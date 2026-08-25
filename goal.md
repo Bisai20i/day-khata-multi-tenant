@@ -42,21 +42,20 @@ this file for direction.
 - Frontend foundation: Inertia wired up, full component library, two layouts, all existing pages
   converted from Blade to real Vue pages.
 - A standalone client-facing design-system demo page (`docs/day-khata-design-system.html`).
-- **Core business schema, backend only** (2026-08-25): chart of accounts (normalized
+- **Core business schema, backend + frontend** (2026-08-25): chart of accounts (normalized
   heads/groups/subgroups/accounts hierarchy), customers/suppliers (with auto-linked ledger
   accounts), item categories/subcategories/items. Migrations, models, a seeder, thin
-  controllers/routes, and 18 focused tests — see `mem.md` for the full breakdown. **No Vue pages
-  yet** — deliberately deferred to a dedicated frontend pass (see roadmap item 2 below). Full test
-  suite + `npm run build` not re-verified together yet after this slice — do that before building
-  on top of it.
+  controllers/routes, backend tests, and — built in a second pass the same day via 3 parallel
+  subagents — the matching Vue/Inertia pages for all 8 resources, plus a component-render guard
+  test. `npm run build` succeeds, full suite green (45/45). See `mem.md` for the full breakdown,
+  including a real gotcha the parallel pass surfaced (Inertia doesn't remount same-route pages, so
+  `onMounted`-based flash toasts silently stop firing after the first load — fixed with `watch`).
+  Not yet manually smoke-tested in an actual browser.
 
 **Next, roughly in order** (not a committed sequence — re-evaluate against sibling
 `05-phase-plan.md` before starting each):
-1. ~~Git init + first commit.~~ Done 2026-08-25 — 4 commits on `master`, see `mem.md`.
-2. **Frontend pass for the core business schema**: Vue/Inertia pages for chart-of-accounts,
-   customers/suppliers, item categories/items (the backend/routes already exist and are tested —
-   see `mem.md`). Run `npm run build` + a real browser smoke test once built, per the "how we work"
-   testing standard below.
+1. ~~Git init + first commit.~~ Done 2026-08-25 — 5 commits on `master`, see `mem.md`.
+2. ~~Frontend pass for the core business schema.~~ Done 2026-08-25, see above.
 3. **Ledger/financial-transaction engine** (journal vouchers, `mainaccountledger`/
    `mainaccountledgerdetails`) — the posting engine every transactional module writes through.
    `05-phase-plan.md` Phase 1 bundles this with chart-of-accounts/customers, but it's materially

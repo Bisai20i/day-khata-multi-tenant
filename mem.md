@@ -3,8 +3,9 @@
 Living state doc. Read this before starting work, update it before stopping. See `goal.md` for
 direction/roadmap — this file is "what exists and why," not "what's next."
 
-**Last updated:** 2026-08-25. **Git status: initialized**, 4 commits on `master` (git init, dev-DB
-gitignore fix, mem/goal update, core business schema). No remote configured yet.
+**Last updated:** 2026-08-25. **Git status: initialized**, 5 commits on `master` (git init, dev-DB
+gitignore fix, mem/goal update, core business schema, business schema frontend pages). No remote
+configured yet.
 
 ---
 
@@ -94,14 +95,11 @@ gitignore fix, mem/goal update, core business schema). No remote configured yet.
 
 ### Backend: core business schema (chart of accounts, customers/suppliers, items)
 
-Tenant-DB master data, `goal.md` roadmap item 2. Backend/testable only — **no Vue/Inertia pages
-built yet**, deliberately (frontend work is a separate, later pass per explicit instruction). Every
-controller's `index()` already calls `Inertia::render('Tenant/.../Index', [...])` pointing at pages
-that don't exist on disk yet; that's expected and doesn't break anything server-side (Laravel
-doesn't validate the Vue file exists), it just means these routes 404-in-a-browser until the
-frontend pass builds the matching pages. Also **no permission-gating** wired to these routes beyond
-`auth:web` (any authenticated tenant user) — matches the existing MVP baseline in
-`TenantDatabaseSeeder`, not a decision to gate later.
+Tenant-DB master data, `goal.md` roadmap item 2. Backend AND frontend now both built (frontend
+landed 2026-08-25 in a second pass, via 3 parallel agents - see "Frontend: business schema pages"
+below). Also **no permission-gating** wired to these routes beyond `auth:web` (any authenticated
+tenant user) — matches the existing MVP baseline in `TenantDatabaseSeeder`, not a decision to gate
+later.
 
 - **Chart of accounts** (`app/Models/{AccountHead,AccountGroup,AccountSubgroup,Account}.php`,
   migrations `2026_08_25_100000..100003`): a proper FK-based 3-to-4-level hierarchy
@@ -165,6 +163,46 @@ frontend pass builds the matching pages. Also **no permission-gating** wired to 
   first (per that session's instruction), then verified against the full 44-test suite together —
   all green.
 
+### Frontend: business schema pages
+
+Built 2026-08-25 in a second pass, immediately after the backend above, via **3 parallel
+subagents** (one per module: chart of accounts, parties, inventory) each owning a disjoint
+directory — no shared nav/config file, every page defines its own `navItems` locally (matching the
+existing per-page convention) using an identical hardcoded block so the sidebar is consistent
+across all 8 pages without any of the three agents touching the same file.
+
+- **Pages** (all `resources/js/pages/Tenant/.../Index.vue`, matching the exact strings each
+  controller's `Inertia::render()` call already used):
+  `Accounting/{AccountGroups,AccountSubgroups,Accounts}`, `Parties/{Customers,Suppliers}`,
+  `Inventory/{ItemCategories,ItemSubcategories,Items}`. Every page follows the same pattern: header
+  row + "New X" button opening a shared create/edit `Modal` (tracked via an `editing` ref, null =
+  create), `Card variant="panel"` wrapping a `DataTable`, row actions as icon buttons
+  (Pencil/Trash2), delete via native `confirm()` + `router.delete(...)`.
+- **`Accounts/Index.vue`** has the one genuinely nontrivial form: a "File under Group/Subgroup"
+  toggle (`parentType` ref) that swaps which Select is shown and nulls out the inactive
+  `account_group_id`/`account_subgroup_id` field before submit, matching the backend's
+  exactly-one-parent invariant.
+- **Known gotcha this pass surfaced and fixed (don't rediscover it)**: create/edit/delete on these
+  pages redirect back to the *same* route/component that's already mounted. Inertia's Vue adapter
+  patches the existing component instance rather than remounting it, so a plain
+  `onMounted(() => { if (flash.status) toast(...) })` — the pattern every pre-existing page in this
+  app uses — only ever fires on the very first load of the page, never again after an in-place
+  modal action. (`Central/Tenants/Show.vue`'s delete looks similar but isn't: it redirects to a
+  *different* route/component, `Index`, so a real remount happens there and `onMounted` is fine.)
+  Two of the three parallel agents independently caught this and fixed it; the third didn't, and
+  its three pages (`ItemCategories`, `ItemSubcategories`, `Items`) were patched afterward to match:
+  replace `onMounted` with `watch(() => page.props.flash?.status, ..., { immediate: true })`. If a
+  new page ever needs a create/edit/delete-in-modal-on-the-index-page pattern, use `watch`, not
+  `onMounted`, from the start.
+- **`tests/Feature/Tenant/BusinessPagesRenderTest.php`** (new, not per-agent): one test hitting all
+  8 routes as an authenticated user and asserting `assertInertia(fn ($page) => $page->component(...))`
+  matches exactly. This is the guard against the controller's `Inertia::render('Tenant/.../Index')`
+  string and the actual `.vue` file path silently drifting apart — there's no compile-time link
+  between them, a typo either side would 200 with the wrong (or a broken) component and nothing
+  else in the suite would catch it. Verified passing (all 8) after the parallel frontend pass.
+- `npm run build` succeeds with all 8 new pages bundled. Full suite green: 45/45 (44 backend +
+  this new render-guard test).
+
 ## Gotchas discovered the hard way (don't rediscover these)
 
 1. **Tenant DBs need their own `cache` and `jobs` tables.** `CACHE_STORE=database` and
@@ -209,12 +247,8 @@ frontend pass builds the matching pages. Also **no permission-gating** wired to 
 
 ```
 cd D:\Projects\day-khata\day-khata-multi-tenant
-npm run build              # must succeed — NOT run since the core-business-schema slice landed
-                            # (frontend checks explicitly deferred that session); no frontend files
-                            # touched by that slice, but confirm the build still succeeds before
-                            # starting the frontend pass (goal.md roadmap item 2)
-php artisan test --compact # 44/44 as of last update (26 pre-existing + 18 new business-schema
-                            # tests), full suite verified together, not just the new files in isolation
+npm run build              # must succeed — last verified 2026-08-25 with all 8 business-schema pages
+php artisan test --compact # 45/45 as of last update (44 backend + BusinessPagesRenderTest)
 php artisan serve --port=8123   # then curl through it — see below
 ```
 
@@ -232,12 +266,12 @@ This caught nothing wrong so far, but it's the fast way to tell "wrong component
 
 ## Open items (also see `goal.md` roadmap)
 
-- **`npm run build` not re-run since the core-business-schema slice landed** — frontend checks were
-  explicitly deferred to the dedicated frontend pass (see `goal.md` roadmap item 2). The full
-  backend test suite (44/44) was verified together, just not the frontend build.
-- No Vue/Inertia pages yet for chart-of-accounts/customers/suppliers/items — backend-only so far,
-  by design (frontend is a separate later pass). The routes exist and are tested via HTTP, but
-  visiting them in a browser will fail to mount (no matching `.vue` file on disk).
+- Chart-of-accounts/customers/suppliers/items are now backend AND frontend complete, verified end
+  to end (`npm run build` succeeds, 45/45 tests including a real authenticated-HTTP Inertia
+  component-render check for all 8 pages). Not manually smoke-tested in an actual browser this
+  session (curl-based CSRF handling was fought and abandoned in favor of the Pest-based check,
+  which is more reliable anyway) — worth a real browser click-through before considering the UI
+  polished, but functionally verified.
 - Ledger/financial-transaction engine (journal vouchers, `mainaccountledger`) not started — Phase 1
   in `05-phase-plan.md` bundles this with chart-of-accounts/customers, but it's a materially bigger
   piece (the actual posting engine) and was treated as separate scope this session.
