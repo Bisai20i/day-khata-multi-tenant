@@ -42,21 +42,34 @@ this file for direction.
 - Frontend foundation: Inertia wired up, full component library, two layouts, all existing pages
   converted from Blade to real Vue pages.
 - A standalone client-facing design-system demo page (`docs/day-khata-design-system.html`).
+- **Core business schema, backend only** (2026-08-25): chart of accounts (normalized
+  heads/groups/subgroups/accounts hierarchy), customers/suppliers (with auto-linked ledger
+  accounts), item categories/subcategories/items. Migrations, models, a seeder, thin
+  controllers/routes, and 18 focused tests — see `mem.md` for the full breakdown. **No Vue pages
+  yet** — deliberately deferred to a dedicated frontend pass (see roadmap item 2 below). Full test
+  suite + `npm run build` not re-verified together yet after this slice — do that before building
+  on top of it.
 
 **Next, roughly in order** (not a committed sequence — re-evaluate against sibling
 `05-phase-plan.md` before starting each):
-1. ~~Git init + first commit.~~ Done 2026-08-25 — 2 commits on `master`, see `mem.md`.
-2. **Core business schema** (tenant DB, Eloquent-only): chart of accounts, customers/suppliers,
-   items + categories, per `../day_khata/migration_plan/04-data-schema-provisioning.md` §2. This is
-   the natural next slice — backend/testable without needing more frontend work first.
-3. **Sales/purchase/inventory modules** once the chart of accounts exists to post against.
-4. **Fiscal year handling** — needs a real design decision: either port a simplified version of the
+1. ~~Git init + first commit.~~ Done 2026-08-25 — 4 commits on `master`, see `mem.md`.
+2. **Frontend pass for the core business schema**: Vue/Inertia pages for chart-of-accounts,
+   customers/suppliers, item categories/items (the backend/routes already exist and are tested —
+   see `mem.md`). Run `npm run build` + a real browser smoke test once built, per the "how we work"
+   testing standard below.
+3. **Ledger/financial-transaction engine** (journal vouchers, `mainaccountledger`/
+   `mainaccountledgerdetails`) — the posting engine every transactional module writes through.
+   `05-phase-plan.md` Phase 1 bundles this with chart-of-accounts/customers, but it's materially
+   bigger (the actual double-entry posting logic) and was treated as separate, not-yet-started
+   scope when the master data above was built.
+4. **Sales/purchase/inventory modules** once the ledger engine exists to post against.
+5. **Fiscal year handling** — needs a real design decision: either port a simplified version of the
    legacy trigger/view mechanism (MySQL-only, breaks SQLite dev) or find an Eloquent-portable
    equivalent (e.g. application-level enforcement + a nightly consistency check). Don't default to
    either without discussing trade-offs first.
-5. **Reporting** (the 52-report-view module in the legacy app) — leans heavily on `DataTable`,
+6. **Reporting** (the 52-report-view module in the legacy app) — leans heavily on `DataTable`,
    already built.
-6. Production hardening pass: MySQL credential-role separation, queued (not synchronous) tenant
+7. Production hardening pass: MySQL credential-role separation, queued (not synchronous) tenant
    provisioning, 2FA for platform admins, CSP/security headers — see
    `../day_khata/migration_plan/02-security-hardening.md`. Deliberately deferred until there's a
    real deployment target, not because it's unimportant.

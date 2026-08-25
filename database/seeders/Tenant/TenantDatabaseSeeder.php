@@ -39,5 +39,7 @@ class TenantDatabaseSeeder extends Seeder
         $admin->permissions()->attach($permissions->pluck('id'));
 
         Role::create(['name' => 'Staff', 'slug' => 'staff']);
+
+        $this->call(ChartOfAccountsSeeder::class);
     }
 }

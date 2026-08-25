@@ -3,8 +3,8 @@
 Living state doc. Read this before starting work, update it before stopping. See `goal.md` for
 direction/roadmap — this file is "what exists and why," not "what's next."
 
-**Last updated:** 2026-08-25. **Git status: initialized**, 2 commits on `master` (`032a8c1` initial
-commit, `b47a842` untrack dev SQLite tenant DBs). No remote configured yet.
+**Last updated:** 2026-08-25. **Git status: initialized**, 4 commits on `master` (git init, dev-DB
+gitignore fix, mem/goal update, core business schema). No remote configured yet.
 
 ---
 
@@ -92,6 +92,79 @@ commit, `b47a842` untrack dev SQLite tenant DBs). No remote configured yet.
   it in sync manually if the real component library's visuals diverge; it is *not* generated from
   the Vue components, it's a hand-authored parallel reference.
 
+### Backend: core business schema (chart of accounts, customers/suppliers, items)
+
+Tenant-DB master data, `goal.md` roadmap item 2. Backend/testable only — **no Vue/Inertia pages
+built yet**, deliberately (frontend work is a separate, later pass per explicit instruction). Every
+controller's `index()` already calls `Inertia::render('Tenant/.../Index', [...])` pointing at pages
+that don't exist on disk yet; that's expected and doesn't break anything server-side (Laravel
+doesn't validate the Vue file exists), it just means these routes 404-in-a-browser until the
+frontend pass builds the matching pages. Also **no permission-gating** wired to these routes beyond
+`auth:web` (any authenticated tenant user) — matches the existing MVP baseline in
+`TenantDatabaseSeeder`, not a decision to gate later.
+
+- **Chart of accounts** (`app/Models/{AccountHead,AccountGroup,AccountSubgroup,Account}.php`,
+  migrations `2026_08_25_100000..100003`): a proper FK-based 3-to-4-level hierarchy
+  (`account_heads` → `account_groups` → `account_subgroups` [optional] → `accounts`), replacing
+  the legacy `day_khata` app's `accountheadsetup`/`accountgroup`/`accountsubgroup`/`mainaccount`
+  tables, which matched rows by denormalized string columns (`accounthead`/`groups`/`subgroups`
+  copied onto every row) instead of foreign keys. This is a deliberate squash/redesign, not a
+  literal port — explicitly permitted by `../day_khata/migration_plan/04-data-schema-provisioning.md`
+  §2 ("fresh, consolidated migrations... not a literal port").
+  - `accounts.account_group_id` and `accounts.account_subgroup_id` are **both nullable, and
+    exactly one must be set** — some legacy account groups (e.g. "Sales Accounts") have no
+    subgroup level at all, others (e.g. "Current Assets") do. Enforced in `Account::booted()`'s
+    `saving` hook (throws `InvalidArgumentException`), **not** a DB CHECK constraint — kept
+    app-level to stay SQLite/MySQL portable per the "Stay portable" rule in `goal.md`.
+- **`ChartOfAccountsSeeder`** (`database/seeders/Tenant/ChartOfAccountsSeeder.php`, called from
+  `TenantDatabaseSeeder::run()`): seeds the 5 fixed account heads (Assets/Liabilities/Income/
+  Expenses/Capital), 8 groups, 5 subgroups, and 9 default leaf accounts, ported from the legacy
+  app's `database/seeders/DefaultMainAccountSeeder.php`. **`"Sundry Debtors"` and `"Sundry
+  Creditors"` subgroup names are a load-bearing contract** — looked up by exact string in
+  `App\Models\Concerns\HasLedgerAccount`. Don't rename without updating that trait.
+  Deliberately **not** ported from the legacy seeder: Fixed Asset/TDS/asset-disposal default
+  accounts (Accumulated Depreciation, TDS Receivable/Payable, Gain/Loss on Asset Disposal) — those
+  belong to the Fixed Assets phase (`05-phase-plan.md` Phase 3), add them when that phase starts.
+  Also **not** ported: the legacy "Walk-in" customer auto-seed (POS anonymous-sale customer) —
+  that's a Sales/POS bootstrapping concern (Phase 2), not core master data.
+- **`App\Models\Concerns\HasLedgerAccount`** trait, used by `Customer` and `Supplier`: on
+  `creating`, auto-creates a linked `Account` under the model's `ledgerAccountSubgroupName()`
+  (`'Sundry Debtors'` / `'Sundry Creditors'`) and sets `account_id`; on `updated`, syncs
+  name/phone/address into the linked account if any of those changed. Ports the legacy
+  `CustomerController`/`SupplierController`'s `DB::table('mainaccount')->insert(...)`
+  side-effect (string-matched) onto a real FK relationship — this is the "creates a
+  chart-of-account entry" behavior `05-phase-plan.md` Phase 1 explicitly calls out.
+  `customers.account_id`/`suppliers.account_id` are **non-nullable, `restrictOnDelete()`** — an
+  `Account` can never be deleted while a customer/supplier still references it; deleting the
+  customer/supplier itself leaves the ledger account orphaned-but-intact (correct: never silently
+  delete financial records).
+- **Items**: `item_categories` → `item_subcategories` (optional) → `items`
+  (`app/Models/{ItemCategory,ItemSubcategory,Item}.php`, migrations `2026_08_25_100006..100008`).
+  Renamed from the legacy `item_groups`/`item_sub_groups`/`inventorysettings` naming. Dropped
+  legacy columns that were ecommerce-only (`thumbnail`, `rating_count`, `sell_count`, `features`,
+  `publish_for_ecommerce`, `keep_item_for_sell`, `commonCode`, `beIn`, `purchaseStatus`) per the
+  ecommerce non-goal in `00-overview.md` §3, and `company_id`/`store_id` (multi-company/multi-store
+  concepts superseded by tenancy itself / not yet in scope — flagged here, not silently dropped).
+  `items.account_id` (nullable, optional inventory/COGS ledger link) is a plain manual FK, **not**
+  auto-created like customers/suppliers — matches the legacy `inventorysettings.accno` behavior
+  (a user-assigned code, not an auto-generated one).
+- **Routes**: `routes/tenant-business.php` (new file, `require`d from `routes/tenant.php` inside
+  its `auth:web` group) — `account-groups`, `account-subgroups`, `accounts`, `customers`,
+  `suppliers`, `item-categories`, `item-subcategories`, `items`, each with
+  index/store/update/destroy only (no create/edit/show — simple master-data CRUD, forms are
+  expected to be inline modals once the frontend pass builds them, matching the existing
+  `central-tenants.php` explicit-route style rather than `Route::resource`).
+- **Controllers**: `app/Http/Controllers/Tenant/{Accounting,Parties,Inventory}/*Controller.php` —
+  8 controllers, all thin (inline `$request->validate()`, no Form Request classes — matches this
+  project's existing convention, there are none anywhere else in the codebase either). All business
+  logic (ledger auto-linking, the group-xor-subgroup invariant) lives in the models, not here.
+- **Tests**: `tests/Feature/Tenant/{Accounting/ChartOfAccountsTest,Parties/{CustomerTest,
+  SupplierTest},Inventory/ItemTest}.php` — 18 focused tests covering seeding, the
+  group-xor-subgroup guard, ledger auto-link + sync-on-update, mobile-uniqueness, cross-field
+  subcategory-belongs-to-category validation, and full HTTP CRUD round-trips. Run in isolation
+  first (per that session's instruction), then verified against the full 44-test suite together —
+  all green.
+
 ## Gotchas discovered the hard way (don't rediscover these)
 
 1. **Tenant DBs need their own `cache` and `jobs` tables.** `CACHE_STORE=database` and
@@ -136,8 +209,12 @@ commit, `b47a842` untrack dev SQLite tenant DBs). No remote configured yet.
 
 ```
 cd D:\Projects\day-khata\day-khata-multi-tenant
-npm run build              # must succeed
-php artisan test --compact # 26/26 as of last update
+npm run build              # must succeed — NOT run since the core-business-schema slice landed
+                            # (frontend checks explicitly deferred that session); no frontend files
+                            # touched by that slice, but confirm the build still succeeds before
+                            # starting the frontend pass (goal.md roadmap item 2)
+php artisan test --compact # 44/44 as of last update (26 pre-existing + 18 new business-schema
+                            # tests), full suite verified together, not just the new files in isolation
 php artisan serve --port=8123   # then curl through it — see below
 ```
 
@@ -155,7 +232,15 @@ This caught nothing wrong so far, but it's the fast way to tell "wrong component
 
 ## Open items (also see `goal.md` roadmap)
 
-- No business schema yet (chart of accounts, customers, items, etc.) — next planned slice.
+- **`npm run build` not re-run since the core-business-schema slice landed** — frontend checks were
+  explicitly deferred to the dedicated frontend pass (see `goal.md` roadmap item 2). The full
+  backend test suite (44/44) was verified together, just not the frontend build.
+- No Vue/Inertia pages yet for chart-of-accounts/customers/suppliers/items — backend-only so far,
+  by design (frontend is a separate later pass). The routes exist and are tested via HTTP, but
+  visiting them in a browser will fail to mount (no matching `.vue` file on disk).
+- Ledger/financial-transaction engine (journal vouchers, `mainaccountledger`) not started — Phase 1
+  in `05-phase-plan.md` bundles this with chart-of-accounts/customers, but it's a materially bigger
+  piece (the actual posting engine) and was treated as separate scope this session.
 - Synchronous tenant provisioning, no 2FA, no MySQL credential-role separation — all deliberately
   deferred, see `goal.md`.
 - Fiscal year design is an open question, not yet started — needs a real decision (see `goal.md`

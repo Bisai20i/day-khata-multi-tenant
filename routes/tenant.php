@@ -57,5 +57,7 @@ Route::middleware([
 
             return Inertia::render('Tenant/Admin/Users');
         })->middleware('role:admin')->name('tenant.admin.users');
+
+        require base_path('routes/tenant-business.php');
     });
 });
