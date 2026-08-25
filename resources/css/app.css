@@ -1,0 +1,66 @@
+@import 'tailwindcss';
+
+@source '../../vendor/laravel/framework/src/Illuminate/Pagination/resources/views/*.blade.php';
+@source '../../storage/framework/views/*.php';
+
+@theme {
+    /* Brand */
+    --color-primary: #6600FF;
+    --color-primary-dark: #5500DD;
+    --color-accent: #4285F4;
+    --color-primary-tint: #EDE9FF;
+    --color-primary-tint-strong: #F3EDFF;
+    --color-primary-focus-ring: rgba(102, 0, 255, .09);
+
+    /* Neutrals */
+    --color-bg-page: #F0F2F5;
+    --color-bg-surface: #FFFFFF;
+    --color-bg-subtle: #F9FAFB;
+    --color-bg-muted: #F1F5F9;
+    --color-border: #E5E7EB;
+    --color-border-soft: #F0F2F5;
+    --color-text-strong: #111827;
+    --color-text-base: #1F2937;
+    --color-text-muted: #6B7280;
+    --color-text-faint: #9CA3AF;
+
+    /* Overlay */
+    --color-overlay: rgba(0, 0, 0, .5);
+    --color-overlay-strong: rgba(0, 0, 0, .38);
+
+    /* Toast */
+    --color-toast-bg: #1F2937;
+
+    /* Semantic */
+    --color-danger: #DC2626;
+    --color-danger-bg: #FEE2E2;
+    --color-success: #166534;
+    --color-success-bg: #DCFCE7;
+    --color-success-text-soft: #15803D;
+    --color-success-bg-soft: #F0FDF4;
+    --color-free-text: #16A34A;
+    --color-free-bg: #DCFCE7;
+    --color-warning-bg: #FEF9C3;
+    --color-warning-text: #92400E;
+    --color-tax-bg: #FEF3C7;
+    --color-tax-text: #92400E;
+
+    /* Typography */
+    --font-sans: 'Inter Variable', ui-sans-serif, system-ui, sans-serif;
+
+    /*
+     * Shape, the defining constraint: every `rounded-*` utility collapses to
+     * 0 by redefining the scale itself, so a developer has to deliberately
+     * opt out (rounded-full, kept for avatars) rather than deliberately
+     * opt in. See design-preference.md §3.
+     */
+    --radius-xs: 0px;
+    --radius-sm: 0px;
+    --radius-md: 0px;
+    --radius-lg: 0px;
+    --radius-xl: 0px;
+    --radius-2xl: 0px;
+    --radius-3xl: 0px;
+    --radius-4xl: 0px;
+    --radius-full: 9999px;
+}

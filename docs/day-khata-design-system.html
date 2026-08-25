@@ -1,0 +1,1237 @@
+<title>Day Khata Design System</title>
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet" />
+
+<style>
+  /* ============================= TOKENS ============================= */
+  :root {
+    --color-primary: #6600FF;
+    --color-primary-dark: #5500DD;
+    --color-accent: #4285F4;
+    --color-primary-tint: #EDE9FF;
+    --color-primary-tint-strong: #F3EDFF;
+    --color-primary-focus-ring: rgba(102, 0, 255, .09);
+
+    --color-bg-page: #F0F2F5;
+    --color-bg-surface: #FFFFFF;
+    --color-bg-subtle: #F9FAFB;
+    --color-bg-muted: #F1F5F9;
+    --color-border: #E5E7EB;
+    --color-border-soft: #F0F2F5;
+    --color-text-strong: #111827;
+    --color-text-base: #1F2937;
+    --color-text-muted: #6B7280;
+    --color-text-faint: #9CA3AF;
+
+    --color-overlay: rgba(0, 0, 0, .5);
+    --color-overlay-strong: rgba(0, 0, 0, .38);
+
+    --color-danger: #DC2626;
+    --color-danger-bg: #FEE2E2;
+    --color-success: #166534;
+    --color-success-bg: #DCFCE7;
+    --color-success-text-soft: #15803D;
+    --color-success-bg-soft: #F0FDF4;
+    --color-free-text: #16A34A;
+    --color-free-bg: #DCFCE7;
+    --color-warning-bg: #FEF9C3;
+    --color-warning-text: #92400E;
+    --color-tax-bg: #FEF3C7;
+    --color-tax-text: #92400E;
+
+    --font-sans: 'Inter', ui-sans-serif, system-ui, -apple-system, sans-serif;
+    --font-mono: ui-monospace, 'SFMono-Regular', Menlo, Consolas, monospace;
+
+    --nav-w: 248px;
+  }
+
+  /* This kit deliberately ships one visual world (matching the live product,
+     which has no dark mode yet — see the "Known gaps" note in section 0) but
+     still paints every surface explicitly so it holds on any host background. */
+
+  * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+  @media (prefers-reduced-motion: reduce) {
+    html { scroll-behavior: auto; }
+    * { animation-duration: 0.001ms !important; transition-duration: 0.001ms !important; }
+  }
+
+  body {
+    margin: 0;
+    background: var(--color-bg-page);
+    color: var(--color-text-base);
+    font-family: var(--font-sans);
+    font-size: 14px;
+    line-height: 1.55;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  a { color: var(--color-primary); }
+  a:focus-visible, button:focus-visible, input:focus-visible, [tabindex]:focus-visible {
+    outline: 2px solid var(--color-primary);
+    outline-offset: 2px;
+  }
+
+  code, .mono { font-family: var(--font-mono); }
+
+  /* ============================= SHELL ============================= */
+  .shell {
+    display: grid;
+    grid-template-columns: var(--nav-w) minmax(0, 1fr);
+    min-height: 100vh;
+  }
+
+  .nav {
+    position: sticky;
+    top: 0;
+    height: 100vh;
+    overflow-y: auto;
+    background: var(--color-bg-surface);
+    border-right: 1.5px solid var(--color-border);
+    padding: 22px 18px;
+  }
+
+  .nav-brand {
+    display: flex;
+    align-items: center;
+    gap: 9px;
+    margin-bottom: 22px;
+  }
+
+  .nav-mark {
+    width: 30px;
+    height: 30px;
+    background: var(--color-primary);
+    color: #fff;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-weight: 800;
+    font-size: 14px;
+    flex: none;
+  }
+
+  .nav-brand-text { line-height: 1.2; }
+  .nav-brand-text strong { display: block; font-size: 13.5px; font-weight: 800; color: var(--color-text-strong); }
+  .nav-brand-text span { display: block; font-size: 10.5px; color: var(--color-text-muted); letter-spacing: .3px; }
+
+  .nav-group { margin-bottom: 18px; }
+  .nav-group-label {
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: .8px;
+    text-transform: uppercase;
+    color: var(--color-text-faint);
+    padding: 0 9px;
+    margin-bottom: 6px;
+  }
+
+  .nav a.nav-link {
+    display: block;
+    padding: 6.5px 9px;
+    font-size: 12.5px;
+    font-weight: 600;
+    color: var(--color-text-muted);
+    text-decoration: none;
+    border-left: 2px solid transparent;
+  }
+  .nav a.nav-link:hover { color: var(--color-primary); background: var(--color-primary-tint); }
+  .nav a.nav-link:focus-visible { outline-offset: -2px; }
+
+  .nav-footnote {
+    margin-top: 20px;
+    padding: 12px 10px;
+    background: var(--color-bg-subtle);
+    border: 1.5px solid var(--color-border-soft);
+    font-size: 11px;
+    color: var(--color-text-muted);
+  }
+
+  .main { min-width: 0; padding: 0 0 80px; }
+
+  /* ============================= HERO ============================= */
+  .hero {
+    padding: 48px 56px 40px;
+    border-bottom: 1.5px solid var(--color-border);
+    background: var(--color-bg-surface);
+  }
+  .hero-eyebrow {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 10.5px;
+    font-weight: 700;
+    letter-spacing: .8px;
+    text-transform: uppercase;
+    color: var(--color-primary);
+    background: var(--color-primary-tint);
+    padding: 4px 10px;
+    margin-bottom: 16px;
+  }
+  .hero h1 {
+    margin: 0 0 10px;
+    font-size: 34px;
+    font-weight: 800;
+    color: var(--color-text-strong);
+    letter-spacing: -.5px;
+    text-wrap: balance;
+    max-width: 20ch;
+  }
+  .hero p.lede {
+    margin: 0 0 26px;
+    font-size: 15px;
+    color: var(--color-text-muted);
+    max-width: 62ch;
+  }
+  .hero-meta {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 22px;
+    font-size: 12px;
+    color: var(--color-text-muted);
+  }
+  .hero-meta strong { color: var(--color-text-strong); font-weight: 700; }
+
+  .inventory {
+    padding: 28px 56px 8px;
+  }
+  .inventory h2.section-eyebrow { margin-top: 0; }
+  .inventory-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+    gap: 10px;
+  }
+  .inventory-chip {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    padding: 11px 13px;
+    background: var(--color-bg-surface);
+    border: 1.5px solid var(--color-border);
+    text-decoration: none;
+    color: var(--color-text-base);
+    font-size: 12.5px;
+    font-weight: 600;
+    transition: border-color .18s ease, box-shadow .18s ease;
+  }
+  .inventory-chip:hover {
+    border-color: #C4B5FD;
+    box-shadow: 0 4px 16px rgba(102,0,255,.12);
+  }
+  .inventory-chip .count {
+    font-size: 10.5px;
+    font-weight: 700;
+    color: var(--color-primary);
+    background: var(--color-primary-tint);
+    padding: 2px 6px;
+  }
+
+  /* ============================= SECTIONS ============================= */
+  section.kit-section {
+    padding: 44px 56px;
+    border-bottom: 1.5px solid var(--color-border);
+  }
+  section.kit-section:last-of-type { border-bottom: none; }
+
+  .section-head { margin-bottom: 24px; max-width: 74ch; }
+  .section-num {
+    font-family: var(--font-mono);
+    font-size: 11px;
+    color: var(--color-text-faint);
+    letter-spacing: .5px;
+  }
+  h2.section-title {
+    margin: 4px 0 8px;
+    font-size: 21px;
+    font-weight: 800;
+    color: var(--color-text-strong);
+    letter-spacing: -.2px;
+  }
+  .section-desc { margin: 0; color: var(--color-text-muted); font-size: 13px; }
+
+  .subhead {
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: .6px;
+    text-transform: uppercase;
+    color: var(--color-text-faint);
+    margin: 28px 0 12px;
+  }
+  .subhead:first-of-type { margin-top: 0; }
+
+  /* ============================= COLOR ============================= */
+  .swatch-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(190px, 1fr));
+    gap: 12px;
+  }
+  .swatch {
+    border: 1.5px solid var(--color-border);
+    background: var(--color-bg-surface);
+    overflow: hidden;
+  }
+  .swatch-fill { height: 58px; }
+  .swatch-body { padding: 9px 11px 11px; }
+  .swatch-name { font-size: 12px; font-weight: 700; color: var(--color-text-strong); }
+  .swatch-hex { font-family: var(--font-mono); font-size: 11px; color: var(--color-text-muted); margin: 2px 0 5px; }
+  .swatch-usage { font-size: 11px; color: var(--color-text-muted); line-height: 1.4; }
+
+  .a11y-note {
+    margin-top: 22px;
+    padding: 13px 16px;
+    background: var(--color-bg-subtle);
+    border: 1.5px solid var(--color-border-soft);
+    font-size: 12px;
+    color: var(--color-text-muted);
+    max-width: 74ch;
+  }
+  .a11y-note strong { color: var(--color-text-base); }
+
+  /* ============================= TYPE ============================= */
+  .type-row {
+    display: flex;
+    align-items: baseline;
+    gap: 20px;
+    padding: 13px 0;
+    border-top: 1px solid var(--color-border-soft);
+  }
+  .type-row:first-of-type { border-top: none; }
+  .type-row .meta {
+    flex: none;
+    width: 150px;
+    font-family: var(--font-mono);
+    font-size: 11px;
+    color: var(--color-text-muted);
+  }
+  .type-row .sample { color: var(--color-text-strong); }
+
+  /* ============================= COMPONENT DEMO GRID ============================= */
+  .demo-card {
+    background: var(--color-bg-surface);
+    border: 1.5px solid var(--color-border);
+    padding: 20px 22px;
+    margin-bottom: 14px;
+  }
+  .demo-card-label {
+    font-size: 10.5px;
+    font-weight: 700;
+    letter-spacing: .6px;
+    text-transform: uppercase;
+    color: var(--color-text-faint);
+    margin-bottom: 14px;
+  }
+  .demo-row {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 12px;
+  }
+
+  /* Buttons */
+  .btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    font-family: var(--font-sans);
+    font-weight: 700;
+    font-size: 12.5px;
+    border: 1.5px solid transparent;
+    padding: 9px 16px;
+    cursor: pointer;
+    transition: all .18s ease;
+  }
+  .btn-primary { background: var(--color-primary); color: #fff; box-shadow: 0 4px 14px rgba(102,0,255,.35); }
+  .btn-primary:hover { background: var(--color-primary-dark); }
+  .btn-secondary-purple { background: #FAF5FF; color: var(--color-primary); border-color: #D8B4FE; }
+  .btn-secondary-purple:hover { background: #F3E8FF; }
+  .btn-secondary-blue { background: #F0F9FF; color: var(--color-accent); border-color: #BAE6FD; }
+  .btn-secondary-blue:hover { background: #E0F2FE; }
+  .btn-icon {
+    width: 32px; height: 32px; padding: 0;
+    background: var(--color-primary-tint); color: var(--color-primary); border: none;
+  }
+  .btn-icon:hover { background: var(--color-primary); color: #fff; }
+  .btn[disabled] { opacity: .45; cursor: not-allowed; box-shadow: none; }
+  .btn:active:not([disabled]) { transform: scale(.97); }
+
+  /* Inputs */
+  .field { display: flex; flex-direction: column; gap: 5px; width: 100%; max-width: 240px; }
+  .field label { font-size: 11px; font-weight: 700; color: var(--color-text-muted); }
+  .input, .select {
+    font-family: var(--font-sans);
+    font-size: 12.5px;
+    padding: 8px 10px;
+    border: 1.5px solid var(--color-border);
+    background: var(--color-bg-subtle);
+    color: var(--color-text-base);
+    width: 100%;
+  }
+  .input:focus, .select:focus {
+    outline: none;
+    border-color: var(--color-primary);
+    background: #fff;
+    box-shadow: 0 0 0 3px var(--color-primary-focus-ring);
+  }
+  .input.is-focus-demo {
+    border-color: var(--color-primary);
+    background: #fff;
+    box-shadow: 0 0 0 3px var(--color-primary-focus-ring);
+  }
+  .input[disabled] { opacity: .55; cursor: not-allowed; }
+  .input-icon-wrap { position: relative; width: 100%; max-width: 240px; }
+  .input-icon-wrap .input { padding-left: 30px; max-width: none; }
+  .input-icon-wrap .icon {
+    position: absolute; left: 9px; top: 50%; transform: translateY(-50%);
+    color: var(--color-text-faint); font-size: 13px; pointer-events: none;
+  }
+
+  /* Badges / pills */
+  .badge {
+    display: inline-flex; align-items: center;
+    font-size: 8.5px; font-weight: 700; letter-spacing: .3px; text-transform: uppercase;
+    padding: 2px 5px;
+  }
+  .badge-tax { background: var(--color-tax-bg); color: var(--color-tax-text); }
+  .badge-free { background: var(--color-free-bg); color: var(--color-free-text); }
+  .badge-danger { background: var(--color-danger-bg); color: var(--color-danger); }
+  .badge-warning { background: var(--color-warning-bg); color: var(--color-warning-text); }
+  .badge-success { background: var(--color-success-bg); color: var(--color-success); }
+
+  .chip {
+    display: inline-flex; align-items: center;
+    font-size: 11.5px; font-weight: 600;
+    padding: 4px 13px;
+    border: 1.5px solid var(--color-border);
+    color: var(--color-text-muted);
+    background: #fff;
+    cursor: pointer;
+  }
+  .chip.is-active { border-color: var(--color-primary); color: var(--color-primary); background: var(--color-primary-tint); }
+
+  .pill {
+    display: inline-flex; align-items: center; gap: 7px;
+    font-size: 12px; font-weight: 600;
+    padding: 5px 6px 5px 11px;
+    background: var(--color-primary-tint);
+    color: var(--color-primary);
+  }
+  .pill .x {
+    width: 15px; height: 15px; display: flex; align-items: center; justify-content: center;
+    font-size: 12px; line-height: 1; cursor: pointer; color: var(--color-primary);
+  }
+  .pill .x:hover { color: var(--color-danger); }
+
+  /* Cards / panels */
+  .panel {
+    border: 1.5px solid var(--color-border);
+    background: var(--color-bg-subtle);
+    padding: 14px 16px;
+  }
+  .panel-label {
+    font-size: 10px; font-weight: 700; letter-spacing: .8px; text-transform: uppercase;
+    color: var(--color-text-muted); margin-bottom: 9px;
+  }
+  .product-card {
+    border: 1.5px solid var(--color-border);
+    background: #fff;
+    padding: 14px 16px;
+    transition: transform .2s ease, border-color .2s ease, box-shadow .2s ease;
+    cursor: pointer;
+  }
+  .product-card:hover {
+    transform: translateY(-2px);
+    border-color: #C4B5FD;
+    box-shadow: 0 4px 16px rgba(102,0,255,.15);
+  }
+  .product-card:active { transform: scale(.97); }
+
+  /* List row (cart-item equivalent) */
+  .list-row {
+    border: 1.5px solid var(--color-border);
+    background: #fff;
+    padding: 9px 12px;
+    margin-bottom: 6px;
+    transition: border-color .2s ease, box-shadow .2s ease;
+  }
+  .list-row:hover { border-color: #C4B5FD; box-shadow: 0 4px 16px rgba(102,0,255,.1); }
+  .list-row-primary { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 6px; }
+  .list-row-primary .name { font-weight: 700; font-size: 13px; color: var(--color-text-base); }
+  .list-row-secondary { display: flex; align-items: center; justify-content: space-between; gap: 10px; font-size: 12px; color: var(--color-text-muted); }
+  .list-row-secondary .total { font-weight: 700; color: var(--color-text-strong); font-size: 13.5px; font-variant-numeric: tabular-nums; }
+
+  .qty-stepper {
+    display: inline-flex; align-items: center; gap: 6px;
+    background: var(--color-bg-muted); padding: 3px;
+  }
+  .qty-stepper button {
+    width: 20px; height: 20px; border: none; background: #fff; color: var(--color-primary);
+    font-weight: 700; cursor: pointer; display: flex; align-items: center; justify-content: center;
+  }
+  .qty-stepper span { min-width: 18px; text-align: center; font-weight: 700; color: var(--color-text-base); }
+
+  /* DataTable */
+  .table-wrap { overflow-x: auto; border: 1.5px solid var(--color-border); background: #fff; }
+  table.data-table { width: 100%; border-collapse: collapse; font-size: 12.5px; min-width: 560px; }
+  table.data-table thead th {
+    text-align: left;
+    font-size: 10.5px; font-weight: 700; letter-spacing: .6px; text-transform: uppercase;
+    color: var(--color-text-muted);
+    background: var(--color-bg-subtle);
+    padding: 10px 14px;
+    border-bottom: 1.5px solid var(--color-border);
+    white-space: nowrap;
+    cursor: pointer;
+    user-select: none;
+  }
+  table.data-table thead th .sort-icon { margin-left: 4px; color: var(--color-text-faint); font-size: 10px; }
+  table.data-table thead th.is-sorted { color: var(--color-primary); }
+  table.data-table thead th.is-sorted .sort-icon { color: var(--color-primary); }
+  table.data-table td {
+    padding: 10px 14px;
+    border-bottom: 1px solid var(--color-border-soft);
+    color: var(--color-text-base);
+  }
+  table.data-table td.numeric, table.data-table th.numeric { text-align: right; font-variant-numeric: tabular-nums; }
+  table.data-table tbody tr:hover { background: var(--color-bg-subtle); }
+  table.data-table tbody tr:last-child td { border-bottom: none; }
+
+  .table-footer {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 10px 14px; border-top: 1.5px solid var(--color-border);
+    font-size: 11.5px; color: var(--color-text-muted);
+  }
+  .table-footer .pager { display: flex; gap: 6px; }
+  .table-footer .pager button {
+    border: 1.5px solid var(--color-border); background: #fff; padding: 4px 10px;
+    font-size: 11.5px; font-weight: 600; color: var(--color-text-base); cursor: pointer;
+  }
+  .table-footer .pager button:hover { border-color: var(--color-primary); color: var(--color-primary); }
+
+  .empty-state { padding: 40px 14px; text-align: center; color: var(--color-text-faint); font-size: 12.5px; }
+
+  /* Tabs */
+  .tabs-list { display: flex; gap: 4px; border-bottom: 1.5px solid var(--color-border); margin-bottom: 16px; }
+  .tab-btn {
+    padding: 9px 4px; margin-right: 18px;
+    font-size: 12.5px; font-weight: 700; color: var(--color-text-muted);
+    background: none; border: none; border-bottom: 2px solid transparent;
+    cursor: pointer; position: relative; top: 1.5px;
+  }
+  .tab-btn.is-active { color: var(--color-primary); border-bottom-color: var(--color-primary); }
+  .tab-panel { font-size: 12.5px; color: var(--color-text-muted); display: none; }
+  .tab-panel.is-active { display: block; }
+
+  /* Dropdown */
+  .dropdown { position: relative; display: inline-block; }
+  .dropdown-menu {
+    position: absolute; top: calc(100% + 6px); left: 0; min-width: 190px;
+    background: #fff; border: 1.5px solid var(--color-border);
+    box-shadow: 0 8px 24px rgba(0,0,0,.12);
+    padding: 5px; display: none; z-index: 5;
+  }
+  .dropdown.is-open .dropdown-menu { display: block; }
+  .dropdown-item {
+    display: block; width: 100%; text-align: left;
+    padding: 7px 10px; font-size: 12.5px; font-weight: 600; color: var(--color-text-base);
+    background: none; border: none; cursor: pointer;
+  }
+  .dropdown-item:hover { background: var(--color-primary-tint); color: var(--color-primary); }
+  .dropdown-item.is-danger:hover { background: var(--color-danger-bg); color: var(--color-danger); }
+
+  /* Modal */
+  .modal-scrim {
+    position: fixed; inset: 0; background: var(--color-overlay);
+    display: none; align-items: center; justify-content: center; z-index: 50; padding: 20px;
+  }
+  .modal-scrim.is-open { display: flex; }
+  .modal-dialog {
+    background: #fff; width: 100%; max-width: 380px;
+    box-shadow: 0 10px 25px rgba(0,0,0,.15);
+  }
+  .modal-head {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 16px 20px; border-bottom: 1.5px solid var(--color-border-soft);
+  }
+  .modal-head h4 { margin: 0; font-size: 14px; font-weight: 700; color: var(--color-text-strong); }
+  .modal-close { background: none; border: none; color: var(--color-text-faint); font-size: 16px; cursor: pointer; line-height: 1; }
+  .modal-close:hover { color: var(--color-danger); }
+  .modal-body { padding: 20px; font-size: 12.5px; color: var(--color-text-muted); }
+  .modal-foot { padding: 14px 20px; border-top: 1.5px solid var(--color-border-soft); display: flex; justify-content: flex-end; gap: 10px; }
+
+  /* Toast */
+  .toast-demo-anchor { position: relative; height: 90px; }
+  .toast {
+    position: absolute; bottom: 0; left: 50%; transform: translateX(-50%) translateY(0); opacity: 1;
+    background: #1F2937; color: #fff; font-size: 12.5px; font-weight: 600;
+    padding: 10px 18px; display: inline-flex; align-items: center; gap: 8px;
+    transition: transform .28s ease, opacity .28s ease;
+  }
+  .toast .dot { width: 7px; height: 7px; background: var(--color-free-text); flex: none; }
+  .toast.is-hidden { opacity: 0; transform: translateX(-50%) translateY(14px); pointer-events: none; }
+
+  /* Loader */
+  .loader-inline { display: inline-flex; align-items: center; gap: 10px; font-size: 12.5px; color: var(--color-text-muted); }
+  .spinner {
+    width: 22px; height: 22px; border: 3px solid var(--color-border);
+    border-top-color: var(--color-primary); border-radius: 9999px;
+    animation: spin .9s linear infinite;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .loader-overlay-demo {
+    position: relative; height: 150px; background: var(--color-bg-muted);
+    display: flex; align-items: center; justify-content: center;
+  }
+  .loader-overlay-scrim {
+    position: absolute; inset: 0; background: var(--color-overlay-strong);
+    display: flex; align-items: center; justify-content: center;
+  }
+  .loader-box {
+    background: #fff; padding: 18px 26px; display: flex; flex-direction: column; align-items: center; gap: 10px;
+  }
+  .loader-box span { font-size: 11.5px; font-weight: 600; color: var(--color-text-muted); }
+
+  /* Status rows */
+  .status-row {
+    display: flex; justify-content: space-between; align-items: center;
+    padding: 5px 9px; font-size: 11.5px; font-weight: 600; margin-bottom: 6px; max-width: 320px;
+  }
+  .status-row.due { background: var(--color-warning-bg); color: var(--color-warning-text); }
+  .status-row.change { background: var(--color-success-bg); color: var(--color-success); }
+  .status-row.settled { background: var(--color-success-bg-soft); color: var(--color-success-text-soft); }
+  .status-row .amt { font-variant-numeric: tabular-nums; }
+
+  /* ============================= SAMPLE SCREENS ============================= */
+  .screen-frame {
+    border: 1.5px solid var(--color-border);
+    background: #fff;
+    box-shadow: 0 12px 30px rgba(17,24,39,.08);
+    overflow: hidden;
+  }
+  .screen-titlebar {
+    display: flex; align-items: center; gap: 7px;
+    padding: 9px 14px; background: var(--color-bg-subtle); border-bottom: 1.5px solid var(--color-border);
+  }
+  .screen-titlebar .dot { width: 9px; height: 9px; border-radius: 9999px; background: var(--color-border); }
+  .screen-titlebar .url {
+    margin-left: 8px; font-family: var(--font-mono); font-size: 11px; color: var(--color-text-muted);
+  }
+
+  .login-screen { background: var(--color-bg-page); padding: 60px 20px; display: flex; justify-content: center; }
+  .login-card { width: 100%; max-width: 340px; background: #fff; border: 1.5px solid var(--color-border); padding: 28px 26px; }
+  .login-brand { display: flex; align-items: center; gap: 9px; margin-bottom: 22px; }
+  .login-brand .mark { width: 30px; height: 30px; background: var(--color-primary); color: #fff; display: flex; align-items: center; justify-content: center; font-weight: 800; font-size: 14px; }
+  .login-brand strong { font-size: 14px; font-weight: 800; color: var(--color-text-strong); }
+  .login-card h3 { margin: 0 0 4px; font-size: 17px; font-weight: 800; color: var(--color-text-strong); }
+  .login-card p { margin: 0 0 20px; font-size: 12px; color: var(--color-text-muted); }
+  .login-card .field { max-width: none; margin-bottom: 14px; }
+  .login-card .btn { width: 100%; margin-top: 4px; }
+
+  .app-screen { display: grid; grid-template-columns: 190px 1fr; min-height: 460px; }
+  .app-screen .side { background: #fff; border-right: 1.5px solid var(--color-border); padding: 16px 12px; }
+  .app-screen .side .item {
+    display: flex; align-items: center; gap: 8px;
+    padding: 7px 9px; font-size: 12px; font-weight: 600; color: var(--color-text-muted); margin-bottom: 2px;
+  }
+  .app-screen .side .item.is-active { background: var(--color-primary-tint); color: var(--color-primary); }
+  .app-screen .side .dot { width: 6px; height: 6px; background: currentColor; opacity: .5; }
+  .app-screen .content { background: var(--color-bg-page); padding: 20px; }
+  .app-screen .topbar { display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; }
+  .app-screen .topbar h4 { margin: 0; font-size: 16px; font-weight: 800; color: var(--color-text-strong); }
+  .app-screen .topbar .user { font-size: 11.5px; color: var(--color-text-muted); }
+  .stat-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin-bottom: 16px; }
+  .stat-card { background: #fff; border: 1.5px solid var(--color-border); padding: 13px 15px; }
+  .stat-card .label { font-size: 10px; font-weight: 700; letter-spacing: .5px; text-transform: uppercase; color: var(--color-text-faint); margin-bottom: 6px; }
+  .stat-card .value { font-size: 19px; font-weight: 800; color: var(--color-text-strong); font-variant-numeric: tabular-nums; }
+  .stat-card .value.accent { color: var(--color-primary); }
+
+  @media (max-width: 880px) {
+    .shell { grid-template-columns: 1fr; }
+    .nav { position: static; height: auto; }
+    .hero, .inventory, section.kit-section { padding-left: 24px; padding-right: 24px; }
+    .app-screen { grid-template-columns: 1fr; }
+    .app-screen .side { display: none; }
+  }
+</style>
+
+<div class="shell">
+  <nav class="nav" aria-label="Section navigation">
+    <div class="nav-brand">
+      <div class="nav-mark">DK</div>
+      <div class="nav-brand-text"><strong>Day Khata</strong><span>Design System · v0.1</span></div>
+    </div>
+
+    <div class="nav-group">
+      <div class="nav-group-label">Foundations</div>
+      <a class="nav-link" href="#colors">Color</a>
+      <a class="nav-link" href="#type">Typography</a>
+      <a class="nav-link" href="#shape">Shape &amp; spacing</a>
+    </div>
+    <div class="nav-group">
+      <div class="nav-group-label">Actions &amp; inputs</div>
+      <a class="nav-link" href="#buttons">Buttons</a>
+      <a class="nav-link" href="#inputs">Inputs &amp; selects</a>
+    </div>
+    <div class="nav-group">
+      <div class="nav-group-label">Labels &amp; content</div>
+      <a class="nav-link" href="#badges">Badges &amp; pills</a>
+      <a class="nav-link" href="#cards">Cards &amp; panels</a>
+      <a class="nav-link" href="#rows">List rows</a>
+      <a class="nav-link" href="#table">Data table</a>
+      <a class="nav-link" href="#status">Status rows</a>
+    </div>
+    <div class="nav-group">
+      <div class="nav-group-label">Navigation &amp; feedback</div>
+      <a class="nav-link" href="#tabs">Tabs</a>
+      <a class="nav-link" href="#dropdown">Dropdown menu</a>
+      <a class="nav-link" href="#modal">Modal</a>
+      <a class="nav-link" href="#toast">Toast</a>
+      <a class="nav-link" href="#loader">Loader</a>
+    </div>
+    <div class="nav-group">
+      <div class="nav-group-label">In context</div>
+      <a class="nav-link" href="#screen-login">Login screen</a>
+      <a class="nav-link" href="#screen-dashboard">Dashboard screen</a>
+    </div>
+
+    <div class="nav-footnote">Prepared for UI sign-off. Comment inline or reply by email — every element on this page maps 1:1 to a build component.</div>
+  </nav>
+
+  <main class="main">
+    <header class="hero">
+      <span class="hero-eyebrow">UI kit &middot; for review</span>
+      <h1>The visual language for Day Khata</h1>
+      <p class="lede">
+        Every color, type size, and component the new Day Khata product will be built from —
+        collected on one page so it can be reviewed and signed off before screens get built.
+        Nothing here is a mockup of a specific page; it's the parts kit those pages will assemble from.
+      </p>
+      <div class="hero-meta">
+        <span><strong>15</strong> element groups</span>
+        <span><strong>Inter</strong>, weights 300&ndash;800</span>
+        <span>Flat corners throughout — a deliberate, consistent choice, not an oversight</span>
+      </div>
+    </header>
+
+    <div class="inventory">
+      <div class="inventory-grid">
+        <a class="inventory-chip" href="#colors">Color palette <span class="count">18</span></a>
+        <a class="inventory-chip" href="#type">Typography <span class="count">6</span></a>
+        <a class="inventory-chip" href="#buttons">Buttons <span class="count">4</span></a>
+        <a class="inventory-chip" href="#inputs">Inputs &amp; selects <span class="count">5</span></a>
+        <a class="inventory-chip" href="#badges">Badges &amp; pills <span class="count">3</span></a>
+        <a class="inventory-chip" href="#cards">Cards &amp; panels <span class="count">2</span></a>
+        <a class="inventory-chip" href="#rows">List rows <span class="count">1</span></a>
+        <a class="inventory-chip" href="#table">Data table <span class="count">1</span></a>
+        <a class="inventory-chip" href="#status">Status rows <span class="count">3</span></a>
+        <a class="inventory-chip" href="#tabs">Tabs <span class="count">1</span></a>
+        <a class="inventory-chip" href="#dropdown">Dropdown menu <span class="count">1</span></a>
+        <a class="inventory-chip" href="#modal">Modal <span class="count">1</span></a>
+        <a class="inventory-chip" href="#toast">Toast <span class="count">1</span></a>
+        <a class="inventory-chip" href="#loader">Loader <span class="count">2</span></a>
+        <a class="inventory-chip" href="#screen-login">Login screen <span class="count">in context</span></a>
+        <a class="inventory-chip" href="#screen-dashboard">Dashboard screen <span class="count">in context</span></a>
+      </div>
+    </div>
+
+    <!-- ============================= COLOR ============================= -->
+    <section class="kit-section" id="colors">
+      <div class="section-head">
+        <div class="section-num">01</div>
+        <h2 class="section-title">Color</h2>
+        <p class="section-desc">One brand purple, a restrained neutral scale, and a small semantic set for tax/free/due/paid states. Every pairing below is what the build reads its color tokens from — nothing is a one-off.</p>
+      </div>
+
+      <div class="subhead">Brand</div>
+      <div class="swatch-grid">
+        <div class="swatch"><div class="swatch-fill" style="background:#6600FF"></div><div class="swatch-body"><div class="swatch-name">Primary</div><div class="swatch-hex">#6600FF</div><div class="swatch-usage">Primary buttons, active states, focus rings, links on hover</div></div></div>
+        <div class="swatch"><div class="swatch-fill" style="background:#5500DD"></div><div class="swatch-body"><div class="swatch-name">Primary Dark</div><div class="swatch-hex">#5500DD</div><div class="swatch-usage">Primary button hover</div></div></div>
+        <div class="swatch"><div class="swatch-fill" style="background:#4285F4"></div><div class="swatch-body"><div class="swatch-name">Accent</div><div class="swatch-hex">#4285F4</div><div class="swatch-usage">Secondary accent — "save" actions, active bill-type pill</div></div></div>
+        <div class="swatch"><div class="swatch-fill" style="background:#EDE9FF"></div><div class="swatch-body"><div class="swatch-name">Primary Tint</div><div class="swatch-hex">#EDE9FF</div><div class="swatch-usage">Icon button backgrounds, active chips, entity pills</div></div></div>
+      </div>
+
+      <div class="subhead">Neutrals</div>
+      <div class="swatch-grid">
+        <div class="swatch"><div class="swatch-fill" style="background:#F0F2F5"></div><div class="swatch-body"><div class="swatch-name">Page</div><div class="swatch-hex">#F0F2F5</div><div class="swatch-usage">App background</div></div></div>
+        <div class="swatch"><div class="swatch-fill" style="background:#FFFFFF;border-bottom:1px solid #E5E7EB"></div><div class="swatch-body"><div class="swatch-name">Surface</div><div class="swatch-hex">#FFFFFF</div><div class="swatch-usage">Cards, panels, modals</div></div></div>
+        <div class="swatch"><div class="swatch-fill" style="background:#F9FAFB"></div><div class="swatch-body"><div class="swatch-name">Subtle</div><div class="swatch-hex">#F9FAFB</div><div class="swatch-usage">Input fill (unfocused), side panels</div></div></div>
+        <div class="swatch"><div class="swatch-fill" style="background:#111827"></div><div class="swatch-body"><div class="swatch-name">Text Strong</div><div class="swatch-hex">#111827</div><div class="swatch-usage">Totals, primary values</div></div></div>
+        <div class="swatch"><div class="swatch-fill" style="background:#1F2937"></div><div class="swatch-body"><div class="swatch-name">Text Base</div><div class="swatch-hex">#1F2937</div><div class="swatch-usage">Headings, item names</div></div></div>
+        <div class="swatch"><div class="swatch-fill" style="background:#6B7280"></div><div class="swatch-body"><div class="swatch-name">Text Muted</div><div class="swatch-hex">#6B7280</div><div class="swatch-usage">Secondary labels — AA floor for real text</div></div></div>
+        <div class="swatch"><div class="swatch-fill" style="background:#9CA3AF"></div><div class="swatch-body"><div class="swatch-name">Text Faint</div><div class="swatch-hex">#9CA3AF</div><div class="swatch-usage">Placeholders, disabled — never body copy</div></div></div>
+        <div class="swatch"><div class="swatch-fill" style="background:#E5E7EB"></div><div class="swatch-body"><div class="swatch-name">Border</div><div class="swatch-hex">#E5E7EB</div><div class="swatch-usage">Default border, all components</div></div></div>
+      </div>
+
+      <div class="subhead">Semantic</div>
+      <div class="swatch-grid">
+        <div class="swatch"><div class="swatch-fill" style="background:#FEF3C7"></div><div class="swatch-body"><div class="swatch-name">Tax</div><div class="swatch-hex">#FEF3C7 / #92400E</div><div class="swatch-usage">Taxable / VAT badges</div></div></div>
+        <div class="swatch"><div class="swatch-fill" style="background:#DCFCE7"></div><div class="swatch-body"><div class="swatch-name">Free</div><div class="swatch-hex">#DCFCE7 / #16A34A</div><div class="swatch-usage">Non-taxable / VAT-free badges</div></div></div>
+        <div class="swatch"><div class="swatch-fill" style="background:#FEE2E2"></div><div class="swatch-body"><div class="swatch-name">Danger</div><div class="swatch-hex">#FEE2E2 / #DC2626</div><div class="swatch-usage">Delete, errors — badges/icons, not small body text</div></div></div>
+        <div class="swatch"><div class="swatch-fill" style="background:#FEF9C3"></div><div class="swatch-body"><div class="swatch-name">Warning</div><div class="swatch-hex">#FEF9C3 / #92400E</div><div class="swatch-usage">"Due" payment state</div></div></div>
+        <div class="swatch"><div class="swatch-fill" style="background:#DCFCE7"></div><div class="swatch-body"><div class="swatch-name">Success</div><div class="swatch-hex">#DCFCE7 / #166534</div><div class="swatch-usage">"Change" / "Settled" state</div></div></div>
+      </div>
+
+      <div class="a11y-note"><strong>Accessibility.</strong> Every text/background pairing above has been checked against WCAG 2.1 AA (4.5:1 normal text, 3:1 large text). <span class="mono">Text Muted</span> is the floor for real body copy — <span class="mono">Text Faint</span> is reserved for placeholders and decorative use only. <span class="mono">Danger</span> on its tint is 3.95:1: fine for badges/icons/large text, not small running text.</div>
+    </section>
+
+    <!-- ============================= TYPE ============================= -->
+    <section class="kit-section" id="type">
+      <div class="section-head">
+        <div class="section-num">02</div>
+        <h2 class="section-title">Typography</h2>
+        <p class="section-desc">One family — Inter — carrying the whole interface through weight and size rather than mixing typefaces. This is deliberate: an accounting product is read in dense, data-heavy screens, and one disciplined family stays legible longer than a decorative pairing would.</p>
+      </div>
+      <div class="type-row"><div class="meta">800 / 18px</div><div class="sample" style="font-weight:800;font-size:18px">Rs 24,850.00 — grand total</div></div>
+      <div class="type-row"><div class="meta">700 / 14px</div><div class="sample" style="font-weight:700;font-size:14px">Section header, modal title</div></div>
+      <div class="type-row"><div class="meta">700 / 13px</div><div class="sample" style="font-weight:700;font-size:13px">Item name, list-row primary line</div></div>
+      <div class="type-row"><div class="meta">600 / 12.5px</div><div class="sample" style="font-weight:600;font-size:12.5px">Body copy, input text, button label</div></div>
+      <div class="type-row"><div class="meta">700 / 10px, +.8px</div><div class="sample" style="font-weight:700;font-size:10px;letter-spacing:.8px;text-transform:uppercase;color:var(--color-text-muted)">Panel eyebrow label</div></div>
+      <div class="type-row"><div class="meta">700 / 8.5px</div><div class="sample" style="font-weight:700;font-size:8.5px;letter-spacing:.3px;text-transform:uppercase;color:var(--color-tax-text);background:var(--color-tax-bg);padding:2px 5px;display:inline-block">Micro badge</div></div>
+    </section>
+
+    <!-- ============================= SHAPE ============================= -->
+    <section class="kit-section" id="shape">
+      <div class="section-head">
+        <div class="section-num">03</div>
+        <h2 class="section-title">Shape &amp; spacing</h2>
+        <p class="section-desc">Every corner on this page is 0px. That's not unfinished styling — it's the one rule every component obeys without exception, the same way the color and type rules are obeyed. The single exception is a fully round avatar, which doesn't appear on this page because no avatar component exists yet.</p>
+      </div>
+      <div class="demo-row" style="gap:18px">
+        <div style="width:64px;height:64px;background:var(--color-primary-tint);border:1.5px solid var(--color-border)"></div>
+        <div style="width:64px;height:64px;background:var(--color-primary);box-shadow:0 4px 14px rgba(102,0,255,.35)"></div>
+        <div style="width:64px;height:64px;border-radius:9999px;background:var(--color-primary);display:flex;align-items:center;justify-content:center;color:#fff;font-weight:800;font-size:13px">DK</div>
+        <span style="font-size:11.5px;color:var(--color-text-muted);align-self:center">&larr; the one rounded exception: avatars</span>
+      </div>
+    </section>
+
+    <!-- ============================= BUTTONS ============================= -->
+    <section class="kit-section" id="buttons">
+      <div class="section-head">
+        <div class="section-num">04</div>
+        <h2 class="section-title">Buttons</h2>
+        <p class="section-desc">Three tiers. Primary commits an action, secondary is a lighter-weight action tinted to match its context (purple for neutral actions like Hold, blue for Save-style actions), icon buttons are square and label-free.</p>
+      </div>
+      <div class="demo-card">
+        <div class="demo-card-label">Primary</div>
+        <div class="demo-row">
+          <button class="btn btn-primary">Print Invoice</button>
+          <button class="btn btn-primary" disabled>Print Invoice</button>
+          <span style="font-size:11.5px;color:var(--color-text-muted)">default &middot; disabled</span>
+        </div>
+      </div>
+      <div class="demo-card">
+        <div class="demo-card-label">Secondary</div>
+        <div class="demo-row">
+          <button class="btn btn-secondary-purple">Hold Bill</button>
+          <button class="btn btn-secondary-blue">Save Draft</button>
+        </div>
+      </div>
+      <div class="demo-card">
+        <div class="demo-card-label">Icon</div>
+        <div class="demo-row">
+          <button class="btn btn-icon" aria-label="Add customer">+</button>
+          <button class="btn btn-icon" aria-label="Scan barcode">#</button>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============================= INPUTS ============================= -->
+    <section class="kit-section" id="inputs">
+      <div class="section-head">
+        <div class="section-num">05</div>
+        <h2 class="section-title">Inputs &amp; selects</h2>
+        <p class="section-desc">Subtle fill until focus, then a white background with a soft purple ring — the same focus treatment on every field type so keyboard and mouse users get one consistent signal.</p>
+      </div>
+      <div class="demo-card">
+        <div class="demo-row" style="align-items:flex-start">
+          <div class="field"><label>Default</label><input class="input" placeholder="Customer name" /></div>
+          <div class="field"><label>Focused</label><input class="input is-focus-demo" placeholder="Customer name" value="Ram Bahadur" /></div>
+          <div class="field"><label>Disabled</label><input class="input" placeholder="Locked field" disabled /></div>
+          <div class="field"><label>Select</label>
+            <select class="select"><option>Cash</option><option>Credit</option><option>Bank transfer</option></select>
+          </div>
+          <div class="field"><label>Icon-prefixed</label>
+            <div class="input-icon-wrap"><span class="icon">&#128269;</span><input class="input" placeholder="Search items&hellip;" /></div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============================= BADGES ============================= -->
+    <section class="kit-section" id="badges">
+      <div class="section-head">
+        <div class="section-num">06</div>
+        <h2 class="section-title">Badges &amp; pills</h2>
+        <p class="section-desc">Three sizes for three jobs: a micro badge marks a line item's tax status, a chip filters a category, a pill represents a selected entity you can remove.</p>
+      </div>
+      <div class="demo-card">
+        <div class="demo-card-label">Micro badges</div>
+        <div class="demo-row">
+          <span class="badge badge-tax">Taxable</span>
+          <span class="badge badge-free">Tax-free</span>
+          <span class="badge badge-danger">Overdue</span>
+          <span class="badge badge-warning">Pending</span>
+          <span class="badge badge-success">Paid</span>
+        </div>
+      </div>
+      <div class="demo-card">
+        <div class="demo-card-label">Category chips</div>
+        <div class="demo-row">
+          <span class="chip">All items</span>
+          <span class="chip is-active">Beverages</span>
+          <span class="chip">Groceries</span>
+          <span class="chip">Electronics</span>
+        </div>
+      </div>
+      <div class="demo-card">
+        <div class="demo-card-label">Entity pill</div>
+        <div class="demo-row">
+          <span class="pill">Ram Bahadur Thapa <span class="x">&times;</span></span>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============================= CARDS ============================= -->
+    <section class="kit-section" id="cards">
+      <div class="section-head">
+        <div class="section-num">07</div>
+        <h2 class="section-title">Cards &amp; panels</h2>
+        <p class="section-desc">A panel groups related fields under a quiet label. A product card is pressable — it lifts on hover and settles on click, the same feedback pattern used across every clickable tile.</p>
+      </div>
+      <div class="demo-row" style="align-items:stretch">
+        <div class="panel" style="width:260px">
+          <div class="panel-label">Payment Summary</div>
+          <div style="display:flex;justify-content:space-between;font-size:12.5px;margin-bottom:6px"><span style="color:var(--color-text-muted)">Subtotal</span><span class="mono">Rs 22,400.00</span></div>
+          <div style="display:flex;justify-content:space-between;font-size:12.5px"><span style="color:var(--color-text-muted)">VAT (13%)</span><span class="mono">Rs 2,912.00</span></div>
+        </div>
+        <div class="product-card" style="width:170px;text-align:center">
+          <div style="font-size:26px;margin-bottom:8px">&#127869;</div>
+          <div style="font-weight:700;font-size:12.5px;color:var(--color-text-base)">Basmati Rice 5kg</div>
+          <div style="font-size:11.5px;color:var(--color-text-muted);margin-top:2px">Rs 850.00</div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============================= LIST ROWS ============================= -->
+    <section class="kit-section" id="rows">
+      <div class="section-head">
+        <div class="section-num">08</div>
+        <h2 class="section-title">List rows</h2>
+        <p class="section-desc">The compact line-item pattern for invoices and bills: a name/badge row on top, quantity and totals below, right-aligned and bold so a column of amounts stays scannable.</p>
+      </div>
+      <div class="list-row">
+        <div class="list-row-primary"><span class="name">Basmati Rice 5kg</span><span class="badge badge-tax">Taxable</span></div>
+        <div class="list-row-secondary">
+          <span class="qty-stepper"><button aria-label="Decrease">&minus;</button><span>2</span><button aria-label="Increase">+</button></span>
+          <span>@ Rs 850.00</span>
+          <span class="total">Rs 1,700.00</span>
+        </div>
+      </div>
+      <div class="list-row">
+        <div class="list-row-primary"><span class="name">Mustard Oil 1L</span><span class="badge badge-free">Tax-free</span></div>
+        <div class="list-row-secondary">
+          <span class="qty-stepper"><button aria-label="Decrease">&minus;</button><span>1</span><button aria-label="Increase">+</button></span>
+          <span>@ Rs 320.00</span>
+          <span class="total">Rs 320.00</span>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============================= DATA TABLE ============================= -->
+    <section class="kit-section" id="table">
+      <div class="section-head">
+        <div class="section-num">09</div>
+        <h2 class="section-title">Data table</h2>
+        <p class="section-desc">The single highest-leverage component in the kit — reports and every list screen are built from this. Sortable headers, tabular figures for anything numeric, and pagination for anything long. Click a header.</p>
+      </div>
+      <div class="table-wrap">
+        <table class="data-table" id="demo-table">
+          <thead>
+            <tr>
+              <th data-key="tenant">Tenant <span class="sort-icon">&#8645;</span></th>
+              <th data-key="domain">Domain <span class="sort-icon">&#8645;</span></th>
+              <th data-key="status">Status <span class="sort-icon">&#8645;</span></th>
+              <th class="numeric" data-key="amount">Balance (Rs) <span class="sort-icon">&#8645;</span></th>
+            </tr>
+          </thead>
+          <tbody id="demo-table-body"></tbody>
+        </table>
+        <div class="table-footer">
+          <span id="table-count">6 tenants</span>
+          <span class="pager"><button id="table-prev">Prev</button><button id="table-next">Next</button></span>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============================= STATUS ROWS ============================= -->
+    <section class="kit-section" id="status">
+      <div class="section-head">
+        <div class="section-num">10</div>
+        <h2 class="section-title">Status rows</h2>
+        <p class="section-desc">A flat colored bar for the three states a payment can end up in — due, change owed, or fully settled.</p>
+      </div>
+      <div class="status-row due"><span>Amount Due</span><span class="amt">Rs 1,250.00</span></div>
+      <div class="status-row change"><span>Change</span><span class="amt">Rs 150.00</span></div>
+      <div class="status-row settled"><span>Fully Settled</span><span class="amt">Rs 0.00</span></div>
+    </section>
+
+    <!-- ============================= TABS ============================= -->
+    <section class="kit-section" id="tabs">
+      <div class="section-head">
+        <div class="section-num">11</div>
+        <h2 class="section-title">Tabs</h2>
+        <p class="section-desc">Underline-style, for switching between views of the same data without leaving the page.</p>
+      </div>
+      <div class="demo-card">
+        <div class="tabs-list" role="tablist">
+          <button class="tab-btn is-active" data-tab="a">This Month</button>
+          <button class="tab-btn" data-tab="b">This Year</button>
+          <button class="tab-btn" data-tab="c">Custom Range</button>
+        </div>
+        <div class="tab-panel is-active" data-panel="a">Showing transactions from 1&ndash;22 Bhadra, 2083.</div>
+        <div class="tab-panel" data-panel="b">Showing transactions from the start of fiscal year 2082/83.</div>
+        <div class="tab-panel" data-panel="c">Pick a start and end date to filter transactions.</div>
+      </div>
+    </section>
+
+    <!-- ============================= DROPDOWN ============================= -->
+    <section class="kit-section" id="dropdown">
+      <div class="section-head">
+        <div class="section-num">12</div>
+        <h2 class="section-title">Dropdown menu</h2>
+        <p class="section-desc">A small floating menu of actions, anchored to a trigger button.</p>
+      </div>
+      <div class="demo-card">
+        <div class="dropdown" id="demo-dropdown">
+          <button class="btn btn-secondary-purple" id="dropdown-trigger">Actions &#9662;</button>
+          <div class="dropdown-menu">
+            <button class="dropdown-item">Edit tenant</button>
+            <button class="dropdown-item">Suspend access</button>
+            <button class="dropdown-item is-danger">Delete tenant</button>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============================= MODAL ============================= -->
+    <section class="kit-section" id="modal">
+      <div class="section-head">
+        <div class="section-num">13</div>
+        <h2 class="section-title">Modal</h2>
+        <p class="section-desc">A compact, centered dialog for confirming a destructive or important action.</p>
+      </div>
+      <div class="demo-card">
+        <button class="btn btn-primary" id="modal-open">Delete Tenant&hellip;</button>
+      </div>
+    </section>
+
+    <!-- ============================= TOAST ============================= -->
+    <section class="kit-section" id="toast">
+      <div class="section-head">
+        <div class="section-num">14</div>
+        <h2 class="section-title">Toast</h2>
+        <p class="section-desc">A brief, bottom-center confirmation for an action that just succeeded.</p>
+      </div>
+      <div class="demo-card">
+        <button class="btn btn-secondary-blue" id="toast-trigger">Save changes</button>
+        <div class="toast-demo-anchor">
+          <div class="toast is-hidden" id="demo-toast"><span class="dot"></span>Tenant saved successfully</div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============================= LOADER ============================= -->
+    <section class="kit-section" id="loader">
+      <div class="section-head">
+        <div class="section-num">15</div>
+        <h2 class="section-title">Loader</h2>
+        <p class="section-desc">Inline for a small in-place wait, full overlay for a page-blocking one.</p>
+      </div>
+      <div class="demo-card">
+        <div class="demo-card-label">Inline</div>
+        <div class="loader-inline"><span class="spinner"></span> Fetching report&hellip;</div>
+      </div>
+      <div class="demo-card" style="padding:0">
+        <div class="loader-overlay-demo">
+          <div class="loader-overlay-scrim">
+            <div class="loader-box"><span class="spinner"></span><span>Provisioning tenant&hellip;</span></div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============================= SCREEN: LOGIN ============================= -->
+    <section class="kit-section" id="screen-login">
+      <div class="section-head">
+        <div class="section-num">16</div>
+        <h2 class="section-title">In context — login screen</h2>
+        <p class="section-desc">The same input, button, and card components from above, assembled into a real screen.</p>
+      </div>
+      <div class="screen-frame">
+        <div class="screen-titlebar"><span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="url">acme.daykhata.com/login</span></div>
+        <div class="login-screen">
+          <div class="login-card">
+            <div class="login-brand"><div class="mark">DK</div><strong>Day Khata</strong></div>
+            <h3>Welcome back</h3>
+            <p>Sign in to Acme Traders' account.</p>
+            <div class="field"><label>Email</label><input class="input" value="admin@acmetraders.com.np" /></div>
+            <div class="field"><label>Password</label><input class="input" type="password" value="••••••••••" /></div>
+            <button class="btn btn-primary">Sign in</button>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============================= SCREEN: DASHBOARD ============================= -->
+    <section class="kit-section" id="screen-dashboard" style="border-bottom:none">
+      <div class="section-head">
+        <div class="section-num">17</div>
+        <h2 class="section-title">In context — dashboard screen</h2>
+        <p class="section-desc">Sidebar, stat cards, and the data table together, the way a real screen combines them.</p>
+      </div>
+      <div class="screen-frame">
+        <div class="screen-titlebar"><span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="url">app.daykhata.com/tenants</span></div>
+        <div class="app-screen">
+          <div class="side">
+            <div class="item is-active"><span class="dot"></span>Tenants</div>
+            <div class="item"><span class="dot"></span>Billing</div>
+            <div class="item"><span class="dot"></span>Support</div>
+            <div class="item"><span class="dot"></span>Settings</div>
+          </div>
+          <div class="content">
+            <div class="topbar"><h4>Tenants</h4><span class="user">signed in as admin@daykhata.com</span></div>
+            <div class="stat-grid">
+              <div class="stat-card"><div class="label">Active</div><div class="value">128</div></div>
+              <div class="stat-card"><div class="label">Suspended</div><div class="value">3</div></div>
+              <div class="stat-card"><div class="label">MRR</div><div class="value accent">Rs 4.2L</div></div>
+            </div>
+            <div class="table-wrap">
+              <table class="data-table">
+                <thead><tr><th>Tenant</th><th>Domain</th><th class="numeric">Balance (Rs)</th></tr></thead>
+                <tbody>
+                  <tr><td>Acme Traders</td><td class="mono">acme.daykhata.com</td><td class="numeric">24,850.00</td></tr>
+                  <tr><td>Himal Furnishing</td><td class="mono">himal.daykhata.com</td><td class="numeric">102,300.00</td></tr>
+                  <tr><td>Sunrise Grocery</td><td class="mono">sunrise.daykhata.com</td><td class="numeric">8,120.00</td></tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+  </main>
+</div>
+
+<script>
+  // Tabs
+  document.querySelectorAll('.tab-btn').forEach(function (btn) {
+    btn.addEventListener('click', function () {
+      var group = btn.closest('.demo-card');
+      group.querySelectorAll('.tab-btn').forEach(function (b) { b.classList.remove('is-active'); });
+      group.querySelectorAll('.tab-panel').forEach(function (p) { p.classList.remove('is-active'); });
+      btn.classList.add('is-active');
+      group.querySelector('.tab-panel[data-panel="' + btn.dataset.tab + '"]').classList.add('is-active');
+    });
+  });
+
+  // Chips
+  document.querySelectorAll('.chip').forEach(function (chip) {
+    chip.addEventListener('click', function () {
+      chip.parentElement.querySelectorAll('.chip').forEach(function (c) { c.classList.remove('is-active'); });
+      chip.classList.add('is-active');
+    });
+  });
+
+  // Dropdown
+  var dropdown = document.getElementById('demo-dropdown');
+  document.getElementById('dropdown-trigger').addEventListener('click', function (e) {
+    e.stopPropagation();
+    dropdown.classList.toggle('is-open');
+  });
+  document.addEventListener('click', function () { dropdown.classList.remove('is-open'); });
+
+  // Modal
+  var modalScrim = document.createElement('div');
+  modalScrim.className = 'modal-scrim';
+  modalScrim.innerHTML =
+    '<div class="modal-dialog">' +
+      '<div class="modal-head"><h4>Delete tenant?</h4><button class="modal-close" aria-label="Close">&times;</button></div>' +
+      '<div class="modal-body">This permanently deletes Acme Traders&rsquo; database and cannot be undone. Consider suspending instead if you just need to pause access.</div>' +
+      '<div class="modal-foot"><button class="btn btn-secondary-purple" id="modal-cancel">Cancel</button><button class="btn btn-primary" style="background:var(--color-danger);box-shadow:none">Delete</button></div>' +
+    '</div>';
+  document.body.appendChild(modalScrim);
+  function closeModal() { modalScrim.classList.remove('is-open'); }
+  document.getElementById('modal-open').addEventListener('click', function () { modalScrim.classList.add('is-open'); });
+  modalScrim.addEventListener('click', function (e) { if (e.target === modalScrim) { closeModal(); } });
+  modalScrim.querySelector('.modal-close').addEventListener('click', closeModal);
+  modalScrim.querySelector('#modal-cancel').addEventListener('click', closeModal);
+  document.addEventListener('keydown', function (e) { if (e.key === 'Escape') { closeModal(); } });
+
+  // Toast
+  var toastTimer;
+  document.getElementById('toast-trigger').addEventListener('click', function () {
+    var toast = document.getElementById('demo-toast');
+    clearTimeout(toastTimer);
+    toast.classList.remove('is-hidden');
+    toastTimer = setTimeout(function () { toast.classList.add('is-hidden'); }, 2600);
+  });
+
+  // Data table: sort + paginate
+  var TABLE_DATA = [
+    { tenant: 'Acme Traders', domain: 'acme.daykhata.com', status: 'active', amount: 24850 },
+    { tenant: 'Himal Furnishing', domain: 'himal.daykhata.com', status: 'active', amount: 102300 },
+    { tenant: 'Sunrise Grocery', domain: 'sunrise.daykhata.com', status: 'suspended', amount: 8120 },
+    { tenant: 'Everest Hardware', domain: 'everest.daykhata.com', status: 'active', amount: 51200 },
+    { tenant: 'Kalash Traders', domain: 'kalash.daykhata.com', status: 'active', amount: 0 },
+    { tenant: 'Bagmati Stationers', domain: 'bagmati.daykhata.com', status: 'suspended', amount: 3400 },
+  ];
+  var sortKey = null, sortDir = 1, page = 0, pageSize = 4;
+
+  function renderTable() {
+    var rows = TABLE_DATA.slice();
+    if (sortKey) {
+      rows.sort(function (a, b) {
+        var av = a[sortKey], bv = b[sortKey];
+        if (typeof av === 'number') { return (av - bv) * sortDir; }
+        return String(av).localeCompare(String(bv)) * sortDir;
+      });
+    }
+    var start = page * pageSize;
+    var pageRows = rows.slice(start, start + pageSize);
+    var body = document.getElementById('demo-table-body');
+    body.innerHTML = pageRows.map(function (r) {
+      var badge = r.status === 'active'
+        ? '<span class="badge badge-success">Active</span>'
+        : '<span class="badge badge-warning">Suspended</span>';
+      return '<tr><td>' + r.tenant + '</td><td class="mono">' + r.domain + '</td><td>' + badge +
+        '</td><td class="numeric">' + r.amount.toLocaleString('en-IN', { minimumFractionDigits: 2 }) + '</td></tr>';
+    }).join('') || '<tr><td colspan="4"><div class="empty-state">No tenants match this view.</div></td></tr>';
+    document.getElementById('table-count').textContent = TABLE_DATA.length + ' tenants';
+    document.querySelectorAll('#demo-table thead th').forEach(function (th) {
+      th.classList.toggle('is-sorted', th.dataset.key === sortKey);
+      var icon = th.querySelector('.sort-icon');
+      if (icon) { icon.innerHTML = th.dataset.key === sortKey ? (sortDir === 1 ? '&#8593;' : '&#8595;') : '&#8645;'; }
+    });
+  }
+  document.querySelectorAll('#demo-table thead th').forEach(function (th) {
+    th.addEventListener('click', function () {
+      var key = th.dataset.key;
+      sortDir = sortKey === key ? sortDir * -1 : 1;
+      sortKey = key;
+      renderTable();
+    });
+  });
+  document.getElementById('table-prev').addEventListener('click', function () {
+    page = Math.max(0, page - 1);
+    renderTable();
+  });
+  document.getElementById('table-next').addEventListener('click', function () {
+    var maxPage = Math.ceil(TABLE_DATA.length / pageSize) - 1;
+    page = Math.min(maxPage, page + 1);
+    renderTable();
+  });
+  renderTable();
+</script>
