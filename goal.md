@@ -45,8 +45,7 @@ this file for direction.
 
 **Next, roughly in order** (not a committed sequence — re-evaluate against sibling
 `05-phase-plan.md` before starting each):
-1. **Git init + first commit.** Still not done. Do this before any further work touches the tree —
-   right now everything only exists on disk.
+1. ~~Git init + first commit.~~ Done 2026-08-25 — 2 commits on `master`, see `mem.md`.
 2. **Core business schema** (tenant DB, Eloquent-only): chart of accounts, customers/suppliers,
    items + categories, per `../day_khata/migration_plan/04-data-schema-provisioning.md` §2. This is
    the natural next slice — backend/testable without needing more frontend work first.

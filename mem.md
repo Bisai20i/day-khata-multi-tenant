@@ -3,9 +3,8 @@
 Living state doc. Read this before starting work, update it before stopping. See `goal.md` for
 direction/roadmap — this file is "what exists and why," not "what's next."
 
-**Last updated:** 2026-08-22. **Git status: no repository initialized yet** — everything below
-exists only on disk in `D:\Projects\day-khata\day-khata-multi-tenant`. Init + commit before
-anything else touches this tree.
+**Last updated:** 2026-08-25. **Git status: initialized**, 2 commits on `master` (`032a8c1` initial
+commit, `b47a842` untrack dev SQLite tenant DBs). No remote configured yet.
 
 ---
 
@@ -126,8 +125,12 @@ anything else touches this tree.
    only) + `routes/central-tenants.php` (tenant CRUD only). `routes/tenant.php` is separate again
    (stancl-generated, tenant-domain-only). Keep this split even if it looks like unnecessary
    indirection for a single session working alone — it's what makes multi-agent fan-out safe here.
-6. **This project has no git repo.** `vendor/bin/pint --dirty` silently no-ops (nothing to diff
-   against) — that's expected, not a bug, until git is initialized.
+6. **`stancl/tenancy`'s per-tenant SQLite files have no file extension** (`database/tenant<uuid>`,
+   not `.sqlite`) — `database/.gitignore`'s original `*.sqlite*` pattern missed them entirely. They
+   got swept into the initial `git add -A` (36 files, ~4.3MB of dev-only data from manual
+   provisioning tests) and had to be untracked in a follow-up commit. Fixed by adding `/tenant*` to
+   `database/.gitignore`. If tenancy config ever changes where per-tenant SQLite files land, check
+   that pattern still matches.
 
 ## How to verify the app is actually working (do this, don't just trust test-green)
 
@@ -152,7 +155,6 @@ This caught nothing wrong so far, but it's the fast way to tell "wrong component
 
 ## Open items (also see `goal.md` roadmap)
 
-- Git init + first commit — not done.
 - No business schema yet (chart of accounts, customers, items, etc.) — next planned slice.
 - Synchronous tenant provisioning, no 2FA, no MySQL credential-role separation — all deliberately
   deferred, see `goal.md`.
