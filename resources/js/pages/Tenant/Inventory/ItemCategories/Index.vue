@@ -1,20 +1,6 @@
 <script setup>
 import { computed, h, ref, watch } from 'vue';
 import { router, useForm, usePage } from '@inertiajs/vue3';
-import {
-    LayoutDashboard,
-    Layers,
-    ListTree,
-    BookOpen,
-    Users,
-    Truck,
-    Tags,
-    Tag,
-    Package,
-    UserCog,
-    Pencil,
-    Trash2,
-} from '@lucide/vue';
 import AppLayout from '@/layouts/AppLayout.vue';
 import Card from '@/components/ui/Card.vue';
 import Button from '@/components/ui/Button.vue';
@@ -22,7 +8,9 @@ import Badge from '@/components/ui/Badge.vue';
 import DataTable from '@/components/ui/DataTable.vue';
 import Modal from '@/components/ui/Modal.vue';
 import Input from '@/components/ui/Input.vue';
+import RowActions from '@/components/ui/RowActions.vue';
 import { useToast } from '@/composables/useToast';
+import { navGroups } from '@/lib/nav-items.js';
 
 defineProps({
     categories: {
@@ -49,23 +37,7 @@ watch(
 
 const isAdmin = computed(() => page.props.auth?.user?.role?.slug === 'admin');
 
-const navItems = computed(() => {
-    const items = [
-        { label: 'Dashboard', href: '/dashboard', icon: LayoutDashboard },
-        { label: 'Account Groups', href: '/account-groups', icon: Layers },
-        { label: 'Account Subgroups', href: '/account-subgroups', icon: ListTree },
-        { label: 'Accounts', href: '/accounts', icon: BookOpen },
-        { label: 'Customers', href: '/customers', icon: Users },
-        { label: 'Suppliers', href: '/suppliers', icon: Truck },
-        { label: 'Item Categories', href: '/item-categories', icon: Tags },
-        { label: 'Item Subcategories', href: '/item-subcategories', icon: Tag },
-        { label: 'Items', href: '/items', icon: Package },
-    ];
-    if (isAdmin.value) {
-        items.push({ label: 'Manage users', href: '/admin/users', icon: UserCog });
-    }
-    return items;
-});
+const navItems = computed(() => navGroups(isAdmin.value));
 
 const showModal = ref(false);
 const editing = ref(null);
@@ -130,28 +102,10 @@ const columns = [
         header: '',
         numeric: false,
         cell: ({ row }) =>
-            h('div', { class: 'flex items-center gap-1.5' }, [
-                h(
-                    Button,
-                    {
-                        variant: 'icon',
-                        type: 'button',
-                        'aria-label': 'Edit',
-                        onClick: () => openEdit(row.original),
-                    },
-                    () => h(Pencil, { class: 'size-3.5' }),
-                ),
-                h(
-                    Button,
-                    {
-                        variant: 'icon',
-                        type: 'button',
-                        'aria-label': 'Delete',
-                        onClick: () => destroy(row.original),
-                    },
-                    () => h(Trash2, { class: 'size-3.5' }),
-                ),
-            ]),
+            h(RowActions, {
+                onEdit: () => openEdit(row.original),
+                onDelete: () => destroy(row.original),
+            }),
     },
 ];
 </script>

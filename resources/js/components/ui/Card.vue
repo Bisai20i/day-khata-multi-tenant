@@ -17,7 +17,7 @@ const rootClasses = computed(() =>
                   'motion-safe:hover:-translate-y-0.5 hover:border-[#C4B5FD] hover:shadow-[0_4px_16px_rgba(102,0,255,.15)]',
                   'motion-safe:active:scale-[.97]',
               )
-            : 'bg-bg-subtle',
+            : 'bg-bg-subtle shadow-xs',
         props.class,
     ),
 );

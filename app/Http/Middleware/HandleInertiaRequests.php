@@ -41,6 +41,9 @@ class HandleInertiaRequests extends Middleware
                 'platformAdmin' => $request->user('platform'),
                 'user' => $request->user('web'),
             ],
+            'tenant' => fn (): ?array => tenancy()->initialized
+                ? ['company_name' => tenant('company_name')]
+                : null,
             'flash' => [
                 'status' => fn (): ?string => $request->session()->get('status'),
             ],

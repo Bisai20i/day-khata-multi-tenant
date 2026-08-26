@@ -6,6 +6,7 @@ use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\HasMany;
 use InvalidArgumentException;
 
 #[Fillable(['account_group_id', 'account_subgroup_id', 'code', 'name', 'phone', 'address'])]
@@ -42,5 +43,25 @@ class Account extends Model
     public function subgroup(): BelongsTo
     {
         return $this->belongsTo(AccountSubgroup::class, 'account_subgroup_id');
+    }
+
+    /**
+     * @return HasMany<JournalVoucherLine, $this>
+     */
+    public function journalVoucherLines(): HasMany
+    {
+        return $this->hasMany(JournalVoucherLine::class);
+    }
+
+    /**
+     * Whether this account resets to zero at year-end (Income/Expenses)
+     * rather than carrying its balance forward - resolved through
+     * whichever of group/subgroup this account actually uses.
+     */
+    public function isProfitAndLoss(): bool
+    {
+        $head = $this->group?->accountHead ?? $this->subgroup?->accountGroup?->accountHead;
+
+        return $head?->is_profit_and_loss ?? false;
     }
 }

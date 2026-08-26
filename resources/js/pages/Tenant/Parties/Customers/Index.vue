@@ -1,14 +1,15 @@
 <script setup>
 import { computed, h, ref, watch } from 'vue';
 import { router, useForm, usePage } from '@inertiajs/vue3';
-import { LayoutDashboard, Layers, ListTree, BookOpen, Users, Truck, Tags, Tag, Package, UserCog } from '@lucide/vue';
 import AppLayout from '@/layouts/AppLayout.vue';
 import Card from '@/components/ui/Card.vue';
 import Button from '@/components/ui/Button.vue';
 import Input from '@/components/ui/Input.vue';
 import Modal from '@/components/ui/Modal.vue';
 import DataTable from '@/components/ui/DataTable.vue';
+import RowActions from '@/components/ui/RowActions.vue';
 import { useToast } from '@/composables/useToast';
+import { navGroups } from '@/lib/nav-items.js';
 
 defineProps({
     customers: {
@@ -22,23 +23,7 @@ const { toast } = useToast();
 
 const isAdmin = computed(() => page.props.auth?.user?.role?.slug === 'admin');
 
-const navItems = computed(() => {
-    const items = [
-        { label: 'Dashboard', href: '/dashboard', icon: LayoutDashboard },
-        { label: 'Account Groups', href: '/account-groups', icon: Layers },
-        { label: 'Account Subgroups', href: '/account-subgroups', icon: ListTree },
-        { label: 'Accounts', href: '/accounts', icon: BookOpen },
-        { label: 'Customers', href: '/customers', icon: Users },
-        { label: 'Suppliers', href: '/suppliers', icon: Truck },
-        { label: 'Item Categories', href: '/item-categories', icon: Tags },
-        { label: 'Item Subcategories', href: '/item-subcategories', icon: Tag },
-        { label: 'Items', href: '/items', icon: Package },
-    ];
-    if (isAdmin.value) {
-        items.push({ label: 'Manage users', href: '/admin/users', icon: UserCog });
-    }
-    return items;
-});
+const navItems = computed(() => navGroups(isAdmin.value));
 
 // Flash status is watched (not just read on mount) because create/edit/delete
 // all redirect back to this same route + component, which Inertia re-renders
@@ -141,26 +126,10 @@ const columns = [
         header: 'Actions',
         numeric: false,
         cell: ({ row }) =>
-            h('div', { class: 'flex items-center gap-3' }, [
-                h(
-                    'button',
-                    {
-                        type: 'button',
-                        class: 'text-sm font-semibold text-primary hover:underline',
-                        onClick: () => openEdit(row.original),
-                    },
-                    'Edit',
-                ),
-                h(
-                    'button',
-                    {
-                        type: 'button',
-                        class: 'text-sm font-semibold text-danger hover:underline',
-                        onClick: () => destroyCustomer(row.original),
-                    },
-                    'Delete',
-                ),
-            ]),
+            h(RowActions, {
+                onEdit: () => openEdit(row.original),
+                onDelete: () => destroyCustomer(row.original),
+            }),
     },
 ];
 </script>

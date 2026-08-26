@@ -3,9 +3,12 @@
 Living state doc. Read this before starting work, update it before stopping. See `goal.md` for
 direction/roadmap — this file is "what exists and why," not "what's next."
 
-**Last updated:** 2026-08-25. **Git status: initialized**, 5 commits on `master` (git init, dev-DB
-gitignore fix, mem/goal update, core business schema, business schema frontend pages). No remote
-configured yet.
+**Last updated:** 2026-08-26. **Git status: initialized**, 5 commits on `master` (git init, dev-DB
+gitignore fix, mem/goal update, core business schema, business schema frontend pages), plus
+everything since (enterprise-UI redesign, ledger/journal-voucher posting engine, Sales/Purchase,
+Stock Adjustment, the MVP Reporting slice, and partial-line Sales/Purchase Returns — all described
+below) **not yet committed** — sitting uncommitted in the working tree as of this update, fully
+verified (121/121 Tenant tests, `npm run build` green). No remote configured yet.
 
 ---
 
@@ -203,6 +206,78 @@ across all 8 pages without any of the three agents touching the same file.
 - `npm run build` succeeds with all 8 new pages bundled. Full suite green: 45/45 (44 backend +
   this new render-guard test).
 
+### Frontend: enterprise UI redesign (app shell, row actions, real dashboard)
+
+Built 2026-08-25, same day as the business-schema pages above but a separate pass: the initial
+frontend was flagged as "too basic" for an enterprise billing product. Design direction was
+mocked up first in a Claude Design canvas (Xero/QuickBooks-density, 0-radius theme preserved,
+single-place shadow/radius tokens) and approved by the user before any real code changed. Applied
+via **4 parallel subagents** (AppLayout shell / page-batch-1 / page-batch-2 / dashboard),
+following foundational pieces I built myself first so the agents had a fixed shared contract to
+build against instead of inventing one each:
+
+- **`resources/css/app.css`**: added `--shadow-xs`, `--shadow-sm`, `--shadow-primary-sm` to the
+  `@theme` block, same "single place definition" pattern as the existing `--radius-*` tokens —
+  Tailwind v4 auto-generates the matching `shadow-xs`/`shadow-sm`/`shadow-primary-sm` utilities.
+- **`resources/js/lib/nav-items.js`** (new): `navGroups(isAdmin)` — the one source of truth for
+  the tenant sidebar nav, grouped (`OVERVIEW`/`ACCOUNTING`/`PARTIES`/`INVENTORY`/`ADMIN`). Replaces
+  the identical hardcoded flat `navItems` block that used to be copy-pasted into all 8 business
+  pages + `Tenant/Dashboard.vue`. **Central (platform-admin) pages still pass their own flat,
+  ungrouped `navItems` array locally** — untouched, different nav entirely, not migrated to this
+  module on purpose.
+- **`resources/js/layouts/AppLayout.vue`**: redesigned shell — sidebar widened to 264px with a
+  logo mark, grouped nav (via `nav-items.js` for tenant pages), static user-info footer chip;
+  topbar keeps the page `<h1>{{ title }}</h1>` on the left (Central pages depend on it — the
+  mockup's title-less topbar was NOT ported as-is for this reason), adds a centered *decorative,
+  `disabled`* search input (no backend, deliberately marked non-functional rather than looking
+  broken), a `Tooltip`-wrapped notification bell (no fake unread badge — no notification feature
+  exists yet), and an avatar+name+chevron `DropdownMenu` trigger holding the one "Log out" entry
+  point (the old always-visible topbar Log-out `Button` was removed). **Key contract**: `navItems`
+  prop accepts EITHER shape — grouped `[{label, items}]` (tenant) or legacy flat `[{label,href,icon}]`
+  (Central) — normalized internally via `Array.isArray(navItems[0]?.items)`. Any new page can pass
+  either shape safely.
+- **`resources/js/components/ui/Tooltip.vue`** (new): generic reusable tooltip — `label` prop,
+  `side` prop (`'top'`|`'bottom'`, default `'top'`), wraps trigger via default slot, dark flat pill
+  styled off `bg-toast-bg` (matches `Toaster.vue`'s real color, not a new one). Used by
+  `RowActions.vue`, `DataTable.vue`'s pagination prev/next buttons, and `AppLayout.vue`'s bell icon.
+- **`resources/js/components/ui/RowActions.vue`** (new): the fix for "edit and delete look the
+  same" — two icon buttons (`Pencil`/`Trash2` from `@lucide/vue`), each `Tooltip`-wrapped. Edit
+  stays accent-tinted (`bg-primary-tint text-primary`, routine action); Delete is neutral by
+  default (`bg-bg-subtle text-text-faint`) and only turns red on hover (`hover:bg-danger-bg
+  hover:text-danger`) so a destructive action never looks pre-armed. Emits `edit`/`delete` (Vue
+  maps these to `onEdit`/`onDelete` when used via `h(RowActions, {...})` in a TanStack column
+  `cell` renderer). All 8 business `Index.vue` pages now use this instead of hand-rolled
+  Edit/Delete buttons (some were plain text links, some were two visually-identical `Button
+  variant="icon"` instances — same underlying bug either way).
+- **`Button.vue`**: removed the primary variant's `shadow-[0_4px_14px_rgba(102,0,255,.35)]` — user
+  feedback on the mockup was that it visually bled onto neighboring elements; primary buttons now
+  have no shadow at all, not a lighter one.
+- **`Card.vue`**: panel variant gained `shadow-xs`. **`DataTable.vue`**: pagination prev/next
+  buttons wrapped in `Tooltip`.
+- **`app/Http/Middleware/HandleInertiaRequests.php`**: added a shared `tenant` prop —
+  `{ company_name } | null`, non-null only when `tenancy()->initialized`. Lets `AppLayout.vue`'s
+  sidebar subtext show the real tenant company name without fabricating one on Central pages.
+- **Real dashboard** (`app/Http/Controllers/Tenant/DashboardController.php`, new;
+  `routes/tenant.php`'s `/dashboard` route now points at it instead of an inline closure): KPI row
+  (customers/suppliers/items totals + real "this week" counts via `created_at >= now()->subWeek()`,
+  plus a ledger-accounts total), last-5 `recentCustomers` (name/mobile/ledger code/relative time),
+  and `accountHeadBreakdown` (per-`AccountHead` leaf-account counts, computed at runtime via
+  `whereHas('group', ...)->orWhereHas('subgroup.accountGroup', ...)` — not hardcoded to the 5
+  seeded head names). `resources/js/pages/Tenant/Dashboard.vue` rebuilt to render all of it; no
+  fabricated/placeholder numbers anywhere in this page.
+- **`tests/Feature/Tenant/DashboardTest.php`** (new): same tenant-provisioning pattern as
+  `BusinessPagesRenderTest.php`, asserts the KPI/recentCustomers/accountHeadBreakdown prop shapes
+  against real seeded records.
+- Verified after all 4 agents landed: `php artisan test tests/Feature/Tenant` → 32/32 (up from the
+  prior 18 + `BusinessPagesRenderTest`, now also includes `DashboardTest`). `npm run build`
+  succeeds. Manually re-read `AppLayout.vue`, `Dashboard.vue`, `DashboardController.php`, and two
+  representative `Index.vue` pages end-to-end after the parallel pass — all correctly wired, no
+  agent left a stray unused import or a wrong function-name reference in the `RowActions` wiring
+  (function names differ per file — `destroy`, `destroyCustomer`, `destroySupplier` — each agent
+  matched the real name rather than assuming one).
+- **Not yet done**: no live browser check of the redesign (only automated tests + a manual code
+  read) — the user still needs to eyeball this in an actual browser before considering it final.
+
 ## Gotchas discovered the hard way (don't rediscover these)
 
 1. **Tenant DBs need their own `cache` and `jobs` tables.** `CACHE_STORE=database` and
@@ -264,18 +339,305 @@ the raw Inertia payload (`component`, `props`) even though curl can't execute th
 This caught nothing wrong so far, but it's the fast way to tell "wrong component rendered" from
 "right component, JS just didn't run under curl."
 
+## Backend + Frontend: ledger / journal voucher posting engine
+
+Built 2026-08-25, right after the enterprise-UI pass. This is `goal.md` roadmap item 3
+(ledger/financial-transaction engine) — a **from-scratch, portable schema**, not a port of the
+legacy `mainaccountledger`/`mainaccountledgerdetails` tables (whose column layout is inverted and
+confusing). Two design questions were resolved with the user before building: (1) fiscal-year
+enforcement is Eloquent-portable (global invariant + model events + one posting method) rather
+than the legacy MySQL view/trigger/session-variable mechanism, so it runs identically on SQLite
+(tests) and MySQL (prod); (2) the user chose full fidelity on scope — both the closed-year
+super-admin correction override (with multi-year roll-forward) and automatic P&L year-end closing
+are built now, not deferred. Full design record: the plan file this was built from is quoted in
+full in the session transcript if the exact reasoning is ever needed again.
+
+- **Schema** (5 new tenant migrations, `2026_08_25_100009` through `_100013`): `account_heads`
+  gained `is_profit_and_loss` (boolean) — `Income`/`Expenses` are `true`, everything else `false`
+  (set in `ChartOfAccountsSeeder`, which is the ONLY place head classification is decided — never
+  string-match head names elsewhere). New tables: `fiscal_years` (name/start_date/end_date/status),
+  `voucher_sequences` (per fiscal-year, per voucher-type sequential counters), `journal_vouchers`
+  (header: fiscal_year_id/voucher_type/voucher_number/date/narration/reason/created_by),
+  `journal_voucher_lines` (account_id/debit/credit/narration). **Posted vouchers are never
+  edited or deleted** — every correction, including the closed-year override, is a new voucher.
+- **`App\Models\FiscalYear`**: `saving` hook enforces at most one `open` row and no overlapping
+  date ranges (same app-level-invariant style as `Account`'s group-xor-subgroup rule — no DB CHECK
+  constraints, stays portable). `FiscalYear::current()` resolves the one open row (throws
+  `ModelNotFoundException` if none exists — a fresh tenant must create its first fiscal year
+  manually, nothing auto-creates one). `FiscalYear::close($next, $actor)` is the year-end engine:
+  computes every P&L account's net balance for the closing year, zeroes each one via one
+  consolidated `ClosingEntry` voucher with the net profit/loss credited/debited to the seeded
+  `"Profit & Loss"` account (code `CA2`, under Capital — reused as the retained-earnings target,
+  no new account was seeded for this), then carries every nonzero Balance Sheet account's ending
+  balance forward as one consolidated `OpeningBalance` voucher into `$next`. Both consolidated
+  vouchers are mathematically guaranteed to balance on their own (proven in the model's docblock
+  comments) — worth reading `app/Models/FiscalYear.php` directly rather than re-deriving the sign
+  logic from scratch if touching this again.
+- **`App\Models\JournalVoucher::post($header, $lines, $actor)`** is the one user-facing entry
+  point (thin controllers call this, no business logic duplicated in controllers, matching the
+  house style). Validates double-entry shape (≥2 lines, each line exactly one of debit/credit,
+  total debit = total credit), resolves the target fiscal year (defaults to `FiscalYear::current()`
+  unless `fiscal_year_id` is explicitly passed), and — if that year is `closed` — requires a
+  `reason` AND an `admin`-role actor (reusing the existing `role:admin` gate, same one `/admin/users`
+  uses) before allowing it. A closed-year posting triggers `rollForward()`: it replays the
+  correcting voucher's own lines with each line's account swapped to `"Profit & Loss"` when that
+  account resets to zero every year-end (so its only lasting effect is on retained earnings) or
+  left as-is for a Balance Sheet account, and posts that replayed (automatically still-balanced)
+  line set into every fiscal year after the corrected one up to and including the currently open
+  one. There's a low-level `JournalVoucher::write()` used internally by both `post()` and
+  `FiscalYear::close()`/`rollForward()` for the actual numbering+creation — `close()`'s two
+  consolidated vouchers deliberately bypass `post()`'s fiscal-year-resolution/closed-year gate
+  since they're routine system bookkeeping, not a user-initiated correction.
+- **Voucher numbering**: `VoucherSequence::firstOrCreate` + `lockForUpdate()` + `increment()`,
+  per `(fiscal_year_id, voucher_type)` — this is the first `DB::transaction`/`lockForUpdate` usage
+  anywhere in this codebase (confirmed via search before building — no prior pattern to match).
+  `lockForUpdate()` is a no-op on SQLite (tests) but does real row locking on MySQL (prod); this is
+  expected/portable Laravel behavior, not a bug. A genuine concurrent-race edge case on the very
+  first voucher of a brand-new `(fiscal_year_id, voucher_type)` pair could raise a unique-constraint
+  `QueryException` that aborts the whole `DB::transaction` — documented as an accepted, not
+  bulletproofed, limitation (matches the legacy app's own level of protection here).
+- **Controllers/routes**: `FiscalYearController` (index/store/close — `close` is `role:admin`-gated
+  and additionally rejects targeting a `$next` year that already has vouchers posted, to stop
+  double-seeding opening balances), `JournalVoucherController` (index/store — no update/destroy,
+  vouchers are immutable), and a `ledger` method added to the existing `AccountController` (a
+  read-only per-account, per-fiscal-year statement with a running balance, computed server-side).
+  All wired in a new `routes/tenant-ledger.php`, required from `routes/tenant.php` right after
+  `tenant-business.php` (same parallel-work file-splitting convention, mem.md gotcha #5).
+- **Frontend**: `Tenant/Accounting/FiscalYears/Index.vue` (list + create modal + a "Close" action
+  on the open row that opens a small modal to pick the next fiscal year), `JournalVouchers/Index.vue`
+  + `JournalVouchers/Create.vue` (read-only list with a per-voucher line-detail modal, and a
+  dynamic multi-line create form with live Dr/Cr balance feedback — **note**: there is no
+  `GET /journal-vouchers/create` route; `Create.vue` is a plain component `Index.vue` toggles to
+  in-place via a local ref, not a separate page, since adding a new route was out of scope for that
+  build pass), and `Accounts/Ledger.vue` (per-account statement, fiscal-year picker) plus a small
+  "Ledger" link added to `Accounts/Index.vue`'s row actions. "Fiscal Years" and "Journal Vouchers"
+  were added to `resources/js/lib/nav-items.js`'s `ACCOUNTING` group (the shared nav module from
+  the enterprise-UI pass) — no per-account ledger nav entry, it's reached only from the Accounts
+  list.
+- **Tests**: `tests/Feature/Tenant/Accounting/{FiscalYearTest,JournalVoucherPostingTest,
+  FiscalYearClosingTest,LedgerControllerTest}.php` — 28 tests covering the invariants, the full
+  posting engine including the closed-year override + roll-forward cascade, the P&L sweep +
+  opening-balance-carry-forward math (verified against a concrete numeric scenario: 1000 cash
+  sale, 400 cash expense → 600 net profit correctly credited to Profit & Loss and carried forward
+  alongside Cash's 600 debit balance), and the HTTP-level routes/role-gating. Full
+  `tests/Feature/Tenant` suite: 53/53. `npm run build` succeeds. Not yet manually smoke-tested in
+  an actual browser (same caveat as the enterprise-UI pass above).
+- **Deliberately out of scope for this pass** (real future work, not forgotten): a fresh tenant
+  has to create its own first fiscal year manually (nothing auto-creates one during provisioning);
+  no UI exists yet for the closed-year super-admin override path (the backend fully supports it —
+  see `JournalVoucher::post()`'s `fiscal_year_id`/`reason` params — but `JournalVoucherController`'s
+  create form only ever posts into the current open year); sales/purchase modules (which will post
+  vouchers through this same `JournalVoucher::post()` engine) are the next roadmap slice now that
+  the engine exists.
+
+## Backend + Frontend: Sales, Purchase, Stock Adjustment (2026-08-26)
+
+Built via 2 parallel forks (Sales, Purchase) the same day the ledger engine landed, then a follow-up
+pass added Stock Adjustment via a 3rd fork alongside 3 more forks building the Reporting MVP (see
+next section) — 4 forks running concurrently, zero file conflicts, via the established
+pre-stub-routes-and-nav-myself-then-fork convention (mem.md gotcha #5).
+
+- **Periodic, not perpetual, inventory accounting** — confirmed from an explicit docblock in
+  legacy's `StockAdjustmentController`. Sales/Purchase/Stock Adjustment **never** post an
+  inventory-asset/COGS ledger line; they only post money-side journal voucher lines
+  (debtor/creditor, income/purchase, VAT, optional TDS). Stock quantity lives entirely in a new,
+  ledger-decoupled `item_stock_movements` table.
+- **`App\Enums\StockMovementType`**: `Purchase|Sale|PurchaseReturn|SaleReturn|Opening|AdjustmentIn|
+  AdjustmentOut`, each with `direction(): int` (+1/-1). **`App\Models\ItemStockMovement`**:
+  `item_id`, `movement_type`, `quantity` (decimal 4dp), `unit_cost_rate` (decimal 4dp, nullable),
+  polymorphic `reference` (points at the SaleLine/PurchaseLine/StockAdjustmentLine that generated
+  it), `date`, `cancelled` (bool — flipped true on cancel rather than writing inverse rows),
+  `narration`. **`App\Models\Item`** gained `stockMovements()`, `recordStockMovement(type, qty,
+  date, reference, ?unitCostRate)`, and `currentStock()` (sums signed quantities of non-cancelled
+  movements via `movement_type->direction()`).
+- **`App\Models\Sale::post()`/`Purchase::post()`** (static, `DB::transaction`, mirrors
+  `JournalVoucher::post()`'s calling convention): computes taxable/nontaxable/VAT/total, builds a
+  balanced voucher-line set, posts one `JournalVoucher`, creates the header + line rows, records a
+  stock movement per stockable line. **Purchase unifies stock/service/capital purchase lines into
+  one shape** by reusing `Item.account_id` (falls back to the seeded `EXE8` Purchases Account if
+  null) — no `purchase_type` discriminator column, deliberately. **TDS is fully optional** —  a TDS
+  leg only posts if the client supplies `tds_account_id` + `tds_amount > 0`, no hardcoded TDS
+  account (none seeded yet). **Two `VoucherType` cases for Sale** (`Sale`/`SaleAbbreviated`) so
+  Nepali dual invoice-numbering gets its own `VoucherSequence` counter per type, for free.
+- **`Sale::cancel()`/`Purchase::cancel()`**: full-invoice cancellation only in this pass (no
+  partial-line returns — see `goal.md` roadmap item 4 for that as a real, explicitly-deferred next
+  slice). Posts a brand-new reversing voucher (every original line's debit/credit swapped) — the
+  original voucher is **never** edited, matching the app-wide voucher-immutability rule. Flags
+  every stock movement the sale/purchase generated as `cancelled=true` rather than writing inverse
+  movement rows.
+- **A real bug the Purchase build agent caught and fixed itself**: applying the header `discount`
+  directly to the supplier-credit line without proportionally reducing the item debit lines left
+  the voucher off-balance. Fixed via proportional reduction of vatable-line debit totals, with the
+  last account absorbing the rounding remainder.
+- **A legacy bug deliberately NOT carried forward**: legacy's `saveServicePurchaseReturn` credited
+  VAT Payable (`LIA20`) instead of crediting back VAT Receivable (`ASA23`) on a service purchase
+  return. **A legacy gap NOT carried forward**: normal stock-purchase cancellation was never
+  actually wired up in legacy (dead table/controller) — this rewrite built it fresh.
+- **`App\Models\StockAdjustment`** (`app/Models/{StockAdjustment,StockAdjustmentLine}.php`,
+  `app/Enums/StockAdjustmentReason.php`: `Damage|Lost|Correction|Found|Opening|Other`, with
+  `isZeroValue(): bool` true for Damage/Lost): `post()` mirrors `Sale::post()`'s shape but **never**
+  touches the ledger. Forces `direction='in'` when `reason_type==='opening'` (opening stock is just
+  another adjustment reason, not a separate bulk-import flow, unlike legacy's Excel-import screen —
+  a deliberate simplification). Forces zero cost/value for Damage/Lost reasons server-side
+  regardless of client input (matches legacy). Guards `out` lines against overselling via
+  `lockForUpdate()` on the item's own `item_stock_movements` rows (same portable no-op-on-SQLite/
+  real-on-MySQL pattern `VoucherSequence` already uses) — checked against `Item::currentStock()`.
+  Rejects zero/negative quantity **at the model layer**, not just HTTP validation (a real legacy bug
+  class: a negative `out` quantity once slipped past a client-only check and added stock instead of
+  removing it). `cancel()` mirrors `Sale::cancel()` — **no edit method at all**, which sidesteps a
+  separate real legacy bug (an edit-in-place path once wrote through a fiscal-year-filtered VIEW
+  that silently matched zero rows for non-current-year records, leaving a cancelled header with
+  stock still live).
+- **Routes**: `routes/tenant-sales.php`, `routes/tenant-purchase.php`,
+  `routes/tenant-stock-adjustments.php` (index/store/cancel each — no update, matching
+  voucher-immutability). Nav: a new "TRANSACTIONS" group (Sales, Purchases) and a "Stock
+  Adjustments" entry added to the existing "INVENTORY" group.
+- **Tests**: `tests/Feature/Tenant/{Sales/{SalePostingTest,SaleControllerTest},
+  Purchases/*,Inventory/StockAdjustmentTest}.php` — 25 tests total across the three modules
+  (10 Sales, 15 Purchase, 7 Stock Adjustment — some overlap in the full-suite count below since
+  route/controller tests are separate files).
+- **A test-authoring gotcha from parallel Eloquent model work**: `AccountHead`/`AccountGroup`/
+  `AccountSubgroup` were missing `use HasFactory;` (a pre-existing gap since nothing needed
+  `::factory()` for them before) — needed for bank-account test fixtures. **Two independent forks
+  fixed this identically with zero conflict** — worth knowing if a future fork hits the same
+  missing-trait error on these models, it's a real gap, not a fork mistake.
+
+## Backend + Frontend: Reporting MVP (2026-08-26)
+
+Roadmap item 6. Legacy has a ~52-report `reportsController.php` (3,413 LOC, confirmed via research
+pass); rather than port all of it speculatively, the user chose to build a prioritized MVP subset
+first, re-evaluating what's next against actual usage. Built via 3 parallel forks (Accounting /
+Sales-Purchase / Inventory), running alongside the Stock Adjustment fork above — 4 forks, disjoint
+files, verified zero conflicts.
+
+- **8 reports shipped**: Trial Balance, Income Statement (P&L), Balance Sheet (accounting reports —
+  the 3 characterization-tested financial statements legacy's own migration plan calls out as exit
+  criteria), Sales Register, Purchase Register, Sales VAT Book, Purchase VAT Book (Nepali
+  VAT-compliance-mandatory tax-filing formats), Stock Summary (per-item opening/in/out/closing
+  quantity + weighted-average valuation over a date range).
+- **Zero new DB tables** — every report is a pure aggregation over `JournalVoucher`/
+  `JournalVoucherLine`, `Account`→`AccountGroup`→`AccountSubgroup`→`AccountHead`, `Sale`/`SaleLine`,
+  `Purchase`/`PurchaseLine`, `ItemStockMovement`. Legacy's equivalent queries were raw joins across
+  `mainaccountledger`/`mainaccountledgerdetails` with a typo-repairing `normaliseAccountHead()`
+  string-matcher and hacky date-boundary "opening bucket" logic to simulate a per-fiscal-year
+  opening balance — none of that ugliness was needed here because the ledger engine already has
+  real primitives (`FiscalYear`, an actual carried-forward `OpeningBalance` voucher) for what legacy
+  had to fake.
+- **Load-bearing correctness point, don't re-derive from scratch if touching these reports again**:
+  computing "an account's balance in fiscal year N" means summing `journal_voucher_lines` scoped to
+  `journal_voucher.fiscal_year_id === N` only (not across all years — the `OpeningBalance` voucher
+  already carries the prior cumulative Balance Sheet position into year N). But if year N has been
+  closed, a `ClosingEntry` voucher was posted **into that same year**, zeroing every P&L account
+  within that year's own line set — so **Trial Balance and Income Statement must exclude
+  `ClosingEntry`-type voucher lines**, or a closed year's P&L wrongly reports zero. **Balance Sheet
+  must NOT exclude anything** — `ClosingEntry` only touches P&L accounts (not shown on a Balance
+  Sheet) plus the seeded `"Profit & Loss"` retained-earnings account (`CA2`, correctly needs the
+  closing entry's net-income effect folded in). This is tested directly: `AccountingReportTest`
+  posts P&L activity, closes the year, and asserts the Income Statement for the now-closed year
+  still shows the real net profit, not zero.
+- **A real, deliberate deviation from the build brief, worth knowing about**: the Balance Sheet
+  report adds a virtual `currentYearEarnings` line for a still-**open** fiscal year — computed as
+  the same Income-minus-Expenses net used by the Income Statement (excluding `ClosingEntry`).
+  Without it, Assets vs. Liabilities+Capital only balances *after* `FiscalYear::close()` sweeps net
+  profit into `"Profit & Loss"` — an open year's unswept profit would otherwise just vanish from the
+  Balance Sheet rather than merely be unbalanced. The virtual line disappears automatically once the
+  year is closed (the real `ClosingEntry`-driven balance takes over) — verified in
+  `AccountingReportTest`.
+- **A real bug caught in the merge, not shipped**: `AccountingReportTest`'s `assertInertia`
+  assertions initially compared float literals like `1000.0` against JSON-decoded values — PHP's
+  `json_encode` drops the `.0` from whole-number floats, so the wire value comes back as an int
+  `1000`, and Inertia's `where()` assertion does strict (`===`) comparison. Found by a sibling fork
+  running the full suite mid-merge, fixed by the owning fork before final report. If a future report
+  test asserts an exact numeric value via `assertInertia`, watch for this — cast/round on both sides
+  or compare loosely.
+- **Routes**: `routes/tenant-reports-{accounting,sales-purchase,inventory}.php`, all under a shared
+  `/reports/*` prefix and `tenant.reports.*` name group. Nav: a new "REPORTS" group with all 8
+  entries.
+- **Frontend pattern**: all 8 pages extend the existing `Accounts/Ledger.vue` template (a filter →
+  `router.get(window.location.pathname, {...}, {preserveState:true, preserveScroll:true})` →
+  `Card variant="panel"` wrapper) rather than inventing a new report-page shape. The 3 accounting
+  reports render a hierarchical head→group→subgroup→account tree manually (not `DataTable` — flat
+  tables don't fit a nested statement); the other 5 are flat and use `DataTable` + a totals row.
+- **Tests**: `tests/Feature/Tenant/Reports/{AccountingReportTest,SalesPurchaseReportTest,
+  InventoryReportTest}.php`.
+- **Deliberately out of scope for this pass**: the remaining ~44 legacy report views (Day Book,
+  Cash Book, Bank Book, age-wise receivables/payables, item/group-wise breakdowns, etc.) — re-evaluate
+  priority against real usage before picking the next batch, don't build speculatively.
+
+## Backend + Frontend: partial-line Sales/Purchase Returns (2026-08-26)
+
+Built via 2 parallel forks (Sales Return, Purchase Return) same day as the above, in a follow-up
+pass after the user picked this as the next roadmap slice over more reports / a browser smoke-test
+pass / committing. Upgrades cancel-only (full-invoice) voiding with real credit-note/debit-note
+documents against specific original line quantities — closer legacy parity.
+
+- **`App\Models\SalesReturn`/`SaleReturnLine`, `App\Models\PurchaseReturn`/`PurchaseReturnLine`**
+  (new tables, each mirrors its parent Sale/Purchase's line shape plus a `rate`/`line_total` snapshot
+  at return time). `SalesReturn::post()`/`PurchaseReturn::post()` (static, `DB::transaction`, same
+  calling convention as `Sale::post()`/`Purchase::post()`): per return-line, guards over-return by
+  summing prior return quantities against the same original line (`$remaining = original.quantity -
+  sum(existing returns for this line)`), computes the returned amount from the original line's
+  **post-discount effective unit price** (`line_total / quantity`), NOT a fresh rate — so multiple
+  partial returns against the same line stay consistent with what was actually charged.
+- **Money side**: Sales Return debits Sales Revenue (`INI20`) + VAT Payable (`LIA20`, reversing the
+  original credit) and credits the Customer's account (a credit note — reduces receivable, or
+  creates a customer credit balance if the sale was already cash/bank-settled). Purchase Return
+  credits back the SAME per-item accounts the original purchase debited (grouped by
+  `item.account_id ?? EXE8`, matching `Purchase::post()`'s own grouping — not a single hardcoded
+  account) + credits VAT Receivable (`ASA23`, correctly — not `LIA20`, avoiding the exact legacy bug
+  `Purchase::post()`'s own docblock already warns against) and debits the Supplier's account (a
+  debit note).
+- **Stock side**: writes a brand-new `StockMovementType::SaleReturn` (direction `+1`, goods
+  physically return to stock) or `PurchaseReturn` (direction `-1`, goods physically leave stock)
+  movement per returned line — this is the first code to actually use those two enum cases (Stock
+  Adjustment only used `Opening`/`AdjustmentIn`/`AdjustmentOut`). Deliberately does NOT flag the
+  original Sale/Purchase movement `cancelled=true` (unlike full `cancel()`) since only part of its
+  quantity came back — the two movements coexist, netting out correctly in `Item::currentStock()`.
+- **Two deliberate, documented simplifications (real gaps, not oversights)**: neither return
+  proportionally reverses the ORIGINAL invoice's header-level discount (only the line's own
+  rate/discount is used); neither reverses any TDS withheld on the original sale/purchase. Also: no
+  return auto-generates a cash/bank refund voucher — it only posts the credit/debit note against the
+  customer's/supplier's own account; an actual cash refund is a separate, manual follow-up action
+  (out of scope for this pass).
+- **Guard added to `Sale::cancel()`/`Purchase::cancel()`** (the only change made to those two
+  existing files): both now throw `InvalidArgumentException` if any return line already references
+  one of the original invoice's lines — prevents a full-invoice cancel from double-reversing money
+  a partial return already reversed. Both models gained a `returns(): HasMany` relation.
+- **Routes**: `routes/tenant-sales-returns.php`, `routes/tenant-purchase-returns.php`
+  (index/store only — returns are themselves immutable in this pass, no cancel-a-return; that's a
+  real, deliberately deferred next layer if it's ever needed). Nav: "Sales Returns"/"Purchase
+  Returns" added to the existing TRANSACTIONS group.
+- **Tests**: `tests/Feature/Tenant/{Sales/SalesReturnTest,Purchases/PurchaseReturnTest}.php` — 10
+  tests total (5 each): balanced voucher + correct stock direction on a partial return, over-return
+  rejection, return-against-already-cancelled-invoice rejection, cancel-after-return rejection,
+  HTTP round-trip. Purchase Return's test additionally asserts VAT credits `ASA23` not `LIA20` and
+  that different item accounts are credited back correctly (not one hardcoded account).
+
+## How to verify the app is actually working, updated (2026-08-26)
+
+Full suite is now **121/121 tests, 747 assertions**, `npm run build` succeeds. Confirmed via a fresh
+authoritative run after all 6 parallel forks across both passes (Stock Adjustment + 3 Reporting
+forks, then Sales Return + Purchase Return) landed — the same `php artisan test --compact` / `npm
+run build` commands under "How to verify" above, just a higher test count than when that section
+was first written.
+
 ## Open items (also see `goal.md` roadmap)
 
-- Chart-of-accounts/customers/suppliers/items are now backend AND frontend complete, verified end
-  to end (`npm run build` succeeds, 45/45 tests including a real authenticated-HTTP Inertia
-  component-render check for all 8 pages). Not manually smoke-tested in an actual browser this
-  session (curl-based CSRF handling was fought and abandoned in favor of the Pest-based check,
-  which is more reliable anyway) — worth a real browser click-through before considering the UI
-  polished, but functionally verified.
-- Ledger/financial-transaction engine (journal vouchers, `mainaccountledger`) not started — Phase 1
-  in `05-phase-plan.md` bundles this with chart-of-accounts/customers, but it's a materially bigger
-  piece (the actual posting engine) and was treated as separate scope this session.
+- Chart-of-accounts/customers/suppliers/items, the enterprise UI redesign, the ledger/journal
+  voucher posting engine, Sales/Purchase/Stock Adjustment, the Reporting MVP, and partial-line
+  Sales/Purchase Returns are all backend AND frontend complete, verified via the automated suite
+  (121/121) and `npm run build`. **None of this has been manually smoke-tested in an actual browser
+  yet** — worth a real click-through (create a fiscal year, post a journal voucher and a
+  sale/purchase, close a year, run each report, post a stock adjustment, post a partial return)
+  before considering any of it fully polished.
+- Neither return type reverses header-level discount or TDS, and neither auto-generates a cash/bank
+  refund voucher — see the Returns section above for the reasoning; real gaps if closer fidelity is
+  ever wanted.
+- No cancel-a-return path — returns are immutable/append-only in this pass, same as everything else,
+  but there's no correction mechanism if a return itself was entered wrong (would need a new
+  document type, e.g. a "return reversal," not an edit).
+- The remaining ~44 legacy report views beyond the 8-report MVP — see the Reporting section above.
 - Synchronous tenant provisioning, no 2FA, no MySQL credential-role separation — all deliberately
   deferred, see `goal.md`.
-- Fiscal year design is an open question, not yet started — needs a real decision (see `goal.md`
-  roadmap item 4) before any ledger/transaction schema work begins.
+- No UI yet for the closed-year correction override (backend-complete, frontend deliberately
+  deferred this pass — see the ledger section above).

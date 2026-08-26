@@ -3,6 +3,7 @@
 declare(strict_types=1);
 
 use App\Http\Controllers\Tenant\Auth\AuthenticatedSessionController;
+use App\Http\Controllers\Tenant\DashboardController;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Route;
 use Inertia\Inertia;
@@ -43,14 +44,7 @@ Route::middleware([
         Route::post('/logout', [AuthenticatedSessionController::class, 'destroy'])
             ->name('tenant.logout');
 
-        Route::get('/dashboard', function (Request $request) {
-            // Eager-load the role relation onto the same User instance that
-            // HandleInertiaRequests shares as `auth.user`, so the page can
-            // read `auth.user.role` without a separate prop.
-            $request->user()->loadMissing('role');
-
-            return Inertia::render('Tenant/Dashboard');
-        })->name('tenant.dashboard');
+        Route::get('/dashboard', [DashboardController::class, 'index'])->name('tenant.dashboard');
 
         Route::get('/admin/users', function (Request $request) {
             $request->user()->loadMissing('role');
@@ -59,5 +53,14 @@ Route::middleware([
         })->middleware('role:admin')->name('tenant.admin.users');
 
         require base_path('routes/tenant-business.php');
+        require base_path('routes/tenant-ledger.php');
+        require base_path('routes/tenant-sales.php');
+        require base_path('routes/tenant-purchase.php');
+        require base_path('routes/tenant-sales-returns.php');
+        require base_path('routes/tenant-purchase-returns.php');
+        require base_path('routes/tenant-stock-adjustments.php');
+        require base_path('routes/tenant-reports-accounting.php');
+        require base_path('routes/tenant-reports-sales-purchase.php');
+        require base_path('routes/tenant-reports-inventory.php');
     });
 });

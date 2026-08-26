@@ -63,4 +63,13 @@
     --radius-3xl: 0px;
     --radius-4xl: 0px;
     --radius-full: 9999px;
+
+    /*
+     * Elevation, single-place definition (same reasoning as radius above):
+     * every shadow used across the app resolves through one of these three
+     * tokens so intensity/color can move in one edit.
+     */
+    --shadow-xs: 0 1px 2px rgba(17, 24, 39, .05);
+    --shadow-sm: 0 1px 3px rgba(17, 24, 39, .06), 0 1px 2px rgba(17, 24, 39, .04);
+    --shadow-primary-sm: 0 2px 8px rgba(102, 0, 255, .20);
 }

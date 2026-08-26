@@ -19,7 +19,7 @@ const buttonVariants = cva(
     {
         variants: {
             variant: {
-                primary: 'bg-primary px-4 py-2.5 text-[13px] text-white shadow-[0_4px_14px_rgba(102,0,255,.35)] hover:bg-primary-dark',
+                primary: 'bg-primary px-4 py-2.5 text-[13px] text-white hover:bg-primary-dark',
                 secondary: 'border-[1.5px] px-4 py-2.5 text-[13px]',
                 icon: 'h-8 w-8 bg-primary-tint text-primary hover:bg-primary hover:text-white',
             },

@@ -34,6 +34,7 @@ import {
     DropdownMenuTrigger,
 } from 'reka-ui';
 import { cn } from '@/lib/utils';
+import Tooltip from '@/components/ui/Tooltip.vue';
 
 const props = defineProps({
     columns: { type: Array, required: true },
@@ -209,24 +210,28 @@ function onHeaderKeydown(event, column) {
                         </DropdownMenuPortal>
                     </DropdownMenuRoot>
                     <div class="flex items-center gap-1">
-                        <button
-                            type="button"
-                            class="inline-flex h-7 w-7 items-center justify-center border-[1.5px] border-border bg-white text-text-muted transition-colors duration-150 ease-out hover:border-primary hover:text-primary disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:border-border disabled:hover:text-text-muted"
-                            :disabled="!table.getCanPreviousPage()"
-                            aria-label="Previous page"
-                            @click="table.previousPage()"
-                        >
-                            <ChevronLeft class="h-3.5 w-3.5" />
-                        </button>
-                        <button
-                            type="button"
-                            class="inline-flex h-7 w-7 items-center justify-center border-[1.5px] border-border bg-white text-text-muted transition-colors duration-150 ease-out hover:border-primary hover:text-primary disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:border-border disabled:hover:text-text-muted"
-                            :disabled="!table.getCanNextPage()"
-                            aria-label="Next page"
-                            @click="table.nextPage()"
-                        >
-                            <ChevronRight class="h-3.5 w-3.5" />
-                        </button>
+                        <Tooltip label="Previous page">
+                            <button
+                                type="button"
+                                class="inline-flex h-7 w-7 items-center justify-center border-[1.5px] border-border bg-white text-text-muted transition-colors duration-150 ease-out hover:border-primary hover:text-primary disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:border-border disabled:hover:text-text-muted"
+                                :disabled="!table.getCanPreviousPage()"
+                                aria-label="Previous page"
+                                @click="table.previousPage()"
+                            >
+                                <ChevronLeft class="h-3.5 w-3.5" />
+                            </button>
+                        </Tooltip>
+                        <Tooltip label="Next page">
+                            <button
+                                type="button"
+                                class="inline-flex h-7 w-7 items-center justify-center border-[1.5px] border-border bg-white text-text-muted transition-colors duration-150 ease-out hover:border-primary hover:text-primary disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:border-border disabled:hover:text-text-muted"
+                                :disabled="!table.getCanNextPage()"
+                                aria-label="Next page"
+                                @click="table.nextPage()"
+                            >
+                                <ChevronRight class="h-3.5 w-3.5" />
+                            </button>
+                        </Tooltip>
                     </div>
                 </div>
             </div>

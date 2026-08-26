@@ -25,11 +25,22 @@ class ChartOfAccountsSeeder extends Seeder
      * are looked up by exact string in App\Models\Concerns\HasLedgerAccount,
      * used by Customer and Supplier. Do not rename without updating that
      * side too.
+     *
+     * "Income" and "Expenses" are marked is_profit_and_loss=true - the
+     * ledger's year-end close (App\Models\FiscalYear::close()) sweeps every
+     * account under these two heads to zero and posts the net to the
+     * "Profit & Loss" account (code CA2, under Capital) rather than carrying
+     * a balance forward. Every other head carries forward as-is.
      */
     public function run(): void
     {
+        $profitAndLossHeads = ['Income', 'Expenses'];
+
         $heads = collect(['Assets', 'Liabilities', 'Income', 'Expenses', 'Capital'])
-            ->mapWithKeys(fn (string $name) => [$name => AccountHead::create(['name' => $name])]);
+            ->mapWithKeys(fn (string $name) => [$name => AccountHead::create([
+                'name' => $name,
+                'is_profit_and_loss' => in_array($name, $profitAndLossHeads, true),
+            ])]);
 
         $groups = collect([
             ['head' => 'Assets', 'name' => 'Current Assets'],

@@ -50,24 +50,48 @@ this file for direction.
   test. `npm run build` succeeds, full suite green (45/45). See `mem.md` for the full breakdown,
   including a real gotcha the parallel pass surfaced (Inertia doesn't remount same-route pages, so
   `onMounted`-based flash toasts silently stop firing after the first load — fixed with `watch`).
-  Not yet manually smoke-tested in an actual browser.
+- **Enterprise UI redesign** (2026-08-25): app shell (grouped sidebar, topbar), row-action
+  differentiation + tooltips across all 8 business pages, and a real (non-placeholder) tenant
+  dashboard with live KPIs. Design tokens (`--shadow-*`) centralized alongside the existing
+  `--radius-*` tokens in `resources/css/app.css`. See `mem.md` for the full breakdown.
+- **Ledger/journal-voucher posting engine, backend + frontend** (2026-08-25): fiscal years,
+  double-entry journal vouchers, sequential per-type voucher numbering, automatic P&L year-end
+  closing with balance-sheet carry-forward, and a super-admin closed-year correction override with
+  multi-year roll-forward — all built Eloquent-portable (no DB views/triggers/session variables),
+  resolving roadmap item 5 below as part of building item 3. `npm run build` succeeds, full suite
+  green (53/53). See `mem.md` for the full breakdown (schema, the exact posting/closing algorithms,
+  what's deliberately deferred).
+- **Sales/Purchase modules, Stock Adjustment, an MVP Reporting slice, and partial-line Sales/
+  Purchase Returns** (2026-08-26): the transaction modules post money-side-only journal vouchers
+  against the ledger engine and track quantity via a new decoupled `ItemStockMovement` table
+  (periodic, not perpetual, inventory accounting — confirmed from legacy). Full-invoice cancel
+  (reversing voucher) AND real partial-line Sales/Purchase Return documents (credit/debit notes
+  against specific original line quantities) both exist now. Stock Adjustment (manual quantity
+  correction + opening stock, folded into one `reason_type`) rounds out the quantity side. 8 MVP
+  reports built (Trial Balance, Income Statement, Balance Sheet, Sales/Purchase Register,
+  Sales/Purchase VAT Book, Stock Summary) — chosen out of legacy's ~52-report module as the
+  compliance-critical + highest-value subset, not all of them. All built via parallel subagents
+  (forks). Full suite green (121/121), `npm run build` succeeds. See `mem.md` for the full
+  breakdown. **Not yet committed to git.**
+- Not yet manually smoke-tested in an actual browser (any of the above, including this pass).
 
 **Next, roughly in order** (not a committed sequence — re-evaluate against sibling
 `05-phase-plan.md` before starting each):
 1. ~~Git init + first commit.~~ Done 2026-08-25 — 5 commits on `master`, see `mem.md`.
 2. ~~Frontend pass for the core business schema.~~ Done 2026-08-25, see above.
-3. **Ledger/financial-transaction engine** (journal vouchers, `mainaccountledger`/
-   `mainaccountledgerdetails`) — the posting engine every transactional module writes through.
-   `05-phase-plan.md` Phase 1 bundles this with chart-of-accounts/customers, but it's materially
-   bigger (the actual double-entry posting logic) and was treated as separate, not-yet-started
-   scope when the master data above was built.
-4. **Sales/purchase/inventory modules** once the ledger engine exists to post against.
-5. **Fiscal year handling** — needs a real design decision: either port a simplified version of the
-   legacy trigger/view mechanism (MySQL-only, breaks SQLite dev) or find an Eloquent-portable
-   equivalent (e.g. application-level enforcement + a nightly consistency check). Don't default to
-   either without discussing trade-offs first.
-6. **Reporting** (the 52-report-view module in the legacy app) — leans heavily on `DataTable`,
-   already built.
+3. ~~Ledger/financial-transaction engine.~~ Done 2026-08-25 (from-scratch portable schema, not a
+   port of `mainaccountledger`/`mainaccountledgerdetails`), see above and `mem.md`. Not yet
+   committed to git.
+4. ~~Sales/purchase/inventory modules.~~ Done 2026-08-26 — Sales, Purchase, Stock Adjustment, and
+   (in a follow-up same-day pass) partial-line Sales/Purchase Returns are all built and verified,
+   see above and `mem.md`.
+5. ~~Fiscal year handling design decision.~~ Resolved 2026-08-25 as part of item 3: Eloquent-portable
+   (app-level invariant + model events + one posting method), not the legacy MySQL trigger/view
+   mechanism. See `mem.md`.
+6. **Reporting**, continued — an MVP slice of 8 reports shipped 2026-08-26 (see above). The
+   remaining ~44 legacy report views (see `mem.md` for the categorized list a research pass
+   produced) are a real next slice, not forgotten — re-evaluate priority against actual usage before
+   picking the next batch rather than building all of them speculatively.
 7. Production hardening pass: MySQL credential-role separation, queued (not synchronous) tenant
    provisioning, 2FA for platform admins, CSP/security headers — see
    `../day_khata/migration_plan/02-security-hardening.md`. Deliberately deferred until there's a

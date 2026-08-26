@@ -2,10 +2,13 @@
 
 namespace App\Http\Controllers\Tenant\Accounting;
 
+use App\Enums\FiscalYearStatus;
 use App\Http\Controllers\Controller;
 use App\Models\Account;
 use App\Models\AccountGroup;
 use App\Models\AccountSubgroup;
+use App\Models\FiscalYear;
+use App\Models\JournalVoucherLine;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Validation\Rule;
@@ -42,6 +45,41 @@ class AccountController extends Controller
         $account->delete();
 
         return redirect()->route('tenant.accounts.index')->with('status', 'Account deleted.');
+    }
+
+    public function ledger(Request $request, Account $account): Response
+    {
+        $fiscalYearId = $request->integer('fiscal_year_id') ?: FiscalYear::query()->where('status', FiscalYearStatus::Open)->value('id');
+
+        $entries = $account->journalVoucherLines()
+            ->whereHas('journalVoucher', fn ($query) => $query->where('fiscal_year_id', $fiscalYearId))
+            ->with('journalVoucher')
+            ->get()
+            ->sortBy([['journalVoucher.date', 'asc'], ['id', 'asc']])
+            ->values();
+
+        $runningBalance = 0.0;
+
+        $entries = $entries->map(function (JournalVoucherLine $line) use (&$runningBalance) {
+            $runningBalance += (float) $line->debit - (float) $line->credit;
+
+            return [
+                'date' => $line->journalVoucher->date->toDateString(),
+                'voucherType' => $line->journalVoucher->voucher_type->value,
+                'voucherNumber' => $line->journalVoucher->voucher_number,
+                'narration' => $line->narration ?? $line->journalVoucher->narration,
+                'debit' => (float) $line->debit,
+                'credit' => (float) $line->credit,
+                'balance' => $runningBalance,
+            ];
+        });
+
+        return Inertia::render('Tenant/Accounting/Accounts/Ledger', [
+            'account' => $account->only(['id', 'code', 'name']),
+            'fiscalYears' => FiscalYear::query()->orderByDesc('start_date')->get(['id', 'name', 'status']),
+            'fiscalYearId' => $fiscalYearId,
+            'entries' => $entries,
+        ]);
     }
 
     /**
