@@ -21,7 +21,10 @@ class AuthenticatedSessionController extends Controller
     }
 
     /**
-     * Handle an incoming platform admin authentication request.
+     * Handle an incoming platform admin authentication request. Credentials
+     * are validated without logging in yet (via the guard's provider
+     * directly, not attempt()), because a 2FA-enabled admin must clear the
+     * challenge step before a session is actually established.
      */
     public function store(Request $request): RedirectResponse
     {
@@ -30,11 +33,26 @@ class AuthenticatedSessionController extends Controller
             'password' => ['required', 'string'],
         ]);
 
-        if (! Auth::guard('platform')->attempt($credentials, $request->boolean('remember'))) {
+        $provider = Auth::guard('platform')->getProvider();
+        $admin = $provider->retrieveByCredentials($credentials);
+
+        if (! $admin || ! $provider->validateCredentials($admin, $credentials)) {
             throw ValidationException::withMessages([
                 'email' => trans('auth.failed'),
             ]);
         }
+
+        if ($admin->hasTwoFactorEnabled()) {
+            $request->session()->put('platform_two_factor_challenge', [
+                'id' => $admin->getKey(),
+                'remember' => $request->boolean('remember'),
+                'expires_at' => now()->addMinutes(5)->timestamp,
+            ]);
+
+            return redirect()->route('central.two-factor.challenge');
+        }
+
+        Auth::guard('platform')->login($admin, $request->boolean('remember'));
 
         $request->session()->regenerate();
 

@@ -5,6 +5,7 @@ use App\Models\PlatformAdmin;
 use App\Models\Tenant;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Queue;
 
 uses(RefreshDatabase::class);
 
@@ -35,7 +36,13 @@ test('creating a tenant via the endpoint provisions a working tenant database wi
 
     $response->assertRedirect(route('central.tenants.show', $tenant));
 
+    // The TenantCreated job pipeline is queued (TenancyServiceProvider), but
+    // the test suite runs on the `sync` queue connection, so by the time the
+    // request above returns, CreateDatabase/MigrateDatabase/SeedDatabase/
+    // CreateTenantFirstAdmin have already all run inline and the tenant is
+    // already Active — this is exercising the real pipeline, not a stub.
     expect($tenant->status)->toBe(TenantStatus::Active);
+    expect($tenant->pending_admin)->toBeNull();
     expect($tenant->contact_email)->toBe('billing@acme.test');
     expect($tenant->domains()->where('domain', 'acme.localhost')->exists())->toBeTrue();
 
@@ -52,6 +59,40 @@ test('creating a tenant via the endpoint provisions a working tenant database wi
 
     expect($adminUser['name'])->toBe('Acme Admin')
         ->and($adminUser['role_slug'])->toBe('admin');
+});
+
+test('a request into a still-provisioning tenant is blocked instead of hitting a missing database', function () {
+    // Fake the queue so the TenantCreated pipeline (CreateDatabase/
+    // MigrateDatabase/SeedDatabase/CreateTenantFirstAdmin) never actually
+    // runs, leaving the tenant stuck in Provisioning — exactly the window a
+    // real deployment has between the store() request returning and a queue
+    // worker picking the job up.
+    Queue::fake();
+
+    $admin = PlatformAdmin::factory()->create();
+
+    $this->actingAs($admin, 'platform')->post(route('central.tenants.store'), [
+        'company_name' => 'Still Cooking Inc',
+        'subdomain' => 'stillcooking',
+        'contact_email' => null,
+        'admin_name' => 'Pending Admin',
+        'admin_email' => 'admin@stillcooking.test',
+        'admin_password' => 'password123',
+    ]);
+
+    $tenant = Tenant::where('company_name', 'Still Cooking Inc')->firstOrFail();
+
+    expect($tenant->status)->toBe(TenantStatus::Provisioning);
+    // Nothing was ever created for this tenant, so there's no database file
+    // on disk to clean up — the afterEach's Tenant::delete() call is a no-op
+    // database-file-wise here (also queued/faked), which is fine.
+    expect(file_exists(database_path($tenant->database()->getName())))->toBeFalse();
+
+    // Matches the existing convention in TenantSuspensionTest (status-only,
+    // hitting the public root route rather than an auth-gated one, since the
+    // abort fires from AbortIfTenantSuspended, which runs early in the tenant
+    // route middleware stack — right after tenancy is initialized).
+    $this->get('http://stillcooking.localhost/')->assertStatus(403);
 });
 
 test('the subdomain must be unique across tenants', function () {

@@ -4,7 +4,7 @@ declare(strict_types=1);
 
 namespace App\Providers;
 
-use App\Listeners\AbortIfTenantSuspended;
+use App\Jobs\CreateTenantFirstAdmin;
 use Illuminate\Contracts\Http\Kernel;
 use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Route;
@@ -30,13 +30,11 @@ class TenancyServiceProvider extends ServiceProvider
                     Jobs\CreateDatabase::class,
                     Jobs\MigrateDatabase::class,
                     Jobs\SeedDatabase::class,
-
-                    // Your own jobs to prepare the tenant.
-                    // Provision API keys, create S3 buckets, anything you want!
+                    CreateTenantFirstAdmin::class,
 
                 ])->send(function (Events\TenantCreated $event) {
                     return $event->tenant;
-                })->shouldBeQueued(false), // `false` by default, but you probably want to make this `true` for production.
+                })->shouldBeQueued(true),
             ],
             Events\SavingTenant::class => [],
             Events\TenantSaved::class => [],
@@ -48,7 +46,7 @@ class TenancyServiceProvider extends ServiceProvider
                     Jobs\DeleteDatabase::class,
                 ])->send(function (Events\TenantDeleted $event) {
                     return $event->tenant;
-                })->shouldBeQueued(false), // `false` by default, but you probably want to make this `true` for production.
+                })->shouldBeQueued(true),
             ],
 
             // Domain events
@@ -71,9 +69,12 @@ class TenancyServiceProvider extends ServiceProvider
             // Tenancy events
             Events\InitializingTenancy::class => [],
             Events\TenancyInitialized::class => [
-                // Runs before bootstrapping so a suspended tenant's DB/cache/
-                // filesystem connections never get switched into for this request.
-                AbortIfTenantSuspended::class,
+                // Suspended/still-provisioning tenants are blocked via the
+                // App\Http\Middleware\AbortIfTenantSuspended route middleware
+                // (routes/tenant.php), not here — this event also fires for
+                // every internal tenancy()->initialize()/$tenant->run() call
+                // the provisioning pipeline itself makes, which must be able
+                // to proceed while status is still Provisioning.
                 Listeners\BootstrapTenancy::class,
             ],
 

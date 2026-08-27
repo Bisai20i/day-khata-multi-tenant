@@ -143,6 +143,9 @@ function logout() {
                             </button>
                         </template>
 
+                        <DropdownMenuItem v-if="page.props.auth?.platformAdmin" @select="() => router.visit('/two-factor')">
+                            Two-Factor Authentication
+                        </DropdownMenuItem>
                         <DropdownMenuItem @select="logout">Log out</DropdownMenuItem>
                     </DropdownMenu>
                 </div>

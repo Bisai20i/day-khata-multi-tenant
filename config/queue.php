@@ -33,6 +33,18 @@ return [
 
         'sync' => [
             'driver' => 'sync',
+            // Read by Stancl\Tenancy\Bootstrappers\QueueTenancyBootstrapper::getPayload() —
+            // NOT config/tenancy.php, despite that being where you'd expect tenancy-related
+            // settings to live (verified against vendor/stancl/tenancy's own stub config,
+            // which has no `queue` section at all). Marks this connection exempt from having
+            // jobs tagged with whichever tenant happens to be initialized at dispatch time.
+            // Without this, any job dispatched while tenancy is transiently initialized (e.g.
+            // App\Jobs\CreateTenantFirstAdmin's own $tenant->run() call, or any test that does
+            // $tenant->run() around code that queues something) gets tagged, and then fails
+            // with TenantCouldNotBeIdentifiedById once that tenant is gone (e.g. a prior test's
+            // tenant rolled back) by the time the job is processed. There are currently no
+            // genuinely tenant-scoped queued jobs in this app — revisit if one is ever added.
+            'central' => true,
         ],
 
         'database' => [
@@ -42,6 +54,8 @@ return [
             'queue' => env('DB_QUEUE', 'default'),
             'retry_after' => (int) env('DB_QUEUE_RETRY_AFTER', 90),
             'after_commit' => false,
+            // See the `sync` connection above for why this is here.
+            'central' => true,
         ],
 
         'beanstalkd' => [

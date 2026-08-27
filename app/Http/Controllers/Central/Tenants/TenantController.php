@@ -4,9 +4,7 @@ namespace App\Http\Controllers\Central\Tenants;
 
 use App\Enums\TenantStatus;
 use App\Http\Controllers\Controller;
-use App\Models\Role;
 use App\Models\Tenant;
-use App\Models\User;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -45,9 +43,13 @@ class TenantController extends Controller
     }
 
     /**
-     * Provision a new tenant: central tenant + domain records, a fresh
-     * tenant database (created/migrated/seeded via the TenantCreated job
-     * pipeline), and the tenant's first admin user.
+     * Provision a new tenant: central tenant + domain records, then a fresh
+     * tenant database (created/migrated/seeded, and its first admin user
+     * created) asynchronously via the queued TenantCreated job pipeline
+     * (see App\Jobs\CreateTenantFirstAdmin and TenancyServiceProvider). The
+     * tenant starts out `Provisioning` and only flips to `Active` once that
+     * pipeline finishes — see AbortIfTenantSuspended for how requests into a
+     * still-provisioning tenant are handled in the meantime.
      */
     public function store(Request $request): RedirectResponse
     {
@@ -75,29 +77,30 @@ class TenantController extends Controller
         try {
             // Instantiated and saved separately (rather than Tenant::create())
             // so $tenant still references the row if the TenantCreated job
-            // pipeline (which creates/migrates/seeds the tenant database)
-            // throws partway through its own "created" event listeners.
+            // pipeline (which creates/migrates/seeds the tenant database and
+            // creates its first admin) throws partway through its own
+            // "created" event listeners.
             $tenant = new Tenant([
                 'company_name' => $validated['company_name'],
-                'status' => TenantStatus::Active,
+                'status' => TenantStatus::Provisioning,
                 'contact_email' => $validated['contact_email'] ?? null,
             ]);
+
+            // Not a real column (see Tenant::getCustomColumns()) — swept into
+            // the `data` JSON column and read back by App\Jobs\CreateTenantFirstAdmin
+            // once the tenant database exists. Hashed here, never stored in
+            // plaintext even transiently.
+            $tenant->pending_admin = [
+                'name' => $validated['admin_name'],
+                'email' => $validated['admin_email'],
+                'password' => Hash::make($validated['admin_password']),
+            ];
+
             $tenant->save();
 
             $tenant->domains()->create([
                 'domain' => "{$validated['subdomain']}.localhost",
             ]);
-
-            $tenant->run(function () use ($validated): void {
-                $role = Role::where('slug', 'admin')->firstOrFail();
-
-                User::create([
-                    'name' => $validated['admin_name'],
-                    'email' => $validated['admin_email'],
-                    'password' => Hash::make($validated['admin_password']),
-                    'role_id' => $role->id,
-                ]);
-            });
 
             $connection->commit();
         } catch (Throwable $e) {
@@ -116,7 +119,7 @@ class TenantController extends Controller
 
         return redirect()
             ->route('central.tenants.show', $tenant)
-            ->with('status', 'Tenant provisioned successfully.');
+            ->with('status', 'Tenant provisioning started — it will be ready shortly.');
     }
 
     /**

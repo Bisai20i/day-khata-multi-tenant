@@ -30,6 +30,12 @@ const navItems = [
     { label: 'Tenants', href: '/tenants', icon: Building2 },
 ];
 
+const statusBadgeVariant = {
+    active: 'success',
+    provisioning: 'warning',
+    suspended: 'danger',
+};
+
 const columns = [
     { accessorKey: 'company_name', header: 'Company' },
     { accessorKey: 'domain', header: 'Domain' },
@@ -38,7 +44,7 @@ const columns = [
         header: 'Status',
         numeric: false,
         cell: ({ row }) =>
-            h(Badge, { variant: row.original.status === 'active' ? 'success' : 'danger', pill: true }, () => row.original.status),
+            h(Badge, { variant: statusBadgeVariant[row.original.status] ?? 'neutral', pill: true }, () => row.original.status),
     },
     { accessorKey: 'created_at', header: 'Created' },
     {

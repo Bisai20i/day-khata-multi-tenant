@@ -32,6 +32,12 @@ const navItems = [
 
 const showDeleteModal = ref(false);
 
+const statusBadgeVariant = {
+    active: 'success',
+    provisioning: 'warning',
+    suspended: 'danger',
+};
+
 function suspend() {
     router.post(`/tenants/${props.tenant.id}/suspend`);
 }
@@ -61,7 +67,7 @@ function confirmDelete() {
                 <div class="flex items-center justify-between border-b border-border-soft py-2">
                     <dt class="text-text-muted">Status</dt>
                     <dd>
-                        <Badge :variant="tenant.status === 'active' ? 'success' : 'danger'" pill>{{ tenant.status }}</Badge>
+                        <Badge :variant="statusBadgeVariant[tenant.status] ?? 'neutral'" pill>{{ tenant.status }}</Badge>
                     </dd>
                 </div>
                 <div class="flex items-center justify-between border-b border-border-soft py-2">
@@ -83,7 +89,7 @@ function confirmDelete() {
                     <CirclePause class="size-4" />
                     Suspend
                 </Button>
-                <Button v-else variant="secondary" tone="blue" @click="resume">
+                <Button v-else-if="tenant.status === 'suspended'" variant="secondary" tone="blue" @click="resume">
                     <CirclePlay class="size-4" />
                     Resume
                 </Button>

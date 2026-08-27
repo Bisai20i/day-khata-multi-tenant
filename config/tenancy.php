@@ -3,9 +3,7 @@
 declare(strict_types=1);
 
 use App\Models\Tenant;
-use Stancl\Tenancy\Bootstrappers\CacheTenancyBootstrapper;
 use Stancl\Tenancy\Bootstrappers\DatabaseTenancyBootstrapper;
-use Stancl\Tenancy\Bootstrappers\FilesystemTenancyBootstrapper;
 use Stancl\Tenancy\Bootstrappers\QueueTenancyBootstrapper;
 use Stancl\Tenancy\Database\Models\Domain;
 use Stancl\Tenancy\TenantDatabaseManagers\MySQLDatabaseManager;
@@ -34,11 +32,48 @@ return [
      * Their responsibility is making Laravel features tenant-aware.
      *
      * To configure their behavior, see the config keys below.
+     *
+     * CacheTenancyBootstrapper and FilesystemTenancyBootstrapper are
+     * deliberately NOT enabled. This app has zero direct Cache::/cache() or
+     * Storage::/storage_path() usage anywhere (verified via a full grep of
+     * app/) — no tenant-scoped file storage, no cache reliance — so neither
+     * has any functional value here.
+     *
+     * Both surfaced real crashes once tenant provisioning became a
+     * multi-step queued pipeline (this production-hardening pass:
+     * tenants:migrate, tenants:seed, then CreateTenantFirstAdmin's own
+     * $tenant->run(), each its own tenancy()->initialize()/end() cycle,
+     * where before this pass admin creation was a single synchronous call
+     * and tenancy() was never cycled more than once per request). The
+     * underlying defect is in the vendor package, not fixable from here:
+     * Stancl\Tenancy\Database\Concerns\TenantRun::run() and
+     * Tenancy::runForMultiple() (used by tenants:migrate/tenants:seed) have
+     * no try/finally around the wrapped callback, so if anything throws
+     * mid-cycle, tenancy()->end() is simply never called and `initialized`
+     * stays stuck true for the rest of the request/test. The NEXT
+     * initialize()/end() transition (for the same or a different tenant)
+     * then unconditionally reverts every configured bootstrapper — including
+     * ones whose per-cycle captured "original" state was never (re)populated
+     * this time around. CacheTenancyBootstrapper hit this first (its
+     * bootstrap()/revert() swap the 'cache' container binding via
+     * Container::extend(), and a stale/absent capture manifested as
+     * "Argument #1 ($cache) must be of type ...\Factory, null given" when
+     * Tenant/Domain models' resolver-cache-invalidation traits then tried to
+     * construct a CachedTenantResolver). With Cache removed,
+     * FilesystemTenancyBootstrapper hit the exact same class of bug next
+     * (its revert() indexes into $originalPaths['disks'][$disk], populated
+     * per-disk during bootstrap() — "Undefined array key 'local'" when that
+     * capture never happened). Database's revert() (reconnectToCentral())
+     * doesn't depend on any per-cycle captured state, and Queue's
+     * bootstrap()/revert() are no-ops — neither is at risk from this same
+     * defect, which is why they're the only two left enabled. Revisit only
+     * if this app ever adds real tenant-scoped Cache::/Storage:: usage that
+     * needs isolation — and consider fixing the actual exception-safety gap
+     * in the vendor package at that point rather than disabling more
+     * bootstrappers.
      */
     'bootstrappers' => [
         DatabaseTenancyBootstrapper::class,
-        CacheTenancyBootstrapper::class,
-        FilesystemTenancyBootstrapper::class,
         QueueTenancyBootstrapper::class,
         // Stancl\Tenancy\Bootstrappers\RedisTenancyBootstrapper::class, // Note: phpredis is needed
     ],

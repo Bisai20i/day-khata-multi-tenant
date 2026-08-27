@@ -3,12 +3,15 @@
 Living state doc. Read this before starting work, update it before stopping. See `goal.md` for
 direction/roadmap — this file is "what exists and why," not "what's next."
 
-**Last updated:** 2026-08-26. **Git status: initialized**, 5 commits on `master` (git init, dev-DB
-gitignore fix, mem/goal update, core business schema, business schema frontend pages), plus
-everything since (enterprise-UI redesign, ledger/journal-voucher posting engine, Sales/Purchase,
-Stock Adjustment, the MVP Reporting slice, and partial-line Sales/Purchase Returns — all described
-below) **not yet committed** — sitting uncommitted in the working tree as of this update, fully
-verified (121/121 Tenant tests, `npm run build` green). No remote configured yet.
+**Last updated:** 2026-08-26. **Git status: initialized**, 6 commits on `master` (git init, dev-DB
+gitignore fix, mem/goal update, core business schema, business schema frontend pages, and one
+catch-up commit — `56c6b18` — covering everything since: enterprise-UI redesign,
+ledger/journal-voucher posting engine, Sales/Purchase, Stock Adjustment, the MVP Reporting slice,
+and partial-line Sales/Purchase Returns). **On top of that, the production hardening pass described
+below (queued provisioning, 2FA, CSP/headers, MySQL creds doc) is sitting uncommitted as of this
+update, not yet verified by the test suite or `npm run build`** — the user is running those
+themselves this session rather than having this session run them. No remote configured yet — this
+protects against a bad `git clean`/`reset`/`checkout`, not disk loss.
 
 ---
 
@@ -613,13 +616,280 @@ documents against specific original line quantities — closer legacy parity.
   HTTP round-trip. Purchase Return's test additionally asserts VAT credits `ASA23` not `LIA20` and
   that different item accounts are credited back correctly (not one hardcoded account).
 
+## Production hardening pass (2026-08-26)
+
+`goal.md` roadmap item 7, picked as the next slice ahead of the browser smoke-test and the remaining
+report batch. Built via 3 parallel forks on completely disjoint files (queued provisioning / 2FA /
+CSP+headers), same convention as prior multi-fork passes. **Not yet verified by the test suite or
+build** as of this update — the user asked this session to stop running `php artisan test`/`npm run
+build` itself and will run them manually; all three forks confirmed `php -l` clean and did targeted
+sanity checks (route registration, a real `tinker` round-trip through the TOTP/QR pipeline) instead.
+
+- **Queued tenant provisioning**: `app/Providers/TenancyServiceProvider.php` flips both
+  `shouldBeQueued(false)` → `true` (`TenantCreated` and `TenantDeleted` pipelines). A new
+  `App\Jobs\CreateTenantFirstAdmin` job is appended to the `TenantCreated` pipeline after
+  `SeedDatabase` — it re-fetches the tenant fresh (not the job-pipeline-passed instance, to sidestep
+  any doubt about `data`-column decode state surviving queue serialization), creates the first admin
+  user from a `pending_admin` payload, then flips the tenant to `Active`. `TenantStatus` gained a
+  `Provisioning` case (initial state now, not `Active`). `TenantController::store()` no longer
+  creates the admin user synchronously inside the request — it hashes the password immediately and
+  stashes `name`/`email`/already-hashed `password` as `$tenant->pending_admin`, which
+  `Tenant::getCustomColumns()` not listing it means it's swept into the `data` JSON column
+  automatically (`vendor/stancl/virtualcolumn`'s `VirtualColumn` trait) and read back by the job once
+  the tenant DB exists. `AbortIfTenantSuspended` (same class, no rename) now also 403s a request into
+  a still-`Provisioning` tenant with a distinct message, firing on `TenancyInitialized` before the
+  (possibly nonexistent) tenant DB connection is ever attempted. Central `Tenants/Index.vue` and
+  `Show.vue` render a third `provisioning` badge state and hide suspend/resume while provisioning.
+  Tests: extended `TenantProvisioningTest.php`, including a new test using `Queue::fake()` to
+  actually freeze a tenant in `Provisioning` and confirm a request into its domain gets a clean 403
+  rather than a missing-database error — not just relying on the `sync` test-queue driver making the
+  gap invisible.
+- **2FA for platform admins only** (not tenant users — matches `goal.md`'s explicit scope and the
+  security doc's "central app is the highest-value target" reasoning). New `pragmarx/google2fa` +
+  `bacon/bacon-qr-code` deps (QR rendered as an inline SVG data URI, no external QR image API — keeps
+  it compatible with the new strict CSP's `img-src`). `platform_admins` gained
+  `two_factor_secret`/`two_factor_recovery_codes` (both `encrypted`/`encrypted:array` casts, both in
+  `PlatformAdmin`'s `#[Hidden]`) and `two_factor_confirmed_at` (a secret alone, pre-confirmation,
+  doesn't count as enabled — `PlatformAdmin::hasTwoFactorEnabled()` checks the confirmed timestamp).
+  Opt-in, not forced enrollment — the seeded dev admin keeps working unchanged until 2FA is
+  deliberately turned on. Login flow: `AuthenticatedSessionController::store()` no longer calls
+  `Auth::attempt()`; it validates credentials via the guard's provider directly
+  (`retrieveByCredentials`/`validateCredentials`) so a 2FA-enabled admin isn't logged in yet — instead
+  the pending admin id + `remember` flag + a 5-minute expiry go into session, and the request redirects
+  to a new `TwoFactorChallengeController` (also under the existing `guest:platform` route group, since
+  the admin genuinely isn't authenticated yet). The challenge accepts either a live TOTP code or a
+  one-time recovery code (consumed from the stored array on use, can't be replayed); both the
+  `login.store` and `central.two-factor.challenge.store` routes carry the same `throttle:5,1` this app
+  already used for plain login. New `TwoFactorAuthenticationController` (behind `auth:platform`) owns
+  enroll/confirm/disable — confirm issues 8 recovery codes shown exactly once in that response;
+  disable requires re-entering the current password (`current_password:platform` validation rule) so a
+  hijacked-but-still-open session can't silently strip the protection. New pages
+  `Central/Auth/{TwoFactorChallenge,TwoFactorSetup}.vue`; one new link in the shared `AppLayout.vue`
+  avatar dropdown (previously only "Log out"), gated on `auth.platformAdmin` being present. Tests: 8
+  cases in `TwoFactorAuthenticationTest.php`, all driven through the real HTTP flow rather than direct
+  model writes — enroll/confirm/recovery-codes-shown-once, invalid code rejected, disable requires
+  password, a non-2FA login is unaffected, a 2FA login is redirected to the challenge instead of
+  establishing a session, the challenge itself accepts/rejects TOTP and recovery codes correctly, and
+  a used recovery code can't be replayed.
+- **CSP + security headers**: new `app/Http/Middleware/SecurityHeaders.php`, appended in
+  `bootstrap/app.php` alongside `HandleInertiaRequests`, applied to every response **except** when
+  `app()->environment('local')` — Vite's dev-mode client injects a cross-origin `<script src>` for HMR
+  that a strict `script-src 'self'` would block, and there's no browser available in-session to verify
+  a dev-mode carve-out empirically, so local is simply exempted rather than guessed at (verify this
+  properly the first time it actually matters). Ships `Content-Security-Policy: default-src 'self';
+  script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self';
+  connect-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'` (confirmed via grep
+  there's no Ziggy, no `v-html`, no external font CDN, and no inline script anywhere — `script-src`
+  stays strict; `style-src` needs `'unsafe-inline'` because of one real `:style=` binding in
+  `Tenant/Dashboard.vue`), plus `X-Content-Type-Options: nosniff` and
+  `Referrer-Policy: strict-origin-when-cross-origin` (`frame-ancestors 'none'` already covers what
+  `X-Frame-Options: DENY` would). Test: `SecurityHeadersTest.php` asserts headers present under
+  `production`, absent under `local`.
+- **MySQL credential-role separation — scoped down to docs only, deliberately not app code**: new
+  `deploy/mysql-credentials.md` + `deploy/mysql-grants.sql`. This can't be functionally built or
+  tested right now (dev is SQLite, which has no concept of DB users/roles at all), and the security
+  doc's own §7 says a single shared runtime DB user is an acceptable MVP default anyway. The docs cover
+  only the two roles that actually apply to this rewrite — `tenant_provisioner` (CREATE/DROP DATABASE
+  + schema DDL, used only by the provisioning job pipeline) and a least-privilege runtime app user
+  (DML+SELECT only) — **not** the security doc's third `tenant_ddl_owner` role, since this rewrite
+  deliberately never uses MySQL triggers/views (confirmed via `grep -rn "CREATE TRIGGER\|CREATE
+  VIEW\|DB::statement" database/ app/` — zero matches, this is a locked-in `goal.md` architecture
+  decision, not an oversight). Actually wiring the `.env`/`config/database.php` split is real future
+  work once there's a MySQL deployment target to verify against — not built this pass.
+- **Incidental side effect, not a deliberate change**: `composer require`ing the 2FA packages
+  triggered Laravel Boost's own post-autoload hook, which auto-regenerated parts of `CLAUDE.md` and
+  `boost.json` and added `.claude/skills/inertia-vue-development/` (a lowercase `pages/` path fix and
+  a new skill-activation guideline). Harmless, unrelated to the app itself — left as-is.
+- **Post-hoc fix #1 (same day, before first test run): `CreateTenantFirstAdmin` crashed on tenants
+  created outside `TenantController::store()`.** The user ran the suite manually as instructed and hit
+  115/132 failures, virtually all `ErrorException: Trying to access array offset on null` at
+  `CreateTenantFirstAdmin.php:50`. Root cause: `pending_admin` is only ever set by
+  `TenantController::store()`, but ~22 pre-existing test files across Sales/Purchase/Reports/etc.
+  provision their test tenant via `Tenant::create(['company_name' => ...])` directly (bypassing the
+  controller) and separately `User::factory()->create()` inside `$tenant->run()`. With
+  `shouldBeQueued(true)` now on and `QUEUE_CONNECTION=sync` in `phpunit.xml`, `CreateTenantFirstAdmin`
+  runs inline as part of that `Tenant::create()` call and blew up on the null payload, taking down the
+  tenant setup for nearly every feature test in the suite — not a provisioning-only bug. Fixed by
+  guarding `handle()`: if `pending_admin` is null, skip the `User::create()` step entirely but still
+  flip the tenant to `Active` (so directly-created tenants — tests, tinker, future admin tooling —
+  aren't left stuck in `Provisioning` forever). Confirmed via `git blame`-equivalent reasoning that the
+  DB default for `status` is `'active'`, so these test tenants were never actually `Provisioning` in
+  the first place — only the crash inside the pipeline was new. `php -l` clean.
+- **Post-hoc fix #2 (same day, second test run): `TenantCouldNotBeIdentifiedById` on ~59 unrelated
+  tenant tests.** After fix #1, the user re-ran the suite and hit a second, much wider regression:
+  nearly every test that provisions a tenant (Sales/Purchase/Reports/Items/Customers/Suppliers/Ledger/
+  Login/RoleMiddleware/Dashboard/BusinessPagesRender, plus the 3 tenant-lifecycle tests in Central)
+  failed with `TenantCouldNotBeIdentifiedById` at `vendor/stancl/tenancy/.../QueueTenancyBootstrapper.php:93`.
+  Root cause: `QueueTenancyBootstrapper` tags any job payload created while tenancy happens to be
+  initialized with the current tenant's id (`getPayload()`), so the job re-initializes that tenant
+  automatically when processed. Flipping `shouldBeQueued(true)` (this pass) changed the pipeline's
+  dispatch from `dispatch_sync()` (bypasses the queue system's payload-creation hooks entirely) to a
+  real `dispatch()` (goes through `Queue::createPayloadUsing()`, exactly what `QueueTenancyBootstrapper`
+  hooks into) — so this tagging machinery was never exercised before this pass. If tenancy is left
+  initialized at the moment a job payload is built (e.g. mid-pipeline, around `CreateTenantFirstAdmin`'s
+  own `$tenant->run()` call, or any of the many pre-existing tests that do `$tenant->run(...)` around
+  something that happens to dispatch a job), the job gets tagged with whatever tenant was active; once
+  that tenant is gone (rolled back by test isolation) by the time the job is *processed*, re-identifying
+  it throws.
+  **First attempt was wrong and had zero effect** — added a `queue.connections.*.central` section
+  inside `config/tenancy.php`, reasoning by analogy with `tenancy.database.central_connection` etc. But
+  `QueueTenancyBootstrapper::getPayload()` reads `$this->config["queue.connections.$connection.central"]`
+  off the **root** config `Repository` (it's typehinted `Illuminate\Config\Repository`, not scoped to
+  the `tenancy` namespace) — that key resolves to `config/queue.php`, not `config/tenancy.php`. Confirmed
+  by reading `vendor/stancl/tenancy/assets/config.php` (the package's own stub): it has no `queue`
+  section at all, so this was never meant to live in `config/tenancy.php`. The user's third test run
+  (56 failed, 76 passed — down from 59 only because fix #3 landed; the `TenantCouldNotBeIdentifiedById`
+  list was byte-for-byte the same as the previous run) is what surfaced that the first attempt did
+  nothing. **Actual fix**: added `'central' => true` directly to the `sync` and `database` connection
+  arrays in `config/queue.php` (Laravel ignores unknown keys in a connection array for everything except
+  this one listener) and removed the dead section from `config/tenancy.php`. This is the documented
+  stancl/tenancy opt-out for connections used by central/administrative pipelines. Safe here because
+  there are currently no genuinely tenant-scoped queued jobs in this app — both
+  `App\Jobs\CreateTenantFirstAdmin` and stancl's own `CreateDatabase`/`MigrateDatabase`/`SeedDatabase`/
+  `DeleteDatabase` already receive their `Tenant` directly via the constructor rather than relying on
+  this bootstrapper's auto re-initialization. **This will need revisiting if a real tenant-scoped
+  background job is ever added on these connections.** Lesson: when a package config key's *name*
+  suggests a natural home in a related config file, verify where the code actually reads it (check the
+  `$config[...]` scoping) rather than assuming — this cost a whole extra test run.
+- **Post-hoc fix #3 (same run): 3 failing tests in `TwoFactorAuthenticationTest`, unrelated to fixes
+  #1/#2.** A genuine test-isolation bug, not app code: the `twoFactorTestEnable()` helper calls
+  `actingAs($admin, 'platform')` to drive enrollment through the real HTTP flow, but `actingAs()` leaves
+  the `platform` guard authenticated for the rest of that test. The 3 failing tests all call the helper
+  then immediately do a plain (non-`actingAs`) `POST /login` expecting a genuine guest request — instead
+  `guest:platform` middleware saw the still-authenticated admin and redirected away before
+  `AuthenticatedSessionController::store()` ever ran, so the 2FA-redirect/challenge assertions failed.
+  (Test 7 already worked around this *between its own two internal logins* with an explicit
+  `Auth::guard('platform')->logout(); session()->flush();` — just not right after the helper.) Fixed by
+  adding that same logout+session-flush to the end of `twoFactorTestEnable()` itself, so every caller
+  starts from a clean guest state. `php -l` clean on all files touched by fixes #2/#3.
+- **Post-hoc fix #4 (fourth test run, after the corrected fix #2 landed): 5 failures**, all real tenant
+  provisioning through the HTTP endpoint (`TenantProvisioningTest`, `TenantSuspensionTest`) —
+  `Stancl\Tenancy\Resolvers\Contracts\CachedTenantResolver::__construct(): Argument #1 ($cache) must be
+  of type Illuminate\Contracts\Cache\Factory, null given`, plus two knock-on `ModelNotFoundException`s
+  in `TenantSuspensionTest` where the provisioning helper's `Tenant::where(...)->firstOrFail()` found
+  nothing because the underlying `store()` call had crashed the same way. Root cause, verified by
+  reading `Stancl\Tenancy\Database\Concerns\InvalidatesResolverCache`/`InvalidatesTenantsResolverCache`
+  (used by stancl's base `Tenant`/`Domain` models, which `App\Models\Tenant` and this app's `domain_model`
+  extend): every `saved`/`deleting` event on a Tenant or Domain unconditionally constructs
+  `DomainTenantResolver`/`PathTenantResolver`/`RequestDataTenantResolver` (each needs `Factory $cache`
+  injected) to invalidate a resolver cache — even though `CachedTenantResolver::$shouldCache` defaults
+  to `false` and this app never touches it, so the invalidation itself is always a no-op; the crash is
+  purely in constructing the resolver. `CacheTenancyBootstrapper` is the only code in this whole
+  codebase that ever touches the `'cache'` container binding (via `Container::extend()` in its
+  bootstrap()/revert(), swapping it to a per-tenant `Stancl\Tenancy\CacheManager` and back). Traced the
+  exact `Container::extend()`/`resolve()` mechanics at length (confirmed bootstrappers ARE registered as
+  real singletons in `TenancyServiceProvider`, confirmed `Factory::class` aliases to `'cache'` via
+  `registerCoreContainerAliases()`, confirmed each bootstrap/revert pair looks self-balanced in
+  isolation) without being able to pin the *exact* line that corrupts the binding to literal `null` —
+  the new piece this pass introduced is that `tenancy()->initialize()/end()` now cycles multiple times
+  per request (once each for `Artisan::call('tenants:migrate'/'tenants:seed', ...)` inside
+  `MigrateDatabase`/`SeedDatabase`, then again for `CreateTenantFirstAdmin`'s own `$tenant->run()`) where
+  before this pass admin creation was a single synchronous call and Domain::create() always ran *before*
+  tenancy was ever initialized at all, never exercising this interaction. Also independently confirmed a
+  real, separate latent hazard while tracing this: `Stancl\Tenancy\Database\Concerns\TenantRun::run()`
+  and `Tenancy::runForMultiple()` have **no try/finally** — if the wrapped callback throws, `tenancy()->
+  end()` is simply never called, leaving the DB/filesystem/cache bindings stuck mid-swap for the rest of
+  the request. Not currently triggered (no evidence anything throws inside `CreateTenantFirstAdmin`'s
+  callback — the seeder unconditionally creates the `admin` role), but worth remembering as a real vendor
+  gap if a future job's callback can fail. **Fix applied**: confirmed via a full grep of `app/` that this
+  app has zero direct `Cache::`/`cache()` usage anywhere, so tenant-scoped cache tagging has no
+  functional value here. Removed `CacheTenancyBootstrapper::class` from the `bootstrappers` array in
+  `config/tenancy.php` (and its now-unused `use` import) — this removes the only code path that ever
+  swaps the `'cache'` binding, eliminating the crash's mechanism outright rather than chasing the exact
+  corruption point. Revisit only if this app ever adds real tenant-scoped `Cache::` usage that needs
+  isolation. `php -l` clean.
+- **Post-hoc fix #5 (fifth test run, after fix #4): same 5 failures, different crash — "Undefined array
+  key 'local'"** at the exact same call sites (`TenantProvisioningTest`/`TenantSuspensionTest` real
+  provisioning). Fix #4 was correct and DID work (confirmed — the `CachedTenantResolver`/Factory$cache
+  crash is completely gone), but it only removed ONE symptom of a more general defect, which then
+  surfaced through the next stateful bootstrapper in line. Root cause (now understood precisely, thanks
+  to the crash moving rather than disappearing): `Stancl\Tenancy\Database\Concerns\TenantRun::run()` and
+  `Tenancy::runForMultiple()` (the latter used internally by stancl's own `tenants:migrate`/
+  `tenants:seed` console commands, which `MigrateDatabase`/`SeedDatabase` jobs invoke via
+  `Artisan::call()`) wrap their callback with **no try/finally**. Before this pass, admin creation was
+  ONE synchronous `$tenant->run()` call and nothing else ever cycled tenancy state. Now the pipeline
+  cycles `tenancy()->initialize()/end()` three separate times per provision (`tenants:migrate`,
+  `tenants:seed`, then `CreateTenantFirstAdmin`'s own `$tenant->run()`) — and if anything throws inside
+  ANY of those wrapped callbacks, `end()` is simply never called, `Tenancy::$initialized` stays stuck
+  `true`, and the *next* initialize()/end() transition anywhere in the request unconditionally reverts
+  **every** configured bootstrapper — including ones whose per-cycle "restore to this" state was never
+  (re)captured this time. `CacheTenancyBootstrapper` hit this first (fix #4). With Cache removed,
+  `FilesystemTenancyBootstrapper` hit the identical class of bug next: its `revert()` reads
+  `$originalPaths['disks'][$disk]`, populated per-disk inside `bootstrap()` — when that capture never
+  ran, `$disk = 'local'` (first in `config('tenancy.filesystem.disks')`) is the first missing key,
+  matching the exact error. **Fix applied**: same grep-verified reasoning as fix #4 — this app also has
+  zero `Storage::`/`storage_path()` usage anywhere (no tenant-scoped file storage exists), so
+  `FilesystemTenancyBootstrapper` has no functional value either. Removed it from `config/tenancy.php`'s
+  `bootstrappers` array (and its `use` import); confirmed the vendor's own `globalUrl` singleton
+  registration in `TenancyServiceProvider::boot()` already guards with `$app->bound(FilesystemTenancyBoot
+  strapper::class)`, so removing it from the list is safe on that front too. Remaining bootstrappers are
+  `DatabaseTenancyBootstrapper` (its `revert()` — `reconnectToCentral()` — doesn't depend on any
+  per-cycle captured state, just repoints to a fixed connection name, so it's immune to this defect
+  class) and `QueueTenancyBootstrapper` (bootstrap()/revert() are literal no-ops). Neither can crash this
+  way, so this should close out the whole defect class rather than just relocating it again — but that
+  couldn't be fully confirmed without a fifth test run. The underlying vendor gap (missing try/finally)
+  is NOT fixed and can't be from application code; documented in `config/tenancy.php`'s comment as a
+  reason to reconsider before ever re-enabling either bootstrapper. `php -l` clean.
+
+- **Post-hoc fix #6 (sixth test run, after fix #5): same "5 failed" count but a completely different
+  failure shape** — `ModelNotFoundException`/"No query results for model [App\Models\Tenant]" in
+  `TenantDeletionTest`, `TenantProvisioningTest`, and both `TenantSuspensionTest` cases (all of which
+  provision a tenant via `central.tenants.store` first), plus "Session is missing expected key [errors]"
+  in the subdomain-uniqueness test. Fix #5 genuinely worked (the Filesystem crash is gone) — this is a
+  different, **pre-existing self-inflicted bug** in this same hardening pass, just unmasked once the
+  bootstrapper crashes stopped hiding it. Root cause: `App\Listeners\AbortIfTenantSuspended` (added earlier in this same pass, for the "block
+  requests into a still-provisioning tenant" feature) was registered
+  as a listener on the generic `Events\TenancyInitialized` event in `TenancyServiceProvider`. That event
+  fires for **every** `tenancy()->initialize()`/`$tenant->run()` call, including the ones the provisioning
+  pipeline makes on itself (`tenants:migrate`, `tenants:seed`, `CreateTenantFirstAdmin`'s own
+  `$tenant->run()`) — not just real inbound HTTP requests through `InitializeTenancyByDomain`. Since a
+  brand-new tenant's `status` is `Provisioning` for the tenant's *entire* provisioning pipeline, the
+  listener's own `abort(403, '...still being set up...')` branch fired on the very first internal
+  initialize (inside `MigrateDatabase`'s `tenants:migrate` call) — killing the pipeline immediately. That
+  `HttpException` bubbles up through the synchronous `dispatch()` (queue = `sync` in tests) and through
+  `$tenant->save()` in `TenantController::store()`, into its `catch (Throwable $e)` block, which
+  `rollBack()`s the wrapping transaction and re-throws — so the tenant row never really exists, the
+  response Laravel renders is a 403 (not a redirect), and every test that provisions-then-looks-up a
+  tenant hits `ModelNotFoundException`. The "subdomain must be unique" test failed for the identical
+  reason: the *first* tenant in that test never actually persisted either, so the second POST found
+  nothing to collide with. **Fix applied**: moved the check out of the `TenancyInitialized` event
+  entirely and turned it into real HTTP route middleware — new `App\Http\Middleware\AbortIfTenantSuspended`
+  (`handle(Request $request, Closure $next)`, reads `tenant()` directly), registered in
+  `routes/tenant.php`'s middleware group right after `InitializeTenancyByDomain::class` (the only tenant
+  entry point in this app — confirmed via grep, no `InitializeTenancyBySubdomain` usage anywhere). Removed
+  the old `App\Listeners\AbortIfTenantSuspended` file and its `TenancyInitialized` registration (with an
+  explanatory comment) in `TenancyServiceProvider`. Because it's now route middleware instead of a global
+  tenancy event listener, it only ever sees genuine inbound requests into a tenant's domain — internal
+  pipeline-driven `$tenant->run()` calls never go through HTTP routing, so they're no longer affected.
+  Also fixed a now-stale comment in `TenantProvisioningTest.php` referencing the old "before any route
+  middleware runs" framing. `php -l` clean on all four touched/added files. **Not yet re-verified by the
+  user** — this was root-caused and fixed via pure static reasoning about the event vs. middleware timing
+  difference, same as every other fix in this pass; no test was executed by the assistant.
+  - **Lesson**: a `TenancyInitialized` (or any tenancy lifecycle event) listener that's meant to gate
+    *end-user requests* must be scoped to the HTTP middleware layer, not the underlying tenancy event —
+    the same event also fires for every internal/programmatic `$tenant->run()` call the app itself makes
+    (migrations, seeding, background provisioning, admin tooling), and a status guard meant for requests
+    will incorrectly fire there too, especially for a tenant whose current status is exactly the
+    in-progress state the guard is designed to catch.
+
 ## How to verify the app is actually working, updated (2026-08-26)
 
-Full suite is now **121/121 tests, 747 assertions**, `npm run build` succeeds. Confirmed via a fresh
-authoritative run after all 6 parallel forks across both passes (Stock Adjustment + 3 Reporting
-forks, then Sales Return + Purchase Return) landed — the same `php artisan test --compact` / `npm
-run build` commands under "How to verify" above, just a higher test count than when that section
-was first written.
+Full suite was **121/121 tests, 747 assertions**, `npm run build` succeeding, as of the commit right
+before this production-hardening pass (`56c6b18`). The user has since run the suite six times against
+the hardening pass: 115/132 failed (post-hoc fix #1) → 59/132 failed (post-hoc fix #3 landed; fix #2's
+first attempt was inert, see above) → 56/132 failed (confirmed fix #2's first attempt did nothing — same
+`TenantCouldNotBeIdentifiedById` list byte-for-byte; fix #2 corrected, moved from `config/tenancy.php` to
+`config/queue.php`) → 5/132 failed, 127 passed (786 assertions) (confirmed the corrected fix #2 worked —
+the whole `TenantCouldNotBeIdentifiedById` avalanche is gone; fix #4 applied for a new
+`CachedTenantResolver`/Factory$cache crash in real tenant provisioning) → **same 5/132 failed, different
+crash** (fix #4 worked but only relocated the underlying defect — see post-hoc fix #5 above — to
+`FilesystemTenancyBootstrapper`, now also fixed) → **same 5/132 failed (127 passed, 786 assertions) again,
+completely different failure shape** — `ModelNotFoundException` on `Tenant` lookups plus one missing
+validation-error assertion, all from the SAME self-inflicted bug (see post-hoc fix #6 above: the
+suspension/provisioning guard was firing on the pipeline's own internal tenancy initializations, not just
+real requests; moved from a `TenancyInitialized` event listener to route middleware). **Not yet
+re-verified against fix #6.** `npm run build` also hasn't been re-run since this pass started.
+Update this section's test count once the user reruns and reports back rather than assuming it here.
 
 ## Open items (also see `goal.md` roadmap)
 
@@ -637,7 +907,13 @@ was first written.
   but there's no correction mechanism if a return itself was entered wrong (would need a new
   document type, e.g. a "return reversal," not an edit).
 - The remaining ~44 legacy report views beyond the 8-report MVP — see the Reporting section above.
-- Synchronous tenant provisioning, no 2FA, no MySQL credential-role separation — all deliberately
-  deferred, see `goal.md`.
 - No UI yet for the closed-year correction override (backend-complete, frontend deliberately
   deferred this pass — see the ledger section above).
+- **Production hardening pass (queued provisioning, 2FA, CSP/headers, MySQL creds doc) is built but
+  not yet verified by the test suite or `npm run build`** — see that section above. Run both before
+  trusting it.
+- MySQL credential-role separation is docs-only (`deploy/mysql-credentials.md`/`mysql-grants.sql`) —
+  actually wiring dual DB connections is real future work, needs a real MySQL target to verify against.
+- Queued/async operational pieces still missing: 2FA is opt-in (no forced-enrollment UX), and there's
+  no queue-worker supervision/monitoring guidance yet for running `php artisan queue:work` in
+  production now that tenant provisioning genuinely depends on a worker being alive.

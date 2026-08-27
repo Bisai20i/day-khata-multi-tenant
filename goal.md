@@ -72,7 +72,14 @@ this file for direction.
   Sales/Purchase VAT Book, Stock Summary) — chosen out of legacy's ~52-report module as the
   compliance-critical + highest-value subset, not all of them. All built via parallel subagents
   (forks). Full suite green (121/121), `npm run build` succeeds. See `mem.md` for the full
-  breakdown. **Not yet committed to git.**
+  breakdown. Committed 2026-08-26 as one catch-up commit alongside the enterprise UI redesign,
+  ledger engine, and reporting MVP (all of which were also sitting uncommitted at the time) — see
+  `mem.md`.
+- **Production hardening pass** (2026-08-26): queued (not synchronous) tenant provisioning, 2FA for
+  platform admins (TOTP + recovery codes), CSP/security headers, and a MySQL credential-role
+  separation doc (deploy-time only, not app code — see roadmap item 7 below for why). Built via 3
+  parallel forks. **Not yet committed, not yet verified by the test suite or `npm run build`** — see
+  `mem.md`.
 - Not yet manually smoke-tested in an actual browser (any of the above, including this pass).
 
 **Next, roughly in order** (not a committed sequence — re-evaluate against sibling
@@ -80,8 +87,7 @@ this file for direction.
 1. ~~Git init + first commit.~~ Done 2026-08-25 — 5 commits on `master`, see `mem.md`.
 2. ~~Frontend pass for the core business schema.~~ Done 2026-08-25, see above.
 3. ~~Ledger/financial-transaction engine.~~ Done 2026-08-25 (from-scratch portable schema, not a
-   port of `mainaccountledger`/`mainaccountledgerdetails`), see above and `mem.md`. Not yet
-   committed to git.
+   port of `mainaccountledger`/`mainaccountledgerdetails`), see above and `mem.md`.
 4. ~~Sales/purchase/inventory modules.~~ Done 2026-08-26 — Sales, Purchase, Stock Adjustment, and
    (in a follow-up same-day pass) partial-line Sales/Purchase Returns are all built and verified,
    see above and `mem.md`.
@@ -92,10 +98,13 @@ this file for direction.
    remaining ~44 legacy report views (see `mem.md` for the categorized list a research pass
    produced) are a real next slice, not forgotten — re-evaluate priority against actual usage before
    picking the next batch rather than building all of them speculatively.
-7. Production hardening pass: MySQL credential-role separation, queued (not synchronous) tenant
-   provisioning, 2FA for platform admins, CSP/security headers — see
-   `../day_khata/migration_plan/02-security-hardening.md`. Deliberately deferred until there's a
-   real deployment target, not because it's unimportant.
+7. ~~Production hardening pass~~ Built 2026-08-26 (not yet committed, not yet test/build-verified —
+   see `mem.md`): queued tenant provisioning, 2FA for platform admins, CSP/security headers are real
+   code. MySQL credential-role separation is scoped down to a deploy doc + GRANT script only (can't
+   be functionally tested against the SQLite dev DB, and the security doc's own MVP guidance already
+   accepts a single shared runtime user) — see
+   `../day_khata/migration_plan/02-security-hardening.md` §7 and `mem.md` for the reasoning. Wiring
+   the actual dual-connection split remains real future work once there's a MySQL deployment target.
 
 ## Explicit non-goals for now (deferred, not forgotten)
 
