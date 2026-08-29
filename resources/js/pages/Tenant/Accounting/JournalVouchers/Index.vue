@@ -21,6 +21,10 @@ const props = defineProps({
         type: Array,
         default: () => [],
     },
+    fiscalYears: {
+        type: Array,
+        default: () => [],
+    },
 });
 
 const page = usePage();
@@ -143,7 +147,12 @@ const columns = [
 <template>
     <AppLayout title="Journal Vouchers" :nav-items="navItems">
         <template v-if="showCreateForm">
-            <Create :accounts="accounts" @cancel="showCreateForm = false" @posted="showCreateForm = false" />
+            <Create
+                :accounts="accounts"
+                :fiscal-years="fiscalYears"
+                @cancel="showCreateForm = false"
+                @posted="showCreateForm = false"
+            />
         </template>
 
         <template v-else>

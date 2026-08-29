@@ -78,8 +78,16 @@ this file for direction.
 - **Production hardening pass** (2026-08-26): queued (not synchronous) tenant provisioning, 2FA for
   platform admins (TOTP + recovery codes), CSP/security headers, and a MySQL credential-role
   separation doc (deploy-time only, not app code — see roadmap item 7 below for why). Built via 3
-  parallel forks. **Not yet committed, not yet verified by the test suite or `npm run build`** — see
-  `mem.md`.
+  parallel forks. Committed (`617b655`). A real regression this pass introduced (a request into a
+  still-provisioning tenant crashed instead of getting a clean 403, with a knock-on transaction
+  corruption cascade) was found and fixed 2026-08-27 — see `mem.md`. Full suite now 132/132,
+  `npm run build` succeeds.
+- **Closed-year correction UI** (2026-08-27): the backend for posting an admin-only, reasoned
+  correcting journal voucher into a closed fiscal year already existed and needed no changes — this
+  was the frontend (fiscal-year picker + warning + reason field in `JournalVouchers/Create.vue`) plus
+  new HTTP-level test coverage that had been missing. Writing that test coverage caught and fixed a
+  real bug in `JournalVoucher::rollForward()` (a closed year could get a spurious duplicate
+  roll-forward voucher posted into itself). Full suite now 134/134. See `mem.md`.
 - Not yet manually smoke-tested in an actual browser (any of the above, including this pass).
 
 **Next, roughly in order** (not a committed sequence — re-evaluate against sibling
@@ -98,11 +106,11 @@ this file for direction.
    remaining ~44 legacy report views (see `mem.md` for the categorized list a research pass
    produced) are a real next slice, not forgotten — re-evaluate priority against actual usage before
    picking the next batch rather than building all of them speculatively.
-7. ~~Production hardening pass~~ Built 2026-08-26 (not yet committed, not yet test/build-verified —
-   see `mem.md`): queued tenant provisioning, 2FA for platform admins, CSP/security headers are real
-   code. MySQL credential-role separation is scoped down to a deploy doc + GRANT script only (can't
-   be functionally tested against the SQLite dev DB, and the security doc's own MVP guidance already
-   accepts a single shared runtime user) — see
+7. ~~Production hardening pass~~ Built 2026-08-26, committed and verified 2026-08-27 (132/132 tests
+   — see `mem.md`): queued tenant provisioning, 2FA for platform admins, CSP/security headers are
+   real code. MySQL credential-role separation is scoped down to a deploy doc + GRANT script only
+   (can't be functionally tested against the SQLite dev DB, and the security doc's own MVP guidance
+   already accepts a single shared runtime user) — see
    `../day_khata/migration_plan/02-security-hardening.md` §7 and `mem.md` for the reasoning. Wiring
    the actual dual-connection split remains real future work once there's a MySQL deployment target.
 

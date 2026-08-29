@@ -3,15 +3,90 @@
 Living state doc. Read this before starting work, update it before stopping. See `goal.md` for
 direction/roadmap — this file is "what exists and why," not "what's next."
 
-**Last updated:** 2026-08-26. **Git status: initialized**, 6 commits on `master` (git init, dev-DB
-gitignore fix, mem/goal update, core business schema, business schema frontend pages, and one
-catch-up commit — `56c6b18` — covering everything since: enterprise-UI redesign,
-ledger/journal-voucher posting engine, Sales/Purchase, Stock Adjustment, the MVP Reporting slice,
-and partial-line Sales/Purchase Returns). **On top of that, the production hardening pass described
-below (queued provisioning, 2FA, CSP/headers, MySQL creds doc) is sitting uncommitted as of this
-update, not yet verified by the test suite or `npm run build`** — the user is running those
-themselves this session rather than having this session run them. No remote configured yet — this
-protects against a bad `git clean`/`reset`/`checkout`, not disk loss.
+**Last updated:** 2026-08-27. **Git status: initialized**, 7 commits on `main` (renamed from
+`master` at some point between sessions — not investigated, not load-bearing). The production
+hardening pass (queued provisioning, 2FA, CSP/headers, MySQL creds doc) IS committed — `617b655`
+("initialization"), landed after the previous session's mem.md update said it was still
+uncommitted. No remote configured yet — this protects against a bad `git clean`/`reset`/`checkout`,
+not disk loss.
+
+**2026-08-27 session, second entry: closed-year correction UI (frontend) + a real roll-forward bug
+found by testing it end-to-end.** Backend for posting a correcting journal voucher into a closed
+fiscal year already existed and needed zero changes (`JournalVoucher::post()` +
+`JournalVoucherController::store()`, see the ledger engine section below) — this was purely a
+frontend + test-coverage gap. Added: `Index.vue` now passes the already-fetched `fiscalYears` prop
+through to `Create.vue`; `Create.vue` shows an **admin-only** fiscal-year `Select` (closed years
+labeled), and when a closed year is picked, a warning callout (reusing the existing
+`--color-warning-bg`/`--color-warning-text` tokens, previously unused outside `Badge.vue`) plus a
+required `reason` `<textarea>` (no dedicated `Textarea.vue` component exists in this codebase, so a
+raw element styled to match `Input.vue`/`Select.vue` was used) — non-admins never see the picker at
+all, so they can't get partway through a voucher before learning at submit time that it's rejected.
+Added 2 new HTTP-level tests in `LedgerControllerTest.php` (the closed-year path was previously only
+tested at the model layer, never through the actual `POST /journal-vouchers` route).
+
+Writing the "admin posts a correction, it rolls forward" HTTP test caught a **real, previously
+undetected bug** in `JournalVoucher::rollForward()` (`app/Models/JournalVoucher.php`): it selected
+"subsequent fiscal years" via `FiscalYear::where('start_date', '>', $correctedYear->start_date->toDateString())`.
+Under SQLite, a `date`-cast column is actually stored as a full `"Y-m-d H:i:s"` string (a known
+Laravel+SQLite quirk — the grammar's date format applies to `date` columns too, not just
+`datetime`), which is lexicographically *greater than* the truncated `"Y-m-d"` string being compared
+against. So the corrected (closed) year matched its own `start_date > ...` filter and got a
+**second, spurious roll-forward voucher posted into itself**, on top of the correction voucher
+already there — silently corrupting the closed year's own figures with a self-referential
+"correction of a correction." The existing model-level test for this
+(`JournalVoucherPostingTest.php`) never caught it because it only asserted the *open* year got the
+right roll-forward voucher, never that the *closed* year stayed at exactly one voucher. **Fix**:
+excluded the corrected year explicitly by id (`FiscalYear::whereKeyNot($correctedYear->id)`) rather
+than relying on the date comparison alone — safe because the model already forbids two fiscal years
+sharing a `start_date` (see `FiscalYear::saving()`'s overlap check), so once self is excluded by id,
+the date-string comparison is reliable for every other row. Strengthened the model-level test with
+an explicit "closed year has exactly 1 voucher" assertion so this can't regress silently again.
+**Verified**: full suite **134/134 passing, 819 assertions** (up from 132/132 — 2 new tests), `npm
+run build` succeeds, `vendor/bin/pint --dirty` clean. **Not yet committed, not yet browser-verified**
+— ask before committing.
+- **Lesson**: a Laravel `date` cast does not guarantee a bare `Y-m-d` string in the database on
+  SQLite — comparing a cast column against a manually truncated string (`->toDateString()`) can
+  silently misbehave in self-referential queries. Prefer excluding the current row by primary key
+  explicitly rather than trusting a strict date inequality to do it, especially in code executed
+  during money-affecting operations. Also: a test that only checks "the right thing showed up"
+  without also checking "nothing extra showed up" will miss exactly this class of bug — this is the
+  second time in this project a stricter assertion (not a different code path) is what surfaced a
+  real defect.
+
+**2026-08-27 session: found and fixed a real regression, not documented anywhere before this.** A
+fresh session started by re-verifying mem.md's claims against actual repo state (a good habit —
+don't trust a stale "not yet verified" note at face value) and found the full suite at **21/132
+passing, 111 errors** — dramatically worse than the "5/132 failed" mem.md had last recorded after
+post-hoc fix #6. Root cause (new, distinct from fixes #1–#6 above, though the same underlying vendor
+gap): `DatabaseTenancyBootstrapper::bootstrap()` (vendor code) only checks "does the tenant database
+exist" and throws a clean `TenantDatabaseDoesNotExistException` when `app()->environment('local')`
+— under `testing` (and `production`) it skips that check and goes straight to
+`connectToTenant()`, so a real inbound request into a still-`Provisioning` tenant (whose database
+genuinely doesn't exist yet) made `tenancy()->initialize()` throw a raw, uncaught SQLite "database
+file does not exist" exception, in `InitializeTenancyByDomain::handle()`, before
+`AbortIfTenantSuspended` (route middleware, added by the hardening pass) ever got a chance to 403
+it. That crash left `Tenancy::$initialized` stuck `true` (same no-try/finally vendor gap documented
+in post-hoc fix #5/#6), which corrupted the next test's DB transaction state (SQLite's connection
+purge/reconnect under an open RefreshDatabase transaction), cascading "cannot start a transaction
+within a transaction" errors into nearly every other tenant-provisioning test in the run.
+**Fix**: `AbortIfTenantSuspended` now resolves the tenant itself via
+`Stancl\Tenancy\Resolvers\DomainTenantResolver` (a plain central-DB query, catching
+`TenantCouldNotBeIdentifiedException` and passing through to let `InitializeTenancyByDomain` handle
+an unrecognized domain normally) and checks status **before** tenancy is ever initialized, so a
+Provisioning/Suspended tenant is rejected without ever attempting to connect to its (possibly
+nonexistent) database. Moved to run before `InitializeTenancyByDomain` in both
+`TenancyServiceProvider::makeTenancyMiddlewareHighestPriority()`'s priority list and `routes/tenant.php`'s
+declared order (the priority list is what actually controls execution order — the route's own array
+order is cosmetic once middleware is in that list, but kept in sync for readability). This still
+only ever fires for genuine inbound HTTP requests (not the provisioning pipeline's own internal
+`$tenant->run()` calls), same reasoning as post-hoc fix #6 — see that middleware's own docblock.
+**Verified**: full suite now **132/132 passing, 811 assertions** (up from the pre-hardening-pass
+121/121 — the hardening pass added 11 tests), `npm run build` succeeds, `vendor/bin/pint --dirty`
+clean. This is a genuinely new fix, not a re-verification of fix #6 — fix #6 was correct and
+necessary but insufficient; it fixed the *internal pipeline* self-abort bug, not this separate
+*external request during the missing-DB window* bug. Touched files:
+`app/Http/Middleware/AbortIfTenantSuspended.php`, `app/Providers/TenancyServiceProvider.php`,
+`routes/tenant.php`. **Not yet committed as of this update** — ask before committing/pushing.
 
 ---
 
@@ -872,24 +947,18 @@ sanity checks (route registration, a real `tinker` round-trip through the TOTP/Q
     will incorrectly fire there too, especially for a tenant whose current status is exactly the
     in-progress state the guard is designed to catch.
 
-## How to verify the app is actually working, updated (2026-08-26)
+## How to verify the app is actually working, updated (2026-08-27)
 
-Full suite was **121/121 tests, 747 assertions**, `npm run build` succeeding, as of the commit right
-before this production-hardening pass (`56c6b18`). The user has since run the suite six times against
-the hardening pass: 115/132 failed (post-hoc fix #1) → 59/132 failed (post-hoc fix #3 landed; fix #2's
-first attempt was inert, see above) → 56/132 failed (confirmed fix #2's first attempt did nothing — same
-`TenantCouldNotBeIdentifiedById` list byte-for-byte; fix #2 corrected, moved from `config/tenancy.php` to
-`config/queue.php`) → 5/132 failed, 127 passed (786 assertions) (confirmed the corrected fix #2 worked —
-the whole `TenantCouldNotBeIdentifiedById` avalanche is gone; fix #4 applied for a new
-`CachedTenantResolver`/Factory$cache crash in real tenant provisioning) → **same 5/132 failed, different
-crash** (fix #4 worked but only relocated the underlying defect — see post-hoc fix #5 above — to
-`FilesystemTenancyBootstrapper`, now also fixed) → **same 5/132 failed (127 passed, 786 assertions) again,
-completely different failure shape** — `ModelNotFoundException` on `Tenant` lookups plus one missing
-validation-error assertion, all from the SAME self-inflicted bug (see post-hoc fix #6 above: the
-suspension/provisioning guard was firing on the pipeline's own internal tenancy initializations, not just
-real requests; moved from a `TenancyInitialized` event listener to route middleware). **Not yet
-re-verified against fix #6.** `npm run build` also hasn't been re-run since this pass started.
-Update this section's test count once the user reruns and reports back rather than assuming it here.
+Full suite: **132/132 tests, 811 assertions**, `npm run build` succeeding — verified directly by an
+assistant session on 2026-08-27 (not just relayed from the user), after finding and fixing the
+regression described in the top-of-file 2026-08-27 entry. This closes out the whole post-hoc
+fix #1–#6 saga above: every failure mode hit during the hardening pass (queue tenant tagging,
+the two vendor-bootstrapper try/finally crashes, the 2FA test-isolation bug, the
+provisioning-guard-fires-on-internal-calls bug, and this session's
+missing-database-file-crashes-before-the-guard-runs bug) is now fixed and covered by a passing
+suite. If a future session sees a "not yet re-verified" note like the ones above again, don't just
+trust it — rerun the suite first, the way this session did, since it already caught one place where
+the actual state was much worse than what was written down.
 
 ## Open items (also see `goal.md` roadmap)
 
@@ -909,9 +978,10 @@ Update this section's test count once the user reruns and reports back rather th
 - The remaining ~44 legacy report views beyond the 8-report MVP — see the Reporting section above.
 - No UI yet for the closed-year correction override (backend-complete, frontend deliberately
   deferred this pass — see the ledger section above).
-- **Production hardening pass (queued provisioning, 2FA, CSP/headers, MySQL creds doc) is built but
-  not yet verified by the test suite or `npm run build`** — see that section above. Run both before
-  trusting it.
+- ~~Production hardening pass is built but not yet verified~~ — verified 2026-08-27: 132/132 tests,
+  `npm run build` succeeds, after fixing the missing-database-file regression described at the top
+  of this file. The pass itself (queued provisioning, 2FA, CSP/headers) is now committed
+  (`617b655`) but the regression fix is not yet committed as of this update.
 - MySQL credential-role separation is docs-only (`deploy/mysql-credentials.md`/`mysql-grants.sql`) —
   actually wiring dual DB connections is real future work, needs a real MySQL target to verify against.
 - Queued/async operational pieces still missing: 2FA is opt-in (no forced-enrollment UX), and there's

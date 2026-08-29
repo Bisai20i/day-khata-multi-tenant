@@ -1,8 +1,10 @@
 <?php
 
 use App\Enums\FiscalYearStatus;
+use App\Enums\VoucherType;
 use App\Models\Account;
 use App\Models\FiscalYear;
+use App\Models\JournalVoucher;
 use App\Models\Role;
 use App\Models\Tenant;
 use App\Models\User;
@@ -141,7 +143,7 @@ test('an authenticated user can post a balanced journal voucher through the stor
     ])->assertRedirect("http://{$domain}/journal-vouchers");
 
     $tenant->run(function () {
-        expect(\App\Models\JournalVoucher::query()->count())->toBe(1);
+        expect(JournalVoucher::query()->count())->toBe(1);
     });
 
     $tenant->delete();
@@ -172,7 +174,87 @@ test('posting an unbalanced journal voucher through the store route fails valida
     ])->assertSessionHasErrors('lines');
 
     $tenant->run(function () {
-        expect(\App\Models\JournalVoucher::query()->count())->toBe(0);
+        expect(JournalVoucher::query()->count())->toBe(0);
+    });
+
+    $tenant->delete();
+});
+
+test('posting a correction into a closed fiscal year through the store route is rejected for a non-admin', function () {
+    $domain = 'jv-store-closed-non-admin.tenant-test';
+    $tenant = provisionLedgerControllerTestTenant($domain);
+
+    $closedId = null;
+    $cashId = null;
+    $salesId = null;
+    $tenant->run(function () use (&$closedId, &$cashId, &$salesId) {
+        User::factory()->create([
+            'email' => 'owner@example.com',
+            'role_id' => Role::where('slug', 'staff')->value('id'),
+        ]);
+        $closedId = FiscalYear::create(['name' => 'FY1', 'start_date' => '2026-01-01', 'end_date' => '2026-12-31', 'status' => FiscalYearStatus::Closed])->id;
+        FiscalYear::create(['name' => 'FY2', 'start_date' => '2027-01-01', 'end_date' => '2027-12-31', 'status' => FiscalYearStatus::Open]);
+        $cashId = Account::where('code', 'AS1')->value('id');
+        $salesId = Account::where('code', 'INI20')->value('id');
+    });
+
+    loginLedgerControllerTestUser($domain);
+
+    $this->post("http://{$domain}/journal-vouchers", [
+        'fiscal_year_id' => $closedId,
+        'reason' => 'Missed expense',
+        'date' => '2026-06-01',
+        'narration' => 'Correction',
+        'lines' => [
+            ['account_id' => $cashId, 'debit' => 0, 'credit' => 50],
+            ['account_id' => $salesId, 'debit' => 50, 'credit' => 0],
+        ],
+    ])->assertSessionHasErrors('lines');
+
+    $tenant->run(function () {
+        expect(JournalVoucher::query()->count())->toBe(0);
+    });
+
+    $tenant->delete();
+});
+
+test('an admin can post a correction into a closed fiscal year through the store route and it rolls forward', function () {
+    $domain = 'jv-store-closed-admin.tenant-test';
+    $tenant = provisionLedgerControllerTestTenant($domain);
+
+    $closedId = null;
+    $openId = null;
+    $cashId = null;
+    $salesId = null;
+    $tenant->run(function () use (&$closedId, &$openId, &$cashId, &$salesId) {
+        User::factory()->create([
+            'email' => 'owner@example.com',
+            'role_id' => Role::where('slug', 'admin')->value('id'),
+        ]);
+        $closedId = FiscalYear::create(['name' => 'FY1', 'start_date' => '2026-01-01', 'end_date' => '2026-12-31', 'status' => FiscalYearStatus::Closed])->id;
+        $openId = FiscalYear::create(['name' => 'FY2', 'start_date' => '2027-01-01', 'end_date' => '2027-12-31', 'status' => FiscalYearStatus::Open])->id;
+        $cashId = Account::where('code', 'AS1')->value('id');
+        $salesId = Account::where('code', 'INI20')->value('id');
+    });
+
+    loginLedgerControllerTestUser($domain);
+
+    $this->post("http://{$domain}/journal-vouchers", [
+        'fiscal_year_id' => $closedId,
+        'reason' => 'Duplicate sale recorded in error',
+        'date' => '2026-06-15',
+        'narration' => 'Reverse duplicate sale',
+        'lines' => [
+            ['account_id' => $salesId, 'debit' => 100, 'credit' => 0],
+            ['account_id' => $cashId, 'debit' => 0, 'credit' => 100],
+        ],
+    ])->assertRedirect("http://{$domain}/journal-vouchers");
+
+    $tenant->run(function () use (&$closedId, &$openId) {
+        expect(JournalVoucher::where('fiscal_year_id', $closedId)->count())->toBe(1)
+            ->and(JournalVoucher::where('fiscal_year_id', $openId)
+                ->where('voucher_type', VoucherType::RollForwardAdjustment)
+                ->exists())->toBeTrue();
     });
 
     $tenant->delete();

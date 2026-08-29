@@ -202,7 +202,14 @@ class JournalVoucher extends Model
             ];
         })->all();
 
-        $subsequentYears = FiscalYear::where('start_date', '>', $correctedYear->start_date->toDateString())
+        // Excludes the corrected year by id, not just by date comparison:
+        // SQLite stores a `date`-cast column as a full "Y-m-d H:i:s" string,
+        // which is lexicographically greater than the truncated `Y-m-d`
+        // string used below, so a plain `start_date > ...` comparison
+        // matches the corrected year against itself and double-posts a
+        // roll-forward voucher into the very year being corrected.
+        $subsequentYears = FiscalYear::whereKeyNot($correctedYear->id)
+            ->where('start_date', '>', $correctedYear->start_date->toDateString())
             ->orderBy('start_date')
             ->get();
 

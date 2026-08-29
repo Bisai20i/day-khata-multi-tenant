@@ -1,20 +1,28 @@
 <script setup>
 import { computed } from 'vue';
-import { useForm } from '@inertiajs/vue3';
+import { useForm, usePage } from '@inertiajs/vue3';
 import { Plus, X } from '@lucide/vue';
 import Card from '@/components/ui/Card.vue';
 import Button from '@/components/ui/Button.vue';
 import Input from '@/components/ui/Input.vue';
 import Combobox from '@/components/ui/Combobox.vue';
+import Select from '@/components/ui/Select.vue';
 
 const props = defineProps({
     accounts: {
         type: Array,
         default: () => [],
     },
+    fiscalYears: {
+        type: Array,
+        default: () => [],
+    },
 });
 
 const emit = defineEmits(['cancel', 'posted']);
+
+const page = usePage();
+const isAdmin = computed(() => page.props.auth?.user?.role?.slug === 'admin');
 
 const accountOptions = computed(() =>
     props.accounts.map((account) => ({
@@ -23,15 +31,30 @@ const accountOptions = computed(() =>
     })),
 );
 
+// Only admins see this picker at all (see isAdmin above) — for everyone
+// else the voucher always posts into whichever fiscal year is currently
+// open, which the backend defaults to when fiscal_year_id is omitted.
+const fiscalYearOptions = computed(() =>
+    props.fiscalYears.map((year) => ({
+        value: year.id,
+        label: year.status === 'closed' ? `${year.name} (Closed)` : year.name,
+    })),
+);
+
 function emptyLine() {
     return { account_id: null, debit: '', credit: '', narration: '' };
 }
 
 const form = useForm({
+    fiscal_year_id: null,
+    reason: '',
     date: '',
     narration: '',
     lines: [emptyLine(), emptyLine()],
 });
+
+const selectedFiscalYear = computed(() => props.fiscalYears.find((year) => year.id === form.fiscal_year_id));
+const isClosedYearSelected = computed(() => selectedFiscalYear.value?.status === 'closed');
 
 function addLine() {
     form.lines.push(emptyLine());
@@ -56,10 +79,13 @@ function setCredit(index, value) {
 const totalDebit = computed(() => form.lines.reduce((sum, line) => sum + (Number(line.debit) || 0), 0));
 const totalCredit = computed(() => form.lines.reduce((sum, line) => sum + (Number(line.credit) || 0), 0));
 const isBalanced = computed(() => totalDebit.value > 0 && Math.abs(totalDebit.value - totalCredit.value) < 0.005);
+const canSubmit = computed(() => isBalanced.value && (!isClosedYearSelected.value || form.reason.trim().length > 0));
 
 function submit() {
     form.transform((data) => ({
         ...data,
+        fiscal_year_id: data.fiscal_year_id || undefined,
+        reason: isClosedYearSelected.value ? data.reason : undefined,
         lines: data.lines.map((line) => ({
             account_id: line.account_id,
             debit: Number(line.debit) || 0,
@@ -85,6 +111,35 @@ function submit() {
         </p>
 
         <form class="flex flex-col gap-4" @submit.prevent="submit">
+            <div v-if="isAdmin">
+                <label for="jv-fiscal-year" class="mb-1 block text-sm font-semibold text-text-base">Fiscal year</label>
+                <Select
+                    id="jv-fiscal-year"
+                    v-model="form.fiscal_year_id"
+                    :options="fiscalYearOptions"
+                    placeholder="Currently open fiscal year"
+                />
+                <p v-if="form.errors.fiscal_year_id" class="mt-1 text-sm text-danger">{{ form.errors.fiscal_year_id }}</p>
+            </div>
+
+            <div v-if="isClosedYearSelected" class="flex flex-col gap-3 border-[1.5px] border-warning-text bg-warning-bg px-3 py-3">
+                <p class="text-sm text-warning-text">
+                    {{ selectedFiscalYear.name }} is closed. Posting here is a correction and will roll forward
+                    through every fiscal year after it, up to the currently open one.
+                </p>
+                <div>
+                    <label for="jv-reason" class="mb-1 block text-sm font-semibold text-text-base">Reason</label>
+                    <textarea
+                        id="jv-reason"
+                        v-model="form.reason"
+                        rows="2"
+                        required
+                        class="w-full border-[1.5px] border-border bg-bg-subtle px-3 py-2 text-[13px] text-text-base outline-none transition-colors duration-150 focus:border-primary focus:bg-white focus:[box-shadow:0_0_0_3px_var(--color-primary-focus-ring)]"
+                    ></textarea>
+                    <p v-if="form.errors.reason" class="mt-1 text-sm text-danger">{{ form.errors.reason }}</p>
+                </div>
+            </div>
+
             <div class="grid grid-cols-2 gap-4">
                 <div>
                     <label for="jv-date" class="mb-1 block text-sm font-semibold text-text-base">Date</label>
@@ -164,7 +219,7 @@ function submit() {
 
             <div class="flex items-center justify-end gap-2">
                 <Button variant="secondary" tone="purple" type="button" @click="emit('cancel')">Cancel</Button>
-                <Button variant="primary" tone="purple" type="submit" :disabled="form.processing || !isBalanced">
+                <Button variant="primary" tone="purple" type="submit" :disabled="form.processing || !canSubmit">
                     Post voucher
                 </Button>
             </div>

@@ -238,6 +238,11 @@ test('an admin can post a reasoned correction into a closed fiscal year and it r
         expect($correction->fiscal_year_id)->toBe($closed->id)
             ->and($correction->reason)->toBe('Duplicate sale recorded in error');
 
+        // The corrected (closed) year itself must stay untouched beyond the
+        // correction voucher — no roll-forward should ever land back in the
+        // year being corrected.
+        expect(JournalVoucher::where('fiscal_year_id', $closed->id)->count())->toBe(1);
+
         $rollForward = JournalVoucher::where('fiscal_year_id', $open->id)
             ->where('voucher_type', VoucherType::RollForwardAdjustment)
             ->firstOrFail();
