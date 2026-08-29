@@ -88,6 +88,8 @@ export function navGroups(isAdmin) {
                 { label: 'Sales by Category', href: '/reports/sales-by-category', icon: FileBarChart },
                 { label: 'Purchase by Category', href: '/reports/purchase-by-category', icon: FileBarChart },
                 { label: 'Stock by Category', href: '/reports/stock-by-category', icon: FileBarChart },
+                { label: 'VAT Summary', href: '/reports/vat-summary', icon: FileBarChart },
+                { label: 'Stock Movement Register', href: '/reports/stock-movement-register', icon: FileBarChart },
             ],
         },
     ];

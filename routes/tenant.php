@@ -69,5 +69,7 @@ Route::middleware([
         require base_path('routes/tenant-reports-item-wise-sales.php');
         require base_path('routes/tenant-reports-item-wise-purchase.php');
         require base_path('routes/tenant-reports-category-wise.php');
+        require base_path('routes/tenant-reports-vat-summary.php');
+        require base_path('routes/tenant-reports-stock-movement-register.php');
     });
 });

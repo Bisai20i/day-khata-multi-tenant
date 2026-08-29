@@ -102,6 +102,16 @@ this file for direction.
   171/171, `npm run build` succeeds. See `mem.md` for the full breakdown, including a real
   5-fork-vs-4-fork gotcha (pre-stubbed `require` lines in `routes/tenant.php` created a brief
   route-boot race across forks' test runs until every fork's route file existed).
+- **VAT Summary + Stock Movement Register** (2026-08-29, third session): the last 2 legacy reports
+  worth building — everything else in the remaining ~30-method legacy list turned out to be either a
+  duplicate of a report already shipped, already covered by the generic Account Ledger, or tied to an
+  unmodeled business concept (sales agents, capital/service purchase splits, item company/brand). 20
+  reports total now. Built via 2 parallel forks; this time the coordinator pre-created stub route
+  files (not just `require` lines) to fully avoid the route-boot race from the prior batch, which
+  worked. Caught and fixed one real bug during verification that neither fork's own Pest tests could
+  catch (they were told not to run `npm run build`): a `<script setup>` `defineProps()` default
+  referencing an outer-scope arrow function, which Vue's compiler forbids. Full suite now 184/184,
+  `npm run build` succeeds after the fix. See `mem.md` for the full breakdown.
 - Not yet manually smoke-tested in an actual browser (any of the above, including this pass) — this
   is now the single biggest gap between "tests green" and "actually production ready."
 
@@ -117,12 +127,14 @@ this file for direction.
 5. ~~Fiscal year handling design decision.~~ Resolved 2026-08-25 as part of item 3: Eloquent-portable
    (app-level invariant + model events + one posting method), not the legacy MySQL trigger/view
    mechanism. See `mem.md`.
-6. **Reporting**, continued — an MVP slice of 8 reports shipped 2026-08-26, Day Book/Cash Book/Bank
-   Book/Aged Receivables/Aged Payables shipped 2026-08-29, then TDS/Stock Valuation/Item-wise
-   Sales/Item-wise Purchase/Category-wise rollups shipped later the same day (18 reports total, see
-   above). The remaining ~30ish legacy report views (see `mem.md` for the categorized list) are a real
-   next slice, not forgotten — re-evaluate priority against actual usage before picking the next batch
-   rather than building all of them speculatively.
+6. **Reporting** — an MVP slice of 8 reports shipped 2026-08-26, Day Book/Cash Book/Bank Book/Aged
+   Receivables/Aged Payables shipped 2026-08-29, then TDS/Stock Valuation/Item-wise Sales/Item-wise
+   Purchase/Category-wise rollups and finally VAT Summary/Stock Movement Register shipped later the
+   same day (20 reports total, see above). Per a 2026-08-29 dedup pass over the rest of legacy's
+   report list, this is now considered **essentially done** — the remaining ~28ish legacy report
+   methods are duplicates, already-covered-by-generic-ledger, or gated on unmodeled business concepts
+   (sales agents, capital/service purchase splits, item company/brand). Don't pick up more reports
+   speculatively; revisit only if a specific real need surfaces.
 7. ~~Production hardening pass~~ Built 2026-08-26, committed and verified 2026-08-27 (132/132 tests
    — see `mem.md`): queued tenant provisioning, 2FA for platform admins, CSP/security headers are
    real code. MySQL credential-role separation is scoped down to a deploy doc + GRANT script only

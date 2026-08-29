@@ -3,8 +3,53 @@
 Living state doc. Read this before starting work, update it before stopping. See `goal.md` for
 direction/roadmap — this file is "what exists and why," not "what's next."
 
-**Last updated:** 2026-08-29. **Git status: initialized**, 12 commits on `main`. No remote configured
+**Last updated:** 2026-08-29. **Git status: initialized**, 13 commits on `main`. No remote configured
 yet — this protects against a bad `git clean`/`reset`/`checkout`, not disk loss.
+
+**2026-08-29, third session: VAT Summary + Stock Movement Register, via 2 parallel forks.** After the
+5-report batch below, the user asked for more legacy reports again — rather than build the whole
+remaining ~30-method list speculatively, this session first read every remaining legacy
+`reportsController.php` method and dedup'd them: most are either filter-variant duplicates of reports
+already built, already covered by the existing generic Account Ledger page, or tied to business
+concepts this app deliberately doesn't model (sales agents, capital/service purchase splits, item
+"company"/brand groupings) and would need a real feature decision first. Only 2 were genuinely new;
+the user picked both. Report count now **20**. This time the coordinator pre-created valid *stub*
+route files (not just the `require` lines in `routes/tenant.php`) up front, specifically to avoid the
+prior batch's route-boot race where a faster fork's test run could fail because a slower sibling's
+route file didn't exist yet — worked as intended, no race this time. Full suite after merge:
+**184/184 tests, 1709 assertions** (up from 171/1513).
+
+- **VAT Summary** (`VatSummaryReportController::index`, `routes/tenant-reports-vat-summary.php`,
+  `Tenant/Reports/VatSummary.vue`): the net-VAT-payable figure a real VAT filing actually needs, which
+  neither the existing Sales VAT Book nor Purchase VAT Book computes (they list gross VAT only, no
+  return-netting). Output VAT = posted `Sale.vat_amount` in range minus non-cancelled
+  `SalesReturn.vat_amount` (a stored column on the return itself, not recomputed) **whose own date**
+  falls in range — deliberately netted by the return's period, not the original sale's period, since
+  that's how a real VAT return filing works (a return processed in period B reduces period B's
+  liability). Input VAT mirrors this via Purchase/PurchaseReturn. `netVatPayable = outputVat.net -
+  inputVat.net`; positive is owed, negative is refundable/carry-forward, and the UI labels/colors it
+  accordingly rather than showing a bare signed number.
+- **Stock Movement Register** (`StockMovementRegisterController::index`,
+  `routes/tenant-reports-stock-movement-register.php`, `Tenant/Reports/StockMovementRegister.vue`):
+  the inventory-side sibling of Day Book — one row per non-cancelled `ItemStockMovement` in a date
+  range (optionally filtered to one item), chronological, with a signed quantity
+  (`quantity * movement_type->direction()`, `quantity` is stored as a positive magnitude) and a
+  human-readable reference description resolved from the polymorphic `reference` relation
+  (`SaleLine`→"Sale #N · Customer", `PurchaseReturnLine`→"Purchase Return #N (Purchase #M)", etc.) —
+  verified against what `Sale::post()`/`Purchase::post()`/`SalesReturn::post()`/
+  `PurchaseReturn::post()`/`StockAdjustment::post()` actually pass to `recordStockMovement()`, not
+  guessed.
+- **A real bug caught in verification, not in either fork's own tests**: `VatSummary.vue`'s
+  `defineProps()` used `default: zeroVatBlock` referencing a locally-declared arrow function — Vue's
+  `<script setup>` compiler hoists `defineProps()`'s argument out of setup scope, so it can't
+  reference local variables (`[@vue/compiler-sfc] defineProps() ... cannot reference locally declared
+  variables`). This only surfaces at `npm run build` time, which the fork was deliberately told not to
+  run (to avoid concurrent-build races) — a real gap in the "Pest tests pass" signal for Vue-only
+  bugs. Fixed by inlining the default as `() => ({ gross: 0, returns: 0, net: 0 })` directly in both
+  `outputVat`/`inputVat` prop definitions. **Lesson for future forks that touch `.vue` files under a
+  no-build constraint: either allow one `npm run build` right after each Vue-touching fork lands (cheap,
+  ~10-20s, no real race risk since builds don't write per-fork state), or explicitly warn forks never to
+  reference outer-scope identifiers inside `defineProps()`'s defaults.**
 
 **2026-08-29, second session: 5 more legacy reports (TDS, Stock Valuation, Item-wise Sales/Purchase,
 Category-wise rollups), via 5 parallel forks.** Report count now **18**. User picked all three
@@ -1108,14 +1153,18 @@ the actual state was much worse than what was written down.
 `vendor/bin/pint --dirty` clean, re-verified directly (not relayed) after the 5-fork reports batch
 above.
 
+**184/184 tests, 1709 assertions as of 2026-08-29 (third session)** — `npm run build` succeeds (after
+fixing the `VatSummary.vue` `defineProps()` bug described above), `vendor/bin/pint --dirty` clean.
+
 ## Open items (also see `goal.md` roadmap)
 
 - Chart-of-accounts/customers/suppliers/items, the enterprise UI redesign, the ledger/journal
-  voucher posting engine, Sales/Purchase/Stock Adjustment, the Reporting MVP (now **18 reports** — the
-  original 8, Day/Cash/Bank Book and Aged Receivables/Payables, then TDS, Stock Valuation, Item-wise
-  Sales/Purchase, and Sales/Purchase/Stock-by-Category), partial-line Sales/Purchase Returns, and the
-  return-fidelity fixes (cancel-a-return, discount/TDS reversal, cash/bank refund) are all backend AND
-  frontend complete, verified via the automated suite (171/171) and `npm run build`. **None of this
+  voucher posting engine, Sales/Purchase/Stock Adjustment, the Reporting MVP (now **20 reports** — the
+  original 8, Day/Cash/Bank Book and Aged Receivables/Payables, TDS, Stock Valuation, Item-wise
+  Sales/Purchase, Sales/Purchase/Stock-by-Category, then VAT Summary and Stock Movement Register),
+  partial-line Sales/Purchase Returns, and the return-fidelity fixes (cancel-a-return, discount/TDS
+  reversal, cash/bank refund) are all backend AND frontend complete, verified via the automated suite
+  (184/184) and `npm run build`. **None of this
   has been manually smoke-tested in an actual browser yet** — worth a real click-through before
   considering any of it fully polished. This is now the single biggest gap between
   "automated-tests-green" and "actually production ready" — every other item below is either a
@@ -1124,9 +1173,13 @@ above.
 - Aged Receivables/Payables has a real, documented MVP gap: no payment-receipt feature exists, so a
   credit invoice settled via a generic Journal Voucher keeps aging forever — see the 2026-08-29
   section above.
-- The remaining ~30ish legacy report views beyond the now-18-report set (invoice print list, ledger
+- The remaining ~28ish legacy report views beyond the now-20-report set (invoice print list, ledger
   summary/sub-ledger, sales/purchase-with-notes, agent charges, capital services, damage-stock,
-  outstock/instock raw listings, etc. — see legacy `app/Http/Controllers/reportsController.php` in the
+  outstock/instock raw listings, etc.) are, per a 2026-08-29 dedup pass, mostly either filter-variant
+  duplicates of reports already built, already covered by the existing generic Account Ledger page, or
+  tied to business concepts this app deliberately doesn't model (sales agents, capital/service purchase
+  splits, item "company"/brand groupings) that would need a real feature decision first, not just a
+  report — see legacy `app/Http/Controllers/reportsController.php` in the
   sibling `../day_khata` repo for the full method list, most of which are date-filter variants of a
   smaller set of real report types). Re-evaluate priority against actual usage before picking the next
   batch, same as every prior reporting pass.
