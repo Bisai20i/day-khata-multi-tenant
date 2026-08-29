@@ -3,8 +3,77 @@
 Living state doc. Read this before starting work, update it before stopping. See `goal.md` for
 direction/roadmap — this file is "what exists and why," not "what's next."
 
-**Last updated:** 2026-08-29. **Git status: initialized**, 13 commits on `main`. No remote configured
+**Last updated:** 2026-08-29. **Git status: initialized**, 14 commits on `main`. No remote configured
 yet — this protects against a bad `git clean`/`reset`/`checkout`, not disk loss.
+
+**2026-08-29, fourth session: first-ever HTTP-level smoke test of the whole app, found a real
+year-end-closing bug tests could never have caught.** No browser automation tool is available in this
+session (Laravel Boost MCP failed to connect; no Playwright/browser MCP configured), so per user
+choice this was a curl-driven HTTP walkthrough against the real running dev server instead of an
+actual browser click-through — a real but strictly weaker substitute (catches server-side/data bugs,
+not JS/console/visual ones). Delegated to a single fork (not parallelized — the golden path is
+inherently sequential: fiscal year before vouchers, customer/item before a sale, etc.).
+
+- **Environment setup, by the coordinator before forking**: reset both `admin@example.com` (platform)
+  and `admin@acme.localhost` (tenant, id `c1ba1318-ce0f-4afa-a9e8-4dd57431c227`) passwords to a known
+  value for testing (both had no 2FA enrolled, so no TOTP flow blocked login) and ran
+  `php artisan tenants:migrate` — this discovered the acme/test tenants' DBs predated several
+  migrations from later sessions and needed catching up before they were usable at all. **If a future
+  session needs to manually test against these dev tenants, always run `tenants:migrate` first** — an
+  existing dev tenant's schema silently lagging behind `database/migrations/tenant` is exactly the
+  scenario that caused the bug below.
+- **The golden path walked, all passing** (central: login/tenant-list/tenant-detail/create-tenant-via-
+  real-provisioning-flow/delete-tenant, both cleaned up afterward; tenant: login → chart of accounts →
+  fiscal year → customer/supplier/items → journal voucher → sale → purchase → stock adjustment →
+  partial sales+purchase returns with refund vouchers → cancel a return → 13 sampled reports → close
+  fiscal year → closed-year correction voucher → roll-forward → logout). Every one of the 8 vouchers
+  posted during the walkthrough was independently confirmed balanced; VAT Summary and TDS Report were
+  hand-verified against manual calculation and matched exactly.
+- **Real, pre-existing bug found by the walkthrough, not by any Pest test — and structurally
+  invisible to Pest**: `FiscalYear::close()` silently does nothing (no `ClosingEntry` posted, no net
+  profit swept into "Profit & Loss") on any tenant provisioned before
+  `2026_08_25_100009_add_is_profit_and_loss_to_account_heads_table` — that migration added the
+  `is_profit_and_loss` column with `default(false)` and **no backfill**, so a pre-existing tenant's
+  "Income"/"Expenses" heads are stuck at `false` forever, and `postClosingEntries()` finds nothing
+  flagged to sweep. The closed year's Balance Sheet then goes silently unbalanced (caught via a real
+  50-unit Assets-vs-Liabilities+Capital discrepancy on the acme dev tenant after closing a year with
+  real activity). **`RefreshDatabase`-based tests can never reproduce this**: every test tenant is
+  provisioned fresh against current migrations/seeders, so it always gets the correct flag — this bug
+  only bites a tenant that already existed before a later migration/seeder fix landed, which is
+  exactly what a real running dev/production tenant is and a test factory never is. This is the
+  concrete argument for why "tests green" and "smoke-tested against real, aged data" are genuinely
+  different bars, not redundant ones.
+  - **Fix**: new data-only migration
+    `2026_08_29_100200_backfill_is_profit_and_loss_on_account_heads_table.php` — flips
+    `is_profit_and_loss=true` for `AccountHead` rows named "Income"/"Expenses" wherever still `false`
+    (exactly the two names `ChartOfAccountsSeeder` itself flags, confirmed by reading the seeder, not
+    guessed). Deliberately irreversible (`down()` is a no-op with a docblock explaining why: there's no
+    way to tell a head this migration flipped from one that was already correctly `true`). Applied via
+    `tenants:migrate` to both real dev tenants (acme/test) — confirmed via tinker both now read
+    `{"Income":true,"Expenses":true}`.
+  - **Test**: `tests/Feature/Tenant/Accounting/FiscalYearClosingTest.php` gained `'a tenant with stale
+    is_profit_and_loss flags gets backfilled and closes correctly'` — since `RefreshDatabase` can't
+    naturally produce the stale state, the test manually corrupts the flags back to `false` right after
+    provisioning, then directly `require`s and invokes the migration's `up()`, then proves both the
+    flag fix and that a subsequent `close()` now posts a real `ClosingEntry` with the correct
+    net-profit sweep. Full suite after merge: **185/185 tests, 1713 assertions** (up from 184/1709).
+  - **Residual, not fixed, dev-only**: the acme dev tenant's FY2026 was already closed in its broken
+    state before the fix (from earlier ad-hoc testing) and can't be re-closed through the normal API —
+    its Balance Sheet stays unbalanced. Local dev data only, not production; left as-is rather than
+    hacked around via tinker.
+- **A stale-documentation bug also caught and fixed**: `goal.md`'s "Explicit non-goals" section still
+  claimed "Async/queued tenant provisioning — currently synchronous (`shouldBeQueued(false)`)" — this
+  directly contradicted `goal.md`'s own item 7 two sections above ("queued (not synchronous) tenant
+  provisioning... Built 2026-08-26") and the actual code
+  (`TenancyServiceProvider.php`: `shouldBeQueued(true)` on both `TenantCreated`/`TenantDeleted`
+  pipelines, confirmed by reading it directly). The walkthrough's create-tenant-via-real-HTTP-flow step
+  surfaced this by needing a running queue worker to see provisioning complete. Removed the stale
+  non-goal line entirely (queued provisioning is done, not deferred) rather than leaving a
+  self-contradicting doc.
+- **Aside, unrelated to correctness, not acted on**: `database/` has ~1160 orphaned
+  `tenant<uuid>.sqlite` files left behind by past test runs whose tenant DB file was never cleaned up
+  (a `RefreshDatabase`/tenant-testing gotcha — the physical file outlives the test). Pure disk clutter,
+  not a bug affecting the app; flagged to the user, not touched without explicit sign-off.
 
 **2026-08-29, third session: VAT Summary + Stock Movement Register, via 2 parallel forks.** After the
 5-report batch below, the user asked for more legacy reports again — rather than build the whole
@@ -1156,6 +1225,14 @@ above.
 **184/184 tests, 1709 assertions as of 2026-08-29 (third session)** — `npm run build` succeeds (after
 fixing the `VatSummary.vue` `defineProps()` bug described above), `vendor/bin/pint --dirty` clean.
 
+**185/185 tests, 1713 assertions as of 2026-08-29 (fourth session)** — after the first-ever real
+HTTP-level smoke test found and fixed the `is_profit_and_loss` backfill bug described above.
+`vendor/bin/pint --dirty` clean. This was also the first session to verify actual runtime behavior
+against real (non-`RefreshDatabase`) tenant data, not just the automated suite — worth repeating
+periodically against the two persistent dev tenants (`acme.localhost`/`test.localhost`) rather than
+relying on the suite alone, since this bug is proof a green suite can hide a real defect that only
+aged, pre-existing data exposes.
+
 ## Open items (also see `goal.md` roadmap)
 
 - Chart-of-accounts/customers/suppliers/items, the enterprise UI redesign, the ledger/journal
@@ -1164,12 +1241,14 @@ fixing the `VatSummary.vue` `defineProps()` bug described above), `vendor/bin/pi
   Sales/Purchase, Sales/Purchase/Stock-by-Category, then VAT Summary and Stock Movement Register),
   partial-line Sales/Purchase Returns, and the return-fidelity fixes (cancel-a-return, discount/TDS
   reversal, cash/bank refund) are all backend AND frontend complete, verified via the automated suite
-  (184/184) and `npm run build`. **None of this
-  has been manually smoke-tested in an actual browser yet** — worth a real click-through before
-  considering any of it fully polished. This is now the single biggest gap between
-  "automated-tests-green" and "actually production ready" — every other item below is either a
-  documented, deliberate scope limit or genuinely blocked on infrastructure that doesn't exist yet (a
-  real MySQL target).
+  (185/185) and `npm run build`. **A real HTTP-level (curl-driven) smoke test of the golden path was
+  done 2026-08-29 (fourth session) — see above — and it found a real bug (`is_profit_and_loss`
+  backfill) the automated suite structurally could not catch.** This was NOT a real browser
+  click-through, though — no JS execution, no console-error/visual/CSS check, no proof the Vue side
+  actually hydrates and reacts correctly (only that the server returns correct Inertia JSON). **A true
+  browser-based pass is still open** and worth doing once a browser automation tool (Playwright MCP or
+  similar) is available in a session — every other item below is either a documented, deliberate scope
+  limit or genuinely blocked on infrastructure that doesn't exist yet (a real MySQL target).
 - Aged Receivables/Payables has a real, documented MVP gap: no payment-receipt feature exists, so a
   credit invoice settled via a generic Journal Voucher keeps aging forever — see the 2026-08-29
   section above.
@@ -1189,4 +1268,12 @@ fixing the `VatSummary.vue` `defineProps()` bug described above), `vendor/bin/pi
   actually wiring dual DB connections is real future work, needs a real MySQL target to verify against.
 - Queued/async operational pieces still missing: 2FA is opt-in (no forced-enrollment UX), and there's
   no queue-worker supervision/monitoring guidance yet for running `php artisan queue:work` in
-  production now that tenant provisioning genuinely depends on a worker being alive.
+  production now that tenant provisioning genuinely depends on a worker being alive. **Confirmed
+  concretely, not just in theory, by the 2026-08-29 (fourth session) smoke test**: creating a tenant via
+  the real HTTP flow does nothing until a `queue:work` process actually drains the job — this is
+  exactly the missing-supervision risk this bullet already flagged, now with a first-hand repro.
+- `database/` has ~1160 orphaned `tenant<uuid>.sqlite` files from past test runs whose physical DB file
+  was never cleaned up (found during the 2026-08-29 fourth-session smoke test, not acted on). Pure disk
+  clutter, not a correctness bug — safe to bulk-delete any `tenant*.sqlite` file whose UUID doesn't
+  match a real row in the central `tenants` table, but do that only with explicit user sign-off, not
+  unilaterally.

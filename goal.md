@@ -112,8 +112,21 @@ this file for direction.
   catch (they were told not to run `npm run build`): a `<script setup>` `defineProps()` default
   referencing an outer-scope arrow function, which Vue's compiler forbids. Full suite now 184/184,
   `npm run build` succeeds after the fix. See `mem.md` for the full breakdown.
-- Not yet manually smoke-tested in an actual browser (any of the above, including this pass) — this
-  is now the single biggest gap between "tests green" and "actually production ready."
+- **First-ever HTTP-level smoke test of the whole app** (2026-08-29, fourth session): no browser
+  automation tool was available this session, so this was a curl-driven walkthrough of the golden path
+  against the real running dev server instead of an actual browser click-through — weaker (no
+  JS/console/visual verification) but real (exercises actual HTTP/session/CSRF/Inertia wiring against
+  actual data, not test factories). It found and fixed a genuine bug the automated suite structurally
+  could never catch: `FiscalYear::close()` silently did nothing on any tenant provisioned before a
+  since-added `is_profit_and_loss` column landed (no backfill), because `RefreshDatabase` always seeds
+  fresh tenants that never hit this stale-data path. Also caught and fixed a stale `goal.md` line that
+  contradicted this file's own item 7. Full suite now 185/185. See `mem.md` for the full breakdown,
+  including a real disk-clutter finding (~1160 orphaned tenant SQLite files from past test runs) left
+  unactioned pending user sign-off.
+- **Still not manually smoke-tested in an actual browser** — this remains the biggest gap between
+  "tests green" and "actually production ready," now sharpened to specifically mean: JS
+  hydration/reactivity, console errors, and visual/CSS correctness, since the HTTP-level substitute
+  above already covers server-side wiring. Revisit once a browser automation tool is available.
 
 **Next, roughly in order** (not a committed sequence — re-evaluate against sibling
 `05-phase-plan.md` before starting each):
@@ -150,8 +163,6 @@ this file for direction.
 - The ~79-key legacy privilege port — the current `admin`/`staff` role split is a placeholder.
 - Per-tenant MySQL credentials, DEFINER-pinned DDL roles, archive databases — all MySQL-specific,
   all deferred until the SQLite-portable core is further along.
-- Async/queued tenant provisioning — currently synchronous (`shouldBeQueued(false)`), fine at
-  today's scale, not fine in production.
 
 ## How we work on this project
 
