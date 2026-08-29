@@ -25,9 +25,9 @@ use Stancl\Tenancy\Middleware\PreventAccessFromCentralDomains;
 
 Route::middleware([
     'web',
-    InitializeTenancyByDomain::class,
-    AbortIfTenantSuspended::class,
     PreventAccessFromCentralDomains::class,
+    AbortIfTenantSuspended::class,
+    InitializeTenancyByDomain::class,
 ])->group(function () {
     Route::get('/', function () {
         return 'This is your multi-tenant application. The id of the current tenant is '.tenant('id');

@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Providers;
 
+use App\Http\Middleware\AbortIfTenantSuspended;
 use App\Jobs\CreateTenantFirstAdmin;
 use Illuminate\Contracts\Http\Kernel;
 use Illuminate\Support\Facades\Event;
@@ -139,6 +140,10 @@ class TenancyServiceProvider extends ServiceProvider
         $tenancyMiddleware = [
             // Even higher priority than the initialization middleware
             Middleware\PreventAccessFromCentralDomains::class,
+
+            // Must run before any tenancy-initialization middleware below —
+            // see AbortIfTenantSuspended's own docblock for why.
+            AbortIfTenantSuspended::class,
 
             Middleware\InitializeTenancyByDomain::class,
             Middleware\InitializeTenancyBySubdomain::class,
