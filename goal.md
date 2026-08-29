@@ -95,6 +95,13 @@ this file for direction.
   `mem.md` for the full breakdown, including a real MVP gap Aged Receivables/Payables documents
   (no payment-receipt feature exists yet) and a design gap both return-fidelity forks independently
   caught (cancelling a refunded return must also reverse the refund settlement voucher).
+- **5 more legacy reports** (2026-08-29, second session): TDS Report, Stock Valuation, Item-wise
+  Sales, Item-wise Purchase, and Sales/Purchase/Stock-by-Category rollups (18 reports total now).
+  Built via 5 parallel forks after deduplicating legacy's ~70-method `reportsController.php` down to
+  its real distinct report types and having the user pick which batches mattered. Full suite now
+  171/171, `npm run build` succeeds. See `mem.md` for the full breakdown, including a real
+  5-fork-vs-4-fork gotcha (pre-stubbed `require` lines in `routes/tenant.php` created a brief
+  route-boot race across forks' test runs until every fork's route file existed).
 - Not yet manually smoke-tested in an actual browser (any of the above, including this pass) — this
   is now the single biggest gap between "tests green" and "actually production ready."
 
@@ -110,11 +117,12 @@ this file for direction.
 5. ~~Fiscal year handling design decision.~~ Resolved 2026-08-25 as part of item 3: Eloquent-portable
    (app-level invariant + model events + one posting method), not the legacy MySQL trigger/view
    mechanism. See `mem.md`.
-6. **Reporting**, continued — an MVP slice of 8 reports shipped 2026-08-26, then Day Book/Cash
-   Book/Bank Book/Aged Receivables/Aged Payables shipped 2026-08-29 (13 reports total, see above).
-   The remaining ~40ish legacy report views (see `mem.md` for the categorized list a research pass
-   produced) are a real next slice, not forgotten — re-evaluate priority against actual usage before
-   picking the next batch rather than building all of them speculatively.
+6. **Reporting**, continued — an MVP slice of 8 reports shipped 2026-08-26, Day Book/Cash Book/Bank
+   Book/Aged Receivables/Aged Payables shipped 2026-08-29, then TDS/Stock Valuation/Item-wise
+   Sales/Item-wise Purchase/Category-wise rollups shipped later the same day (18 reports total, see
+   above). The remaining ~30ish legacy report views (see `mem.md` for the categorized list) are a real
+   next slice, not forgotten — re-evaluate priority against actual usage before picking the next batch
+   rather than building all of them speculatively.
 7. ~~Production hardening pass~~ Built 2026-08-26, committed and verified 2026-08-27 (132/132 tests
    — see `mem.md`): queued tenant provisioning, 2FA for platform admins, CSP/security headers are
    real code. MySQL credential-role separation is scoped down to a deploy doc + GRANT script only

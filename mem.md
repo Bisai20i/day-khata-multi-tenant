@@ -3,10 +3,64 @@
 Living state doc. Read this before starting work, update it before stopping. See `goal.md` for
 direction/roadmap — this file is "what exists and why," not "what's next."
 
-**Last updated:** 2026-08-29. **Git status: initialized**, 9 commits on `main`. No remote configured
+**Last updated:** 2026-08-29. **Git status: initialized**, 12 commits on `main`. No remote configured
 yet — this protects against a bad `git clean`/`reset`/`checkout`, not disk loss.
 
-**2026-08-29 session: 5 new reports + return fidelity gaps closed, via 4 parallel forks.** Picked by
+**2026-08-29, second session: 5 more legacy reports (TDS, Stock Valuation, Item-wise Sales/Purchase,
+Category-wise rollups), via 5 parallel forks.** Report count now **18**. User picked all three
+candidate batches offered from a deduplicated read of legacy's `reportsController.php` (~70 methods,
+mostly date-filter variants of the same underlying report — dedup'd down to real distinct types
+before asking). Coordinator pre-stubbed both shared files before forking (the `require` lines in
+`routes/tenant.php`, the 7 new nav entries in `resources/js/lib/nav-items.js`) so all 5 forks'
+controller/route/Vue/test files were fully disjoint — confirmed via `git status` after merge, zero
+overlapping edits. Each fork was told to scope its post-work `pint` run to its own exact file list
+(not `--dirty`) specifically to avoid the cross-fork pint-collision gotcha from the prior session's
+4-fork batch. Full suite after merge: **171/171 tests, 1513 assertions** (up from 151/1004),
+`npm run build` succeeds, `vendor/bin/pint --dirty` (run once, after all forks landed) clean.
+
+- **TDS Report** (`TdsReportController::index`, `routes/tenant-reports-tds.php`,
+  `Tenant/Reports/TdsReport.vue`): lists every posted Sale/Purchase with a `tds_account_id` in a date
+  range, split into "TDS on Sales" (a claimable credit) and "TDS on Purchases" (a liability owed to
+  the tax authority), each row showing **net** TDS — `tds_amount` minus the sum of every non-cancelled
+  return's proportional `tdsShare = round(tds_amount * (return.total/total), 2)` reversed against it,
+  the exact formula `SalesReturn::post()`/`PurchaseReturn::post()` use. Hand-verified directly (not
+  just trusted): a cancelled return is excluded from the reversal sum because `cancel()` already
+  re-posts a voucher restoring the original TDS in the ledger, so treating it as a no-op here is
+  correct, not an oversight.
+- **Stock Valuation Report** (`StockValuationReportController::index`,
+  `routes/tenant-reports-stock-valuation.php`, `Tenant/Reports/StockValuation.vue`): a single
+  `as_of`-date snapshot (not a range) of on-hand quantity × weighted-average cost per stockable item,
+  sorted by valuation descending. Reuses `InventoryReportController::stockSummary()`'s exact
+  weighted-average-cost algorithm collapsed to one cutoff instead of a from/to range — deliberately
+  duplicated rather than shared, matching this app's existing per-controller-file convention.
+- **Item-wise Sales / Item-wise Purchase** (`ItemWiseSalesReportController`/
+  `ItemWisePurchaseReportController`, routes `tenant-reports-item-wise-{sales,purchase}.php`, pages
+  `Tenant/Reports/ItemWise{Sales,Purchase}.vue`): the item-level counterpart to the existing
+  invoice-level Sales/Purchase Register — aggregates `SaleLine`/`PurchaseLine.line_total` (not
+  `quantity * rate`, since `line_total` already has the line discount baked in) grouped by item over a
+  date range, posted-only. Built via portable query-builder joins + `selectRaw` SUM/COUNT aggregates
+  (no vendor-specific SQL), verified against both SQLite (tests) and the portability rule.
+- **Category-wise rollups** (`CategoryWiseReportController::{salesByCategory,purchaseByCategory,
+  stockByCategory}`, `routes/tenant-reports-category-wise.php`, pages `Tenant/Reports/
+  {Sales,Purchase,Stock}ByCategory.vue`): Sales/Purchase rolled up by `ItemCategory` with a nested
+  `ItemSubcategory` breakdown; Stock is the same `as_of` weighted-average-valuation snapshot as the
+  Stock Valuation report above, just summed into category/subcategory buckets instead of listed
+  per-item. Every category is always shown (even zero-activity ones), and `item_category_id` is a
+  **required, non-nullable FK** on `Item` (confirmed via migration) — so there is no "uncategorized
+  item" edge case that could silently drop money from the grand total; an item with no *subcategory*
+  rolls into its category's own total and only surfaces its own "Uncategorized" sub-row when nonzero.
+- **A real gotcha from running 5 forks instead of 4**: `routes/tenant.php` unconditionally requires
+  all 5 new route files up front (pre-stubbed before forking, per the file-ownership convention), so
+  until every fork had actually created its own route file, **every test in the whole suite** —
+  not just the slow fork's — failed at route-boot time whenever a faster fork ran `php artisan test`
+  first. Every fork independently noticed and correctly diagnosed this as a transient sibling-race,
+  not their own bug; one fork briefly stubbed the missing file to unblock its own verification and
+  deleted the stub immediately after. No real conflict resulted (confirmed via the final disjoint
+  `git status`), but if forking ≥5 report/route batches again, consider having the coordinator create
+  empty-but-valid stub route files up front (not just the `require` lines) so this race doesn't
+  recur.
+
+**2026-08-29, first session: 5 new reports + return fidelity gaps closed, via 4 parallel forks.** Picked by
 the user from goal.md's open-items list after re-verifying (not just trusting) the prior session's
 "134/134, not yet committed" claim — confirmed green and committed it first as two logical commits
 (`36f24b8` the missing-tenant-DB regression fix, `e02fa9d` the closed-year correction UI +
@@ -1050,24 +1104,32 @@ suite. If a future session sees a "not yet re-verified" note like the ones above
 trust it — rerun the suite first, the way this session did, since it already caught one place where
 the actual state was much worse than what was written down.
 
+**171/171 tests, 1513 assertions as of 2026-08-29 (second session)** — `npm run build` succeeds,
+`vendor/bin/pint --dirty` clean, re-verified directly (not relayed) after the 5-fork reports batch
+above.
+
 ## Open items (also see `goal.md` roadmap)
 
 - Chart-of-accounts/customers/suppliers/items, the enterprise UI redesign, the ledger/journal
-  voucher posting engine, Sales/Purchase/Stock Adjustment, the Reporting MVP (now 13 reports — the
-  original 8 plus Day/Cash/Bank Book and Aged Receivables/Payables), partial-line Sales/Purchase
-  Returns, and the return-fidelity fixes (cancel-a-return, discount/TDS reversal, cash/bank refund)
-  are all backend AND frontend complete, verified via the automated suite (151/151) and
-  `npm run build`. **None of this has been manually smoke-tested in an actual browser yet** — worth
-  a real click-through before considering any of it fully polished. This is now the single biggest
-  gap between "automated-tests-green" and "actually production ready" — every other item below is
-  either a documented, deliberate scope limit or genuinely blocked on infrastructure that doesn't
-  exist yet (a real MySQL target).
+  voucher posting engine, Sales/Purchase/Stock Adjustment, the Reporting MVP (now **18 reports** — the
+  original 8, Day/Cash/Bank Book and Aged Receivables/Payables, then TDS, Stock Valuation, Item-wise
+  Sales/Purchase, and Sales/Purchase/Stock-by-Category), partial-line Sales/Purchase Returns, and the
+  return-fidelity fixes (cancel-a-return, discount/TDS reversal, cash/bank refund) are all backend AND
+  frontend complete, verified via the automated suite (171/171) and `npm run build`. **None of this
+  has been manually smoke-tested in an actual browser yet** — worth a real click-through before
+  considering any of it fully polished. This is now the single biggest gap between
+  "automated-tests-green" and "actually production ready" — every other item below is either a
+  documented, deliberate scope limit or genuinely blocked on infrastructure that doesn't exist yet (a
+  real MySQL target).
 - Aged Receivables/Payables has a real, documented MVP gap: no payment-receipt feature exists, so a
   credit invoice settled via a generic Journal Voucher keeps aging forever — see the 2026-08-29
   section above.
-- The remaining ~40ish legacy report views beyond the now-13-report set — see the Reporting sections
-  above. Re-evaluate priority against actual usage before picking the next batch, same as every prior
-  reporting pass.
+- The remaining ~30ish legacy report views beyond the now-18-report set (invoice print list, ledger
+  summary/sub-ledger, sales/purchase-with-notes, agent charges, capital services, damage-stock,
+  outstock/instock raw listings, etc. — see legacy `app/Http/Controllers/reportsController.php` in the
+  sibling `../day_khata` repo for the full method list, most of which are date-filter variants of a
+  smaller set of real report types). Re-evaluate priority against actual usage before picking the next
+  batch, same as every prior reporting pass.
 - No UI yet for the closed-year correction override — **this is now DONE**, see the 2026-08-27
   session entry near the top of this file (was still open as of the last mem.md revision).
 - MySQL credential-role separation is docs-only (`deploy/mysql-credentials.md`/`mysql-grants.sql`) —

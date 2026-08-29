@@ -81,6 +81,13 @@ export function navGroups(isAdmin) {
                 { label: 'Bank Book', href: '/reports/bank-book', icon: FileBarChart },
                 { label: 'Aged Receivables', href: '/reports/aged-receivables', icon: FileBarChart },
                 { label: 'Aged Payables', href: '/reports/aged-payables', icon: FileBarChart },
+                { label: 'TDS Report', href: '/reports/tds', icon: FileBarChart },
+                { label: 'Stock Valuation', href: '/reports/stock-valuation', icon: FileBarChart },
+                { label: 'Item-wise Sales', href: '/reports/item-wise-sales', icon: FileBarChart },
+                { label: 'Item-wise Purchase', href: '/reports/item-wise-purchase', icon: FileBarChart },
+                { label: 'Sales by Category', href: '/reports/sales-by-category', icon: FileBarChart },
+                { label: 'Purchase by Category', href: '/reports/purchase-by-category', icon: FileBarChart },
+                { label: 'Stock by Category', href: '/reports/stock-by-category', icon: FileBarChart },
             ],
         },
     ];

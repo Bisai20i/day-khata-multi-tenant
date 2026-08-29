@@ -64,5 +64,10 @@ Route::middleware([
         require base_path('routes/tenant-reports-accounting.php');
         require base_path('routes/tenant-reports-sales-purchase.php');
         require base_path('routes/tenant-reports-inventory.php');
+        require base_path('routes/tenant-reports-tds.php');
+        require base_path('routes/tenant-reports-stock-valuation.php');
+        require base_path('routes/tenant-reports-item-wise-sales.php');
+        require base_path('routes/tenant-reports-item-wise-purchase.php');
+        require base_path('routes/tenant-reports-category-wise.php');
     });
 });
