@@ -190,6 +190,155 @@ test('balance sheet balances while the fiscal year is open (via the current-year
     $tenant->delete();
 });
 
+test('day book lists vouchers within the range and excludes vouchers outside it', function () {
+    $domain = 'report-day-book.tenant-test';
+    $tenant = provisionAccountingReportTestTenant($domain);
+
+    $tenant->run(function () {
+        $admin = User::factory()->create(['email' => 'owner@example.com', 'role_id' => Role::where('slug', 'admin')->value('id')]);
+        FiscalYear::create(['name' => 'FY1', 'start_date' => '2026-01-01', 'end_date' => '2026-12-31', 'status' => FiscalYearStatus::Open]);
+
+        $cash = Account::where('code', 'AS1')->firstOrFail();
+        $sales = Account::where('code', 'INI20')->firstOrFail();
+
+        // In range (2026-02-01..2026-04-01).
+        JournalVoucher::post(
+            ['date' => '2026-03-01', 'narration' => 'In-range cash sale'],
+            [
+                ['account_id' => $cash->id, 'debit' => 1000, 'credit' => 0],
+                ['account_id' => $sales->id, 'debit' => 0, 'credit' => 1000],
+            ],
+            $admin,
+        );
+
+        // Out of range.
+        JournalVoucher::post(
+            ['date' => '2026-06-01', 'narration' => 'Out-of-range cash sale'],
+            [
+                ['account_id' => $cash->id, 'debit' => 500, 'credit' => 0],
+                ['account_id' => $sales->id, 'debit' => 0, 'credit' => 500],
+            ],
+            $admin,
+        );
+    });
+
+    loginAccountingReportTestUser($domain);
+
+    $this->get("http://{$domain}/reports/day-book?from=2026-02-01&to=2026-04-01")
+        ->assertOk()
+        ->assertInertia(fn ($page) => $page
+            ->component('Tenant/Reports/DayBook')
+            ->has('vouchers', 1)
+            ->where('vouchers.0.narration', 'In-range cash sale')
+            ->where('totalDebit', 1000)
+            ->where('totalCredit', 1000));
+
+    $tenant->delete();
+});
+
+test('cash book computes an exact opening balance carried from before the range and a correct running balance within it', function () {
+    $domain = 'report-cash-book.tenant-test';
+    $tenant = provisionAccountingReportTestTenant($domain);
+
+    $tenant->run(function () {
+        $admin = User::factory()->create(['email' => 'owner@example.com', 'role_id' => Role::where('slug', 'admin')->value('id')]);
+        FiscalYear::create(['name' => 'FY1', 'start_date' => '2026-01-01', 'end_date' => '2026-12-31', 'status' => FiscalYearStatus::Open]);
+
+        $cash = Account::where('code', 'AS1')->firstOrFail();
+        $sales = Account::where('code', 'INI20')->firstOrFail();
+        $purchases = Account::where('code', 'EXE8')->firstOrFail();
+
+        // Before the range: opening balance should be exactly 1000.
+        JournalVoucher::post(
+            ['date' => '2026-01-01', 'narration' => 'Pre-range cash sale'],
+            [
+                ['account_id' => $cash->id, 'debit' => 1000, 'credit' => 0],
+                ['account_id' => $sales->id, 'debit' => 0, 'credit' => 1000],
+            ],
+            $admin,
+        );
+
+        // Within the range: 1000 - 400 = 600, then 600 + 200 = 800.
+        JournalVoucher::post(
+            ['date' => '2026-02-15', 'narration' => 'In-range cash purchase'],
+            [
+                ['account_id' => $purchases->id, 'debit' => 400, 'credit' => 0],
+                ['account_id' => $cash->id, 'debit' => 0, 'credit' => 400],
+            ],
+            $admin,
+        );
+
+        JournalVoucher::post(
+            ['date' => '2026-02-20', 'narration' => 'In-range cash sale'],
+            [
+                ['account_id' => $cash->id, 'debit' => 200, 'credit' => 0],
+                ['account_id' => $sales->id, 'debit' => 0, 'credit' => 200],
+            ],
+            $admin,
+        );
+    });
+
+    loginAccountingReportTestUser($domain);
+
+    $this->get("http://{$domain}/reports/cash-book?from=2026-02-01&to=2026-03-01")
+        ->assertOk()
+        ->assertInertia(fn ($page) => $page
+            ->component('Tenant/Reports/CashBook')
+            ->where('openingBalance', 1000)
+            ->has('entries', 2)
+            ->where('entries.0.balance', 600)
+            ->where('entries.1.balance', 800)
+            ->where('closingBalance', 800));
+
+    $tenant->delete();
+});
+
+test('bank book scopes to the selected account only and excludes the Cash In Hand account from its picker', function () {
+    $domain = 'report-bank-book.tenant-test';
+    $tenant = provisionAccountingReportTestTenant($domain);
+
+    $bankAccountId = null;
+
+    $tenant->run(function () use (&$bankAccountId) {
+        $admin = User::factory()->create(['email' => 'owner@example.com', 'role_id' => Role::where('slug', 'admin')->value('id')]);
+        FiscalYear::create(['name' => 'FY1', 'start_date' => '2026-01-01', 'end_date' => '2026-12-31', 'status' => FiscalYearStatus::Open]);
+
+        $cash = Account::where('code', 'AS1')->firstOrFail();
+        $bank = Account::where('code', 'LIA20')->firstOrFail();
+        $bankAccountId = $bank->id;
+
+        JournalVoucher::post(
+            ['date' => '2026-02-10', 'narration' => 'Bank-side entry'],
+            [
+                ['account_id' => $bank->id, 'debit' => 300, 'credit' => 0],
+                ['account_id' => $cash->id, 'debit' => 0, 'credit' => 300],
+            ],
+            $admin,
+        );
+    });
+
+    loginAccountingReportTestUser($domain);
+
+    $this->get("http://{$domain}/reports/bank-book?account_id={$bankAccountId}&from=2026-02-01&to=2026-03-01")
+        ->assertOk()
+        ->assertInertia(fn ($page) => $page
+            ->component('Tenant/Reports/BankBook')
+            ->where('accountId', $bankAccountId)
+            ->has('entries', 1)
+            ->where('entries.0.debit', 300)
+            ->where('entries.0.balance', 300)
+            ->where('closingBalance', 300));
+
+    // The Cash In Hand account itself must never appear in the bank picker.
+    $this->get("http://{$domain}/reports/bank-book")
+        ->assertOk()
+        ->assertInertia(fn ($page) => $page
+            ->component('Tenant/Reports/BankBook')
+            ->where('accounts', fn ($accounts) => ! collect($accounts)->pluck('code')->contains('AS1')));
+
+    $tenant->delete();
+});
+
 test('the three accounting report routes render their expected components with no fiscal year yet', function () {
     $domain = 'report-routes-no-fy.tenant-test';
     $tenant = provisionAccountingReportTestTenant($domain);

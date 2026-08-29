@@ -76,6 +76,11 @@ export function navGroups(isAdmin) {
                 { label: 'Sales VAT Book', href: '/reports/sales-vat-book', icon: FileBarChart },
                 { label: 'Purchase VAT Book', href: '/reports/purchase-vat-book', icon: FileBarChart },
                 { label: 'Stock Summary', href: '/reports/stock-summary', icon: FileBarChart },
+                { label: 'Day Book', href: '/reports/day-book', icon: FileBarChart },
+                { label: 'Cash Book', href: '/reports/cash-book', icon: FileBarChart },
+                { label: 'Bank Book', href: '/reports/bank-book', icon: FileBarChart },
+                { label: 'Aged Receivables', href: '/reports/aged-receivables', icon: FileBarChart },
+                { label: 'Aged Payables', href: '/reports/aged-payables', icon: FileBarChart },
             ],
         },
     ];

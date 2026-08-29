@@ -21,4 +21,7 @@ Route::name('tenant.reports.')->prefix('reports')->group(function () {
     Route::get('/trial-balance', [AccountingReportController::class, 'trialBalance'])->name('trial-balance');
     Route::get('/income-statement', [AccountingReportController::class, 'incomeStatement'])->name('income-statement');
     Route::get('/balance-sheet', [AccountingReportController::class, 'balanceSheet'])->name('balance-sheet');
+    Route::get('/day-book', [AccountingReportController::class, 'dayBook'])->name('day-book');
+    Route::get('/cash-book', [AccountingReportController::class, 'cashBook'])->name('cash-book');
+    Route::get('/bank-book', [AccountingReportController::class, 'bankBook'])->name('bank-book');
 });

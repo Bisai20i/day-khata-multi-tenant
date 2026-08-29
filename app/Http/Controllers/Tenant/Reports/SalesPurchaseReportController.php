@@ -10,6 +10,7 @@ use App\Models\Purchase;
 use App\Models\Sale;
 use App\Models\Supplier;
 use Illuminate\Http\Request;
+use Illuminate\Support\Carbon;
 use Inertia\Inertia;
 use Inertia\Response;
 
@@ -174,6 +175,145 @@ class SalesPurchaseReportController extends Controller
             'from' => $from,
             'to' => $to,
         ]);
+    }
+
+    /**
+     * Ages every still-open `credit`-mode sale by days elapsed between its
+     * invoice date and `as_of`, bucketed Current (0-30) / 31-60 / 61-90 /
+     * 90+, grouped by customer.
+     *
+     * Deliberate MVP limitation, not a bug: this app has no dedicated
+     * "receive payment against invoice" feature anywhere (confirmed: no
+     * Receipt/Payment model exists). A `credit`-mode sale's outstanding
+     * balance is reduced here only by a SalesReturn linked to that specific
+     * sale. If a business later collects payment for a credit sale by
+     * posting a generic Journal Voucher directly against the customer's
+     * ledger account (the only mechanism currently available for that),
+     * that invoice keeps aging here even though it may have actually been
+     * settled - revisit if/when a real payment-receipt feature is built.
+     * Same category of documented gap as SalesReturn's own "does not
+     * reverse header discount/TDS" note.
+     */
+    public function agedReceivables(Request $request): Response
+    {
+        $asOf = Carbon::parse($request->string('as_of')->toString() ?: now()->toDateString());
+
+        $sales = Sale::query()
+            ->with(['customer:id,name', 'returns'])
+            ->where('payment_mode', 'credit')
+            ->where('status', 'posted')
+            ->where('date', '<=', $asOf->toDateString())
+            ->orderBy('date')
+            ->get();
+
+        $byCustomer = [];
+
+        foreach ($sales as $sale) {
+            $outstanding = round((float) $sale->total - (float) $sale->returns->sum('total'), 2);
+
+            if ($outstanding <= 0.01) {
+                continue;
+            }
+
+            $bucket = $this->agingBucket((int) $sale->date->diffInDays($asOf));
+            $customerId = $sale->customer_id;
+
+            $byCustomer[$customerId] ??= $this->emptyAgingRow($sale->customer?->name ?? '—');
+            $byCustomer[$customerId][$bucket] = round($byCustomer[$customerId][$bucket] + $outstanding, 2);
+            $byCustomer[$customerId]['total'] = round($byCustomer[$customerId]['total'] + $outstanding, 2);
+        }
+
+        $rows = collect($byCustomer)->sortBy('party')->values()->all();
+
+        return Inertia::render('Tenant/Reports/AgedReceivables', [
+            'rows' => $rows,
+            'totals' => $this->sumAgingTotals($rows),
+            'asOf' => $asOf->toDateString(),
+        ]);
+    }
+
+    /**
+     * Exact mirror of agedReceivables() for `credit`-mode purchases /
+     * suppliers - see that method's docblock for the same deliberate
+     * payment-receipt-feature limitation, which applies identically here
+     * via PurchaseReturn instead of SalesReturn.
+     */
+    public function agedPayables(Request $request): Response
+    {
+        $asOf = Carbon::parse($request->string('as_of')->toString() ?: now()->toDateString());
+
+        $purchases = Purchase::query()
+            ->with(['supplier:id,name', 'returns'])
+            ->where('payment_mode', 'credit')
+            ->where('status', 'posted')
+            ->where('date', '<=', $asOf->toDateString())
+            ->orderBy('date')
+            ->get();
+
+        $bySupplier = [];
+
+        foreach ($purchases as $purchase) {
+            $outstanding = round((float) $purchase->total - (float) $purchase->returns->sum('total'), 2);
+
+            if ($outstanding <= 0.01) {
+                continue;
+            }
+
+            $bucket = $this->agingBucket((int) $purchase->date->diffInDays($asOf));
+            $supplierId = $purchase->supplier_id;
+
+            $bySupplier[$supplierId] ??= $this->emptyAgingRow($purchase->supplier?->name ?? '—');
+            $bySupplier[$supplierId][$bucket] = round($bySupplier[$supplierId][$bucket] + $outstanding, 2);
+            $bySupplier[$supplierId]['total'] = round($bySupplier[$supplierId]['total'] + $outstanding, 2);
+        }
+
+        $rows = collect($bySupplier)->sortBy('party')->values()->all();
+
+        return Inertia::render('Tenant/Reports/AgedPayables', [
+            'rows' => $rows,
+            'totals' => $this->sumAgingTotals($rows),
+            'asOf' => $asOf->toDateString(),
+        ]);
+    }
+
+    /**
+     * @return array{party: string, current: float, days31_60: float, days61_90: float, days90Plus: float, total: float}
+     */
+    private function emptyAgingRow(string $party): array
+    {
+        return [
+            'party' => $party,
+            'current' => 0.0,
+            'days31_60' => 0.0,
+            'days61_90' => 0.0,
+            'days90Plus' => 0.0,
+            'total' => 0.0,
+        ];
+    }
+
+    private function agingBucket(int $daysOutstanding): string
+    {
+        return match (true) {
+            $daysOutstanding <= 30 => 'current',
+            $daysOutstanding <= 60 => 'days31_60',
+            $daysOutstanding <= 90 => 'days61_90',
+            default => 'days90Plus',
+        };
+    }
+
+    /**
+     * @param  array<int, array<string, mixed>>  $rows
+     * @return array{current: float, days31_60: float, days61_90: float, days90Plus: float, total: float}
+     */
+    private function sumAgingTotals(array $rows): array
+    {
+        return [
+            'current' => round((float) array_sum(array_column($rows, 'current')), 2),
+            'days31_60' => round((float) array_sum(array_column($rows, 'days31_60')), 2),
+            'days61_90' => round((float) array_sum(array_column($rows, 'days61_90')), 2),
+            'days90Plus' => round((float) array_sum(array_column($rows, 'days90Plus')), 2),
+            'total' => round((float) array_sum(array_column($rows, 'total')), 2),
+        ];
     }
 
     /**

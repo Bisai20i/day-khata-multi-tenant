@@ -8,6 +8,7 @@ use App\Http\Controllers\Controller;
 use App\Models\Account;
 use App\Models\AccountHead;
 use App\Models\FiscalYear;
+use App\Models\JournalVoucher;
 use App\Models\JournalVoucherLine;
 use Illuminate\Http\Request;
 use Illuminate\Support\Collection;
@@ -129,6 +130,169 @@ class AccountingReportController extends Controller
         ]);
     }
 
+    /**
+     * A complete chronological diary of every voucher posted in the date
+     * range, lines nested underneath - unlike Trial Balance/Income
+     * Statement this is an audit trail, not a balance computation, so
+     * ClosingEntry/OpeningBalance vouchers are NOT excluded.
+     */
+    public function dayBook(Request $request): Response
+    {
+        [$from, $to] = $this->resolveDateRange($request);
+
+        $vouchers = JournalVoucher::query()
+            ->with('lines.account:id,code,name')
+            ->whereBetween('date', [$from, $to])
+            ->orderBy('date')
+            ->orderBy('id')
+            ->get();
+
+        return Inertia::render('Tenant/Reports/DayBook', [
+            'vouchers' => $vouchers->map(fn (JournalVoucher $voucher) => [
+                'date' => $voucher->date->toDateString(),
+                'voucherType' => $voucher->voucher_type->value,
+                'voucherNumber' => $voucher->voucher_number,
+                'narration' => $voucher->narration,
+                'lines' => $voucher->lines->map(fn (JournalVoucherLine $line) => [
+                    'accountCode' => $line->account->code,
+                    'accountName' => $line->account->name,
+                    'debit' => (float) $line->debit,
+                    'credit' => (float) $line->credit,
+                    'narration' => $line->narration,
+                ])->values(),
+            ])->values(),
+            'totalDebit' => (float) $vouchers->flatMap->lines->sum('debit'),
+            'totalCredit' => (float) $vouchers->flatMap->lines->sum('credit'),
+            'from' => $from,
+            'to' => $to,
+        ]);
+    }
+
+    /**
+     * Fixed to the single seeded Cash-In-Hand account (code AS1) - same
+     * hardcoded-account-code convention this app already relies on for
+     * INI20/LIA20/ASA23/EXE8/CA2 elsewhere.
+     */
+    public function cashBook(Request $request): Response
+    {
+        [$from, $to] = $this->resolveDateRange($request);
+        $account = Account::where('code', 'AS1')->firstOrFail();
+
+        return Inertia::render('Tenant/Reports/CashBook', array_merge(
+            [
+                'account' => $account->only(['id', 'code', 'name']),
+                'from' => $from,
+                'to' => $to,
+            ],
+            $this->accountBook($account, $from, $to),
+        ));
+    }
+
+    /**
+     * There is no "is this a bank account" flag anywhere on the Account
+     * model (confirmed via grep) - `bank_account_id` on Sale/Purchase is
+     * just a free choice of any Account the user makes at posting time.
+     * Rather than invent new schema/UI to classify accounts as banks, this
+     * report is a plain account picker (same pattern as
+     * Accounts/Ledger.vue's fiscal-year picker) - the user chooses which
+     * non-cash account to view as a "bank book."
+     */
+    public function bankBook(Request $request): Response
+    {
+        [$from, $to] = $this->resolveDateRange($request);
+
+        $accounts = Account::where('code', '!=', 'AS1')->orderBy('name')->get(['id', 'code', 'name']);
+        $accountId = $request->integer('account_id') ?: $accounts->first()?->id;
+        $account = $accountId ? $accounts->firstWhere('id', $accountId) : null;
+
+        return Inertia::render('Tenant/Reports/BankBook', array_merge(
+            [
+                'accounts' => $accounts,
+                'accountId' => $accountId,
+                'from' => $from,
+                'to' => $to,
+            ],
+            $account
+                ? $this->accountBook($account, $from, $to)
+                : ['entries' => [], 'openingBalance' => 0.0, 'closingBalance' => 0.0],
+        ));
+    }
+
+    /**
+     * Defaults to the current open fiscal year's date range when no
+     * explicit `from`/`to` query params are given, falling back to
+     * month-to-date if no fiscal year exists yet. Identical logic to
+     * SalesPurchaseReportController::resolveDateRange() - duplicated
+     * rather than shared across controllers, matching this app's existing
+     * per-controller-file convention (see mem.md gotcha #5).
+     *
+     * @return array{0: string, 1: string}
+     */
+    private function resolveDateRange(Request $request): array
+    {
+        $from = $request->string('from')->toString();
+        $to = $request->string('to')->toString();
+
+        if ($from !== '' && $to !== '') {
+            return [$from, $to];
+        }
+
+        $fiscalYear = FiscalYear::query()->where('status', FiscalYearStatus::Open)->first();
+
+        if ($fiscalYear) {
+            return [$fiscalYear->start_date->toDateString(), $fiscalYear->end_date->toDateString()];
+        }
+
+        return [now()->startOfMonth()->toDateString(), now()->toDateString()];
+    }
+
+    /**
+     * A single account's running book over a date range: an opening
+     * balance carried from everything posted strictly before `$from`
+     * (all-time cumulative, unlike the fiscal-year-boxed Accounts/Ledger),
+     * then every line within the range with a running balance.
+     *
+     * @return array{entries: array<int, array{date: string, voucherType: string, voucherNumber: int, narration: ?string, debit: float, credit: float, balance: float}>, openingBalance: float, closingBalance: float}
+     */
+    private function accountBook(Account $account, string $from, string $to): array
+    {
+        $openingBalance = (float) (JournalVoucherLine::query()
+            ->where('account_id', $account->id)
+            ->whereHas('journalVoucher', fn ($query) => $query->where('date', '<', $from))
+            ->selectRaw('COALESCE(SUM(debit), 0) - COALESCE(SUM(credit), 0) as net')
+            ->value('net') ?? 0);
+
+        $lines = JournalVoucherLine::query()
+            ->where('account_id', $account->id)
+            ->whereHas('journalVoucher', fn ($query) => $query->whereBetween('date', [$from, $to]))
+            ->with('journalVoucher')
+            ->get()
+            ->sortBy([['journalVoucher.date', 'asc'], ['id', 'asc']])
+            ->values();
+
+        $runningBalance = $openingBalance;
+
+        $entries = $lines->map(function (JournalVoucherLine $line) use (&$runningBalance) {
+            $runningBalance = round($runningBalance + (float) $line->debit - (float) $line->credit, 2);
+
+            return [
+                'date' => $line->journalVoucher->date->toDateString(),
+                'voucherType' => $line->journalVoucher->voucher_type->value,
+                'voucherNumber' => $line->journalVoucher->voucher_number,
+                'narration' => $line->narration ?? $line->journalVoucher->narration,
+                'debit' => (float) $line->debit,
+                'credit' => (float) $line->credit,
+                'balance' => $runningBalance,
+            ];
+        })->values()->all();
+
+        return [
+            'entries' => $entries,
+            'openingBalance' => round($openingBalance, 2),
+            'closingBalance' => round($runningBalance, 2),
+        ];
+    }
+
     private function resolveFiscalYearId(Request $request): ?int
     {
         return $request->integer('fiscal_year_id') ?: FiscalYear::query()->where('status', FiscalYearStatus::Open)->value('id');
@@ -219,7 +383,7 @@ class AccountingReportController extends Controller
 
     /**
      * @return array{0: float, 1: float} [debit, credit] - only one is ever
-     *   nonzero: net>0 shows as a debit balance, net<0 as a credit balance.
+     *                                   nonzero: net>0 shows as a debit balance, net<0 as a credit balance.
      */
     private function netDebitCredit(int $accountId, int $fiscalYearId, bool $excludeClosingEntry): array
     {
