@@ -29,8 +29,10 @@ Route::middleware([
     AbortIfTenantSuspended::class,
     InitializeTenancyByDomain::class,
 ])->group(function () {
-    Route::get('/', function () {
-        return 'This is your multi-tenant application. The id of the current tenant is '.tenant('id');
+    Route::get('/', function (Request $request) {
+        return $request->user()
+            ? redirect()->route('tenant.dashboard')
+            : redirect()->route('tenant.login');
     });
 
     Route::middleware('guest:web')->group(function () {
