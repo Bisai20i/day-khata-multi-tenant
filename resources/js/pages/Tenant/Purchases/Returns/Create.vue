@@ -8,6 +8,7 @@ import Combobox from '@/components/ui/Combobox.vue';
 
 const props = defineProps({
     purchases: { type: Array, default: () => [] },
+    accounts: { type: Array, default: () => [] },
 });
 
 const emit = defineEmits(['cancel', 'posted']);
@@ -16,6 +17,13 @@ const purchaseOptions = computed(() =>
     props.purchases.map((purchase) => ({
         value: purchase.id,
         label: `#${purchase.id} — ${purchase.supplier?.name ?? '—'} (${Number(purchase.total).toFixed(2)})`,
+    })),
+);
+
+const accountOptions = computed(() =>
+    props.accounts.map((account) => ({
+        value: account.id,
+        label: account.code ? `${account.code} — ${account.name}` : account.name,
     })),
 );
 
@@ -33,6 +41,7 @@ const form = useForm({
     purchase_id: null,
     date: '',
     reason: '',
+    refund_account_id: null,
     lines: [],
 });
 
@@ -50,6 +59,7 @@ function submit() {
         purchase_id: data.purchase_id,
         date: data.date,
         reason: data.reason || null,
+        refund_account_id: data.refund_account_id || null,
         lines: data.lines
             .filter((line) => Number(line.quantity) > 0)
             .map((line) => ({
@@ -75,7 +85,7 @@ function submit() {
         </p>
 
         <form class="flex flex-col gap-4" @submit.prevent="submit">
-            <div class="grid grid-cols-3 gap-4">
+            <div class="grid grid-cols-4 gap-4">
                 <div>
                     <label class="mb-1 block text-sm font-semibold text-text-base">Purchase</label>
                     <Combobox
@@ -94,6 +104,16 @@ function submit() {
                 <div>
                     <label class="mb-1 block text-sm font-semibold text-text-base">Reason</label>
                     <Input v-model="form.reason" type="text" placeholder="Optional" />
+                </div>
+                <div>
+                    <label class="mb-1 block text-sm font-semibold text-text-base">Refund via</label>
+                    <Combobox
+                        :model-value="form.refund_account_id"
+                        :options="accountOptions"
+                        placeholder="No refund (credit note only)"
+                        @update:model-value="(v) => (form.refund_account_id = v)"
+                    />
+                    <p v-if="form.errors.refund_account_id" class="mt-1 text-sm text-danger">{{ form.errors.refund_account_id }}</p>
                 </div>
             </div>
 

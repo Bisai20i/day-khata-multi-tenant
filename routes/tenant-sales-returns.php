@@ -21,5 +21,6 @@ Route::name('tenant.')->group(function () {
     Route::prefix('sales-returns')->name('sales-returns.')->group(function () {
         Route::get('/', [SalesReturnController::class, 'index'])->name('index');
         Route::post('/', [SalesReturnController::class, 'store'])->name('store');
+        Route::post('/{salesReturn}/cancel', [SalesReturnController::class, 'cancel'])->name('cancel');
     });
 });

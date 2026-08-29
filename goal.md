@@ -88,7 +88,15 @@ this file for direction.
   new HTTP-level test coverage that had been missing. Writing that test coverage caught and fixed a
   real bug in `JournalVoucher::rollForward()` (a closed year could get a spurious duplicate
   roll-forward voucher posted into itself). Full suite now 134/134. See `mem.md`.
-- Not yet manually smoke-tested in an actual browser (any of the above, including this pass).
+- **5 more reports + all 3 return-fidelity gaps closed** (2026-08-29): Day Book, Cash Book, Bank
+  Book, Aged Receivables, Aged Payables (13 reports total now), plus cancel-a-return,
+  header-discount/TDS reversal, and an optional cash/bank refund voucher for both Sales and Purchase
+  Returns. Built via 4 parallel forks. Full suite now 151/151, `npm run build` succeeds. See
+  `mem.md` for the full breakdown, including a real MVP gap Aged Receivables/Payables documents
+  (no payment-receipt feature exists yet) and a design gap both return-fidelity forks independently
+  caught (cancelling a refunded return must also reverse the refund settlement voucher).
+- Not yet manually smoke-tested in an actual browser (any of the above, including this pass) — this
+  is now the single biggest gap between "tests green" and "actually production ready."
 
 **Next, roughly in order** (not a committed sequence — re-evaluate against sibling
 `05-phase-plan.md` before starting each):
@@ -102,8 +110,9 @@ this file for direction.
 5. ~~Fiscal year handling design decision.~~ Resolved 2026-08-25 as part of item 3: Eloquent-portable
    (app-level invariant + model events + one posting method), not the legacy MySQL trigger/view
    mechanism. See `mem.md`.
-6. **Reporting**, continued — an MVP slice of 8 reports shipped 2026-08-26 (see above). The
-   remaining ~44 legacy report views (see `mem.md` for the categorized list a research pass
+6. **Reporting**, continued — an MVP slice of 8 reports shipped 2026-08-26, then Day Book/Cash
+   Book/Bank Book/Aged Receivables/Aged Payables shipped 2026-08-29 (13 reports total, see above).
+   The remaining ~40ish legacy report views (see `mem.md` for the categorized list a research pass
    produced) are a real next slice, not forgotten — re-evaluate priority against actual usage before
    picking the next batch rather than building all of them speculatively.
 7. ~~Production hardening pass~~ Built 2026-08-26, committed and verified 2026-08-27 (132/132 tests

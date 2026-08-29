@@ -216,7 +216,7 @@ class Sale extends Model
 
             $voucherType = ($data['invoice_type'] ?? 'full') === 'abbreviated' ? VoucherType::SaleAbbreviated : VoucherType::Sale;
 
-            $voucher = \App\Models\JournalVoucher::post(
+            $voucher = JournalVoucher::post(
                 [
                     'voucher_type' => $voucherType->value,
                     'date' => $data['date'],
@@ -286,7 +286,9 @@ class Sale extends Model
             throw new InvalidArgumentException('This sale has already been cancelled.');
         }
 
-        if (SaleReturnLine::whereIn('sale_line_id', $this->lines()->pluck('id'))->exists()) {
+        if (SaleReturnLine::whereIn('sale_line_id', $this->lines()->pluck('id'))
+            ->whereHas('salesReturn', fn ($query) => $query->where('status', '!=', 'cancelled'))
+            ->exists()) {
             throw new InvalidArgumentException('Cannot cancel a sale that has partial returns against it.');
         }
 
@@ -300,7 +302,7 @@ class Sale extends Model
                 'narration' => $line->narration,
             ])->all();
 
-            \App\Models\JournalVoucher::post(
+            JournalVoucher::post(
                 [
                     'voucher_type' => VoucherType::SaleReturn->value,
                     'date' => now()->toDateString(),

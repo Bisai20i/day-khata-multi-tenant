@@ -3,12 +3,102 @@
 Living state doc. Read this before starting work, update it before stopping. See `goal.md` for
 direction/roadmap — this file is "what exists and why," not "what's next."
 
-**Last updated:** 2026-08-27. **Git status: initialized**, 7 commits on `main` (renamed from
-`master` at some point between sessions — not investigated, not load-bearing). The production
-hardening pass (queued provisioning, 2FA, CSP/headers, MySQL creds doc) IS committed — `617b655`
-("initialization"), landed after the previous session's mem.md update said it was still
-uncommitted. No remote configured yet — this protects against a bad `git clean`/`reset`/`checkout`,
-not disk loss.
+**Last updated:** 2026-08-29. **Git status: initialized**, 9 commits on `main`. No remote configured
+yet — this protects against a bad `git clean`/`reset`/`checkout`, not disk loss.
+
+**2026-08-29 session: 5 new reports + return fidelity gaps closed, via 4 parallel forks.** Picked by
+the user from goal.md's open-items list after re-verifying (not just trusting) the prior session's
+"134/134, not yet committed" claim — confirmed green and committed it first as two logical commits
+(`36f24b8` the missing-tenant-DB regression fix, `e02fa9d` the closed-year correction UI +
+`rollForward()` bug fix), THEN fanned out. Nav entries for all 5 new reports were pre-added by the
+coordinator to `resources/js/lib/nav-items.js` before forking (mem.md gotcha #5's convention) so the
+two reports forks never touched the same file. Full suite after merge: **151/151 tests, 1004
+assertions** (up from 134), `npm run build` succeeds, `vendor/bin/pint --dirty` clean. All 4 forks'
+file sets were fully disjoint — confirmed via `git status` after merge, zero overlapping edits.
+
+- **Day Book / Cash Book / Bank Book** (`AccountingReportController::{dayBook,cashBook,bankBook}`,
+  routes in `routes/tenant-reports-accounting.php`, pages `Tenant/Reports/{DayBook,CashBook,
+  BankBook}.vue`): Day Book is a date-range chronological diary of every voucher (deliberately does
+  NOT exclude `ClosingEntry`/`OpeningBalance` — it's a complete audit trail, not a balance
+  computation, unlike Trial Balance/Income Statement). Cash Book is hardcoded to the seeded `AS1`
+  account (matches this app's existing hardcoded-account-code convention). **Bank Book has no way to
+  auto-detect "which account is a bank account"** — there's no `is_bank` flag anywhere on `Account` —
+  so it's a plain account picker excluding `AS1`, a real deliberate scope decision, not an oversight;
+  revisit if a real bank-account classification is ever added. Both Cash/Bank Book compute an
+  **opening balance from all activity strictly before the date range** (not fiscal-year-boxed like
+  `Accounts/Ledger.vue`), which is what makes an arbitrary date-window "book" report meaningful.
+- **Aged Receivables / Aged Payables** (`SalesPurchaseReportController::{agedReceivables,
+  agedPayables}`, routes in `routes/tenant-reports-sales-purchase.php`, pages
+  `Tenant/Reports/{AgedReceivables,AgedPayables}.vue`): buckets `credit`-mode, `posted` Sale/Purchase
+  invoices by age (Current 0-30 / 31-60 / 61-90 / 90+ days as of a query-param `as_of` date, default
+  today) into per-customer/supplier rows. Outstanding per invoice = `total - sum(returns against that
+  specific invoice)` — exact, no FIFO needed, since returns already FK-reference one specific
+  sale/purchase. **Real, explicitly documented MVP gap**: this app has NO dedicated
+  payment-receipt/supplier-payment feature anywhere (confirmed via grep — no `Receipt`/`Payment`
+  model exists), so a credit invoice settled later via a generic Journal Voucher will keep aging here
+  forever even though it's actually been paid — same honesty-over-silence category as the
+  discount/TDS gaps below were before this pass. Revisit if a real payment-receipt feature is ever
+  built.
+- **Sales/Purchase Return fidelity — all three previously-documented gaps closed**: cancel-a-return,
+  proportional header-discount/TDS reversal, and an optional cash/bank refund voucher, mirrored
+  independently by two separate forks (Sales Return: `app/Models/SalesReturn.php`
+  `App\Http\Controllers\Tenant\Sales\SalesReturnController`; Purchase Return: the `PurchaseReturn`
+  equivalents) — verified by reading both models' final `post()`/`cancel()` code directly (not just
+  trusting each fork's self-report) and hand-tracing the double-entry math.
+  - **Cancel-a-return**: both `SalesReturn`/`PurchaseReturn` gained a `status` column (migrations
+    `2026_08_29_100000_...sales_returns...`/`2026_08_29_100130_...purchase_returns...`) and a
+    `cancel(User $actor, string $reason)` method mirroring `Sale::cancel()`/`Purchase::cancel()`'s
+    exact shape: mirrors the original voucher's lines (debit/credit swapped) into a new voucher —
+    reusing `VoucherType::Sale`/`VoucherType::Purchase` for the reversal (the mirror image of why
+    `Sale::cancel()`/`Purchase::cancel()` reuse the *Return* type for theirs) rather than adding new
+    enum cases — and flags the return's own stock movements cancelled. The `alreadyReturned` quantity
+    guard in both `post()` methods now excludes cancelled returns, and `Sale::cancel()`/
+    `Purchase::cancel()`'s own "block if any return references this" guard now excludes cancelled
+    returns too, so a sale/purchase becomes cancellable again once every return against it is itself
+    cancelled.
+  - **Header-discount reversal**: Sales — `Sale::post()` applies the header discount only against the
+    vatable subtotal before crediting Sales Revenue; `SalesReturn::post()` now reconstructs
+    `vatableSubtotalBeforeDiscount = sale.taxable_amount + sale.discount` and backs out each returned
+    vatable line's proportional share (`discount * (lineTotal / vatableSubtotalBeforeDiscount)`)
+    before crediting Sales Revenue back. Purchases — `Purchase::post()`'s discount mechanism is a
+    **uniform ratio of the vatable subtotal applied per item-account** (different shape than Sales'
+    single lump account, per the real bug mem.md already documents fixing here); `PurchaseReturn::
+    post()` mirrors that exact ratio in reverse, per item account.
+  - **TDS reversal**: both compute `tdsShare = tds_amount * (returnTotal / originalTotal)` and split
+    it out of the customer/supplier line rather than adding a same-side extra line — Sales credits
+    `[customer: total - tdsShare, tds_account: tdsShare]`; Purchases debits
+    `[supplier: total - tdsShare, tds_account: tdsShare]` — both pairs still sum to the return's own
+    `total`, so the voucher balances for any `tdsShare` value without a separate correction line.
+  - **Cash/bank refund voucher**: an optional `refund_account_id` (new nullable FK column, both
+    tables, `nullOnDelete()` matching this app's existing optional-account-FK convention) triggers a
+    **second** `VoucherType::Journal` voucher immediately after the return's own voucher, settling
+    exactly the amount that moved onto the customer's/supplier's account (Sales: `[debit customer,
+    credit refund_account]` for `total - tdsShare`; Purchases: `[debit refund_account, credit
+    supplier]` for the same) — correctly using the post-TDS-split amount, not the raw `total`, so it
+    stays correct even when combined with a TDS reversal.
+  - **A genuine, non-obvious design gap both forks independently caught and fixed identically** (same
+    convergent-fix pattern mem.md has recorded before, e.g. the missing `HasFactory` trait fix during
+    the Sales/Purchase/Stock-Adjustment pass): if a refunded return is later cancelled, reversing only
+    the return's own voucher would leave the customer's/supplier's ledger wrong, since the refund cash
+    already moved. Both models gained a `refund_journal_voucher_id` column (not in the original task
+    spec — a real gap the forks found mid-build) so `cancel()` reverses **both** vouchers' lines
+    together into one new voucher when a refund was posted. Hand-traced concretely: for a cash sale +
+    full return + refund + cancel, the net effect correctly nets the customer's ledger back to exactly
+    its post-sale balance and brings the refunded cash back in — verified by tracing the mirrored line
+    set by hand, not just trusting the passing tests.
+  - Routes: `POST /sales-returns/{salesReturn}/cancel`, `POST /purchase-returns/{purchaseReturn}/
+    cancel`. Frontend: both `Returns/Index.vue` pages gained a status column + cancel action
+    (mirroring however `Sales/Index.vue`/`Purchases/Index.vue` already exposed their own
+    cancel-a-sale/purchase UX), both `Returns/Create.vue` pages gained an optional "Refund via"
+    account picker.
+- **A recurring parallel-work gotcha surfaced again this pass**: `vendor/bin/pint --dirty` operates
+  repo-wide over every uncommitted file, not just the files the invoking fork itself touched — one
+  fork's pint run cosmetically reformatted a sibling fork's in-flight, not-yet-complete file (a
+  `phpdoc_align` whitespace tweak, harmless here since the sibling's substantive edits were already
+  on disk by then, but a future batch with tighter timing could see one fork's uncommitted edits
+  clobbered by another's simultaneous pint run). If running ≥4 parallel forks that all end with a
+  pint pass again, consider scoping each fork's pint invocation to only its own known file list
+  (e.g. `vendor/bin/pint --format agent -- <files>`) instead of `--dirty`.
 
 **2026-08-27 session, second entry: closed-year correction UI (frontend) + a real roll-forward bug
 found by testing it end-to-end.** Backend for posting a correcting journal voucher into a closed
@@ -400,8 +490,8 @@ build against instead of inventing one each:
 
 ```
 cd D:\Projects\day-khata\day-khata-multi-tenant
-npm run build              # must succeed — last verified 2026-08-25 with all 8 business-schema pages
-php artisan test --compact # 45/45 as of last update (44 backend + BusinessPagesRenderTest)
+npm run build              # must succeed — last verified 2026-08-29
+php artisan test --compact # 151/151 as of 2026-08-29 (1004 assertions)
 php artisan serve --port=8123   # then curl through it — see below
 ```
 
@@ -963,25 +1053,23 @@ the actual state was much worse than what was written down.
 ## Open items (also see `goal.md` roadmap)
 
 - Chart-of-accounts/customers/suppliers/items, the enterprise UI redesign, the ledger/journal
-  voucher posting engine, Sales/Purchase/Stock Adjustment, the Reporting MVP, and partial-line
-  Sales/Purchase Returns are all backend AND frontend complete, verified via the automated suite
-  (121/121) and `npm run build`. **None of this has been manually smoke-tested in an actual browser
-  yet** — worth a real click-through (create a fiscal year, post a journal voucher and a
-  sale/purchase, close a year, run each report, post a stock adjustment, post a partial return)
-  before considering any of it fully polished.
-- Neither return type reverses header-level discount or TDS, and neither auto-generates a cash/bank
-  refund voucher — see the Returns section above for the reasoning; real gaps if closer fidelity is
-  ever wanted.
-- No cancel-a-return path — returns are immutable/append-only in this pass, same as everything else,
-  but there's no correction mechanism if a return itself was entered wrong (would need a new
-  document type, e.g. a "return reversal," not an edit).
-- The remaining ~44 legacy report views beyond the 8-report MVP — see the Reporting section above.
-- No UI yet for the closed-year correction override (backend-complete, frontend deliberately
-  deferred this pass — see the ledger section above).
-- ~~Production hardening pass is built but not yet verified~~ — verified 2026-08-27: 132/132 tests,
-  `npm run build` succeeds, after fixing the missing-database-file regression described at the top
-  of this file. The pass itself (queued provisioning, 2FA, CSP/headers) is now committed
-  (`617b655`) but the regression fix is not yet committed as of this update.
+  voucher posting engine, Sales/Purchase/Stock Adjustment, the Reporting MVP (now 13 reports — the
+  original 8 plus Day/Cash/Bank Book and Aged Receivables/Payables), partial-line Sales/Purchase
+  Returns, and the return-fidelity fixes (cancel-a-return, discount/TDS reversal, cash/bank refund)
+  are all backend AND frontend complete, verified via the automated suite (151/151) and
+  `npm run build`. **None of this has been manually smoke-tested in an actual browser yet** — worth
+  a real click-through before considering any of it fully polished. This is now the single biggest
+  gap between "automated-tests-green" and "actually production ready" — every other item below is
+  either a documented, deliberate scope limit or genuinely blocked on infrastructure that doesn't
+  exist yet (a real MySQL target).
+- Aged Receivables/Payables has a real, documented MVP gap: no payment-receipt feature exists, so a
+  credit invoice settled via a generic Journal Voucher keeps aging forever — see the 2026-08-29
+  section above.
+- The remaining ~40ish legacy report views beyond the now-13-report set — see the Reporting sections
+  above. Re-evaluate priority against actual usage before picking the next batch, same as every prior
+  reporting pass.
+- No UI yet for the closed-year correction override — **this is now DONE**, see the 2026-08-27
+  session entry near the top of this file (was still open as of the last mem.md revision).
 - MySQL credential-role separation is docs-only (`deploy/mysql-credentials.md`/`mysql-grants.sql`) —
   actually wiring dual DB connections is real future work, needs a real MySQL target to verify against.
 - Queued/async operational pieces still missing: 2FA is opt-in (no forced-enrollment UX), and there's

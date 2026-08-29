@@ -1,9 +1,11 @@
 <script setup>
-import { computed, ref, watch } from 'vue';
-import { usePage } from '@inertiajs/vue3';
+import { computed, h, ref, watch } from 'vue';
+import { useForm, usePage } from '@inertiajs/vue3';
 import AppLayout from '@/layouts/AppLayout.vue';
 import Card from '@/components/ui/Card.vue';
 import Button from '@/components/ui/Button.vue';
+import Input from '@/components/ui/Input.vue';
+import Modal from '@/components/ui/Modal.vue';
 import DataTable from '@/components/ui/DataTable.vue';
 import { useToast } from '@/composables/useToast';
 import { navGroups } from '@/lib/nav-items.js';
@@ -12,6 +14,7 @@ import Create from './Create.vue';
 defineProps({
     returns: { type: Array, default: () => [] },
     purchases: { type: Array, default: () => [] },
+    accounts: { type: Array, default: () => [] },
 });
 
 const page = usePage();
@@ -37,6 +40,28 @@ function itemSummary(purchaseReturn) {
         .join(', ');
 }
 
+const cancelling = ref(null);
+const reasonForm = useForm({ reason: '' });
+
+function openCancel(purchaseReturn) {
+    cancelling.value = purchaseReturn;
+    reasonForm.reset();
+    reasonForm.clearErrors();
+}
+
+function onCancelModalOpenChange(value) {
+    if (!value) cancelling.value = null;
+}
+
+function submitCancel() {
+    reasonForm.post(`/purchase-returns/${cancelling.value.id}/cancel`, {
+        preserveScroll: true,
+        onSuccess: () => {
+            cancelling.value = null;
+        },
+    });
+}
+
 const columns = [
     { accessorKey: 'date', header: 'Date' },
     {
@@ -58,10 +83,40 @@ const columns = [
         cell: ({ row }) => row.original.reason ?? '—',
     },
     {
+        id: 'refund',
+        header: 'Refund via',
+        numeric: false,
+        cell: ({ row }) => row.original.refund_account?.name ?? '—',
+    },
+    {
         id: 'total',
         header: 'Total',
         numeric: true,
         cell: ({ row }) => Number(row.original.total).toFixed(2),
+    },
+    {
+        id: 'status',
+        header: 'Status',
+        numeric: false,
+        cell: ({ row }) => (row.original.status === 'cancelled' ? 'Cancelled' : 'Posted'),
+    },
+    {
+        id: 'actions',
+        header: 'Actions',
+        numeric: false,
+        cell: ({ row }) =>
+            row.original.status === 'posted'
+                ? h(
+                      Button,
+                      {
+                          variant: 'secondary',
+                          tone: 'purple',
+                          type: 'button',
+                          onClick: () => openCancel(row.original),
+                      },
+                      () => 'Cancel',
+                  )
+                : '—',
     },
 ];
 </script>
@@ -69,7 +124,7 @@ const columns = [
 <template>
     <AppLayout title="Purchase Returns" :nav-items="navItems">
         <template v-if="showCreateForm">
-            <Create :purchases="purchases" @cancel="showCreateForm = false" @posted="showCreateForm = false" />
+            <Create :purchases="purchases" :accounts="accounts" @cancel="showCreateForm = false" @posted="showCreateForm = false" />
         </template>
 
         <template v-else>
@@ -82,5 +137,31 @@ const columns = [
                 <DataTable :columns="columns" :data="returns" :page-size="10" empty-message="No purchase returns yet" />
             </Card>
         </template>
+
+        <Modal
+            :open="!!cancelling"
+            title="Cancel purchase return"
+            size="compact"
+            @update:open="onCancelModalOpenChange"
+        >
+            <div v-if="cancelling" class="flex flex-col gap-4">
+                <p class="text-sm text-text-muted">
+                    This posts a reversing voucher for the return against purchase #{{ cancelling.purchase?.id }}
+                    ({{ Number(cancelling.total).toFixed(2) }}). This cannot be undone.
+                </p>
+                <div>
+                    <label class="mb-1 block text-sm font-semibold text-text-base">Reason</label>
+                    <Input v-model="reasonForm.reason" type="text" placeholder="Reason for cancellation" required />
+                    <p v-if="reasonForm.errors.reason" class="mt-1 text-sm text-danger">{{ reasonForm.errors.reason }}</p>
+                </div>
+            </div>
+
+            <template #footer>
+                <Button variant="secondary" tone="purple" type="button" @click="cancelling = null">Back</Button>
+                <Button variant="primary" tone="purple" type="button" :disabled="reasonForm.processing" @click="submitCancel">
+                    Confirm cancellation
+                </Button>
+            </template>
+        </Modal>
     </AppLayout>
 </template>

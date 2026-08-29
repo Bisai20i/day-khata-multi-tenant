@@ -348,7 +348,9 @@ class Purchase extends Model
             throw new InvalidArgumentException('This purchase has already been cancelled.');
         }
 
-        if (PurchaseReturnLine::whereIn('purchase_line_id', $this->lines()->pluck('id'))->exists()) {
+        if (PurchaseReturnLine::whereIn('purchase_line_id', $this->lines()->pluck('id'))
+            ->whereHas('purchaseReturn', fn ($q) => $q->where('status', '!=', 'cancelled'))
+            ->exists()) {
             throw new InvalidArgumentException('Cannot cancel a purchase that has partial returns against it.');
         }
 

@@ -7,6 +7,8 @@ use App\Models\Customer;
 use App\Models\FiscalYear;
 use App\Models\Item;
 use App\Models\ItemStockMovement;
+use App\Models\JournalVoucher;
+use App\Models\JournalVoucherLine;
 use App\Models\Sale;
 use App\Models\SalesReturn;
 use App\Models\Tenant;
@@ -167,6 +169,216 @@ test('cancelling a sale that already has a return against it is rejected', funct
         );
 
         expect(fn () => $sale->cancel($admin, 'Too late'))->toThrow(InvalidArgumentException::class);
+    });
+
+    $tenant->delete();
+});
+
+test('cancelling a sales return reverses its voucher, frees the returned quantity, and rejects double-cancellation', function () {
+    $tenant = provisionSalesReturnTestTenant('sales-return-cancel.tenant-test');
+
+    $tenant->run(function () {
+        salesReturnTestOpenFiscalYear();
+        $admin = salesReturnTestAdmin();
+        $customer = Customer::factory()->create();
+        $item = Item::factory()->create(['is_vatable' => false, 'is_stockable' => true]);
+
+        $sale = Sale::post(
+            ['customer_id' => $customer->id, 'invoice_type' => 'full', 'date' => '2026-06-01', 'payment_mode' => 'credit'],
+            [['item_id' => $item->id, 'quantity' => 10, 'rate' => 100, 'discount' => 0]],
+            $admin,
+        );
+        $saleLine = $sale->lines()->firstOrFail();
+
+        $return = SalesReturn::post(
+            ['sale_id' => $sale->id, 'date' => '2026-06-02', 'reason' => 'Damaged'],
+            [['sale_line_id' => $saleLine->id, 'quantity' => 4]],
+            $admin,
+        );
+        expect($item->fresh()->currentStock())->toBe(-6.0);
+
+        $return->cancel($admin, 'Entered in error');
+
+        expect($return->fresh()->status)->toBe('cancelled')
+            ->and($item->fresh()->currentStock())->toBe(-10.0);
+
+        $cancelVoucher = JournalVoucher::latest('id')->firstOrFail();
+        expect((float) $cancelVoucher->lines->sum('debit'))->toBe((float) $cancelVoucher->lines->sum('credit'));
+
+        expect(fn () => $return->cancel($admin, 'Again'))->toThrow(InvalidArgumentException::class);
+
+        // The cancelled return no longer counts against the remaining
+        // returnable quantity - the full original 10 units are returnable again.
+        $newReturn = SalesReturn::post(
+            ['sale_id' => $sale->id, 'date' => '2026-06-03', 'reason' => 'Re-return'],
+            [['sale_line_id' => $saleLine->id, 'quantity' => 10]],
+            $admin,
+        );
+        expect((float) $newReturn->total)->toBeGreaterThan(0);
+    });
+
+    $tenant->delete();
+});
+
+test('cancelling a sale becomes possible again once its only return against it is cancelled', function () {
+    $tenant = provisionSalesReturnTestTenant('sales-return-then-uncancel.tenant-test');
+
+    $tenant->run(function () {
+        salesReturnTestOpenFiscalYear();
+        $admin = salesReturnTestAdmin();
+        $customer = Customer::factory()->create();
+        $item = Item::factory()->create(['is_vatable' => false, 'is_stockable' => false]);
+
+        $sale = Sale::post(
+            ['customer_id' => $customer->id, 'invoice_type' => 'full', 'date' => '2026-06-01', 'payment_mode' => 'credit'],
+            [['item_id' => $item->id, 'quantity' => 5, 'rate' => 10, 'discount' => 0]],
+            $admin,
+        );
+        $saleLine = $sale->lines()->firstOrFail();
+
+        $return = SalesReturn::post(
+            ['sale_id' => $sale->id, 'date' => '2026-06-02', 'reason' => null],
+            [['sale_line_id' => $saleLine->id, 'quantity' => 1]],
+            $admin,
+        );
+
+        expect(fn () => $sale->cancel($admin, 'Too late'))->toThrow(InvalidArgumentException::class);
+
+        $return->cancel($admin, 'Undo the return');
+
+        $sale->cancel($admin, 'Now allowed');
+        expect($sale->fresh()->status)->toBe('cancelled');
+    });
+
+    $tenant->delete();
+});
+
+test('a return proportionally reverses the header discount and TDS withheld on the original sale', function () {
+    $tenant = provisionSalesReturnTestTenant('sales-return-discount-tds.tenant-test');
+
+    $tenant->run(function () {
+        salesReturnTestOpenFiscalYear();
+        $admin = salesReturnTestAdmin();
+        $customer = Customer::factory()->create();
+        $item = Item::factory()->create(['is_vatable' => true, 'is_stockable' => false]);
+        $tdsAccount = Account::factory()->create();
+
+        $sale = Sale::post(
+            [
+                'customer_id' => $customer->id,
+                'invoice_type' => 'full',
+                'date' => '2026-06-01',
+                'payment_mode' => 'credit',
+                'discount' => 100,
+                'tds_account_id' => $tdsAccount->id,
+                'tds_amount' => 50,
+            ],
+            [['item_id' => $item->id, 'quantity' => 10, 'rate' => 100, 'discount' => 0]],
+            $admin,
+        );
+        expect((float) $sale->taxable_amount)->toBe(900.0)
+            ->and((float) $sale->total)->toBe(1017.0);
+
+        $saleLine = $sale->lines()->firstOrFail();
+
+        $return = SalesReturn::post(
+            ['sale_id' => $sale->id, 'date' => '2026-06-05', 'reason' => 'Partial return'],
+            [['sale_line_id' => $saleLine->id, 'quantity' => 4]],
+            $admin,
+        );
+
+        // 4 of 10 units of a 1000 vatable subtotal = 400 gross; the 100
+        // header discount is shared proportionally (400/1000 = 40% -> 40),
+        // so only 360 counts as taxable; VAT at 13% = 46.8; total = 406.8.
+        expect((float) $return->taxable_amount)->toBe(360.0)
+            ->and((float) $return->vat_amount)->toBe(46.8)
+            ->and((float) $return->total)->toBe(406.8);
+
+        $voucher = $return->journalVoucher;
+        expect((float) $voucher->lines->sum('debit'))->toBe((float) $voucher->lines->sum('credit'));
+
+        // TDS share: 50 * (406.8 / 1017) = 20 exactly. The customer is
+        // credited total-minus-tdsShare (386.8), and the TDS account is
+        // credited the 20 being clawed back.
+        $tdsLine = $voucher->lines()->where('account_id', $tdsAccount->id)->firstOrFail();
+        expect((float) $tdsLine->credit)->toBe(20.0);
+
+        $customerLine = $voucher->lines()->where('account_id', $customer->account_id)->firstOrFail();
+        expect((float) $customerLine->credit)->toBe(386.8);
+    });
+
+    $tenant->delete();
+});
+
+test('a return without a refund account posts only the return voucher', function () {
+    $tenant = provisionSalesReturnTestTenant('sales-return-no-refund.tenant-test');
+
+    $tenant->run(function () {
+        salesReturnTestOpenFiscalYear();
+        $admin = salesReturnTestAdmin();
+        $customer = Customer::factory()->create();
+        $item = Item::factory()->create(['is_vatable' => false, 'is_stockable' => false]);
+
+        $sale = Sale::post(
+            ['customer_id' => $customer->id, 'invoice_type' => 'full', 'date' => '2026-06-01', 'payment_mode' => 'cash'],
+            [['item_id' => $item->id, 'quantity' => 5, 'rate' => 50, 'discount' => 0]],
+            $admin,
+        );
+        $saleLine = $sale->lines()->firstOrFail();
+
+        $return = SalesReturn::post(
+            ['sale_id' => $sale->id, 'date' => '2026-06-02', 'reason' => null],
+            [['sale_line_id' => $saleLine->id, 'quantity' => 5]],
+            $admin,
+        );
+
+        expect($return->refund_journal_voucher_id)->toBeNull()
+            ->and($return->refundJournalVoucher)->toBeNull();
+    });
+
+    $tenant->delete();
+});
+
+test('a return with a refund account posts a refund settlement voucher and nets the customer balance to zero', function () {
+    $tenant = provisionSalesReturnTestTenant('sales-return-refund.tenant-test');
+
+    $tenant->run(function () {
+        salesReturnTestOpenFiscalYear();
+        $admin = salesReturnTestAdmin();
+        $customer = Customer::factory()->create();
+        $item = Item::factory()->create(['is_vatable' => true, 'is_stockable' => false]);
+        $bankAccount = Account::factory()->create();
+
+        // Cash sale: fully settled at posting, so a full return leaves the
+        // customer with a credit balance until refunded.
+        $sale = Sale::post(
+            ['customer_id' => $customer->id, 'invoice_type' => 'full', 'date' => '2026-06-01', 'payment_mode' => 'cash'],
+            [['item_id' => $item->id, 'quantity' => 5, 'rate' => 50, 'discount' => 0]],
+            $admin,
+        );
+        $saleLine = $sale->lines()->firstOrFail();
+
+        $return = SalesReturn::post(
+            ['sale_id' => $sale->id, 'date' => '2026-06-02', 'reason' => null, 'refund_account_id' => $bankAccount->id],
+            [['sale_line_id' => $saleLine->id, 'quantity' => 5]],
+            $admin,
+        );
+
+        expect((float) $return->total)->toBe(282.5)
+            ->and($return->refund_journal_voucher_id)->not->toBeNull();
+
+        $refundVoucher = $return->refundJournalVoucher;
+        expect((float) $refundVoucher->lines->sum('debit'))->toBe((float) $refundVoucher->lines->sum('credit'));
+
+        $customerDebit = $refundVoucher->lines()->where('account_id', $customer->account_id)->firstOrFail();
+        expect((float) $customerDebit->debit)->toBe(282.5);
+
+        $bankCredit = $refundVoucher->lines()->where('account_id', $bankAccount->id)->firstOrFail();
+        expect((float) $bankCredit->credit)->toBe(282.5);
+
+        $netBalance = (float) JournalVoucherLine::where('account_id', $customer->account_id)->sum('debit')
+            - (float) JournalVoucherLine::where('account_id', $customer->account_id)->sum('credit');
+        expect($netBalance)->toBe(0.0);
     });
 
     $tenant->delete();
