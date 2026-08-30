@@ -57,5 +57,8 @@ test('resuming a suspended tenant restores access to its domain', function () {
 
     expect($tenant->fresh()->status)->toBe(TenantStatus::Active);
 
-    $this->get('http://resumeme.localhost/')->assertStatus(200);
+    // The tenant root route redirects guests to login rather than returning
+    // a bare 200 (see routes/tenant.php) - a resumed, unauthenticated tenant
+    // domain is reachable again, which here means "redirects to login", not 403.
+    $this->get('http://resumeme.localhost/')->assertRedirect(route('tenant.login'));
 });

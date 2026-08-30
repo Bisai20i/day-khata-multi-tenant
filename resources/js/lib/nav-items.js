@@ -16,6 +16,8 @@ import {
     ClipboardList,
     FileBarChart,
     Undo2,
+    Building2,
+    FileSignature,
 } from '@lucide/vue';
 
 /**
@@ -43,11 +45,16 @@ export function navGroups(isAdmin) {
         {
             label: 'TRANSACTIONS',
             items: [
+                { label: 'Quotations', href: '/quotations', icon: FileSignature },
                 { label: 'Sales', href: '/sales', icon: ShoppingCart },
                 { label: 'Purchases', href: '/purchases', icon: PackageSearch },
                 { label: 'Sales Returns', href: '/sales-returns', icon: Undo2 },
                 { label: 'Purchase Returns', href: '/purchase-returns', icon: Undo2 },
             ],
+        },
+        {
+            label: 'ASSETS',
+            items: [{ label: 'Fixed Assets', href: '/fixed-assets', icon: Building2 }],
         },
         {
             label: 'PARTIES',

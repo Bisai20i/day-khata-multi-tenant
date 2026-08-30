@@ -7,7 +7,6 @@ use App\Http\Controllers\Tenant\DashboardController;
 use App\Http\Middleware\AbortIfTenantSuspended;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Route;
-use Inertia\Inertia;
 use Stancl\Tenancy\Middleware\InitializeTenancyByDomain;
 use Stancl\Tenancy\Middleware\PreventAccessFromCentralDomains;
 
@@ -30,7 +29,12 @@ Route::middleware([
     InitializeTenancyByDomain::class,
 ])->group(function () {
     Route::get('/', function (Request $request) {
-        return $request->user()
+        // Explicitly the 'web' guard, not the ambiguous default - the
+        // process-wide "default auth guard" can be temporarily switched to
+        // 'platform' (e.g. Auth::shouldUse() in tests, or any code sharing
+        // this worker), and this tenant route must never treat a platform
+        // admin's session as a tenant user's.
+        return $request->user('web')
             ? redirect()->route('tenant.dashboard')
             : redirect()->route('tenant.login');
     });
@@ -50,12 +54,6 @@ Route::middleware([
 
         Route::get('/dashboard', [DashboardController::class, 'index'])->name('tenant.dashboard');
 
-        Route::get('/admin/users', function (Request $request) {
-            $request->user()->loadMissing('role');
-
-            return Inertia::render('Tenant/Admin/Users');
-        })->middleware('role:admin')->name('tenant.admin.users');
-
         require base_path('routes/tenant-business.php');
         require base_path('routes/tenant-ledger.php');
         require base_path('routes/tenant-sales.php');
@@ -73,5 +71,8 @@ Route::middleware([
         require base_path('routes/tenant-reports-category-wise.php');
         require base_path('routes/tenant-reports-vat-summary.php');
         require base_path('routes/tenant-reports-stock-movement-register.php');
+        require base_path('routes/tenant-employees.php');
+        require base_path('routes/tenant-fixed-assets.php');
+        require base_path('routes/tenant-quotations.php');
     });
 });
