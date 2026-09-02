@@ -5,6 +5,7 @@ namespace App\Models;
 use App\Enums\FiscalYearStatus;
 use App\Enums\VoucherType;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
+use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Support\Facades\DB;
@@ -77,11 +78,13 @@ class FiscalYear extends Model
     }
 
     /**
-     * Closes this fiscal year and opens $next: sweeps every
-     * profit-and-loss account to zero (posting the net to "Profit &
-     * Loss"), carries every balance-sheet account's ending balance forward
-     * as $next's opening balances, then flips the status of both years.
-     * All in one transaction.
+     * Closes this fiscal year and opens $next: posts this year's
+     * depreciation for every active fixed asset (must happen before the
+     * P&L sweep below, since depreciation reduces this year's profit),
+     * sweeps every profit-and-loss account to zero (posting the net to
+     * "Profit & Loss"), carries every balance-sheet account's ending
+     * balance forward as $next's opening balances, then flips the status
+     * of both years. All in one transaction.
      */
     public function close(self $next, User $actor): void
     {
@@ -90,6 +93,7 @@ class FiscalYear extends Model
         }
 
         DB::transaction(function () use ($next, $actor) {
+            FixedAsset::postDepreciationForFiscalYear($this, $actor);
             $this->postClosingEntries($actor);
             $this->postOpeningBalances($next, $actor);
 
@@ -189,7 +193,7 @@ class FiscalYear extends Model
     }
 
     /**
-     * @return \Illuminate\Database\Eloquent\Collection<int, Account>
+     * @return Collection<int, Account>
      */
     private function accountsWhereHeadIsProfitAndLoss(bool $isProfitAndLoss)
     {

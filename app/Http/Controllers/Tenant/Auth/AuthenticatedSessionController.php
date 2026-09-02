@@ -36,6 +36,17 @@ class AuthenticatedSessionController extends Controller
             ]);
         }
 
+        // A deactivated employee must be rejected the same way a wrong
+        // password is - a distinct message would leak account status to
+        // whoever is at the login form.
+        if (! Auth::guard('web')->user()->is_active) {
+            Auth::guard('web')->logout();
+
+            throw ValidationException::withMessages([
+                'email' => trans('auth.failed'),
+            ]);
+        }
+
         $request->session()->regenerate();
 
         return redirect()->intended(route('tenant.dashboard'));

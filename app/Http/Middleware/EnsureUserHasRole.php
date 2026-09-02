@@ -18,7 +18,10 @@ class EnsureUserHasRole
      */
     public function handle(Request $request, Closure $next, string $role): Response
     {
-        if ($request->user()?->role?->slug !== $role) {
+        // Explicitly the 'web' guard, not the ambiguous default - see
+        // routes/tenant.php's root route for why relying on the default
+        // guard is unsafe when two named guards (web/platform) exist.
+        if ($request->user('web')?->role?->slug !== $role) {
             abort(403);
         }
 

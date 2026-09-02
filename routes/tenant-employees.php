@@ -2,22 +2,22 @@
 
 declare(strict_types=1);
 
-use Illuminate\Http\Request;
+use App\Http\Controllers\Tenant\Admin\UserController;
 use Illuminate\Support\Facades\Route;
-use Inertia\Inertia;
 
 /*
 |--------------------------------------------------------------------------
 | Tenant Employee/User Management Routes
 |--------------------------------------------------------------------------
 |
-| Placeholder pending real CRUD (see mem.md/goal.md open item: employee
-| creation + role assignment). Kept as a working named route in its own
-| file so parallel feature work on other route files never breaks this one.
+| Real CRUD (minus destroy - see UserController's docblock) resolving the
+| phase-plan's "employee/user/privilege management has no owning phase"
+| open item. Deactivation, not deletion, is the lifecycle action: every
+| created_by FK in this app is restrictOnDelete().
 */
 
-Route::get('/admin/users', function (Request $request) {
-    $request->user()->loadMissing('role');
-
-    return Inertia::render('Tenant/Admin/Users');
-})->middleware('role:admin')->name('tenant.admin.users');
+Route::middleware('role:admin')->group(function () {
+    Route::get('/admin/users', [UserController::class, 'index'])->name('tenant.admin.users');
+    Route::post('/admin/users', [UserController::class, 'store'])->name('tenant.admin.users.store');
+    Route::put('/admin/users/{user}', [UserController::class, 'update'])->name('tenant.admin.users.update');
+});

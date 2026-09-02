@@ -32,7 +32,7 @@ function provisionRoleTestTenant(string $domain): Tenant
     return $tenant;
 }
 
-test('a staff user is blocked from the admin-only demo route', function () {
+test('a staff user is blocked from the admin-only user management page', function () {
     $domain = 'role-staff.tenant-test';
     $tenant = provisionRoleTestTenant($domain);
 
@@ -57,7 +57,7 @@ test('a staff user is blocked from the admin-only demo route', function () {
     $tenant->delete();
 });
 
-test('an admin user can access the admin-only demo route', function () {
+test('an admin user can access the admin-only user management page', function () {
     $domain = 'role-admin.tenant-test';
     $tenant = provisionRoleTestTenant($domain);
 
@@ -78,12 +78,15 @@ test('an admin user can access the admin-only demo route', function () {
     $response = $this->get("http://{$domain}/admin/users");
 
     $response->assertStatus(200);
-    $response->assertInertia(fn ($page) => $page->component('Tenant/Admin/Users'));
+    $response->assertInertia(fn ($page) => $page->component('Tenant/Admin/Users')
+        ->has('users', 1)
+        ->has('roles', 2)
+    );
 
     $tenant->delete();
 });
 
-test('a user with no role is blocked from the admin-only demo route', function () {
+test('a user with no role is blocked from the admin-only user management page', function () {
     $domain = 'role-none.tenant-test';
     $tenant = provisionRoleTestTenant($domain);
 

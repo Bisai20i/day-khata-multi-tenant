@@ -21,4 +21,7 @@ enum VoucherType: string
     case SaleReturn = 'sale_return';
     case Purchase = 'purchase';
     case PurchaseReturn = 'purchase_return';
+    case FixedAssetPurchase = 'fixed_asset_purchase';
+    case Depreciation = 'depreciation';
+    case AssetDisposal = 'asset_disposal';
 }

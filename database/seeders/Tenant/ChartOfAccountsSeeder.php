@@ -16,10 +16,13 @@ class ChartOfAccountsSeeder extends Seeder
      * database/seeders/DefaultMainAccountSeeder.php) onto the normalized
      * account_heads/account_groups/account_subgroups/accounts hierarchy.
      *
-     * Fixed-asset, TDS, and asset-disposal default accounts are
-     * deliberately left out here - those belong to the Fixed Assets phase
-     * (migration_plan 05-phase-plan.md Phase 3), not core chart-of-accounts
-     * setup. Add them when that phase starts, not before.
+     * TDS default accounts are deliberately left out here - TDS already
+     * works via a manually-selected tds_account_id on Sale/Purchase, so a
+     * dedicated default isn't load-bearing yet. Fixed-asset and
+     * asset-disposal default accounts (Accumulated Depreciation,
+     * Depreciation Expense, Gain/Loss on Asset Disposal) ARE seeded below,
+     * added when the Fixed Assets phase (migration_plan 05-phase-plan.md
+     * Phase 3) was built - see App\Models\FixedAsset.
      *
      * "Sundry Debtors" and "Sundry Creditors" are load-bearing names: they
      * are looked up by exact string in App\Models\Concerns\HasLedgerAccount,
@@ -77,6 +80,10 @@ class ChartOfAccountsSeeder extends Seeder
             ['group' => 'Purchase Accounts', 'code' => 'EXE81', 'name' => 'Purchase Return'],
             ['group' => 'Current Liabilities', 'code' => 'LIA20', 'name' => 'Vat Payable'],
             ['group' => 'Current Assets', 'code' => 'ASA23', 'name' => 'Vat Receivable'],
+            ['group' => 'Fixed Assets', 'code' => 'AS31', 'name' => 'Accumulated Depreciation'],
+            ['group' => 'Indirect Expenses', 'code' => 'EXE20', 'name' => 'Depreciation Expense'],
+            ['group' => 'Indirect Expenses', 'code' => 'EXE21', 'name' => 'Loss on Asset Disposal'],
+            ['group' => 'Indirect Income', 'code' => 'INI30', 'name' => 'Gain on Asset Disposal'],
         ];
 
         foreach ($defaultAccounts as $account) {

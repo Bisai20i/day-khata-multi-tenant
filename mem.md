@@ -3,8 +3,84 @@
 Living state doc. Read this before starting work, update it before stopping. See `goal.md` for
 direction/roadmap — this file is "what exists and why," not "what's next."
 
-**Last updated:** 2026-08-29. **Git status: initialized**, 14 commits on `main`. No remote configured
-yet — this protects against a bad `git clean`/`reset`/`checkout`, not disk loss.
+**Last updated:** 2026-09-02. **Git status: initialized**, 15 commits on `main`, plus a substantial
+**uncommitted** working tree (see below) as of this update. No remote configured yet — this protects
+against a bad `git clean`/`reset`/`checkout`, not disk loss.
+
+**2026-09-02 session: verified, not built, a prior session's uncommitted Fixed Assets / Quotations /
+Employee-management pass — found it essentially complete.** This session started from a fresh context
+with a large uncommitted working tree already on disk (commit `2a78704` "Fix tenant-guard ambiguity in
+root route; prep for Fixed Assets/Quotations/Employee-mgmt" had landed the route/nav scaffolding; the
+actual feature build happened after that commit but was never committed or written up here). Rather than
+assume it was unfinished, this session did a full read-through of every touched/new file — models,
+controllers, migrations, routes, Vue pages, tests — before writing anything. **The user explicitly asked
+not to run `php artisan test`/`npm run build` this session** (they run those themselves), so this was a
+static-reasoning review only, same caveat as every "not yet re-verified" note elsewhere in this file —
+**ask the user to run the suite/build before trusting this is green**, then commit.
+- **Fixed Assets** (`app/Models/{FixedAsset,FixedAssetDepreciation}.php`,
+  `App\Http\Controllers\Tenant\Assets\FixedAssetController`, migrations `2026_08_30_100100`/`_100101`,
+  `Tenant/Assets/FixedAssets/{Index,Create}.vue`, `tests/Feature/Tenant/Assets/FixedAssetTest.php` — 8
+  tests): each asset gets its own ledger `Account` under the `"Fixed Assets"` group (no subgroup, matches
+  that group having none), posts through the same `JournalVoucher::post()`/`write()` engine as everything
+  else. Three new `VoucherType` cases (`FixedAssetPurchase`/`Depreciation`/`AssetDisposal`) and 4 new seeded
+  accounts (`AS31` Accumulated Depreciation, `EXE20` Depreciation Expense, `EXE21` Loss on Disposal, `INI30`
+  Gain on Disposal — added to `ChartOfAccountsSeeder`, all under pre-existing groups). Supports SLM (flat %
+  of depreciable base) and WDV (% of opening WDV) methods against 5 statutory Nepali depreciation pools
+  (`App\Enums\DepreciationPool`, Pool A-D have fixed default rates, Pool E has none — amortised over useful
+  life instead). `dispose()`'s gain/loss math hand-verified algebraically (debits always equal credits for
+  gain/loss/break-even cases: `diff = proceeds + accumulated - cost`, and each branch's line set reduces to
+  exactly `cost` on both sides) and the test file covers all three cases numerically too.
+  - **`FiscalYear::close()` now posts every active asset's depreciation before the P&L sweep** (`FixedAsset::
+    postDepreciationForFiscalYear()` called first inside `close()`'s transaction) — correct ordering, since
+    depreciation must reduce the year's profit before that profit is swept to "Profit & Loss". A
+    `fixed_asset_depreciations` unique constraint on `(fixed_asset_id, fiscal_year_id)` is the "already posted
+    this year" guard, checked explicitly rather than relying on the DB to reject a duplicate mid-transaction.
+  - Manual "Post Depreciation" admin action exists too (`role:admin`-gated route, mirrors legacy's
+    superadmin-gated equivalent) for posting ahead of year-end if ever needed — same underlying method.
+- **Quotations** (`app/Models/{Quotation,QuotationLine}.php`, `App\Http\Controllers\Tenant\Sales\
+  QuotationController`, migrations `2026_08_30_100300`/`_100301`, `Tenant/Quotations/{Index,Create}.vue`,
+  `tests/Feature/Tenant/Sales/QuotationTest.php` — 5 tests): a quotation never touches the ledger or stock —
+  draft/converted/cancelled lifecycle only (`App\Enums\QuotationStatus`). Consolidates legacy's separate,
+  behaviorally-identical "Order" module into this one concept (deliberate, not an oversight). `convertToSale()`
+  hands off entirely to the existing `Sale::post()` (always as a `credit`/`full`-invoice sale, since a
+  quotation never captures a real payment method) rather than reimplementing any sale logic — only a draft
+  quotation with ≥1 line can convert, and a converted/cancelled quotation is immutable afterward (verified via
+  both model-level and HTTP-level tests, including the HTTP update/delete-on-a-converted-quotation rejection
+  path).
+- **Employee/user management** (`App\Http\Controllers\Tenant\Admin\UserController`, `Tenant/Admin/Users.vue`
+  rewritten from a placeholder page into a real CRUD-minus-delete UI, `tests/Feature/Tenant/Admin/
+  UserManagementTest.php` — 6 tests): resolves the phase-plan's previously-open "no owning phase for employee/
+  privilege management" item. `users` gained `is_active` (migration `2026_08_30_100300_add_is_active_to_users_
+  table`, defaults `true`) — deactivation, not deletion, is the only lifecycle action, since every
+  `created_by` FK in this app (`journal_vouchers`, `sales`, `purchases`, ...) is `restrictOnDelete()` so a user
+  who ever posted anything can never be hard-deleted anyway (same reasoning already applied to Customer/
+  Supplier). `AuthenticatedSessionController::store()` now rejects an inactive employee's login with the exact
+  same generic `auth.failed` message a wrong password gets (no distinct message, so a deactivated account's
+  status can't be probed from the login form). `UserController::guardLastActiveAdmin()` blocks demoting or
+  deactivating the sole remaining active admin — this tenant has no platform-admin impersonation or
+  password-reset flow, so that would permanently lock the tenant out of its own admin tooling.
+- **A real, already-fixed bug this pass's prep commit (`2a78704`) caught and fixed**: `routes/tenant.php`'s
+  root route resolved `$request->user()` via the ambiguous default auth guard, which can be temporarily
+  `Auth::shouldUse('platform')`-switched elsewhere in the same worker/process — a tenant root-route hit right
+  after that could incorrectly treat a platform admin's session as a tenant user's and redirect to the tenant
+  dashboard. Caught by `TenantSuspensionTest` failing after a prior session's redirect-based root-route change.
+  Fixed by explicitly resolving `$request->user('web')` everywhere a tenant route checks the current user —
+  this same explicit-guard pattern was then also applied to `EnsureUserHasRole` middleware in this pass's own
+  uncommitted diff, for the identical reason (defense in depth, not a second instance of the bug actually
+  firing).
+- **Route/nav file-ownership convention followed as usual** (mem.md gotcha #5): `2a78704` pre-split
+  `routes/tenant-{fixed-assets,quotations,employees}.php` and pre-added all 3 nav entries before the actual
+  feature build, so whichever session/agent(s) built the three features never risked a route-boot race or a
+  shared-file conflict. (Unclear from the diff alone whether the actual build was one session or parallel
+  forks — no fork-coordination notes were left in this uncommitted work the way prior multi-fork passes
+  documented themselves in this file. Worth asking the user, or just noting for next time: leave a mem.md
+  entry immediately after a build pass, even if committing is deferred — this session had to reconstruct the
+  full picture from raw `git diff`/file reads instead of a written record.)
+- **Not yet done**: not committed (working tree still dirty as of this update — ask before committing), not
+  re-verified against the test suite/`npm run build` by this session (user's explicit instruction not to run
+  them here), no browser smoke-test of the 3 new pages. `goal.md` does not mention Fixed Assets/Quotations/
+  Employee-management anywhere — this was scoped and built outside that roadmap doc, so `goal.md` may be
+  worth updating too once this is confirmed working and committed.
 
 **2026-08-29, fourth session: first-ever HTTP-level smoke test of the whole app, found a real
 year-end-closing bug tests could never have caught.** No browser automation tool is available in this
