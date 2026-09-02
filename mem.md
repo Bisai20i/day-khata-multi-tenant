@@ -76,11 +76,14 @@ static-reasoning review only, same caveat as every "not yet re-verified" note el
   documented themselves in this file. Worth asking the user, or just noting for next time: leave a mem.md
   entry immediately after a build pass, even if committing is deferred — this session had to reconstruct the
   full picture from raw `git diff`/file reads instead of a written record.)
-- **Not yet done**: not committed (working tree still dirty as of this update — ask before committing), not
-  re-verified against the test suite/`npm run build` by this session (user's explicit instruction not to run
-  them here), no browser smoke-test of the 3 new pages. `goal.md` does not mention Fixed Assets/Quotations/
-  Employee-management anywhere — this was scoped and built outside that roadmap doc, so `goal.md` may be
-  worth updating too once this is confirmed working and committed.
+- **Verified and committed**: the user ran `vendor/bin/pint --dirty --format agent`, `php artisan test
+  --compact`, and `npm run build` themselves and confirmed all green (exact new pass/assertion counts not
+  reported back — if a future session needs the precise number, rerun the suite rather than trust this line).
+  Committed as `5d6b506` "Add Fixed Assets, Quotations, and Employee management modules" (34 files changed,
+  3034 insertions), on top of the prep commit `2a78704`.
+- **Not yet done**: no browser smoke-test of the 3 new pages. `goal.md` does not mention Fixed Assets/
+  Quotations/Employee-management anywhere — this was scoped and built outside that roadmap doc, so `goal.md`
+  may be worth updating too, or treated as confirmation the roadmap doc itself needs a refresh pass.
 
 **2026-08-29, fourth session: first-ever HTTP-level smoke test of the whole app, found a real
 year-end-closing bug tests could never have caught.** No browser automation tool is available in this
