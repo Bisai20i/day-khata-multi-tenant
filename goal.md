@@ -127,6 +127,20 @@ this file for direction.
   "tests green" and "actually production ready," now sharpened to specifically mean: JS
   hydration/reactivity, console errors, and visual/CSS correctness, since the HTTP-level substitute
   above already covers server-side wiring. Revisit once a browser automation tool is available.
+- **Fixed Assets, Quotations, and Employee/user management** (2026-09-02): three modules built and
+  committed outside this file's own numbered roadmap (scoped and picked ad hoc, not tracked here
+  until now). Fixed Assets covers SLM/WDV depreciation across the 5 statutory Nepali pools, each
+  asset getting its own ledger account, disposal gain/loss postings, and automatic depreciation
+  posting from `FiscalYear::close()` before its P&L sweep. Quotations is a draft/convert/cancel
+  pre-sale document that hands off to the existing `Sale::post()` on conversion rather than
+  duplicating any sale logic. Employee management resolves the previously-open "no owning phase for
+  user/privilege management" gap with real CRUD-minus-delete, `is_active` deactivation (never
+  hard-delete, matching every other `restrictOnDelete()` `created_by` FK in this app), and a
+  last-active-admin guard. All three verified green by the user (Pint, full Pest suite, `npm run
+  build`) and committed (`5d6b506`). See `mem.md`'s 2026-09-02 entry for the full breakdown,
+  including a real guard-ambiguity bug fixed in prep (`2a78704`): the tenant root route and
+  `EnsureUserHasRole` were resolving the ambiguous default auth guard instead of `'web'` explicitly,
+  which could misidentify a platform admin's session as a tenant user's.
 
 **Next, roughly in order** (not a committed sequence — re-evaluate against sibling
 `05-phase-plan.md` before starting each):
@@ -155,6 +169,22 @@ this file for direction.
    already accepts a single shared runtime user) — see
    `../day_khata/migration_plan/02-security-hardening.md` §7 and `mem.md` for the reasoning. Wiring
    the actual dual-connection split remains real future work once there's a MySQL deployment target.
+8. ~~Fixed Assets / Quotations / Employee management~~ Built and committed 2026-09-02, see above and
+   `mem.md`.
+9. **Picked as next: a Payment/Receipt module** (customer receipts against credit sales, supplier
+   payments against credit purchases). This directly closes the real, already-documented MVP gap in
+   the Aged Receivables/Aged Payables reports: this app has no dedicated payment-receipt feature
+   anywhere, so a credit invoice settled via a generic Journal Voucher keeps aging forever in those
+   reports even though it's actually been paid (see `mem.md`'s 2026-08-29 first-session entry). Picked
+   over the other open items below because it's real feature work with no missing infrastructure
+   blocking it (unlike the browser smoke-test and MySQL items) and it should follow the same
+   established pattern this codebase already uses for Sales/Purchase/Fixed-Assets: a model posting
+   through the existing `JournalVoucher::post()` engine, thin controller, Vue page, Pest tests. Likely
+   shape (confirm against `Customer`/`Supplier`'s `account_id` and outstanding-balance logic already
+   used by Aged Receivables/Payables before building): a `Receipt`/`Payment` model posting `[debit
+   cash/bank, credit customer]` or `[debit supplier, credit cash/bank]`, allocatable against one or more
+   specific outstanding Sale/Purchase invoices (so Aged Receivables/Payables can net it out per-invoice
+   the same way returns already do), not just a lump customer/supplier balance.
 
 ## Explicit non-goals for now (deferred, not forgotten)
 
