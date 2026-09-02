@@ -6,6 +6,7 @@ use App\Enums\FiscalYearStatus;
 use App\Http\Controllers\Controller;
 use App\Models\FiscalYear;
 use App\Models\Item;
+use App\Models\Store;
 use Illuminate\Http\Request;
 use Inertia\Inertia;
 use Inertia\Response;
@@ -25,12 +26,15 @@ class InventoryReportController extends Controller
 
         $from = ($request->date('from') ?? $openFiscalYear?->start_date ?? now()->subDays(30))->copy()->startOfDay();
         $to = ($request->date('to') ?? $openFiscalYear?->end_date ?? now())->copy()->endOfDay();
+        $storeId = $request->integer('store_id') ?: null;
 
         $rows = [];
         $grandTotalValuation = 0.0;
 
-        Item::query()->where('is_stockable', true)->orderBy('name')->each(function (Item $item) use ($from, $to, &$rows, &$grandTotalValuation): void {
-            $movements = $item->stockMovements()->where('cancelled', false)->get();
+        Item::query()->where('is_stockable', true)->orderBy('name')->each(function (Item $item) use ($from, $to, $storeId, &$rows, &$grandTotalValuation): void {
+            $movements = $item->stockMovements()->where('cancelled', false)
+                ->when($storeId !== null, fn ($query) => $query->where('store_id', $storeId))
+                ->get();
 
             $opening = (float) $movements
                 ->filter(fn ($movement) => $movement->date->lt($from))
@@ -91,6 +95,8 @@ class InventoryReportController extends Controller
             'to' => $to->toDateString(),
             'rows' => $rows,
             'grandTotalValuation' => round($grandTotalValuation, 2),
+            'stores' => Store::where('is_active', true)->orderBy('name')->get(['id', 'name']),
+            'storeId' => $storeId,
         ]);
     }
 }

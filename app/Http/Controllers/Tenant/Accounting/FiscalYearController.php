@@ -16,7 +16,7 @@ class FiscalYearController extends Controller
     public function index(): Response
     {
         return Inertia::render('Tenant/Accounting/FiscalYears/Index', [
-            'fiscalYears' => FiscalYear::query()->orderByDesc('start_date')->get(),
+            'fiscalYears' => FiscalYear::query()->with('archive')->orderByDesc('start_date')->get(),
         ]);
     }
 

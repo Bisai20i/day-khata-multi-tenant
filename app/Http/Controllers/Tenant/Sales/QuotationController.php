@@ -4,11 +4,14 @@ namespace App\Http\Controllers\Tenant\Sales;
 
 use App\Enums\QuotationStatus;
 use App\Http\Controllers\Controller;
+use App\Models\CompanySetting;
 use App\Models\Customer;
 use App\Models\Item;
 use App\Models\Quotation;
+use Barryvdh\DomPDF\Facade\Pdf;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
+use Illuminate\Http\Response as HttpResponse;
 use Inertia\Inertia;
 use Inertia\Response;
 use InvalidArgumentException;
@@ -94,6 +97,53 @@ class QuotationController extends Controller
         }
 
         return redirect()->route('tenant.quotations.index')->with('status', 'Quotation converted to sale.');
+    }
+
+    /**
+     * Streams a printable PDF quotation inline (not a forced download), so it
+     * opens in a new browser tab from a plain anchor link on the Index page.
+     *
+     * A quotation stores no totals of its own (no line_total on QuotationLine,
+     * no taxable_amount/vat_amount/total on Quotation) and never posts to the
+     * ledger, so every figure below is computed here from the raw quantity/
+     * rate/discount/vat_rate columns using the exact same formula as the
+     * Index page's own quotationTotal() - it applies VAT to the whole
+     * discounted line total, unlike Sale/Purchase's taxable/nontaxable split.
+     */
+    public function print(Quotation $quotation): HttpResponse
+    {
+        $quotation->load(['customer', 'lines.item']);
+
+        $lines = $quotation->lines->map(function ($line) {
+            $lineTotal = round((float) $line->quantity * (float) $line->rate - (float) $line->discount, 2);
+
+            return [
+                'item' => $line->item,
+                'quantity' => (float) $line->quantity,
+                'rate' => (float) $line->rate,
+                'discount' => (float) $line->discount,
+                'line_total' => $lineTotal,
+            ];
+        });
+
+        $lineSum = round((float) $lines->sum('line_total'), 2);
+        $taxable = round($lineSum - (float) $quotation->discount, 2);
+        $vat = round($taxable * ((float) $quotation->vat_rate / 100), 2);
+        $total = round($taxable + $vat, 2);
+
+        $documentNumber = $quotation->reference_number ?: "QUO-{$quotation->id}";
+
+        return Pdf::loadView('pdf.quotation', [
+            'quotation' => $quotation,
+            'lines' => $lines,
+            'lineSum' => $lineSum,
+            'taxable' => $taxable,
+            'vat' => $vat,
+            'total' => $total,
+            'company' => CompanySetting::current(),
+            'documentNumber' => $documentNumber,
+            'documentDate' => $quotation->date->format('Y-m-d'),
+        ])->stream("quotation-{$quotation->id}.pdf");
     }
 
     /**

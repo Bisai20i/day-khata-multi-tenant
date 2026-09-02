@@ -27,7 +27,7 @@ use InvalidArgumentException;
  * TDS - a multi-purchase credit-balance scenario isn't modeled.
  */
 #[Fillable([
-    'purchase_id', 'journal_voucher_id', 'date', 'reason', 'taxable_amount',
+    'purchase_id', 'journal_voucher_id', 'date', 'store_id', 'reason', 'taxable_amount',
     'nontaxable_amount', 'vat_amount', 'total', 'status', 'refund_account_id',
     'refund_journal_voucher_id', 'created_by',
 ])]
@@ -96,7 +96,15 @@ class PurchaseReturn extends Model
     }
 
     /**
-     * @param  array{purchase_id: int, date: string, reason?: string|null, refund_account_id?: int|null}  $data
+     * @return BelongsTo<Store, $this>
+     */
+    public function store(): BelongsTo
+    {
+        return $this->belongsTo(Store::class);
+    }
+
+    /**
+     * @param  array{purchase_id: int, date: string, reason?: string|null, refund_account_id?: int|null, store_id?: int|null}  $data
      * @param  array<int, array{purchase_line_id: int, quantity: float}>  $lines
      */
     public static function post(array $data, array $lines, User $actor): self
@@ -106,6 +114,12 @@ class PurchaseReturn extends Model
 
             if ($purchase->status === 'cancelled') {
                 throw new InvalidArgumentException('Cannot return items against a cancelled purchase.');
+            }
+
+            $storeId = isset($data['store_id']) ? (int) $data['store_id'] : Store::where('is_active', true)->orderBy('id')->value('id');
+
+            if (! $storeId) {
+                throw new InvalidArgumentException('No active store is configured.');
             }
 
             $exe8 = Account::where('code', 'EXE8')->firstOrFail();
@@ -228,6 +242,7 @@ class PurchaseReturn extends Model
                 'purchase_id' => $purchase->id,
                 'journal_voucher_id' => $voucher->id,
                 'date' => $data['date'],
+                'store_id' => $storeId,
                 'reason' => $data['reason'] ?? null,
                 'taxable_amount' => $taxableAmount,
                 'nontaxable_amount' => $nontaxableAmount,
@@ -251,6 +266,7 @@ class PurchaseReturn extends Model
                         StockMovementType::PurchaseReturn,
                         $line['quantity'],
                         $data['date'],
+                        $storeId,
                         $purchaseReturnLine,
                     );
                 }

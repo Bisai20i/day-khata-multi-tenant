@@ -23,5 +23,6 @@ Route::middleware('auth:platform')->prefix('tenants')->name('central.tenants.')-
     Route::get('/{tenant}', [TenantController::class, 'show'])->name('show');
     Route::post('/{tenant}/suspend', [TenantController::class, 'suspend'])->name('suspend');
     Route::post('/{tenant}/resume', [TenantController::class, 'resume'])->name('resume');
+    Route::post('/{tenant}/impersonate', [TenantController::class, 'impersonate'])->name('impersonate');
     Route::delete('/{tenant}', [TenantController::class, 'destroy'])->name('destroy');
 });

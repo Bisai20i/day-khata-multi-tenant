@@ -9,6 +9,7 @@ use App\Models\Purchase;
 use App\Models\PurchaseReturn;
 use App\Models\Sale;
 use App\Models\SalesReturn;
+use App\Models\Store;
 use Illuminate\Http\Request;
 use Inertia\Inertia;
 use Inertia\Response;
@@ -32,25 +33,30 @@ class VatSummaryReportController extends Controller
     public function index(Request $request): Response
     {
         [$from, $to] = $this->resolveDateRange($request);
+        $storeId = $request->integer('store_id') ?: null;
 
         $outputVatGross = round((float) Sale::query()
             ->where('status', 'posted')
             ->whereBetween('date', [$from, $to])
+            ->when($storeId, fn ($query) => $query->where('store_id', $storeId))
             ->sum('vat_amount'), 2);
 
         $outputVatReturns = round((float) SalesReturn::query()
             ->where('status', '!=', 'cancelled')
             ->whereBetween('date', [$from, $to])
+            ->when($storeId, fn ($query) => $query->where('store_id', $storeId))
             ->sum('vat_amount'), 2);
 
         $inputVatGross = round((float) Purchase::query()
             ->where('status', 'posted')
             ->whereBetween('date', [$from, $to])
+            ->when($storeId, fn ($query) => $query->where('store_id', $storeId))
             ->sum('vat_amount'), 2);
 
         $inputVatReturns = round((float) PurchaseReturn::query()
             ->where('status', '!=', 'cancelled')
             ->whereBetween('date', [$from, $to])
+            ->when($storeId, fn ($query) => $query->where('store_id', $storeId))
             ->sum('vat_amount'), 2);
 
         $outputVatNet = round($outputVatGross - $outputVatReturns, 2);
@@ -69,8 +75,10 @@ class VatSummaryReportController extends Controller
                 'net' => $inputVatNet,
             ],
             'netVatPayable' => $netVatPayable,
+            'stores' => Store::where('is_active', true)->orderBy('name')->get(['id', 'name']),
             'from' => $from,
             'to' => $to,
+            'storeId' => $storeId,
         ]);
     }
 

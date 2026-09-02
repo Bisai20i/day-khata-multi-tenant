@@ -2,6 +2,7 @@
 
 use App\Enums\StockMovementType;
 use App\Models\Item;
+use App\Models\Store;
 use App\Models\Tenant;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -44,20 +45,22 @@ test('stock valuation snapshot computes as-of quantity and weighted-average valu
 
         $widget = Item::factory()->create(['name' => 'Widget', 'unit' => 'pcs', 'is_stockable' => true]);
         $widgetId = $widget->id;
+        $storeId = Store::where('is_active', true)->orderBy('id')->firstOrFail()->id;
 
         // On or before as_of (2026-02-28): both feed the weighted-average
         // cost basis and the as-of quantity.
-        $widget->recordStockMovement(StockMovementType::Purchase, 10, '2026-01-01', null, 100);
-        $widget->recordStockMovement(StockMovementType::Purchase, 5, '2026-02-10', null, 130);
-        $widget->recordStockMovement(StockMovementType::Sale, 3, '2026-02-15');
+        $widget->recordStockMovement(StockMovementType::Purchase, 10, '2026-01-01', $storeId, unitCostRate: 100);
+        $widget->recordStockMovement(StockMovementType::Purchase, 5, '2026-02-10', $storeId, unitCostRate: 130);
+        $widget->recordStockMovement(StockMovementType::Sale, 3, '2026-02-15', $storeId);
 
         // After as_of: must not affect quantity, cost basis, or valuation -
         // this is the "as of a past date" guarantee.
-        $widget->recordStockMovement(StockMovementType::Purchase, 20, '2026-03-01', null, 200);
+        $widget->recordStockMovement(StockMovementType::Purchase, 20, '2026-03-01', $storeId, unitCostRate: 200);
 
         // Cancelled: dated on or before as_of but must be excluded from
         // every sum.
         $widget->stockMovements()->create([
+            'store_id' => $storeId,
             'movement_type' => StockMovementType::AdjustmentIn,
             'quantity' => 100,
             'date' => '2026-02-20',
@@ -68,7 +71,7 @@ test('stock valuation snapshot computes as-of quantity and weighted-average valu
         // that the grand total sums across items.
         $gadget = Item::factory()->create(['name' => 'Gadget', 'unit' => 'pcs', 'is_stockable' => true]);
         $gadgetId = $gadget->id;
-        $gadget->recordStockMovement(StockMovementType::Purchase, 100, '2026-01-05', null, 20);
+        $gadget->recordStockMovement(StockMovementType::Purchase, 100, '2026-01-05', $storeId, unitCostRate: 20);
     });
 
     loginStockValuationReportTestUser($domain);
@@ -116,6 +119,54 @@ test('an item with no movements at all is excluded from the stock valuation repo
         ->assertInertia(fn ($page) => $page
             ->component('Tenant/Reports/StockValuation')
             ->where('rows', [])
+            ->etc()
+        );
+
+    $tenant->delete();
+});
+
+test('stock valuation is scoped to a single store when store_id is given, and sums across all stores when omitted', function () {
+    $domain = 'stock-valuation-store-scope.tenant-test';
+    $tenant = provisionStockValuationReportTestTenant($domain);
+
+    $branchStoreId = null;
+    $tenant->run(function () use (&$branchStoreId) {
+        User::factory()->create(['email' => 'owner@example.com']);
+
+        $widget = Item::factory()->create(['name' => 'Widget', 'unit' => 'pcs', 'is_stockable' => true]);
+
+        $mainStoreId = Store::where('is_active', true)->orderBy('id')->firstOrFail()->id;
+        $branchStoreId = Store::factory()->create(['name' => 'Branch Store'])->id;
+
+        // Main store: 10 @ 100 = 1000.
+        $widget->recordStockMovement(StockMovementType::Purchase, 10, '2026-01-05', $mainStoreId, unitCostRate: 100);
+
+        // Branch store: 4 @ 100 = 400.
+        $widget->recordStockMovement(StockMovementType::Purchase, 4, '2026-01-10', $branchStoreId, unitCostRate: 100);
+    });
+
+    loginStockValuationReportTestUser($domain);
+
+    // Filtered to the branch store only: quantity 4, valuation 400.
+    $this->get("http://{$domain}/reports/stock-valuation?as_of=2026-01-31&store_id={$branchStoreId}")
+        ->assertOk()
+        ->assertInertia(fn ($page) => $page
+            ->where('rows.0.quantity', stockValuationNearly(4.0))
+            ->where('rows.0.valuation', stockValuationNearly(400.0))
+            ->where('grandTotalValuation', stockValuationNearly(400.0))
+            ->where('storeId', $branchStoreId)
+            ->etc()
+        );
+
+    // Unfiltered: cross-store quantity 14, valuation 1400 - must match the
+    // total both stores' movements sum to, i.e. the pre-store-filter behaviour.
+    $this->get("http://{$domain}/reports/stock-valuation?as_of=2026-01-31")
+        ->assertOk()
+        ->assertInertia(fn ($page) => $page
+            ->where('rows.0.quantity', stockValuationNearly(14.0))
+            ->where('rows.0.valuation', stockValuationNearly(1400.0))
+            ->where('grandTotalValuation', stockValuationNearly(1400.0))
+            ->where('storeId', null)
             ->etc()
         );
 

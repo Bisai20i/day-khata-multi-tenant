@@ -14,7 +14,7 @@ use Illuminate\Database\Eloquent\Relations\MorphTo;
  * Sales/Purchase/Stock-Adjustment write these directly; nothing here posts
  * a JournalVoucher.
  */
-#[Fillable(['item_id', 'movement_type', 'quantity', 'unit_cost_rate', 'reference_type', 'reference_id', 'date', 'cancelled', 'narration'])]
+#[Fillable(['item_id', 'store_id', 'movement_type', 'quantity', 'unit_cost_rate', 'reference_type', 'reference_id', 'date', 'cancelled', 'narration'])]
 class ItemStockMovement extends Model
 {
     /**
@@ -37,6 +37,14 @@ class ItemStockMovement extends Model
     public function item(): BelongsTo
     {
         return $this->belongsTo(Item::class);
+    }
+
+    /**
+     * @return BelongsTo<Store, $this>
+     */
+    public function store(): BelongsTo
+    {
+        return $this->belongsTo(Store::class);
     }
 
     /**

@@ -4,10 +4,13 @@ namespace App\Models;
 
 use App\Enums\FiscalYearStatus;
 use App\Enums\VoucherType;
+use App\Support\NepaliCalendar;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
+use Illuminate\Database\Eloquent\Casts\Attribute;
 use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Database\Eloquent\Relations\HasOne;
 use Illuminate\Support\Facades\DB;
 use InvalidArgumentException;
 
@@ -57,6 +60,24 @@ class FiscalYear extends Model
     }
 
     /**
+     * BS (Bikram Sambat) fiscal-year label, e.g. "2081/82", derived from
+     * start_date at read time via NepaliCalendar. Deliberately not a stored
+     * column - it's fully derivable from start_date, and this app avoids
+     * denormalized state that can drift out of sync with the column it's
+     * derived from (no DB triggers, no cached-and-copied values).
+     */
+    protected function bsLabel(): Attribute
+    {
+        return Attribute::make(
+            get: function (): string {
+                $bs = NepaliCalendar::adToBs($this->start_date);
+
+                return sprintf('%d/%02d', $bs['year'], ($bs['year'] + 1) % 100);
+            },
+        );
+    }
+
+    /**
      * @return HasMany<JournalVoucher, $this>
      */
     public function journalVouchers(): HasMany
@@ -70,6 +91,17 @@ class FiscalYear extends Model
     public function voucherSequences(): HasMany
     {
         return $this->hasMany(VoucherSequence::class);
+    }
+
+    /**
+     * Present once this fiscal year has been copied out to cold storage -
+     * see App\Support\FiscalYear\FiscalYearArchiver.
+     *
+     * @return HasOne<FiscalYearArchive, $this>
+     */
+    public function archive(): HasOne
+    {
+        return $this->hasOne(FiscalYearArchive::class);
     }
 
     public static function current(): self

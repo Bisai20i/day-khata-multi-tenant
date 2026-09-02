@@ -22,6 +22,7 @@ Route::name('tenant.')->group(function () {
         Route::post('/', [QuotationController::class, 'store'])->name('store');
         Route::put('/{quotation}', [QuotationController::class, 'update'])->name('update');
         Route::delete('/{quotation}', [QuotationController::class, 'destroy'])->name('destroy');
+        Route::get('/{quotation}/print', [QuotationController::class, 'print'])->name('print');
         Route::post('/{quotation}/cancel', [QuotationController::class, 'cancel'])->name('cancel');
         Route::post('/{quotation}/convert-to-sale', [QuotationController::class, 'convertToSale'])->name('convert-to-sale');
     });

@@ -10,6 +10,7 @@ use App\Models\PurchaseReturn;
 use App\Models\Role;
 use App\Models\Sale;
 use App\Models\SalesReturn;
+use App\Models\Store;
 use App\Models\Supplier;
 use App\Models\Tenant;
 use App\Models\User;
@@ -382,6 +383,67 @@ test('a sale or purchase without TDS withheld does not appear on the report', fu
             ->has('sales', 0)
             ->has('purchases', 0)
             ->where('grandTotal', 0)
+        );
+
+    $tenant->delete();
+});
+
+test('the TDS report can be narrowed to a single store', function () {
+    $domain = 'tds-report-store-filter.tenant-test';
+    $tenant = provisionTdsReportTestTenant($domain);
+
+    $storeAId = null;
+    $tenant->run(function () use (&$storeAId) {
+        tdsReportTestOpenFiscalYear();
+        $admin = tdsReportTestAdmin();
+        $customer = Customer::factory()->create();
+        $supplier = Supplier::factory()->create();
+        $tdsAccount = Account::factory()->create();
+        $item = Item::factory()->create(['is_vatable' => false, 'is_stockable' => false]);
+        $storeA = Store::where('is_active', true)->orderBy('id')->firstOrFail();
+        $storeB = Store::factory()->create(['name' => 'Branch Store']);
+
+        Sale::post(
+            [
+                'customer_id' => $customer->id,
+                'store_id' => $storeA->id,
+                'invoice_type' => 'full',
+                'date' => '2026-06-01',
+                'payment_mode' => 'cash',
+                'tds_account_id' => $tdsAccount->id,
+                'tds_amount' => 10,
+            ],
+            [['item_id' => $item->id, 'quantity' => 1, 'rate' => 100, 'discount' => 0]],
+            $admin,
+        );
+
+        Purchase::post(
+            [
+                'supplier_id' => $supplier->id,
+                'store_id' => $storeB->id,
+                'date' => '2026-06-01',
+                'payment_mode' => 'cash',
+                'tds_account_id' => $tdsAccount->id,
+                'tds_amount' => 15,
+            ],
+            [['item_id' => $item->id, 'quantity' => 1, 'rate' => 100, 'discount' => 0]],
+            $admin,
+        );
+
+        $storeAId = $storeA->id;
+    });
+
+    loginTdsReportTestUser($domain);
+
+    $this->get("http://{$domain}/reports/tds?from=2026-06-01&to=2026-06-30&store_id={$storeAId}")
+        ->assertOk()
+        ->assertInertia(fn ($page) => $page
+            ->has('sales', 1)
+            ->where('sales.0.net_tds_amount', 10)
+            ->has('purchases', 0)
+            ->where('salesTotal', 10)
+            ->where('purchasesTotal', 0)
+            ->where('grandTotal', 10)
         );
 
     $tenant->delete();

@@ -9,6 +9,7 @@ use App\Models\PurchaseReturn;
 use App\Models\Role;
 use App\Models\Sale;
 use App\Models\SalesReturn;
+use App\Models\Store;
 use App\Models\Supplier;
 use App\Models\Tenant;
 use App\Models\User;
@@ -456,6 +457,248 @@ test('a date range outside a sale excludes it from the register', function () {
     $this->get("http://{$domain}/reports/sales-register?from=2026-06-01&to=2026-06-30")
         ->assertOk()
         ->assertInertia(fn ($page) => $page->has('sales', 0));
+
+    $tenant->delete();
+});
+
+test('the sales register can be narrowed to a single store', function () {
+    $domain = 'sales-register-store-filter.tenant-test';
+    $tenant = provisionReportTestTenant($domain);
+
+    $storeAId = null;
+    $tenant->run(function () use (&$storeAId) {
+        reportTestOpenFiscalYear();
+        $admin = reportTestAdmin();
+        $customer = Customer::factory()->create();
+        $item = Item::factory()->create(['is_vatable' => false, 'is_stockable' => false]);
+        $storeA = Store::where('is_active', true)->orderBy('id')->firstOrFail();
+        $storeB = Store::factory()->create(['name' => 'Branch Store']);
+
+        Sale::post(
+            ['customer_id' => $customer->id, 'store_id' => $storeA->id, 'invoice_type' => 'full', 'date' => '2026-06-01', 'payment_mode' => 'cash'],
+            [['item_id' => $item->id, 'quantity' => 1, 'rate' => 100, 'discount' => 0]],
+            $admin,
+        );
+        Sale::post(
+            ['customer_id' => $customer->id, 'store_id' => $storeB->id, 'invoice_type' => 'full', 'date' => '2026-06-01', 'payment_mode' => 'cash'],
+            [['item_id' => $item->id, 'quantity' => 1, 'rate' => 250, 'discount' => 0]],
+            $admin,
+        );
+
+        $storeAId = $storeA->id;
+    });
+
+    loginReportTestUser($domain);
+
+    $this->get("http://{$domain}/reports/sales-register?from=2026-06-01&to=2026-06-30&store_id={$storeAId}")
+        ->assertOk()
+        ->assertInertia(fn ($page) => $page
+            ->has('sales', 1)
+            ->where('sales.0.total', 100)
+            ->where('totals.total', 100)
+        );
+
+    $tenant->delete();
+});
+
+test('the purchase register can be narrowed to a single store', function () {
+    $domain = 'purchase-register-store-filter.tenant-test';
+    $tenant = provisionReportTestTenant($domain);
+
+    $storeAId = null;
+    $tenant->run(function () use (&$storeAId) {
+        reportTestOpenFiscalYear();
+        $admin = reportTestAdmin();
+        $supplier = Supplier::factory()->create();
+        $item = Item::factory()->create(['is_vatable' => false, 'is_stockable' => false]);
+        $storeA = Store::where('is_active', true)->orderBy('id')->firstOrFail();
+        $storeB = Store::factory()->create(['name' => 'Branch Store']);
+
+        Purchase::post(
+            ['supplier_id' => $supplier->id, 'store_id' => $storeA->id, 'date' => '2026-06-01', 'payment_mode' => 'cash'],
+            [['item_id' => $item->id, 'quantity' => 1, 'rate' => 100, 'discount' => 0]],
+            $admin,
+        );
+        Purchase::post(
+            ['supplier_id' => $supplier->id, 'store_id' => $storeB->id, 'date' => '2026-06-01', 'payment_mode' => 'cash'],
+            [['item_id' => $item->id, 'quantity' => 1, 'rate' => 250, 'discount' => 0]],
+            $admin,
+        );
+
+        $storeAId = $storeA->id;
+    });
+
+    loginReportTestUser($domain);
+
+    $this->get("http://{$domain}/reports/purchase-register?from=2026-06-01&to=2026-06-30&store_id={$storeAId}")
+        ->assertOk()
+        ->assertInertia(fn ($page) => $page
+            ->has('purchases', 1)
+            ->where('purchases.0.total', 100)
+            ->where('totals.total', 100)
+        );
+
+    $tenant->delete();
+});
+
+test('the sales VAT book can be narrowed to a single store', function () {
+    $domain = 'sales-vat-book-store-filter.tenant-test';
+    $tenant = provisionReportTestTenant($domain);
+
+    $storeAId = null;
+    $tenant->run(function () use (&$storeAId) {
+        reportTestOpenFiscalYear();
+        $admin = reportTestAdmin();
+        $customer = Customer::factory()->create();
+        $item = Item::factory()->create(['is_vatable' => true, 'is_stockable' => false]);
+        $storeA = Store::where('is_active', true)->orderBy('id')->firstOrFail();
+        $storeB = Store::factory()->create(['name' => 'Branch Store']);
+
+        Sale::post(
+            ['customer_id' => $customer->id, 'store_id' => $storeA->id, 'invoice_type' => 'full', 'date' => '2026-06-01', 'payment_mode' => 'cash'],
+            [['item_id' => $item->id, 'quantity' => 1, 'rate' => 100, 'discount' => 0]],
+            $admin,
+        );
+        Sale::post(
+            ['customer_id' => $customer->id, 'store_id' => $storeB->id, 'invoice_type' => 'full', 'date' => '2026-06-01', 'payment_mode' => 'cash'],
+            [['item_id' => $item->id, 'quantity' => 1, 'rate' => 200, 'discount' => 0]],
+            $admin,
+        );
+
+        $storeAId = $storeA->id;
+    });
+
+    loginReportTestUser($domain);
+
+    $this->get("http://{$domain}/reports/sales-vat-book?from=2026-06-01&to=2026-06-30&store_id={$storeAId}")
+        ->assertOk()
+        ->assertInertia(fn ($page) => $page
+            ->has('rows', 1)
+            ->where('totals.taxable_amount', 100)
+            ->where('totals.total', 113)
+        );
+
+    $tenant->delete();
+});
+
+test('the purchase VAT book can be narrowed to a single store', function () {
+    $domain = 'purchase-vat-book-store-filter.tenant-test';
+    $tenant = provisionReportTestTenant($domain);
+
+    $storeAId = null;
+    $tenant->run(function () use (&$storeAId) {
+        reportTestOpenFiscalYear();
+        $admin = reportTestAdmin();
+        $supplier = Supplier::factory()->create();
+        $item = Item::factory()->create(['is_vatable' => true, 'is_stockable' => false]);
+        $storeA = Store::where('is_active', true)->orderBy('id')->firstOrFail();
+        $storeB = Store::factory()->create(['name' => 'Branch Store']);
+
+        Purchase::post(
+            ['supplier_id' => $supplier->id, 'store_id' => $storeA->id, 'date' => '2026-06-01', 'payment_mode' => 'cash'],
+            [['item_id' => $item->id, 'quantity' => 1, 'rate' => 100, 'discount' => 0]],
+            $admin,
+        );
+        Purchase::post(
+            ['supplier_id' => $supplier->id, 'store_id' => $storeB->id, 'date' => '2026-06-01', 'payment_mode' => 'cash'],
+            [['item_id' => $item->id, 'quantity' => 1, 'rate' => 200, 'discount' => 0]],
+            $admin,
+        );
+
+        $storeAId = $storeA->id;
+    });
+
+    loginReportTestUser($domain);
+
+    $this->get("http://{$domain}/reports/purchase-vat-book?from=2026-06-01&to=2026-06-30&store_id={$storeAId}")
+        ->assertOk()
+        ->assertInertia(fn ($page) => $page
+            ->has('rows', 1)
+            ->where('totals.taxable_amount', 100)
+            ->where('totals.total', 113)
+        );
+
+    $tenant->delete();
+});
+
+test('aged receivables can be narrowed to a single store', function () {
+    $domain = 'aged-receivables-store-filter.tenant-test';
+    $tenant = provisionReportTestTenant($domain);
+
+    $storeAId = null;
+    $tenant->run(function () use (&$storeAId) {
+        reportTestOpenFiscalYear();
+        $admin = reportTestAdmin();
+        $customerA = Customer::factory()->create(['name' => 'Store A Customer']);
+        $customerB = Customer::factory()->create(['name' => 'Store B Customer']);
+        $item = Item::factory()->create(['is_vatable' => false, 'is_stockable' => false]);
+        $storeA = Store::where('is_active', true)->orderBy('id')->firstOrFail();
+        $storeB = Store::factory()->create(['name' => 'Branch Store']);
+
+        Sale::post(
+            ['customer_id' => $customerA->id, 'store_id' => $storeA->id, 'invoice_type' => 'full', 'date' => '2026-01-01', 'payment_mode' => 'credit'],
+            [['item_id' => $item->id, 'quantity' => 1, 'rate' => 100, 'discount' => 0]],
+            $admin,
+        );
+        Sale::post(
+            ['customer_id' => $customerB->id, 'store_id' => $storeB->id, 'invoice_type' => 'full', 'date' => '2026-01-01', 'payment_mode' => 'credit'],
+            [['item_id' => $item->id, 'quantity' => 1, 'rate' => 200, 'discount' => 0]],
+            $admin,
+        );
+
+        $storeAId = $storeA->id;
+    });
+
+    loginReportTestUser($domain);
+
+    $this->get("http://{$domain}/reports/aged-receivables?as_of=2026-01-10&store_id={$storeAId}")
+        ->assertOk()
+        ->assertInertia(fn ($page) => $page
+            ->has('rows', 1)
+            ->where('rows.0.party', 'Store A Customer')
+            ->where('totals.total', 100)
+        );
+
+    $tenant->delete();
+});
+
+test('aged payables can be narrowed to a single store', function () {
+    $domain = 'aged-payables-store-filter.tenant-test';
+    $tenant = provisionReportTestTenant($domain);
+
+    $storeAId = null;
+    $tenant->run(function () use (&$storeAId) {
+        reportTestOpenFiscalYear();
+        $admin = reportTestAdmin();
+        $supplierA = Supplier::factory()->create(['name' => 'Store A Supplier']);
+        $supplierB = Supplier::factory()->create(['name' => 'Store B Supplier']);
+        $item = Item::factory()->create(['is_vatable' => false, 'is_stockable' => false]);
+        $storeA = Store::where('is_active', true)->orderBy('id')->firstOrFail();
+        $storeB = Store::factory()->create(['name' => 'Branch Store']);
+
+        Purchase::post(
+            ['supplier_id' => $supplierA->id, 'store_id' => $storeA->id, 'date' => '2026-01-01', 'payment_mode' => 'credit'],
+            [['item_id' => $item->id, 'quantity' => 1, 'rate' => 100, 'discount' => 0]],
+            $admin,
+        );
+        Purchase::post(
+            ['supplier_id' => $supplierB->id, 'store_id' => $storeB->id, 'date' => '2026-01-01', 'payment_mode' => 'credit'],
+            [['item_id' => $item->id, 'quantity' => 1, 'rate' => 200, 'discount' => 0]],
+            $admin,
+        );
+
+        $storeAId = $storeA->id;
+    });
+
+    loginReportTestUser($domain);
+
+    $this->get("http://{$domain}/reports/aged-payables?as_of=2026-01-10&store_id={$storeAId}")
+        ->assertOk()
+        ->assertInertia(fn ($page) => $page
+            ->has('rows', 1)
+            ->where('rows.0.party', 'Store A Supplier')
+            ->where('totals.total', 100)
+        );
 
     $tenant->delete();
 });

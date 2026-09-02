@@ -4,11 +4,15 @@ namespace App\Http\Controllers\Tenant\Purchases;
 
 use App\Http\Controllers\Controller;
 use App\Models\Account;
+use App\Models\CompanySetting;
 use App\Models\Item;
 use App\Models\Purchase;
+use App\Models\Store;
 use App\Models\Supplier;
+use Barryvdh\DomPDF\Facade\Pdf;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
+use Illuminate\Http\Response as HttpResponse;
 use Inertia\Inertia;
 use Inertia\Response;
 use InvalidArgumentException;
@@ -26,6 +30,7 @@ class PurchaseController extends Controller
             'suppliers' => Supplier::query()->orderBy('name')->get(['id', 'name']),
             'items' => Item::query()->orderBy('name')->get(['id', 'name', 'unit', 'is_vatable', 'is_stockable']),
             'accounts' => Account::query()->orderBy('name')->get(['id', 'code', 'name']),
+            'stores' => Store::where('is_active', true)->orderBy('name')->get(['id', 'name']),
         ]);
     }
 
@@ -38,6 +43,7 @@ class PurchaseController extends Controller
             'date' => ['required', 'date'],
             'payment_mode' => ['required', 'in:cash,bank,partial,credit'],
             'bank_account_id' => ['nullable', 'exists:accounts,id'],
+            'store_id' => ['nullable', 'integer', 'exists:stores,id'],
             'discount' => ['nullable', 'numeric', 'min:0'],
             'vat_rate' => ['nullable', 'numeric', 'min:0'],
             'cash_amount' => ['nullable', 'numeric', 'min:0'],
@@ -74,5 +80,25 @@ class PurchaseController extends Controller
         }
 
         return redirect()->route('tenant.purchases.index')->with('status', 'Purchase cancelled.');
+    }
+
+    /**
+     * Streams a printable PDF purchase bill inline (not a forced download), so
+     * it opens in a new browser tab from a plain anchor link on the Index page.
+     */
+    public function print(Purchase $purchase): HttpResponse
+    {
+        $purchase->load(['supplier', 'bankAccount', 'lines.item', 'journalVoucher']);
+
+        $documentNumber = $purchase->journalVoucher
+            ? "PU-{$purchase->journalVoucher->voucher_number}"
+            : "PU-{$purchase->id}";
+
+        return Pdf::loadView('pdf.purchase', [
+            'purchase' => $purchase,
+            'company' => CompanySetting::current(),
+            'documentNumber' => $documentNumber,
+            'documentDate' => $purchase->date->format('Y-m-d'),
+        ])->stream("purchase-{$purchase->id}.pdf");
     }
 }

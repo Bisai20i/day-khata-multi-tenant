@@ -22,7 +22,7 @@ use InvalidArgumentException;
  * this was built from.
  */
 #[Fillable([
-    'customer_id', 'journal_voucher_id', 'invoice_type', 'date', 'payment_mode',
+    'customer_id', 'agent_id', 'commission_amount', 'store_id', 'journal_voucher_id', 'invoice_type', 'date', 'payment_mode',
     'bank_account_id', 'discount', 'taxable_amount', 'nontaxable_amount',
     'vat_rate', 'vat_amount', 'total', 'cash_amount', 'bank_amount',
     'tds_account_id', 'tds_amount', 'narration', 'status', 'created_by',
@@ -45,6 +45,7 @@ class Sale extends Model
             'cash_amount' => 'decimal:2',
             'bank_amount' => 'decimal:2',
             'tds_amount' => 'decimal:2',
+            'commission_amount' => 'decimal:2',
         ];
     }
 
@@ -54,6 +55,22 @@ class Sale extends Model
     public function customer(): BelongsTo
     {
         return $this->belongsTo(Customer::class);
+    }
+
+    /**
+     * @return BelongsTo<Agent, $this>
+     */
+    public function agent(): BelongsTo
+    {
+        return $this->belongsTo(Agent::class);
+    }
+
+    /**
+     * @return BelongsTo<Store, $this>
+     */
+    public function store(): BelongsTo
+    {
+        return $this->belongsTo(Store::class);
     }
 
     /**
@@ -105,11 +122,39 @@ class Sale extends Model
     }
 
     /**
+     * @return HasMany<ReceiptAllocation, $this>
+     */
+    public function receiptAllocations(): HasMany
+    {
+        return $this->hasMany(ReceiptAllocation::class);
+    }
+
+    /**
+     * total minus every non-cancelled return against this sale minus every
+     * non-cancelled Receipt allocated against it - the single source of
+     * truth both Receipt::post()'s over-allocation guard and
+     * SalesPurchaseReportController::agedReceivables() use, so they can
+     * never drift apart. (Previously agedReceivables() summed ALL returns
+     * including cancelled ones - a real pre-existing bug fixed here while
+     * extracting this formula, matching SalesReturn's own "already
+     * returned" guard, which already excludes cancelled returns.)
+     */
+    public function outstandingAmount(): float
+    {
+        return round(
+            (float) $this->total
+            - $this->returns()->where('status', '!=', 'cancelled')->sum('total')
+            - $this->receiptAllocations()->whereHas('receipt', fn ($q) => $q->where('status', '!=', 'cancelled'))->sum('amount'),
+            2
+        );
+    }
+
+    /**
      * Computes the sale's totals, posts one balanced JournalVoucher for
      * the money side, creates the Sale + SaleLine rows, and records a
      * stock movement per stockable line.
      *
-     * @param  array{customer_id: int, invoice_type: string, date: string, payment_mode: string, bank_account_id?: int|null, discount?: float, vat_rate?: float, cash_amount?: float|null, bank_amount?: float|null, tds_account_id?: int|null, tds_amount?: float, narration?: string|null}  $data
+     * @param  array{customer_id: int, invoice_type: string, date: string, payment_mode: string, bank_account_id?: int|null, discount?: float, vat_rate?: float, cash_amount?: float|null, bank_amount?: float|null, tds_account_id?: int|null, tds_amount?: float, agent_id?: int|null, commission_amount?: float, narration?: string|null}  $data
      * @param  array<int, array{item_id: int, quantity: float, rate: float, discount?: float}>  $lines
      */
     public static function post(array $data, array $lines, User $actor): self
@@ -118,6 +163,19 @@ class Sale extends Model
             $customer = Customer::findOrFail($data['customer_id']);
             $vatRate = (float) ($data['vat_rate'] ?? 13.00);
             $headerDiscount = (float) ($data['discount'] ?? 0);
+
+            $agentId = $data['agent_id'] ?? null;
+            $agent = $agentId ? Agent::findOrFail($agentId) : null;
+            $commissionAmount = round((float) ($data['commission_amount'] ?? 0), 2);
+
+            if ($commissionAmount < 0) {
+                throw new InvalidArgumentException('Commission amount cannot be negative.');
+            }
+
+            $storeId = isset($data['store_id']) ? (int) $data['store_id'] : Store::where('is_active', true)->orderBy('id')->value('id');
+            if (! $storeId) {
+                throw new InvalidArgumentException('No active store is configured.');
+            }
 
             $items = Item::whereIn('id', collect($lines)->pluck('item_id'))->get()->keyBy('id');
 
@@ -157,6 +215,13 @@ class Sale extends Model
             $vatAmount = round($taxableAmount * $vatRate / 100, 2);
             $total = round($taxableAmount + $nontaxableAmount + $vatAmount, 2);
 
+            // Soft sanity guard only (not a hard business rule, per design) -
+            // catches an obvious data-entry mistake (e.g. an extra digit)
+            // without blocking a legitimate high-commission scenario.
+            if ($commissionAmount > 0 && $total > 0 && $commissionAmount > $total * 5) {
+                throw new InvalidArgumentException('Commission amount is implausibly large relative to the sale total.');
+            }
+
             $tdsAmount = round((float) ($data['tds_amount'] ?? 0), 2);
             $tdsAccountId = $data['tds_account_id'] ?? null;
 
@@ -195,6 +260,16 @@ class Sale extends Model
                 $voucherLines[] = ['account_id' => $customer->account_id, 'debit' => 0, 'credit' => $tdsAmount, 'narration' => 'TDS withheld'];
             }
 
+            // Commission is a real expense the business owes the agent, not
+            // a customer-side adjustment like TDS above - posted as two
+            // extra, fully independent lines rather than netted against the
+            // customer's settlement amount.
+            if ($agentId && $commissionAmount > 0) {
+                $commissionExpenseId = Account::where('code', 'EXE22')->firstOrFail()->id;
+                $voucherLines[] = ['account_id' => $commissionExpenseId, 'debit' => $commissionAmount, 'credit' => 0, 'narration' => 'Sales commission'];
+                $voucherLines[] = ['account_id' => $agent->account_id, 'debit' => 0, 'credit' => $commissionAmount, 'narration' => 'Commission payable to agent'];
+            }
+
             if ($paymentMode !== 'credit') {
                 $cashAccountId = Account::where('code', 'AS1')->firstOrFail()->id;
 
@@ -228,6 +303,9 @@ class Sale extends Model
 
             $sale = static::create([
                 'customer_id' => $customer->id,
+                'agent_id' => $agentId,
+                'commission_amount' => $commissionAmount,
+                'store_id' => $storeId,
                 'journal_voucher_id' => $voucher->id,
                 'invoice_type' => $data['invoice_type'] ?? 'full',
                 'date' => $data['date'],
@@ -263,6 +341,7 @@ class Sale extends Model
                         StockMovementType::Sale,
                         $line['quantity'],
                         $data['date'],
+                        $storeId,
                         $saleLine,
                     );
                 }
@@ -290,6 +369,10 @@ class Sale extends Model
             ->whereHas('salesReturn', fn ($query) => $query->where('status', '!=', 'cancelled'))
             ->exists()) {
             throw new InvalidArgumentException('Cannot cancel a sale that has partial returns against it.');
+        }
+
+        if ($this->receiptAllocations()->whereHas('receipt', fn ($query) => $query->where('status', '!=', 'cancelled'))->exists()) {
+            throw new InvalidArgumentException('Cannot cancel a sale that has a payment received against it.');
         }
 
         DB::transaction(function () use ($actor, $reason) {

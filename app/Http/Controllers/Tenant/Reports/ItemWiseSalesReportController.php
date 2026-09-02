@@ -6,6 +6,7 @@ use App\Enums\FiscalYearStatus;
 use App\Http\Controllers\Controller;
 use App\Models\FiscalYear;
 use App\Models\SaleLine;
+use App\Models\Store;
 use Illuminate\Http\Request;
 use Inertia\Inertia;
 use Inertia\Response;
@@ -23,12 +24,14 @@ class ItemWiseSalesReportController extends Controller
     public function index(Request $request): Response
     {
         [$from, $to] = $this->resolveDateRange($request);
+        $storeId = $request->integer('store_id') ?: null;
 
         $rows = SaleLine::query()
             ->join('sales', 'sales.id', '=', 'sale_lines.sale_id')
             ->join('items', 'items.id', '=', 'sale_lines.item_id')
             ->where('sales.status', 'posted')
             ->whereBetween('sales.date', [$from, $to])
+            ->when($storeId, fn ($query) => $query->where('sales.store_id', $storeId))
             ->groupBy('sale_lines.item_id', 'items.name', 'items.unit')
             ->orderByDesc('total_value')
             ->selectRaw('sale_lines.item_id as item_id')
@@ -54,8 +57,10 @@ class ItemWiseSalesReportController extends Controller
                 'total_quantity' => round((float) $items->sum('total_quantity'), 4),
                 'total_value' => round((float) $items->sum('total_value'), 2),
             ],
+            'stores' => Store::where('is_active', true)->orderBy('name')->get(['id', 'name']),
             'from' => $from,
             'to' => $to,
+            'storeId' => $storeId,
         ]);
     }
 

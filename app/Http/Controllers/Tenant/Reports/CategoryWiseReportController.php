@@ -10,6 +10,7 @@ use App\Models\ItemCategory;
 use App\Models\ItemStockMovement;
 use App\Models\PurchaseLine;
 use App\Models\SaleLine;
+use App\Models\Store;
 use Illuminate\Http\Request;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Collection;
@@ -33,9 +34,10 @@ class CategoryWiseReportController extends Controller
     public function salesByCategory(Request $request): Response
     {
         [$from, $to] = $this->resolveDateRange($request);
+        $storeId = $request->integer('store_id') ?: null;
 
         $categories = ItemCategory::query()->with('subcategories')->orderBy('name')->get();
-        $aggregates = $this->categoryAggregatesFromSaleLines($from, $to);
+        $aggregates = $this->categoryAggregatesFromSaleLines($from, $to, $storeId);
 
         ['rows' => $rows, 'grandTotal' => $grandTotal] = $this->buildCategoryValueRows($categories, $aggregates);
 
@@ -44,6 +46,8 @@ class CategoryWiseReportController extends Controller
             'to' => $to,
             'rows' => $rows,
             'grandTotal' => $grandTotal,
+            'stores' => Store::where('is_active', true)->orderBy('name')->get(['id', 'name']),
+            'storeId' => $storeId,
         ]);
     }
 
@@ -53,9 +57,10 @@ class CategoryWiseReportController extends Controller
     public function purchaseByCategory(Request $request): Response
     {
         [$from, $to] = $this->resolveDateRange($request);
+        $storeId = $request->integer('store_id') ?: null;
 
         $categories = ItemCategory::query()->with('subcategories')->orderBy('name')->get();
-        $aggregates = $this->categoryAggregatesFromPurchaseLines($from, $to);
+        $aggregates = $this->categoryAggregatesFromPurchaseLines($from, $to, $storeId);
 
         ['rows' => $rows, 'grandTotal' => $grandTotal] = $this->buildCategoryValueRows($categories, $aggregates);
 
@@ -64,6 +69,8 @@ class CategoryWiseReportController extends Controller
             'to' => $to,
             'rows' => $rows,
             'grandTotal' => $grandTotal,
+            'stores' => Store::where('is_active', true)->orderBy('name')->get(['id', 'name']),
+            'storeId' => $storeId,
         ]);
     }
 
@@ -77,9 +84,10 @@ class CategoryWiseReportController extends Controller
     public function stockByCategory(Request $request): Response
     {
         $asOf = Carbon::parse($request->string('as_of')->toString() ?: now()->toDateString())->endOfDay();
+        $storeId = $request->integer('store_id') ?: null;
 
         $categories = ItemCategory::query()->with('subcategories')->orderBy('name')->get();
-        $aggregates = $this->categoryAggregatesFromStockMovements($asOf);
+        $aggregates = $this->categoryAggregatesFromStockMovements($asOf, $storeId);
 
         ['rows' => $rows, 'grandTotal' => $grandTotal] = $this->buildCategoryStockRows($categories, $aggregates);
 
@@ -87,6 +95,8 @@ class CategoryWiseReportController extends Controller
             'asOf' => $asOf->toDateString(),
             'rows' => $rows,
             'grandTotalValuation' => $grandTotal['valuation'],
+            'stores' => Store::where('is_active', true)->orderBy('name')->get(['id', 'name']),
+            'storeId' => $storeId,
         ]);
     }
 
@@ -96,13 +106,14 @@ class CategoryWiseReportController extends Controller
      *
      * @return array<string, array{quantity: float, value: float}> keyed "{categoryId}:{subcategoryId}" (empty string in place of the subcategoryId when the item has none)
      */
-    private function categoryAggregatesFromSaleLines(string $from, string $to): array
+    private function categoryAggregatesFromSaleLines(string $from, string $to, ?int $storeId): array
     {
         return SaleLine::query()
             ->join('sales', 'sales.id', '=', 'sale_lines.sale_id')
             ->join('items', 'items.id', '=', 'sale_lines.item_id')
             ->where('sales.status', 'posted')
             ->whereBetween('sales.date', [$from, $to])
+            ->when($storeId !== null, fn ($query) => $query->where('sales.store_id', $storeId))
             ->get([
                 'items.item_category_id as category_id',
                 'items.item_subcategory_id as subcategory_id',
@@ -123,13 +134,14 @@ class CategoryWiseReportController extends Controller
      *
      * @return array<string, array{quantity: float, value: float}> keyed "{categoryId}:{subcategoryId}" (empty string in place of the subcategoryId when the item has none)
      */
-    private function categoryAggregatesFromPurchaseLines(string $from, string $to): array
+    private function categoryAggregatesFromPurchaseLines(string $from, string $to, ?int $storeId): array
     {
         return PurchaseLine::query()
             ->join('purchases', 'purchases.id', '=', 'purchase_lines.purchase_id')
             ->join('items', 'items.id', '=', 'purchase_lines.item_id')
             ->where('purchases.status', 'posted')
             ->whereBetween('purchases.date', [$from, $to])
+            ->when($storeId !== null, fn ($query) => $query->where('purchases.store_id', $storeId))
             ->get([
                 'items.item_category_id as category_id',
                 'items.item_subcategory_id as subcategory_id',
@@ -152,12 +164,14 @@ class CategoryWiseReportController extends Controller
      *
      * @return array<string, array{quantity: float, valuation: float}> keyed "{categoryId}:{subcategoryId}" (empty string in place of the subcategoryId when the item has none)
      */
-    private function categoryAggregatesFromStockMovements(Carbon $asOf): array
+    private function categoryAggregatesFromStockMovements(Carbon $asOf, ?int $storeId): array
     {
         $aggregates = [];
 
-        Item::query()->where('is_stockable', true)->orderBy('name')->each(function (Item $item) use ($asOf, &$aggregates): void {
-            $movements = $item->stockMovements()->where('cancelled', false)->get();
+        Item::query()->where('is_stockable', true)->orderBy('name')->each(function (Item $item) use ($asOf, $storeId, &$aggregates): void {
+            $movements = $item->stockMovements()->where('cancelled', false)
+                ->when($storeId !== null, fn ($query) => $query->where('store_id', $storeId))
+                ->get();
 
             $closing = (float) $movements
                 ->filter(fn (ItemStockMovement $movement) => $movement->date->lte($asOf))

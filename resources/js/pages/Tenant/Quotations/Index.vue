@@ -1,7 +1,7 @@
 <script setup>
 import { computed, h, ref, watch } from 'vue';
 import { router, usePage } from '@inertiajs/vue3';
-import { ArrowRightCircle, Pencil, Trash2 } from '@lucide/vue';
+import { ArrowRightCircle, Pencil, Printer, Trash2 } from '@lucide/vue';
 import AppLayout from '@/layouts/AppLayout.vue';
 import Card from '@/components/ui/Card.vue';
 import Button from '@/components/ui/Button.vue';
@@ -118,46 +118,65 @@ const columns = [
         numeric: false,
         cell: ({ row }) => {
             const quotation = row.original;
-            if (quotation.status !== 'draft') return null;
 
-            return h('div', { class: 'flex items-center gap-1' }, [
-                h(Tooltip, { label: 'Convert to sale' }, () =>
-                    h(
-                        'button',
-                        {
-                            type: 'button',
-                            class: 'flex h-[26px] w-[26px] items-center justify-center bg-primary-tint text-primary transition-colors duration-150',
-                            'aria-label': 'Convert to sale',
-                            onClick: () => convertToSale(quotation),
-                        },
-                        [h(ArrowRightCircle, { class: 'h-[13px] w-[13px]' })],
-                    ),
+            const printBtn = h(Tooltip, { label: 'Print' }, () =>
+                h(
+                    'a',
+                    {
+                        href: `/quotations/${quotation.id}/print`,
+                        target: '_blank',
+                        rel: 'noopener',
+                        class: 'flex h-[26px] w-[26px] items-center justify-center bg-bg-subtle text-text-faint transition-colors duration-150 hover:bg-primary-tint hover:text-primary',
+                        'aria-label': 'Print quotation',
+                    },
+                    [h(Printer, { class: 'h-[13px] w-[13px]' })],
                 ),
-                h(Tooltip, { label: 'Edit' }, () =>
-                    h(
-                        'button',
-                        {
-                            type: 'button',
-                            class: 'flex h-[26px] w-[26px] items-center justify-center bg-bg-subtle text-text-faint transition-colors duration-150 hover:bg-primary-tint hover:text-primary',
-                            'aria-label': 'Edit quotation',
-                            onClick: () => edit(quotation),
-                        },
-                        [h(Pencil, { class: 'h-[13px] w-[13px]' })],
-                    ),
+            );
+
+            if (quotation.status !== 'draft') {
+                return h('div', { class: 'flex items-center gap-1' }, [printBtn]);
+            }
+
+            const convertBtn = h(Tooltip, { label: 'Convert to sale' }, () =>
+                h(
+                    'button',
+                    {
+                        type: 'button',
+                        class: 'flex h-[26px] w-[26px] items-center justify-center bg-primary-tint text-primary transition-colors duration-150',
+                        'aria-label': 'Convert to sale',
+                        onClick: () => convertToSale(quotation),
+                    },
+                    [h(ArrowRightCircle, { class: 'h-[13px] w-[13px]' })],
                 ),
-                h(Tooltip, { label: 'Delete' }, () =>
-                    h(
-                        'button',
-                        {
-                            type: 'button',
-                            class: 'flex h-[26px] w-[26px] items-center justify-center bg-bg-subtle text-text-faint transition-colors duration-150 hover:bg-danger-bg hover:text-danger',
-                            'aria-label': 'Delete quotation',
-                            onClick: () => destroy(quotation),
-                        },
-                        [h(Trash2, { class: 'h-[13px] w-[13px]' })],
-                    ),
+            );
+
+            const editBtn = h(Tooltip, { label: 'Edit' }, () =>
+                h(
+                    'button',
+                    {
+                        type: 'button',
+                        class: 'flex h-[26px] w-[26px] items-center justify-center bg-bg-subtle text-text-faint transition-colors duration-150 hover:bg-primary-tint hover:text-primary',
+                        'aria-label': 'Edit quotation',
+                        onClick: () => edit(quotation),
+                    },
+                    [h(Pencil, { class: 'h-[13px] w-[13px]' })],
                 ),
-            ]);
+            );
+
+            const deleteBtn = h(Tooltip, { label: 'Delete' }, () =>
+                h(
+                    'button',
+                    {
+                        type: 'button',
+                        class: 'flex h-[26px] w-[26px] items-center justify-center bg-bg-subtle text-text-faint transition-colors duration-150 hover:bg-danger-bg hover:text-danger',
+                        'aria-label': 'Delete quotation',
+                        onClick: () => destroy(quotation),
+                    },
+                    [h(Trash2, { class: 'h-[13px] w-[13px]' })],
+                ),
+            );
+
+            return h('div', { class: 'flex items-center gap-1' }, [printBtn, convertBtn, editBtn, deleteBtn]);
         },
     },
 ];

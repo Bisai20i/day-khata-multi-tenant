@@ -24,4 +24,6 @@ enum VoucherType: string
     case FixedAssetPurchase = 'fixed_asset_purchase';
     case Depreciation = 'depreciation';
     case AssetDisposal = 'asset_disposal';
+    case Receipt = 'receipt';
+    case Payment = 'payment';
 }

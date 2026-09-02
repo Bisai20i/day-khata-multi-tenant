@@ -6,6 +6,7 @@ import Card from '@/components/ui/Card.vue';
 import Button from '@/components/ui/Button.vue';
 import Input from '@/components/ui/Input.vue';
 import Combobox from '@/components/ui/Combobox.vue';
+import NepaliDateInput from '@/components/ui/NepaliDateInput.vue';
 
 const props = defineProps({
     customers: { type: Array, default: () => [] },
@@ -114,7 +115,7 @@ function submit() {
                 </div>
                 <div>
                     <label class="mb-1 block text-sm font-semibold text-text-base">Date</label>
-                    <Input v-model="form.date" type="date" required />
+                    <NepaliDateInput v-model="form.date" required />
                     <p v-if="form.errors.date" class="mt-1 text-sm text-danger">{{ form.errors.date }}</p>
                 </div>
                 <div>

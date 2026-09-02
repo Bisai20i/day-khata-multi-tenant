@@ -1,7 +1,7 @@
 <script setup>
 import { ref, onMounted } from 'vue';
 import { Link, router, usePage } from '@inertiajs/vue3';
-import { ArrowLeft, Building2, CirclePause, CirclePlay, LayoutDashboard, Trash2 } from '@lucide/vue';
+import { ArrowLeft, Building2, CirclePause, CirclePlay, LayoutDashboard, LogIn, Trash2 } from '@lucide/vue';
 import AppLayout from '@/layouts/AppLayout.vue';
 import Card from '@/components/ui/Card.vue';
 import Badge from '@/components/ui/Badge.vue';
@@ -44,6 +44,14 @@ function suspend() {
 
 function resume() {
     router.post(`/tenants/${props.tenant.id}/resume`);
+}
+
+function impersonate() {
+    // The response is an Inertia::location() (not a normal redirect) since
+    // the target is the tenant's own domain - Inertia's client
+    // automatically performs a full-page navigation there instead of
+    // trying to follow it as a same-origin visit.
+    router.post(`/tenants/${props.tenant.id}/impersonate`);
 }
 
 function confirmDelete() {
@@ -92,6 +100,11 @@ function confirmDelete() {
                 <Button v-else-if="tenant.status === 'suspended'" variant="secondary" tone="blue" @click="resume">
                     <CirclePlay class="size-4" />
                     Resume
+                </Button>
+
+                <Button v-if="tenant.status === 'active'" variant="secondary" tone="blue" @click="impersonate">
+                    <LogIn class="size-4" />
+                    Impersonate admin
                 </Button>
 
                 <Button variant="secondary" tone="purple" @click="showDeleteModal = true">

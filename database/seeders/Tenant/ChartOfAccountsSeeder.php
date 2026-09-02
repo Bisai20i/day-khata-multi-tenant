@@ -27,7 +27,13 @@ class ChartOfAccountsSeeder extends Seeder
      * "Sundry Debtors" and "Sundry Creditors" are load-bearing names: they
      * are looked up by exact string in App\Models\Concerns\HasLedgerAccount,
      * used by Customer and Supplier. Do not rename without updating that
-     * side too.
+     * side too. "Sales Agents" is the same kind of load-bearing name, used
+     * by App\Models\Agent - filed under Current Liabilities alongside
+     * Sundry Creditors since a posted commission is money the business owes
+     * the agent, not an asset. EXE22 "Sales Commission Expense" is the
+     * matching expense account Sale::post() debits when a commission is
+     * posted (see App\Models\Sale), added when the Sales Agent Commission
+     * phase was built.
      *
      * "Income" and "Expenses" are marked is_profit_and_loss=true - the
      * ledger's year-end close (App\Models\FiscalYear::close()) sweeps every
@@ -64,6 +70,7 @@ class ChartOfAccountsSeeder extends Seeder
             ['group' => 'Current Assets', 'name' => 'Cash-In-Hand'],
             ['group' => 'Current Assets', 'name' => 'Stock'],
             ['group' => 'Current Liabilities', 'name' => 'Sundry Creditors'],
+            ['group' => 'Current Liabilities', 'name' => 'Sales Agents'],
             ['group' => 'Capital Account', 'name' => 'Reserve Surplus'],
         ])->mapWithKeys(fn (array $subgroup) => [$subgroup['name'] => AccountSubgroup::create([
             'account_group_id' => $groups[$subgroup['group']]->id,
@@ -84,6 +91,7 @@ class ChartOfAccountsSeeder extends Seeder
             ['group' => 'Indirect Expenses', 'code' => 'EXE20', 'name' => 'Depreciation Expense'],
             ['group' => 'Indirect Expenses', 'code' => 'EXE21', 'name' => 'Loss on Asset Disposal'],
             ['group' => 'Indirect Income', 'code' => 'INI30', 'name' => 'Gain on Asset Disposal'],
+            ['group' => 'Indirect Expenses', 'code' => 'EXE22', 'name' => 'Sales Commission Expense'],
         ];
 
         foreach ($defaultAccounts as $account) {

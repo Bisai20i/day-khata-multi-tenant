@@ -7,16 +7,19 @@ import Button from '@/components/ui/Button.vue';
 import Input from '@/components/ui/Input.vue';
 import Select from '@/components/ui/Select.vue';
 import Combobox from '@/components/ui/Combobox.vue';
+import NepaliDateInput from '@/components/ui/NepaliDateInput.vue';
 
 const props = defineProps({
     suppliers: { type: Array, default: () => [] },
     items: { type: Array, default: () => [] },
     accounts: { type: Array, default: () => [] },
+    stores: { type: Array, default: () => [] },
 });
 
 const emit = defineEmits(['cancel', 'posted']);
 
 const supplierOptions = computed(() => props.suppliers.map((s) => ({ value: s.id, label: s.name })));
+const storeOptions = computed(() => props.stores.map((s) => ({ value: s.id, label: s.name })));
 const itemOptions = computed(() => props.items.map((i) => ({ value: i.id, label: `${i.name} (${i.unit})` })));
 const accountOptions = computed(() =>
     props.accounts.map((account) => ({
@@ -40,6 +43,7 @@ function emptyLine() {
 
 const form = useForm({
     supplier_id: null,
+    store_id: null,
     bill_number: '',
     pan_number: '',
     date: '',
@@ -136,7 +140,7 @@ function submit() {
                 </div>
                 <div>
                     <label class="mb-1 block text-sm font-semibold text-text-base">Date</label>
-                    <Input v-model="form.date" type="date" required />
+                    <NepaliDateInput v-model="form.date" required />
                     <p v-if="form.errors.date" class="mt-1 text-sm text-danger">{{ form.errors.date }}</p>
                 </div>
                 <div>
@@ -146,6 +150,16 @@ function submit() {
                 <div>
                     <label class="mb-1 block text-sm font-semibold text-text-base">PAN Number</label>
                     <Input v-model="form.pan_number" type="text" placeholder="Optional" />
+                </div>
+                <div>
+                    <label class="mb-1 block text-sm font-semibold text-text-base">Store</label>
+                    <Combobox
+                        :model-value="form.store_id"
+                        :options="storeOptions"
+                        placeholder="Default store"
+                        @update:model-value="(v) => (form.store_id = v)"
+                    />
+                    <p v-if="form.errors.store_id" class="mt-1 text-sm text-danger">{{ form.errors.store_id }}</p>
                 </div>
                 <div>
                     <label class="mb-1 block text-sm font-semibold text-text-base">Payment Mode</label>

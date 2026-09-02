@@ -3,7 +3,8 @@ import { computed, ref } from 'vue';
 import { router, usePage } from '@inertiajs/vue3';
 import AppLayout from '@/layouts/AppLayout.vue';
 import Card from '@/components/ui/Card.vue';
-import Input from '@/components/ui/Input.vue';
+import NepaliDateInput from '@/components/ui/NepaliDateInput.vue';
+import Select from '@/components/ui/Select.vue';
 import DataTable from '@/components/ui/DataTable.vue';
 import { navGroups } from '@/lib/nav-items.js';
 
@@ -12,6 +13,8 @@ const props = defineProps({
     to: { type: String, required: true },
     rows: { type: Array, default: () => [] },
     grandTotalValuation: { type: Number, default: 0 },
+    stores: { type: Array, default: () => [] },
+    storeId: { type: [Number, null], default: null },
 });
 
 const page = usePage();
@@ -20,11 +23,17 @@ const navItems = computed(() => navGroups(isAdmin.value));
 
 const fromInput = ref(props.from);
 const toInput = ref(props.to);
+const storeId = ref(props.storeId);
+
+const storeOptions = computed(() => [
+    { value: null, label: 'All stores' },
+    ...props.stores.map((store) => ({ value: store.id, label: store.name })),
+]);
 
 function applyFilter() {
     router.get(
         window.location.pathname,
-        { from: fromInput.value, to: toInput.value },
+        { from: fromInput.value, to: toInput.value, store_id: storeId.value ?? undefined },
         { preserveState: true, preserveScroll: true },
     );
 }
@@ -46,11 +55,15 @@ const columns = [
         <div class="mb-4 flex flex-wrap items-end gap-3">
             <div class="w-40">
                 <label class="mb-1 block text-[11px] font-semibold text-text-muted">From</label>
-                <Input v-model="fromInput" type="date" />
+                <NepaliDateInput v-model="fromInput" />
             </div>
             <div class="w-40">
                 <label class="mb-1 block text-[11px] font-semibold text-text-muted">To</label>
-                <Input v-model="toInput" type="date" />
+                <NepaliDateInput v-model="toInput" />
+            </div>
+            <div class="w-56">
+                <label class="mb-1 block text-[11px] font-semibold text-text-muted">Store</label>
+                <Select v-model="storeId" :options="storeOptions" />
             </div>
             <button
                 type="button"

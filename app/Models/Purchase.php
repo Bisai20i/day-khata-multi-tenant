@@ -26,7 +26,7 @@ use InvalidArgumentException;
  * account; a "service" purchase is an item with is_stockable=false.
  */
 #[Fillable([
-    'supplier_id', 'journal_voucher_id', 'bill_number', 'pan_number', 'date',
+    'supplier_id', 'store_id', 'journal_voucher_id', 'bill_number', 'pan_number', 'date',
     'payment_mode', 'bank_account_id', 'discount', 'taxable_amount',
     'nontaxable_amount', 'vat_rate', 'vat_amount', 'total', 'cash_amount',
     'bank_amount', 'tds_account_id', 'tds_amount', 'narration', 'status',
@@ -59,6 +59,14 @@ class Purchase extends Model
     public function supplier(): BelongsTo
     {
         return $this->belongsTo(Supplier::class);
+    }
+
+    /**
+     * @return BelongsTo<Store, $this>
+     */
+    public function store(): BelongsTo
+    {
+        return $this->belongsTo(Store::class);
     }
 
     /**
@@ -110,6 +118,32 @@ class Purchase extends Model
     }
 
     /**
+     * @return HasMany<PaymentAllocation, $this>
+     */
+    public function paymentAllocations(): HasMany
+    {
+        return $this->hasMany(PaymentAllocation::class);
+    }
+
+    /**
+     * total minus every non-cancelled return against this purchase minus
+     * every non-cancelled Payment allocated against it - the single source
+     * of truth both Payment::post()'s over-allocation guard and
+     * SalesPurchaseReportController::agedPayables() use. Mirrors Sale::
+     * outstandingAmount() exactly, including its incidental "exclude
+     * cancelled returns" bugfix.
+     */
+    public function outstandingAmount(): float
+    {
+        return round(
+            (float) $this->total
+            - $this->returns()->where('status', '!=', 'cancelled')->sum('total')
+            - $this->paymentAllocations()->whereHas('payment', fn ($q) => $q->where('status', '!=', 'cancelled'))->sum('amount'),
+            2
+        );
+    }
+
+    /**
      * Builds and posts the purchase's JournalVoucher, then creates the
      * Purchase + PurchaseLine rows and (for stockable items) records a
      * stock movement per line.
@@ -123,6 +157,11 @@ class Purchase extends Model
             $supplier = Supplier::findOrFail($data['supplier_id']);
             $vatRate = (float) ($data['vat_rate'] ?? 13.00);
             $headerDiscount = round((float) ($data['discount'] ?? 0), 2);
+
+            $storeId = isset($data['store_id']) ? (int) $data['store_id'] : Store::where('is_active', true)->orderBy('id')->value('id');
+            if (! $storeId) {
+                throw new InvalidArgumentException('No active store is configured.');
+            }
 
             $lineModels = [];
             $vatableSubtotal = 0.0;
@@ -287,6 +326,7 @@ class Purchase extends Model
 
             $purchase = static::create([
                 'supplier_id' => $supplier->id,
+                'store_id' => $storeId,
                 'journal_voucher_id' => $voucher->id,
                 'bill_number' => $data['bill_number'] ?? null,
                 'pan_number' => $data['pan_number'] ?? null,
@@ -323,6 +363,7 @@ class Purchase extends Model
                         StockMovementType::Purchase,
                         $line['quantity'],
                         $data['date'],
+                        $storeId,
                         $purchaseLine,
                         $line['rate'],
                     );
@@ -352,6 +393,10 @@ class Purchase extends Model
             ->whereHas('purchaseReturn', fn ($q) => $q->where('status', '!=', 'cancelled'))
             ->exists()) {
             throw new InvalidArgumentException('Cannot cancel a purchase that has partial returns against it.');
+        }
+
+        if ($this->paymentAllocations()->whereHas('payment', fn ($q) => $q->where('status', '!=', 'cancelled'))->exists()) {
+            throw new InvalidArgumentException('Cannot cancel a purchase that has a payment made against it.');
         }
 
         DB::transaction(function () use ($actor, $reason) {

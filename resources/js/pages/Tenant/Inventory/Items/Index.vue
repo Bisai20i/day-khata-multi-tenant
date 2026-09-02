@@ -9,6 +9,7 @@ import DataTable from '@/components/ui/DataTable.vue';
 import Modal from '@/components/ui/Modal.vue';
 import Input from '@/components/ui/Input.vue';
 import Select from '@/components/ui/Select.vue';
+import NepaliDateInput from '@/components/ui/NepaliDateInput.vue';
 import RowActions from '@/components/ui/RowActions.vue';
 import { useToast } from '@/composables/useToast';
 import { navGroups } from '@/lib/nav-items.js';
@@ -61,6 +62,7 @@ const form = useForm({
     unit: '',
     hs_code: '',
     min_stock: '',
+    expiry_date: '',
     is_vatable: false,
     is_stockable: true,
     is_active: true,
@@ -72,6 +74,7 @@ form.transform((data) => ({
     description: data.description === '' ? null : data.description,
     hs_code: data.hs_code === '' ? null : data.hs_code,
     min_stock: data.min_stock === '' ? null : data.min_stock,
+    expiry_date: data.expiry_date === '' ? null : data.expiry_date,
 }));
 
 const subcategoryOptions = computed(() => {
@@ -101,6 +104,12 @@ function openEdit(item) {
     form.unit = item.unit;
     form.hs_code = item.hs_code ?? '';
     form.min_stock = item.min_stock ?? '';
+    // item.expiry_date comes back from the server as a full ISO datetime
+    // string (Eloquent's default 'date'-cast serialization), not the plain
+    // "YYYY-MM-DD" NepaliDateInput/adToBs() require - truncate to the date
+    // portion so editing an item with an existing expiry date doesn't
+    // silently blank out the BS fields.
+    form.expiry_date = item.expiry_date ? item.expiry_date.slice(0, 10) : '';
     form.is_vatable = !!item.is_vatable;
     form.is_stockable = !!item.is_stockable;
     form.is_active = !!item.is_active;
@@ -131,6 +140,28 @@ function destroy(item) {
     router.delete(`/items/${item.id}`);
 }
 
+// Client-side only - mirrors Item::scopeExpired()/scopeExpiringSoon()'s
+// boundary rule (an item expiring exactly today counts as expired, not
+// expiring soon) using plain "YYYY-MM-DD" string comparison, which sorts
+// correctly the same way whereDate() does server-side. item.expiry_date may
+// be null (most items won't have one) or a full ISO datetime string, hence
+// the slice(0, 10).
+const EXPIRING_SOON_WITHIN_DAYS = 30;
+
+function expiryStatus(item) {
+    if (!item.expiry_date) return null;
+
+    const expiry = item.expiry_date.slice(0, 10);
+    const today = new Date().toISOString().slice(0, 10);
+    if (expiry <= today) return 'expired';
+
+    const soonUntil = new Date();
+    soonUntil.setDate(soonUntil.getDate() + EXPIRING_SOON_WITHIN_DAYS);
+    if (expiry <= soonUntil.toISOString().slice(0, 10)) return 'soon';
+
+    return null;
+}
+
 const columns = [
     { accessorKey: 'name', header: 'Name' },
     {
@@ -146,6 +177,17 @@ const columns = [
         cell: ({ row }) => row.original.subcategory?.name ?? '—',
     },
     { accessorKey: 'unit', header: 'Unit', numeric: false },
+    {
+        id: 'expiry',
+        header: 'Expiry',
+        numeric: false,
+        cell: ({ row }) => {
+            const status = expiryStatus(row.original);
+            if (status === 'expired') return h(Badge, { variant: 'danger', pill: true }, () => 'Expired');
+            if (status === 'soon') return h(Badge, { variant: 'warning', pill: true }, () => 'Expiring soon');
+            return '—';
+        },
+    },
     {
         id: 'vatable',
         header: 'Vatable',
@@ -246,10 +288,18 @@ const columns = [
                     </div>
                 </div>
 
-                <div>
-                    <label for="min_stock" class="mb-1 block text-sm font-semibold text-text-base">Minimum stock</label>
-                    <Input id="min_stock" v-model="form.min_stock" type="number" step="0.01" class="max-w-[160px]" />
-                    <p v-if="form.errors.min_stock" class="mt-1 text-sm text-danger">{{ form.errors.min_stock }}</p>
+                <div class="grid grid-cols-2 gap-4">
+                    <div>
+                        <label for="min_stock" class="mb-1 block text-sm font-semibold text-text-base">Minimum stock</label>
+                        <Input id="min_stock" v-model="form.min_stock" type="number" step="0.01" class="max-w-[160px]" />
+                        <p v-if="form.errors.min_stock" class="mt-1 text-sm text-danger">{{ form.errors.min_stock }}</p>
+                    </div>
+
+                    <div>
+                        <label class="mb-1 block text-sm font-semibold text-text-base">Expiry date</label>
+                        <NepaliDateInput v-model="form.expiry_date" />
+                        <p v-if="form.errors.expiry_date" class="mt-1 text-sm text-danger">{{ form.errors.expiry_date }}</p>
+                    </div>
                 </div>
 
                 <div class="flex flex-wrap items-center gap-4">

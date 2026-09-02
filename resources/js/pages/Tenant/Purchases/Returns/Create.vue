@@ -5,10 +5,12 @@ import Card from '@/components/ui/Card.vue';
 import Button from '@/components/ui/Button.vue';
 import Input from '@/components/ui/Input.vue';
 import Combobox from '@/components/ui/Combobox.vue';
+import NepaliDateInput from '@/components/ui/NepaliDateInput.vue';
 
 const props = defineProps({
     purchases: { type: Array, default: () => [] },
     accounts: { type: Array, default: () => [] },
+    stores: { type: Array, default: () => [] },
 });
 
 const emit = defineEmits(['cancel', 'posted']);
@@ -27,6 +29,8 @@ const accountOptions = computed(() =>
     })),
 );
 
+const storeOptions = computed(() => props.stores.map((s) => ({ value: s.id, label: s.name })));
+
 function emptyLineFor(purchaseLine) {
     return {
         purchase_line_id: purchaseLine.id,
@@ -42,6 +46,7 @@ const form = useForm({
     date: '',
     reason: '',
     refund_account_id: null,
+    store_id: null,
     lines: [],
 });
 
@@ -60,6 +65,7 @@ function submit() {
         date: data.date,
         reason: data.reason || null,
         refund_account_id: data.refund_account_id || null,
+        store_id: data.store_id || null,
         lines: data.lines
             .filter((line) => Number(line.quantity) > 0)
             .map((line) => ({
@@ -85,7 +91,7 @@ function submit() {
         </p>
 
         <form class="flex flex-col gap-4" @submit.prevent="submit">
-            <div class="grid grid-cols-4 gap-4">
+            <div class="grid grid-cols-5 gap-4">
                 <div>
                     <label class="mb-1 block text-sm font-semibold text-text-base">Purchase</label>
                     <Combobox
@@ -98,7 +104,7 @@ function submit() {
                 </div>
                 <div>
                     <label class="mb-1 block text-sm font-semibold text-text-base">Date</label>
-                    <Input v-model="form.date" type="date" required />
+                    <NepaliDateInput v-model="form.date" required />
                     <p v-if="form.errors.date" class="mt-1 text-sm text-danger">{{ form.errors.date }}</p>
                 </div>
                 <div>
@@ -114,6 +120,16 @@ function submit() {
                         @update:model-value="(v) => (form.refund_account_id = v)"
                     />
                     <p v-if="form.errors.refund_account_id" class="mt-1 text-sm text-danger">{{ form.errors.refund_account_id }}</p>
+                </div>
+                <div>
+                    <label class="mb-1 block text-sm font-semibold text-text-base">Store</label>
+                    <Combobox
+                        :model-value="form.store_id"
+                        :options="storeOptions"
+                        placeholder="Default store"
+                        @update:model-value="(v) => (form.store_id = v)"
+                    />
+                    <p v-if="form.errors.store_id" class="mt-1 text-sm text-danger">{{ form.errors.store_id }}</p>
                 </div>
             </div>
 

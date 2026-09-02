@@ -171,28 +171,57 @@ this file for direction.
    the actual dual-connection split remains real future work once there's a MySQL deployment target.
 8. ~~Fixed Assets / Quotations / Employee management~~ Built and committed 2026-09-02, see above and
    `mem.md`.
-9. **Picked as next: a Payment/Receipt module** (customer receipts against credit sales, supplier
-   payments against credit purchases). This directly closes the real, already-documented MVP gap in
-   the Aged Receivables/Aged Payables reports: this app has no dedicated payment-receipt feature
-   anywhere, so a credit invoice settled via a generic Journal Voucher keeps aging forever in those
-   reports even though it's actually been paid (see `mem.md`'s 2026-08-29 first-session entry). Picked
-   over the other open items below because it's real feature work with no missing infrastructure
-   blocking it (unlike the browser smoke-test and MySQL items) and it should follow the same
-   established pattern this codebase already uses for Sales/Purchase/Fixed-Assets: a model posting
-   through the existing `JournalVoucher::post()` engine, thin controller, Vue page, Pest tests. Likely
-   shape (confirm against `Customer`/`Supplier`'s `account_id` and outstanding-balance logic already
-   used by Aged Receivables/Payables before building): a `Receipt`/`Payment` model posting `[debit
-   cash/bank, credit customer]` or `[debit supplier, credit cash/bank]`, allocatable against one or more
-   specific outstanding Sale/Purchase invoices (so Aged Receivables/Payables can net it out per-invoice
-   the same way returns already do), not just a lump customer/supplier balance.
+9. ~~Payment/Receipt module~~ Built 2026-09-02 via 2 parallel forks (plan-mode-designed first): a
+   `Receipt`/`Payment` model posting a plain `[debit cash/bank, credit customer]` /
+   `[debit supplier, credit cash/bank]` voucher, optionally allocated against one or more specific
+   outstanding Sale/Purchase invoices via a new `ReceiptAllocation`/`PaymentAllocation` table (this
+   app's first N:M "one document settles against N of another" pattern). Closes the real,
+   previously-documented Aged Receivables/Aged Payables MVP gap via a new shared `Sale::
+   outstandingAmount()`/`Purchase::outstandingAmount()` helper both the report and the new module use
+   — as long as payment is recorded through Receipt/Payment rather than a raw Journal Voucher, which
+   still bypasses this. See `mem.md`'s 2026-09-02 second-pass entry for the full breakdown, including
+   an incidental pre-existing bug fixed (cancelled returns were still counting against an invoice's
+   outstanding balance) and a real cancel()-signature inconsistency caught in review (fixed to require
+   a `$reason`, matching every other cancel-with-reversal method in this app). **Not yet verified by
+   the user's own test/build run, not yet committed** — ask before committing.
+10. **Complete the remaining system, full build-out before any further testing.** 2026-09-02: the user
+    wants full feature parity with legacy (plus real fixes where legacy was broken) built out entirely
+    before the next test/build verification pass, given legacy has no support left. Full phase-by-phase
+    plan lives in `plans/complete-system-build.md` (not summarized here — read that file, it's the
+    living tracker; keep its "Status" lines current as phases land, same as this file's own roadmap
+    discipline). Scope was narrowed via research before committing to it: capital/service purchase
+    splits turned out to already be done (`Purchase::post()` already unifies them via `item.account_id`
+    — no legacy port needed), POS/walk-in is frontend-only (legacy's POS posts through the same
+    sale-recording path as the regular invoice screen), and Nepali BS calendar support is an
+    input/output layer, not a database migration (legacy stores Gregorian everywhere, converts only at
+    the UI boundary via a self-contained table-based algorithm). Real per-store stock scoping is
+    confirmed in-scope despite having **no legacy precedent** (legacy's own "multi-store" is a cosmetic
+    label field only) — this is genuinely new design, the largest/riskiest item in the plan. Sales Agent
+    commission will be built properly (real FK + real ledger posting) rather than porting legacy's
+    version, which is thin and has a confirmed bug (a report query referencing a nonexistent `cancel`
+    column). **Phase 0 fully done and verified 2026-09-02** — multi-store core, Nepali BS calendar, the
+    report `store_id` filter sweep, and the date-input retrofit across every existing transaction and
+    report page. See the plan doc and `mem.md` for the full breakdown, including a mid-flight design
+    amendment (store_id made optional-with-fallback at the `post()` layer instead of hard-required, to
+    avoid breaking 29 existing call sites) and a real gap caught along the way (4 report tests called
+    `Item::recordStockMovement()` directly, bypassing that fallback — fixed). **Phase 1 fully complete
+    2026-09-02** — all 12 items built and hand-verified (Settings, Item Varieties, Activity Log, Backup,
+    Admin Impersonation, Dashboard Notices, POS, Item Expiry Tracking, Fiscal-Year Archive DB, CI
+    skeleton, Sales Agent + Commission, PDF/print output). See `plans/complete-system-build.md` and
+    `mem.md` for the full breakdown. **Nothing in this whole effort has been run through the user's own
+    test/build pass yet, and nothing has been committed** — that's Phase 2, the one remaining step.
 
 ## Explicit non-goals for now (deferred, not forgotten)
 
 - Dark mode (matches the legacy app; `03-design-system-frontend.md` §2 flags it as a conscious
   future decision, not an oversight).
 - The ~79-key legacy privilege port — the current `admin`/`staff` role split is a placeholder.
-- Per-tenant MySQL credentials, DEFINER-pinned DDL roles, archive databases — all MySQL-specific,
-  all deferred until the SQLite-portable core is further along.
+- Per-tenant MySQL credentials, DEFINER-pinned DDL roles — MySQL-specific, deferred until the
+  SQLite-portable core is further along. (Per-tenant **fiscal-year archive databases** are no longer a
+  non-goal — see roadmap item 10 / `plans/complete-system-build.md` Phase 1 item 9, now in scope.)
+- Per-store *financial* reporting (P&L/ledger scoped by store, not just stock) — roadmap item 10's
+  multi-store work is stock-scoping only, deliberately, to keep it bounded. Revisit only if a real need
+  surfaces.
 
 ## How we work on this project
 

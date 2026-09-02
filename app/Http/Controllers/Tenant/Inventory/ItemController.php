@@ -65,6 +65,7 @@ class ItemController extends Controller
             'unit' => ['required', 'string', 'max:50'],
             'hs_code' => ['nullable', 'string', 'max:30'],
             'min_stock' => ['nullable', 'numeric', 'min:0'],
+            'expiry_date' => ['nullable', 'date'],
             'is_vatable' => ['boolean'],
             'is_stockable' => ['boolean'],
             'is_active' => ['boolean'],

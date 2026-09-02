@@ -22,5 +22,6 @@ Route::name('tenant.')->group(function () {
         Route::get('/', [SalesReturnController::class, 'index'])->name('index');
         Route::post('/', [SalesReturnController::class, 'store'])->name('store');
         Route::post('/{salesReturn}/cancel', [SalesReturnController::class, 'cancel'])->name('cancel');
+        Route::get('/{salesReturn}/print', [SalesReturnController::class, 'print'])->name('print');
     });
 });

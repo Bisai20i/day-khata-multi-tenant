@@ -3,7 +3,8 @@ import { computed, ref } from 'vue';
 import { router, usePage } from '@inertiajs/vue3';
 import AppLayout from '@/layouts/AppLayout.vue';
 import Card from '@/components/ui/Card.vue';
-import Input from '@/components/ui/Input.vue';
+import NepaliDateInput from '@/components/ui/NepaliDateInput.vue';
+import Select from '@/components/ui/Select.vue';
 import Button from '@/components/ui/Button.vue';
 import { navGroups } from '@/lib/nav-items.js';
 
@@ -12,6 +13,8 @@ const props = defineProps({
     to: { type: String, required: true },
     rows: { type: Array, default: () => [] },
     grandTotal: { type: Object, default: () => ({ quantity: 0, value: 0 }) },
+    stores: { type: Array, default: () => [] },
+    storeId: { type: [Number, null], default: null },
 });
 
 const page = usePage();
@@ -20,9 +23,19 @@ const navItems = computed(() => navGroups(isAdmin.value));
 
 const from = ref(props.from);
 const to = ref(props.to);
+const storeId = ref(props.storeId);
+
+const storeOptions = computed(() => [
+    { value: null, label: 'All stores' },
+    ...props.stores.map((store) => ({ value: store.id, label: store.name })),
+]);
 
 function applyFilter() {
-    router.get(window.location.pathname, { from: from.value, to: to.value }, { preserveState: true, preserveScroll: true });
+    router.get(
+        window.location.pathname,
+        { from: from.value, to: to.value, store_id: storeId.value ?? undefined },
+        { preserveState: true, preserveScroll: true },
+    );
 }
 
 function qty(value) {
@@ -44,11 +57,15 @@ function money(value) {
             <div class="flex flex-wrap items-end gap-3">
                 <div>
                     <label class="mb-1 block text-xs font-semibold text-text-muted">From</label>
-                    <Input v-model="from" type="date" />
+                    <NepaliDateInput v-model="from" />
                 </div>
                 <div>
                     <label class="mb-1 block text-xs font-semibold text-text-muted">To</label>
-                    <Input v-model="to" type="date" />
+                    <NepaliDateInput v-model="to" />
+                </div>
+                <div class="w-56">
+                    <label class="mb-1 block text-xs font-semibold text-text-muted">Store</label>
+                    <Select v-model="storeId" :options="storeOptions" />
                 </div>
                 <Button variant="primary" tone="purple" @click="applyFilter">Apply</Button>
             </div>

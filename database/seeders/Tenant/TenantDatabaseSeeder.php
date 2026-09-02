@@ -4,6 +4,7 @@ namespace Database\Seeders\Tenant;
 
 use App\Models\Permission;
 use App\Models\Role;
+use App\Models\Store;
 use Illuminate\Database\Console\Seeds\WithoutModelEvents;
 use Illuminate\Database\Seeder;
 
@@ -39,6 +40,8 @@ class TenantDatabaseSeeder extends Seeder
         $admin->permissions()->attach($permissions->pluck('id'));
 
         Role::create(['name' => 'Staff', 'slug' => 'staff']);
+
+        Store::create(['name' => 'Main Store', 'is_active' => true]);
 
         $this->call(ChartOfAccountsSeeder::class);
     }

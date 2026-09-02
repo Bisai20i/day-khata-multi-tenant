@@ -21,7 +21,7 @@ use ValueError;
  * trail. Opening stock is just this same flow with reason_type='opening',
  * which forces direction to 'in' regardless of what was passed.
  */
-#[Fillable(['date', 'note', 'total_value', 'status', 'cancelled_by', 'cancelled_at', 'cancel_reason', 'created_by'])]
+#[Fillable(['date', 'store_id', 'note', 'total_value', 'status', 'cancelled_by', 'cancelled_at', 'cancel_reason', 'created_by'])]
 class StockAdjustment extends Model
 {
     /**
@@ -42,6 +42,14 @@ class StockAdjustment extends Model
     public function lines(): HasMany
     {
         return $this->hasMany(StockAdjustmentLine::class);
+    }
+
+    /**
+     * @return BelongsTo<Store, $this>
+     */
+    public function store(): BelongsTo
+    {
+        return $this->belongsTo(Store::class);
     }
 
     /**
@@ -66,7 +74,7 @@ class StockAdjustment extends Model
      * no-op on SQLite/tests, a real lock on MySQL/prod - same pattern
      * VoucherSequence::class already uses for its own counter).
      *
-     * @param  array{date: string, note?: string|null}  $data
+     * @param  array{date: string, note?: string|null, store_id?: int|null}  $data
      * @param  array<int, array{item_id: int, direction: string, reason_type: string, quantity: float, unit_cost_rate?: float|null, remarks?: string|null}>  $lines
      */
     public static function post(array $data, array $lines, User $actor): self
@@ -74,6 +82,12 @@ class StockAdjustment extends Model
         return DB::transaction(function () use ($data, $lines, $actor) {
             if (empty($lines)) {
                 throw new InvalidArgumentException('At least one line is required.');
+            }
+
+            $storeId = isset($data['store_id']) ? (int) $data['store_id'] : Store::where('is_active', true)->orderBy('id')->value('id');
+
+            if (! $storeId) {
+                throw new InvalidArgumentException('No active store is configured.');
             }
 
             $items = Item::whereIn('id', collect($lines)->pluck('item_id'))->get()->keyBy('id');
@@ -155,6 +169,7 @@ class StockAdjustment extends Model
 
             $adjustment = static::create([
                 'date' => $data['date'],
+                'store_id' => $storeId,
                 'note' => $data['note'] ?? null,
                 'total_value' => $totalValue,
                 'status' => 'posted',
@@ -180,6 +195,7 @@ class StockAdjustment extends Model
                     $movementType,
                     $line['quantity'],
                     $data['date'],
+                    $storeId,
                     $adjustmentLine,
                     $line['unit_cost_rate'],
                 );

@@ -1,7 +1,7 @@
 <script setup>
 import { computed, h, ref, watch } from 'vue';
-import { router, useForm, usePage } from '@inertiajs/vue3';
-import { Lock } from '@lucide/vue';
+import { Link, router, useForm, usePage } from '@inertiajs/vue3';
+import { Archive, Lock } from '@lucide/vue';
 import AppLayout from '@/layouts/AppLayout.vue';
 import Card from '@/components/ui/Card.vue';
 import Button from '@/components/ui/Button.vue';
@@ -9,6 +9,7 @@ import Input from '@/components/ui/Input.vue';
 import Modal from '@/components/ui/Modal.vue';
 import Select from '@/components/ui/Select.vue';
 import DataTable from '@/components/ui/DataTable.vue';
+import NepaliDateInput from '@/components/ui/NepaliDateInput.vue';
 import Badge from '@/components/ui/Badge.vue';
 import Tooltip from '@/components/ui/Tooltip.vue';
 import { useToast } from '@/composables/useToast';
@@ -110,6 +111,18 @@ function submitClose() {
     closeForm.post(`/fiscal-years/${closingYear.value.id}/close`, { onSuccess: closeCloseModal });
 }
 
+// Archiving copies a closed year's ledger out to its own read-only
+// cold-storage file (see App\Support\FiscalYear\FiscalYearArchiver) -
+// never deletes/moves anything, so it's safe to just confirm-and-fire
+// rather than needing a dedicated modal the way close() does.
+function archiveFiscalYear(fiscalYear) {
+    if (! confirm(`Archive "${fiscalYear.name}"? This copies its ledger to a read-only snapshot and can only be done once.`)) {
+        return;
+    }
+
+    router.post(`/fiscal-years/${fiscalYear.id}/archive`);
+}
+
 const columns = [
     { accessorKey: 'name', header: 'Name' },
     { accessorKey: 'start_date', header: 'Start Date' },
@@ -129,26 +142,73 @@ const columns = [
         id: 'actions',
         header: 'Actions',
         numeric: false,
-        cell: ({ row }) =>
-            row.original.status === 'open'
-                ? h(
-                      Tooltip,
-                      { label: 'Close fiscal year' },
-                      {
-                          default: () =>
-                              h(
-                                  'button',
-                                  {
-                                      type: 'button',
-                                      class: 'flex h-[26px] w-[26px] items-center justify-center bg-primary-tint text-primary transition-[filter] duration-150 ease-out hover:brightness-95',
-                                      'aria-label': 'Close fiscal year',
-                                      onClick: () => openClose(row.original),
-                                  },
-                                  [h(Lock, { class: 'h-[13px] w-[13px]', 'aria-hidden': 'true' })],
-                              ),
-                      },
-                  )
-                : null,
+        cell: ({ row }) => {
+            const buttons = [];
+            const fiscalYear = row.original;
+
+            if (fiscalYear.status === 'open') {
+                buttons.push(
+                    h(
+                        Tooltip,
+                        { label: 'Close fiscal year' },
+                        {
+                            default: () =>
+                                h(
+                                    'button',
+                                    {
+                                        type: 'button',
+                                        class: 'flex h-[26px] w-[26px] items-center justify-center bg-primary-tint text-primary transition-[filter] duration-150 ease-out hover:brightness-95',
+                                        'aria-label': 'Close fiscal year',
+                                        onClick: () => openClose(fiscalYear),
+                                    },
+                                    [h(Lock, { class: 'h-[13px] w-[13px]', 'aria-hidden': 'true' })],
+                                ),
+                        },
+                    ),
+                );
+            }
+
+            if (isAdmin.value && fiscalYear.status === 'closed') {
+                buttons.push(
+                    fiscalYear.archive
+                        ? h(
+                              Tooltip,
+                              { label: 'View archived year' },
+                              {
+                                  default: () =>
+                                      h(
+                                          Link,
+                                          {
+                                              href: `/fiscal-year-archives/${fiscalYear.archive.id}`,
+                                              class: 'flex h-[26px] w-[26px] items-center justify-center bg-primary-tint text-primary transition-[filter] duration-150 ease-out hover:brightness-95',
+                                              'aria-label': 'View archived year',
+                                          },
+                                          [h(Archive, { class: 'h-[13px] w-[13px]', 'aria-hidden': 'true' })],
+                                      ),
+                              },
+                          )
+                        : h(
+                              Tooltip,
+                              { label: 'Archive fiscal year' },
+                              {
+                                  default: () =>
+                                      h(
+                                          'button',
+                                          {
+                                              type: 'button',
+                                              class: 'flex h-[26px] w-[26px] items-center justify-center bg-primary-tint text-primary transition-[filter] duration-150 ease-out hover:brightness-95',
+                                              'aria-label': 'Archive fiscal year',
+                                              onClick: () => archiveFiscalYear(fiscalYear),
+                                          },
+                                          [h(Archive, { class: 'h-[13px] w-[13px]', 'aria-hidden': 'true' })],
+                                      ),
+                              },
+                          ),
+                );
+            }
+
+            return buttons.length ? h('div', { class: 'flex items-center gap-1.5' }, buttons) : null;
+        },
     },
 ];
 </script>
@@ -174,13 +234,13 @@ const columns = [
 
                 <div>
                     <label for="start_date" class="mb-1 block text-sm font-semibold text-text-base">Start Date</label>
-                    <Input id="start_date" v-model="form.start_date" type="date" required />
+                    <NepaliDateInput id="start_date" v-model="form.start_date" required />
                     <p v-if="form.errors.start_date" class="mt-1 text-sm text-danger">{{ form.errors.start_date }}</p>
                 </div>
 
                 <div>
                     <label for="end_date" class="mb-1 block text-sm font-semibold text-text-base">End Date</label>
-                    <Input id="end_date" v-model="form.end_date" type="date" required />
+                    <NepaliDateInput id="end_date" v-model="form.end_date" required />
                     <p v-if="form.errors.end_date" class="mt-1 text-sm text-danger">{{ form.errors.end_date }}</p>
                 </div>
             </form>

@@ -1,12 +1,16 @@
 <script setup>
-import { computed } from 'vue';
+import { computed, ref } from 'vue';
 import { usePage } from '@inertiajs/vue3';
-import { Users, Truck, Package, BookOpen } from '@lucide/vue';
+import { Users, Truck, Package, BookOpen, Megaphone, AlertTriangle, X } from '@lucide/vue';
 import AppLayout from '@/layouts/AppLayout.vue';
 import Card from '@/components/ui/Card.vue';
 import { navGroups } from '@/lib/nav-items.js';
 
 const props = defineProps({
+    notices: {
+        type: Array,
+        default: () => [],
+    },
     kpis: {
         type: Object,
         default: () => ({
@@ -24,7 +28,22 @@ const props = defineProps({
         type: Array,
         default: () => [],
     },
+    expiringItemsCount: {
+        type: Number,
+        default: 0,
+    },
 });
+
+// Dismissal is in-page only, not persisted anywhere - an active notice
+// reappears on the next visit/reload by design (this MVP has no
+// per-user "read" tracking).
+const dismissedNoticeIds = ref(new Set());
+
+const visibleNotices = computed(() => props.notices.filter((notice) => !dismissedNoticeIds.value.has(notice.id)));
+
+function dismissNotice(id) {
+    dismissedNoticeIds.value = new Set(dismissedNoticeIds.value).add(id);
+}
 
 const page = usePage();
 const isAdmin = computed(() => page.props.auth?.user?.role?.slug === 'admin');
@@ -47,6 +66,28 @@ function initial(name) {
 
 <template>
     <AppLayout title="Dashboard" :nav-items="navItems">
+        <div v-if="visibleNotices.length" class="mb-5 flex flex-col gap-2">
+            <div
+                v-for="notice in visibleNotices"
+                :key="notice.id"
+                class="flex items-start gap-3 border-[1.5px] border-primary bg-primary-tint px-4 py-3"
+            >
+                <Megaphone class="mt-0.5 size-4 shrink-0 text-primary" aria-hidden="true" />
+                <div class="min-w-0 flex-1">
+                    <p class="text-sm font-bold text-text-strong">{{ notice.title }}</p>
+                    <p class="mt-0.5 text-sm whitespace-pre-line text-text-base">{{ notice.body }}</p>
+                </div>
+                <button
+                    type="button"
+                    class="shrink-0 text-text-muted transition-colors duration-150 hover:text-text-strong"
+                    aria-label="Dismiss"
+                    @click="dismissNotice(notice.id)"
+                >
+                    <X class="size-4" aria-hidden="true" />
+                </button>
+            </div>
+        </div>
+
         <h2 class="mb-4 text-base font-bold text-text-strong">Dashboard</h2>
 
         <div class="mb-5 grid grid-cols-4 gap-4">
@@ -66,6 +107,18 @@ function initial(name) {
                 <p class="text-sm text-text-muted">{{ card.label }}</p>
             </Card>
         </div>
+
+        <Card v-if="expiringItemsCount > 0" variant="panel" class="mb-5">
+            <div class="flex items-center gap-3">
+                <div class="flex size-9 shrink-0 items-center justify-center bg-warning-bg">
+                    <AlertTriangle class="size-5 text-warning-text" aria-hidden="true" />
+                </div>
+                <div>
+                    <p class="text-sm font-bold text-text-strong">{{ expiringItemsCount }} item(s) expiring soon</p>
+                    <p class="text-xs text-text-muted">Expiring within the next 30 days</p>
+                </div>
+            </div>
+        </Card>
 
         <div class="grid grid-cols-[2fr_1fr] gap-5">
             <Card variant="panel" title="Recent Customers">

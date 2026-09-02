@@ -48,6 +48,8 @@ Route::middleware([
             ->name('tenant.login.store');
     });
 
+    require base_path('routes/tenant-impersonation.php');
+
     Route::middleware('auth:web')->group(function () {
         Route::post('/logout', [AuthenticatedSessionController::class, 'destroy'])
             ->name('tenant.logout');
@@ -55,6 +57,7 @@ Route::middleware([
         Route::get('/dashboard', [DashboardController::class, 'index'])->name('tenant.dashboard');
 
         require base_path('routes/tenant-business.php');
+        require base_path('routes/tenant-stores.php');
         require base_path('routes/tenant-ledger.php');
         require base_path('routes/tenant-sales.php');
         require base_path('routes/tenant-purchase.php');
@@ -74,5 +77,15 @@ Route::middleware([
         require base_path('routes/tenant-employees.php');
         require base_path('routes/tenant-fixed-assets.php');
         require base_path('routes/tenant-quotations.php');
+        require base_path('routes/tenant-receipts.php');
+        require base_path('routes/tenant-payments.php');
+        require base_path('routes/tenant-settings.php');
+        require base_path('routes/tenant-item-varieties.php');
+        require base_path('routes/tenant-backups.php');
+        require base_path('routes/tenant-notices.php');
+        require base_path('routes/tenant-activity-log.php');
+        require base_path('routes/tenant-pos.php');
+        require base_path('routes/tenant-fiscal-year-archive.php');
+        require base_path('routes/tenant-agents.php');
     });
 });

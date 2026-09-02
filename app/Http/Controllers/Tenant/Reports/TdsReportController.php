@@ -9,6 +9,7 @@ use App\Models\Purchase;
 use App\Models\PurchaseReturn;
 use App\Models\Sale;
 use App\Models\SalesReturn;
+use App\Models\Store;
 use Illuminate\Http\Request;
 use Illuminate\Support\Collection;
 use Inertia\Inertia;
@@ -31,12 +32,14 @@ class TdsReportController extends Controller
     public function index(Request $request): Response
     {
         [$from, $to] = $this->resolveDateRange($request);
+        $storeId = $request->integer('store_id') ?: null;
 
         $sales = Sale::query()
             ->with(['customer:id,name', 'journalVoucher:id,voucher_number', 'tdsAccount:id,name', 'returns'])
             ->where('status', 'posted')
             ->whereNotNull('tds_account_id')
             ->whereBetween('date', [$from, $to])
+            ->when($storeId, fn ($query) => $query->where('store_id', $storeId))
             ->orderBy('date')
             ->orderBy('id')
             ->get();
@@ -51,6 +54,7 @@ class TdsReportController extends Controller
             ->where('status', 'posted')
             ->whereNotNull('tds_account_id')
             ->whereBetween('date', [$from, $to])
+            ->when($storeId, fn ($query) => $query->where('store_id', $storeId))
             ->orderBy('date')
             ->orderBy('id')
             ->get();
@@ -69,8 +73,10 @@ class TdsReportController extends Controller
             'salesTotal' => $salesTotal,
             'purchasesTotal' => $purchasesTotal,
             'grandTotal' => round($salesTotal + $purchasesTotal, 2),
+            'stores' => Store::where('is_active', true)->orderBy('name')->get(['id', 'name']),
             'from' => $from,
             'to' => $to,
+            'storeId' => $storeId,
         ]);
     }
 

@@ -9,6 +9,7 @@ use App\Models\PurchaseReturn;
 use App\Models\Role;
 use App\Models\Sale;
 use App\Models\SalesReturn;
+use App\Models\Store;
 use App\Models\Supplier;
 use App\Models\Tenant;
 use App\Models\User;
@@ -378,6 +379,71 @@ test('a sale, purchase, and return outside the date range are all excluded', fun
             ->where('inputVat.returns', 0)
             ->where('inputVat.net', 0)
             ->where('netVatPayable', 0)
+        );
+
+    $tenant->delete();
+});
+
+test('the VAT summary can be narrowed to a single store, netting only that store\'s sales, purchases, and returns', function () {
+    $domain = 'vat-summary-store-filter.tenant-test';
+    $tenant = provisionVatSummaryTestTenant($domain);
+
+    $storeAId = null;
+    $tenant->run(function () use (&$storeAId) {
+        vatSummaryTestOpenFiscalYear();
+        $admin = vatSummaryTestAdmin();
+        $customer = Customer::factory()->create();
+        $supplier = Supplier::factory()->create();
+        $item = Item::factory()->create(['is_vatable' => true, 'is_stockable' => false]);
+        $storeA = Store::where('is_active', true)->orderBy('id')->firstOrFail();
+        $storeB = Store::factory()->create(['name' => 'Branch Store']);
+
+        // Store A: 2 units @ 500 = 1000 taxable => 130 VAT, then a partial
+        // return of 1 unit reverses half (500 taxable => 65 VAT).
+        $saleA = Sale::post(
+            ['customer_id' => $customer->id, 'store_id' => $storeA->id, 'invoice_type' => 'full', 'date' => '2026-06-01', 'payment_mode' => 'cash'],
+            [['item_id' => $item->id, 'quantity' => 2, 'rate' => 500, 'discount' => 0]],
+            $admin,
+        );
+        SalesReturn::post(
+            ['sale_id' => $saleA->id, 'store_id' => $storeA->id, 'date' => '2026-06-10'],
+            [['sale_line_id' => $saleA->lines()->first()->id, 'quantity' => 1]],
+            $admin,
+        );
+
+        Purchase::post(
+            ['supplier_id' => $supplier->id, 'store_id' => $storeA->id, 'date' => '2026-06-01', 'payment_mode' => 'cash'],
+            [['item_id' => $item->id, 'quantity' => 1, 'rate' => 100, 'discount' => 0]],
+            $admin,
+        );
+
+        // Store B: a much larger sale and purchase that must not leak into
+        // Store A's totals below.
+        Sale::post(
+            ['customer_id' => $customer->id, 'store_id' => $storeB->id, 'invoice_type' => 'full', 'date' => '2026-06-01', 'payment_mode' => 'cash'],
+            [['item_id' => $item->id, 'quantity' => 1, 'rate' => 5000, 'discount' => 0]],
+            $admin,
+        );
+        Purchase::post(
+            ['supplier_id' => $supplier->id, 'store_id' => $storeB->id, 'date' => '2026-06-01', 'payment_mode' => 'cash'],
+            [['item_id' => $item->id, 'quantity' => 1, 'rate' => 2000, 'discount' => 0]],
+            $admin,
+        );
+
+        $storeAId = $storeA->id;
+    });
+
+    loginVatSummaryTestUser($domain);
+
+    // Store A only: output gross 130, returns 65, net 65; input gross 13, net 13.
+    $this->get("http://{$domain}/reports/vat-summary?from=2026-06-01&to=2026-06-30&store_id={$storeAId}")
+        ->assertOk()
+        ->assertInertia(fn ($page) => $page
+            ->where('outputVat.gross', 130)
+            ->where('outputVat.returns', 65)
+            ->where('outputVat.net', 65)
+            ->where('inputVat.gross', 13)
+            ->where('inputVat.net', 13)
         );
 
     $tenant->delete();

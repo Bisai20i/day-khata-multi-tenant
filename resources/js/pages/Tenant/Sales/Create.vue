@@ -7,21 +7,27 @@ import Button from '@/components/ui/Button.vue';
 import Input from '@/components/ui/Input.vue';
 import Select from '@/components/ui/Select.vue';
 import Combobox from '@/components/ui/Combobox.vue';
+import NepaliDateInput from '@/components/ui/NepaliDateInput.vue';
 
 const props = defineProps({
     customers: { type: Array, default: () => [] },
     items: { type: Array, default: () => [] },
     accounts: { type: Array, default: () => [] },
+    stores: { type: Array, default: () => [] },
+    agents: { type: Array, default: () => [] },
 });
 
 const emit = defineEmits(['cancel', 'posted']);
 
 const customerOptions = computed(() => props.customers.map((c) => ({ value: c.id, label: c.name })));
+const storeOptions = computed(() => props.stores.map((s) => ({ value: s.id, label: s.name })));
 const accountOptions = computed(() =>
     props.accounts.map((a) => ({ value: a.id, label: a.code ? `${a.code} — ${a.name}` : a.name })),
 );
 const itemOptions = computed(() => props.items.map((i) => ({ value: i.id, label: `${i.name} (${i.unit})` })));
 const itemsById = computed(() => Object.fromEntries(props.items.map((i) => [i.id, i])));
+const agentOptions = computed(() => props.agents.map((a) => ({ value: a.id, label: a.name })));
+const agentsById = computed(() => Object.fromEntries(props.agents.map((a) => [a.id, a])));
 
 const invoiceTypeOptions = [
     { value: 'full', label: 'Full tax invoice' },
@@ -41,6 +47,7 @@ function emptyLine() {
 
 const form = useForm({
     customer_id: null,
+    store_id: null,
     invoice_type: 'full',
     date: '',
     payment_mode: 'cash',
@@ -51,6 +58,8 @@ const form = useForm({
     bank_amount: '',
     tds_account_id: null,
     tds_amount: '',
+    agent_id: null,
+    commission_amount: '',
     narration: '',
     lines: [emptyLine()],
 });
@@ -90,6 +99,20 @@ const partialBalanced = computed(() => {
     return Math.abs(sum - settlementDue.value) < 0.01;
 });
 
+function selectAgent(agentId) {
+    form.agent_id = agentId;
+
+    if (!agentId) {
+        form.commission_amount = '';
+        return;
+    }
+
+    const agent = agentsById.value[agentId];
+    if (agent?.commission_rate) {
+        form.commission_amount = ((Number(agent.commission_rate) * total.value) / 100).toFixed(2);
+    }
+}
+
 function submit() {
     form.transform((data) => ({
         ...data,
@@ -98,6 +121,7 @@ function submit() {
         cash_amount: data.payment_mode === 'partial' ? Number(data.cash_amount) || 0 : undefined,
         bank_amount: data.payment_mode === 'partial' ? Number(data.bank_amount) || 0 : undefined,
         tds_amount: Number(data.tds_amount) || 0,
+        commission_amount: data.agent_id ? Number(data.commission_amount) || 0 : undefined,
         lines: data.lines.map((line) => ({
             item_id: line.item_id,
             quantity: Number(line.quantity) || 0,
@@ -123,7 +147,7 @@ function submit() {
         </p>
 
         <form class="flex flex-col gap-4" @submit.prevent="submit">
-            <div class="grid grid-cols-3 gap-4">
+            <div class="grid grid-cols-4 gap-4">
                 <div>
                     <label class="mb-1 block text-sm font-semibold text-text-base">Customer</label>
                     <Combobox
@@ -140,8 +164,18 @@ function submit() {
                 </div>
                 <div>
                     <label class="mb-1 block text-sm font-semibold text-text-base">Date</label>
-                    <Input v-model="form.date" type="date" required />
+                    <NepaliDateInput v-model="form.date" required />
                     <p v-if="form.errors.date" class="mt-1 text-sm text-danger">{{ form.errors.date }}</p>
+                </div>
+                <div>
+                    <label class="mb-1 block text-sm font-semibold text-text-base">Store</label>
+                    <Combobox
+                        :model-value="form.store_id"
+                        :options="storeOptions"
+                        placeholder="Default store"
+                        @update:model-value="(v) => (form.store_id = v)"
+                    />
+                    <p v-if="form.errors.store_id" class="mt-1 text-sm text-danger">{{ form.errors.store_id }}</p>
                 </div>
             </div>
 
@@ -237,6 +271,24 @@ function submit() {
                 <div>
                     <label class="mb-1 block text-sm font-semibold text-text-base">TDS amount</label>
                     <Input v-model="form.tds_amount" type="number" min="0" step="0.01" placeholder="0.00" />
+                </div>
+            </div>
+
+            <div class="grid grid-cols-2 gap-4 border-t-[1.5px] border-border pt-4">
+                <div>
+                    <label class="mb-1 block text-sm font-semibold text-text-base">Sales agent (optional)</label>
+                    <Combobox
+                        :model-value="form.agent_id"
+                        :options="agentOptions"
+                        placeholder="Select agent"
+                        @update:model-value="selectAgent"
+                    />
+                    <p v-if="form.errors.agent_id" class="mt-1 text-sm text-danger">{{ form.errors.agent_id }}</p>
+                </div>
+                <div>
+                    <label class="mb-1 block text-sm font-semibold text-text-base">Commission amount</label>
+                    <Input v-model="form.commission_amount" type="number" min="0" step="0.01" placeholder="0.00" :disabled="!form.agent_id" />
+                    <p v-if="form.errors.commission_amount" class="mt-1 text-sm text-danger">{{ form.errors.commission_amount }}</p>
                 </div>
             </div>
 

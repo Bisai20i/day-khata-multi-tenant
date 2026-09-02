@@ -3,7 +3,7 @@ import { computed, ref } from 'vue';
 import { router, usePage } from '@inertiajs/vue3';
 import AppLayout from '@/layouts/AppLayout.vue';
 import Card from '@/components/ui/Card.vue';
-import Input from '@/components/ui/Input.vue';
+import NepaliDateInput from '@/components/ui/NepaliDateInput.vue';
 import Button from '@/components/ui/Button.vue';
 import { navGroups } from '@/lib/nav-items.js';
 
@@ -57,11 +57,11 @@ function money(value) {
             <div class="flex flex-wrap items-end gap-3">
                 <div>
                     <label class="mb-1 block text-xs font-semibold text-text-muted">From</label>
-                    <Input v-model="from" type="date" />
+                    <NepaliDateInput v-model="from" />
                 </div>
                 <div>
                     <label class="mb-1 block text-xs font-semibold text-text-muted">To</label>
-                    <Input v-model="to" type="date" />
+                    <NepaliDateInput v-model="to" />
                 </div>
                 <Button variant="primary" tone="purple" @click="applyFilter">Apply</Button>
             </div>

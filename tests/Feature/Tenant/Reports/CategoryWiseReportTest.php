@@ -9,6 +9,7 @@ use App\Models\ItemCategory;
 use App\Models\ItemSubcategory;
 use App\Models\Purchase;
 use App\Models\Sale;
+use App\Models\Store;
 use App\Models\Supplier;
 use App\Models\Tenant;
 use App\Models\User;
@@ -223,16 +224,19 @@ test('stock by category sums weighted-average valuation per category as of a cut
         $gadget = Item::factory()->create(['item_category_id' => $electronics->id, 'item_subcategory_id' => $smallElectronics->id, 'name' => 'Gadget', 'is_stockable' => true]);
         $chair = Item::factory()->create(['item_category_id' => $furniture->id, 'item_subcategory_id' => null, 'name' => 'Chair', 'is_stockable' => true]);
 
+        $storeId = Store::where('is_active', true)->orderBy('id')->firstOrFail()->id;
+
         // Widget: closing = 10 + 5 - 3 = 12; avgCost = (10*100 + 5*130) / 15 = 110; valuation = 1320.
-        $widget->recordStockMovement(StockMovementType::Purchase, 10, '2026-01-01', null, 100);
-        $widget->recordStockMovement(StockMovementType::Purchase, 5, '2026-02-10', null, 130);
-        $widget->recordStockMovement(StockMovementType::Sale, 3, '2026-02-15');
+        $widget->recordStockMovement(StockMovementType::Purchase, 10, '2026-01-01', $storeId, unitCostRate: 100);
+        $widget->recordStockMovement(StockMovementType::Purchase, 5, '2026-02-10', $storeId, unitCostRate: 130);
+        $widget->recordStockMovement(StockMovementType::Sale, 3, '2026-02-15', $storeId);
 
         // After the as_of cutoff (2026-02-28) - must not affect closing or valuation.
-        $widget->recordStockMovement(StockMovementType::Purchase, 20, '2026-03-01', null, 200);
+        $widget->recordStockMovement(StockMovementType::Purchase, 20, '2026-03-01', $storeId, unitCostRate: 200);
 
         // Cancelled - must be excluded from every sum.
         $widget->stockMovements()->create([
+            'store_id' => $storeId,
             'movement_type' => StockMovementType::AdjustmentIn,
             'quantity' => 100,
             'date' => '2026-02-20',
@@ -240,10 +244,10 @@ test('stock by category sums weighted-average valuation per category as of a cut
         ]);
 
         // Gadget (Small Electronics): closing = 4; avgCost = 50; valuation = 200.
-        $gadget->recordStockMovement(StockMovementType::Purchase, 4, '2026-01-15', null, 50);
+        $gadget->recordStockMovement(StockMovementType::Purchase, 4, '2026-01-15', $storeId, unitCostRate: 50);
 
         // Chair (Furniture, uncategorized): closing = 2; avgCost = 300; valuation = 600.
-        $chair->recordStockMovement(StockMovementType::Purchase, 2, '2026-01-01', null, 300);
+        $chair->recordStockMovement(StockMovementType::Purchase, 2, '2026-01-01', $storeId, unitCostRate: 300);
     });
 
     loginCategoryWiseReportTestUser($domain);
@@ -374,6 +378,169 @@ test('grand totals sum correctly across all three category-wise reports', functi
             ->where('rows.1.quantity', 3)
             ->where('rows.1.valuation', 45)
             ->where('grandTotalValuation', 365)
+        );
+
+    $tenant->delete();
+});
+
+test('sales by category is scoped to a single store when store_id is given, and sums across all stores when omitted', function () {
+    $domain = 'sales-by-category-store-scope.tenant-test';
+    $tenant = provisionCategoryWiseReportTestTenant($domain);
+
+    $branchStoreId = null;
+    $tenant->run(function () use (&$branchStoreId) {
+        categoryWiseReportTestOpenFiscalYear();
+        $admin = categoryWiseReportTestAdmin();
+        $customer = Customer::factory()->create();
+
+        $beverages = ItemCategory::factory()->create(['name' => 'Beverages']);
+        $cola = Item::factory()->create(['item_category_id' => $beverages->id, 'item_subcategory_id' => null, 'is_vatable' => false, 'is_stockable' => false]);
+
+        $mainStoreId = Store::where('is_active', true)->orderBy('id')->firstOrFail()->id;
+        $branchStoreId = Store::factory()->create(['name' => 'Branch Store'])->id;
+
+        // Main store: 2*50=100.
+        Sale::post(
+            ['customer_id' => $customer->id, 'store_id' => $mainStoreId, 'invoice_type' => 'full', 'date' => '2026-06-01', 'payment_mode' => 'cash'],
+            [['item_id' => $cola->id, 'quantity' => 2, 'rate' => 50, 'discount' => 0]],
+            $admin,
+        );
+
+        // Branch store: 3*50=150.
+        Sale::post(
+            ['customer_id' => $customer->id, 'store_id' => $branchStoreId, 'invoice_type' => 'full', 'date' => '2026-06-02', 'payment_mode' => 'cash'],
+            [['item_id' => $cola->id, 'quantity' => 3, 'rate' => 50, 'discount' => 0]],
+            $admin,
+        );
+    });
+
+    loginCategoryWiseReportTestUser($domain);
+
+    // Filtered to the branch store only: qty 3, value 150.
+    $this->get("http://{$domain}/reports/sales-by-category?from=2026-06-01&to=2026-06-30&store_id={$branchStoreId}")
+        ->assertOk()
+        ->assertInertia(fn ($page) => $page
+            ->where('rows.0.quantity', 3)
+            ->where('rows.0.value', 150)
+            ->where('grandTotal.quantity', 3)
+            ->where('grandTotal.value', 150)
+            ->where('storeId', $branchStoreId)
+        );
+
+    // Unfiltered: cross-store total qty 5, value 250 - must match the total
+    // both stores' sales sum to, i.e. the pre-store-filter behaviour.
+    $this->get("http://{$domain}/reports/sales-by-category?from=2026-06-01&to=2026-06-30")
+        ->assertOk()
+        ->assertInertia(fn ($page) => $page
+            ->where('rows.0.quantity', 5)
+            ->where('rows.0.value', 250)
+            ->where('grandTotal.quantity', 5)
+            ->where('grandTotal.value', 250)
+            ->where('storeId', null)
+        );
+
+    $tenant->delete();
+});
+
+test('purchase by category is scoped to a single store when store_id is given, and sums across all stores when omitted', function () {
+    $domain = 'purchase-by-category-store-scope.tenant-test';
+    $tenant = provisionCategoryWiseReportTestTenant($domain);
+
+    $branchStoreId = null;
+    $tenant->run(function () use (&$branchStoreId) {
+        categoryWiseReportTestOpenFiscalYear();
+        $admin = categoryWiseReportTestAdmin();
+        $supplier = Supplier::factory()->create();
+
+        $hardware = ItemCategory::factory()->create(['name' => 'Hardware']);
+        $cable = Item::factory()->create(['item_category_id' => $hardware->id, 'item_subcategory_id' => null, 'is_vatable' => false, 'is_stockable' => false]);
+
+        $mainStoreId = Store::where('is_active', true)->orderBy('id')->firstOrFail()->id;
+        $branchStoreId = Store::factory()->create(['name' => 'Branch Store'])->id;
+
+        // Main store: 4*25=100.
+        Purchase::post(
+            ['supplier_id' => $supplier->id, 'store_id' => $mainStoreId, 'date' => '2026-06-01', 'payment_mode' => 'cash'],
+            [['item_id' => $cable->id, 'quantity' => 4, 'rate' => 25, 'discount' => 0]],
+            $admin,
+        );
+
+        // Branch store: 6*25=150.
+        Purchase::post(
+            ['supplier_id' => $supplier->id, 'store_id' => $branchStoreId, 'date' => '2026-06-02', 'payment_mode' => 'cash'],
+            [['item_id' => $cable->id, 'quantity' => 6, 'rate' => 25, 'discount' => 0]],
+            $admin,
+        );
+    });
+
+    loginCategoryWiseReportTestUser($domain);
+
+    // Filtered to the branch store only: qty 6, value 150.
+    $this->get("http://{$domain}/reports/purchase-by-category?from=2026-06-01&to=2026-06-30&store_id={$branchStoreId}")
+        ->assertOk()
+        ->assertInertia(fn ($page) => $page
+            ->where('rows.0.quantity', 6)
+            ->where('rows.0.value', 150)
+            ->where('grandTotal.quantity', 6)
+            ->where('grandTotal.value', 150)
+            ->where('storeId', $branchStoreId)
+        );
+
+    // Unfiltered: cross-store total qty 10, value 250.
+    $this->get("http://{$domain}/reports/purchase-by-category?from=2026-06-01&to=2026-06-30")
+        ->assertOk()
+        ->assertInertia(fn ($page) => $page
+            ->where('rows.0.quantity', 10)
+            ->where('rows.0.value', 250)
+            ->where('grandTotal.quantity', 10)
+            ->where('grandTotal.value', 250)
+            ->where('storeId', null)
+        );
+
+    $tenant->delete();
+});
+
+test('stock by category is scoped to a single store when store_id is given, and sums across all stores when omitted', function () {
+    $domain = 'stock-by-category-store-scope.tenant-test';
+    $tenant = provisionCategoryWiseReportTestTenant($domain);
+
+    $branchStoreId = null;
+    $tenant->run(function () use (&$branchStoreId) {
+        categoryWiseReportTestAdmin();
+
+        $electronics = ItemCategory::factory()->create(['name' => 'Electronics']);
+        $widget = Item::factory()->create(['item_category_id' => $electronics->id, 'item_subcategory_id' => null, 'name' => 'Widget', 'is_stockable' => true]);
+
+        $mainStoreId = Store::where('is_active', true)->orderBy('id')->firstOrFail()->id;
+        $branchStoreId = Store::factory()->create(['name' => 'Branch Store'])->id;
+
+        // Main store: 10 @ 100 = 1000.
+        $widget->recordStockMovement(StockMovementType::Purchase, 10, '2026-01-01', $mainStoreId, unitCostRate: 100);
+
+        // Branch store: 10 @ 300 = 3000.
+        $widget->recordStockMovement(StockMovementType::Purchase, 10, '2026-01-01', $branchStoreId, unitCostRate: 300);
+    });
+
+    loginCategoryWiseReportTestUser($domain);
+
+    // Filtered to the branch store only: qty 10, valuation 3000.
+    $this->get("http://{$domain}/reports/stock-by-category?as_of=2026-01-31&store_id={$branchStoreId}")
+        ->assertOk()
+        ->assertInertia(fn ($page) => $page
+            ->where('rows.0.quantity', 10)
+            ->where('rows.0.valuation', 3000)
+            ->where('grandTotalValuation', 3000)
+            ->where('storeId', $branchStoreId)
+        );
+
+    // Unfiltered: cross-store qty 20, valuation 4000 (avgCost = 4000/20 = 200 exactly).
+    $this->get("http://{$domain}/reports/stock-by-category?as_of=2026-01-31")
+        ->assertOk()
+        ->assertInertia(fn ($page) => $page
+            ->where('rows.0.quantity', 20)
+            ->where('rows.0.valuation', 4000)
+            ->where('grandTotalValuation', 4000)
+            ->where('storeId', null)
         );
 
     $tenant->delete();

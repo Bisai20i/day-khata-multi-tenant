@@ -21,5 +21,6 @@ Route::name('tenant.')->group(function () {
         Route::get('/', [PurchaseController::class, 'index'])->name('index');
         Route::post('/', [PurchaseController::class, 'store'])->name('store');
         Route::post('/{purchase}/cancel', [PurchaseController::class, 'cancel'])->name('cancel');
+        Route::get('/{purchase}/print', [PurchaseController::class, 'print'])->name('print');
     });
 });

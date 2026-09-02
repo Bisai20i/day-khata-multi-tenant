@@ -15,6 +15,7 @@ defineProps({
     returns: { type: Array, default: () => [] },
     purchases: { type: Array, default: () => [] },
     accounts: { type: Array, default: () => [] },
+    stores: { type: Array, default: () => [] },
 });
 
 const page = usePage();
@@ -105,18 +106,32 @@ const columns = [
         header: 'Actions',
         numeric: false,
         cell: ({ row }) =>
-            row.original.status === 'posted'
-                ? h(
-                      Button,
-                      {
-                          variant: 'secondary',
-                          tone: 'purple',
-                          type: 'button',
-                          onClick: () => openCancel(row.original),
-                      },
-                      () => 'Cancel',
-                  )
-                : '—',
+            h('div', { class: 'flex items-center gap-2' }, [
+                h(
+                    Button,
+                    {
+                        as: 'a',
+                        variant: 'secondary',
+                        tone: 'purple',
+                        href: `/purchase-returns/${row.original.id}/print`,
+                        target: '_blank',
+                        rel: 'noopener',
+                    },
+                    () => 'Print',
+                ),
+                row.original.status === 'posted'
+                    ? h(
+                          Button,
+                          {
+                              variant: 'secondary',
+                              tone: 'purple',
+                              type: 'button',
+                              onClick: () => openCancel(row.original),
+                          },
+                          () => 'Cancel',
+                      )
+                    : null,
+            ]),
     },
 ];
 </script>
@@ -124,7 +139,7 @@ const columns = [
 <template>
     <AppLayout title="Purchase Returns" :nav-items="navItems">
         <template v-if="showCreateForm">
-            <Create :purchases="purchases" :accounts="accounts" @cancel="showCreateForm = false" @posted="showCreateForm = false" />
+            <Create :purchases="purchases" :accounts="accounts" :stores="stores" @cancel="showCreateForm = false" @posted="showCreateForm = false" />
         </template>
 
         <template v-else>

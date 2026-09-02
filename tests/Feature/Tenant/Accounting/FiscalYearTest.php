@@ -3,8 +3,8 @@
 use App\Enums\FiscalYearStatus;
 use App\Models\FiscalYear;
 use App\Models\Tenant;
-use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Database\Eloquent\ModelNotFoundException;
+use Illuminate\Foundation\Testing\RefreshDatabase;
 
 uses(RefreshDatabase::class);
 
@@ -108,6 +108,26 @@ test('FiscalYear::current resolves the open fiscal year', function () {
         ]);
 
         expect(FiscalYear::current()->id)->toBe($open->id);
+    });
+
+    $tenant->delete();
+});
+
+test('bs_label derives the Bikram Sambat fiscal-year label from start_date', function () {
+    $tenant = provisionFiscalYearTestTenant('fy-bs-label.tenant-test');
+
+    $tenant->run(function () {
+        // AD 2026-07-17 == BS 2083-04-01 (Shrawan 1), verified against
+        // App\Support\NepaliCalendar - see its own test suite for the
+        // legacy-cross-checked reference pairs this is drawn from.
+        $fiscalYear = FiscalYear::create([
+            'name' => '2083/84',
+            'start_date' => '2026-07-17',
+            'end_date' => '2027-07-16',
+            'status' => FiscalYearStatus::Open,
+        ]);
+
+        expect($fiscalYear->bs_label)->toBe('2083/84');
     });
 
     $tenant->delete();

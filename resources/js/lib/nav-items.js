@@ -18,6 +18,16 @@ import {
     Undo2,
     Building2,
     FileSignature,
+    Banknote,
+    Wallet,
+    Store,
+    Settings,
+    History,
+    Database,
+    Megaphone,
+    Shapes,
+    ScanBarcode,
+    Handshake,
 } from '@lucide/vue';
 
 /**
@@ -45,11 +55,14 @@ export function navGroups(isAdmin) {
         {
             label: 'TRANSACTIONS',
             items: [
+                { label: 'POS', href: '/pos', icon: ScanBarcode },
                 { label: 'Quotations', href: '/quotations', icon: FileSignature },
                 { label: 'Sales', href: '/sales', icon: ShoppingCart },
                 { label: 'Purchases', href: '/purchases', icon: PackageSearch },
                 { label: 'Sales Returns', href: '/sales-returns', icon: Undo2 },
                 { label: 'Purchase Returns', href: '/purchase-returns', icon: Undo2 },
+                { label: 'Receipts', href: '/receipts', icon: Banknote },
+                { label: 'Payments', href: '/payments', icon: Wallet },
             ],
         },
         {
@@ -61,12 +74,15 @@ export function navGroups(isAdmin) {
             items: [
                 { label: 'Customers', href: '/customers', icon: Users },
                 { label: 'Suppliers', href: '/suppliers', icon: Truck },
+                { label: 'Sales Agents', href: '/agents', icon: Handshake },
             ],
         },
         {
             label: 'INVENTORY',
             items: [
+                { label: 'Stores', href: '/stores', icon: Store },
                 { label: 'Item Categories', href: '/item-categories', icon: Tags },
+                { label: 'Item Varieties', href: '/item-varieties', icon: Shapes },
                 { label: 'Item Subcategories', href: '/item-subcategories', icon: Tag },
                 { label: 'Items', href: '/items', icon: Package },
                 { label: 'Stock Adjustments', href: '/stock-adjustments', icon: ClipboardList },
@@ -104,7 +120,13 @@ export function navGroups(isAdmin) {
     if (isAdmin) {
         groups.push({
             label: 'ADMIN',
-            items: [{ label: 'Manage users', href: '/admin/users', icon: UserCog }],
+            items: [
+                { label: 'Manage users', href: '/admin/users', icon: UserCog },
+                { label: 'Settings', href: '/settings', icon: Settings },
+                { label: 'Notices', href: '/notices', icon: Megaphone },
+                { label: 'Activity Log', href: '/activity-log', icon: History },
+                { label: 'Backups', href: '/backups', icon: Database },
+            ],
         });
     }
 

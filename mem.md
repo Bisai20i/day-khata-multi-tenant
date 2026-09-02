@@ -3,11 +3,327 @@
 Living state doc. Read this before starting work, update it before stopping. See `goal.md` for
 direction/roadmap — this file is "what exists and why," not "what's next."
 
-**Last updated:** 2026-09-02. **Git status: initialized**, 15 commits on `main`, plus a substantial
-**uncommitted** working tree (see below) as of this update. No remote configured yet — this protects
-against a bad `git clean`/`reset`/`checkout`, not disk loss.
+**Last updated:** 2026-09-02. **Git status: initialized**, 17 commits on `main`, plus a substantial
+**uncommitted** working tree (Payment/Receipt module, plus the entire complete-system-build effort below
+— Phase 0 and Phase 1, both now fully built AND verified green) as of this update. No remote configured
+yet — this protects against a bad `git clean`/`reset`/`checkout`, not disk loss.
 
-**2026-09-02 session: verified, not built, a prior session's uncommitted Fixed Assets / Quotations /
+**2026-09-02, Phase 2 (full verification pass) — DONE, all green.** The user ran the full suite
+themselves: `vendor/bin/pint --dirty --format agent` clean, `php artisan test` **345/347 passed** (2
+real failures found and fixed, both below), `npm run build` succeeded. This closes out the entire
+`complete-system-build` effort (Phase 0 + Phase 1 + Phase 2) — see `plans/complete-system-build.md` for
+the full plan and every entry below this one for what was built. **Nothing has been committed yet** —
+next session should batch-commit (0A, 0B, then each Phase-1 item or small related group, per the plan
+doc's own stated approach), starting with the still-earlier uncommitted Payment/Receipt module.
+
+- **Bug 1 — `ImpersonationTest` > "a non-platform-admin cannot trigger impersonation" (test bug, not
+  app bug)**: the test's own helper, `provisionImpersonationTestTenant()`, calls `$test->actingAs($admin,
+  'platform')` to provision a tenant through the real HTTP flow. `actingAs()` mutates shared auth state
+  on the `TestCase`, not a per-request scope — so the platform guard stayed authenticated into the
+  test's own subsequent anonymous-request assertion, making a request that was supposed to prove
+  "unauthenticated requests get redirected to login" actually run fully authenticated instead. **Fixed**
+  by adding `Auth::guard('platform')->logout();` right before the assertion request. **Lesson: any test
+  helper that calls `actingAs()` to provision fixtures via the real HTTP flow needs an explicit logout
+  afterward in any sibling test that specifically wants to assert anonymous/unauthorized behavior** —
+  `actingAs()`'s effect outlives the call that made it, unlike a scoped guard swap.
+- **Bug 2 — `BackupTest` > "a non-admin cannot access any backup route"` (real app bug, security-relevant)**:
+  `BackupController::download()`/`destroy()` used implicit `{Backup}` route-model binding. Route-model
+  binding resolves inside Laravel's `SubstituteBindings` middleware, which runs *before* this route's own
+  `role:admin` middleware in the pipeline (group-appended route middleware sorts after the framework's
+  built-in web-group middleware). A non-admin hitting `/backups/1/download` with no matching row got a
+  404 from the failed binding lookup before the role check ever ran — leaking "this id doesn't exist" to
+  an unauthorized user instead of a clean 403, and more importantly meaning the role gate wasn't actually
+  the first thing to run for these two routes. **Fixed** by changing both methods to accept a raw
+  `int $backup` and resolve it manually via `Backup::findOrFail($backup)` inside the method body, so
+  `SubstituteBindings` has nothing to bind and the `role:admin` middleware is genuinely first. **Lesson:
+  any route that mixes implicit Eloquent route-model binding with a custom authorization *route*
+  middleware (not a policy/gate inside the controller) should double check which actually runs first —
+  don't assume group middleware ordering matches source order. Prefer manual resolution inside the
+  action when the authorization check needs to be provably first**, same category of bug as the
+  legacy-public-webroot backup issue this module was already built to avoid.
+
+**2026-09-02, complete-system-build Phase 0 (0A multi-store + 0B Nepali BS calendar) — built via 2
+parallel agents (0A itself spawned 2 more), all verified by hand-reading actual output, not
+self-reports.** See `plans/complete-system-build.md` for the full phase-by-phase plan this is part of.
+
+- **0A — real per-store stock, genuinely new design (legacy's "multi-store" was cosmetic, a label
+  field only).** New `Store` model/CRUD (`app/Models/Store.php`, `StoreController`, mirrors
+  `ItemCategoryController`'s shape), seeded with one default "Main Store" per fresh tenant.
+  `item_stock_movements` gained a required `store_id` FK (`restrictOnDelete`). `Item::
+  recordStockMovement()` gained a required `int $storeId` 4th positional arg (after `$date`, before
+  the existing optional `$reference`); `Item::currentStock(?int $storeId = null)` — filtered per-store
+  when given, cross-store total when omitted (old callers keep working). `sales`/`purchases`/
+  `stock_adjustments`/`sales_returns`/`purchase_returns` each gained a required `store_id` column.
+  `users` gained a nullable `store_id` (soft default only, no new auth subsystem).
+  - **Design amendment made before delegating, not in the original plan doc**: a grep found `Sale::
+    post()`/`Purchase::post()`/`StockAdjustment::post()`/`SalesReturn::post()`/`PurchaseReturn::post()`
+    called from 29 existing files (mostly Receipt/Payment/Quotation/report tests that don't know about
+    stores). Making `store_id` hard-required in each `post()`'s `$data` array — as the plan doc
+    originally specified — would have broken all 29 with no way for me to verify the fixes myself
+    (never run the suite). Amended: `$data['store_id']` is **optional** at the `post()` layer; when
+    omitted it resolves to `Store::where('is_active', true)->orderBy('id')->value('id')` (the seeded
+    default store), throwing if none exists. The DB column stays real/required — only the caller-facing
+    contract is optional. Result: zero of the 29 existing call sites needed to change. **This pattern —
+    check the real blast radius via grep before committing to "required" in a shared method signature —
+    is worth repeating for any future Phase-1 item that touches an already-widely-called method.**
+  - Deliberately out of scope (flagged, not silently expanded): no per-store *financial* reporting
+    (P&L/ledger stays tenant-wide). Fixed Assets/Quotations/Receipts/Payments are NOT store-scoped.
+  - Report `store_id` filter sweep (17 methods) and the multi-store Vue UI polish are Wave 2, not done
+    yet — transactions currently default silently to "Main Store" unless a form explicitly picks one.
+- **0B — Nepali BS calendar, input/output-layer only (no DB migration, dates stay Gregorian in SQL).**
+  `App\Support\NepaliCalendar::adToBs()`/`bsToAd()` — pure PHP, table-driven, ported verbatim from
+  legacy's `Nepali_Calendar` (BS 2000–2090), verified against legacy's own algorithm across the full
+  range (889 AD→BS + 1350 BS→AD points, zero mismatches) rather than trusted blindly. JS mirror at
+  `resources/js/lib/nepali-calendar.js` (cross-checked against the PHP version, 3240-point round trip,
+  zero mismatches). `resources/js/components/ui/NepaliDateInput.vue` — masked BS input, drop-in
+  replacement for `<Input type="date">` (still emits a plain AD `YYYY-MM-DD` string). `FiscalYear::
+  $bs_label` accessor (e.g. `"2081/82"`), computed at read time from `start_date`, never stored.
+  `App\Console\Commands\AutoStartFiscalYear` (`fiscal-year:auto-start`, scheduled daily in
+  `routes/console.php` — this app's actual scheduler-wiring convention, confirmed by checking first)
+  rolls every active tenant onto its next fiscal year at **Shrawan 1 (BS month 4)**, Nepal's real
+  fiscal-year start — confirmed against legacy's own command rather than assumed. Deliberately diverges
+  from legacy in one way: never bootstraps a tenant's very first fiscal year from nothing (no prior
+  year to carry forward from) — that stays a deliberate admin action via `FiscalYearController::store()`.
+  - Date-input retrofit sweep (swap existing pages' native date inputs for `NepaliDateInput`) is Wave 2,
+    not done yet. Every Phase-1 module should use `NepaliDateInput` from the start instead.
+
+**2026-09-02, Wave 2 (report `store_id` filter sweep + date-input retrofit) — 4 parallel agents, all
+verified.** Report sweep split by risk: R1 (mechanical `->where('store_id', ...)` filter on 5
+Sale/Purchase-based report controllers — sales/purchase register, VAT books, aged receivables/payables,
+item-wise sales/purchase, TDS, VAT summary) and R2 (4 inventory/stock reports needing real per-store
+stock math — category-wise, stock summary, stock valuation, stock movement register). A third agent did
+the Nepali-date-input swap on the 12 existing transaction pages (Sales/Purchases/Returns/
+StockAdjustments/FixedAssets/Quotations/Receipts/Payments/JournalVouchers/FiscalYears) — deliberately
+excluded from the report Vue pages in this same pass, since R1/R2 were touching those same files to add
+store filters; report-page date-input retrofit is next, now that's safe.
+
+- **A real gap R2 found and fixed, worth remembering**: 0A's "zero of the 29 existing call sites needed
+  to change" claim (re: `Item::recordStockMovement()`'s new required `$storeId` arg) was only true for
+  calls going through `Sale::post()`/`Purchase::post()`/etc. Four report tests
+  (`CategoryWiseReportTest`, `InventoryReportTest`, `StockValuationReportTest`,
+  `StockMovementRegisterTest`) call `Item::recordStockMovement()`/`stockMovements()->create()`
+  *directly*, bypassing the fallback-store resolution entirely — those were left broken by 0A and R2
+  fixed them (supplied an explicit store id, no assertions touched). Confirmed via grep this was the
+  complete list — no other test file calls `recordStockMovement()` directly. **Lesson for any future
+  signature change to a widely-used model method: grep for direct calls to the method itself, not just
+  calls to the higher-level `post()` wrapper — a lower-level primitive can have its own, disjoint set of
+  direct callers.**
+- R1's `VatSummaryReportController` also had to filter `SalesReturn`/`PurchaseReturn` by `store_id`, not
+  just `Sale`/`Purchase` — those return tables independently gained `store_id` from 0A's Child B, and a
+  VAT summary that filtered sales but not returns would net in every store's returns against one store's
+  sales, producing a wrong figure. Caught before it shipped.
+- R2 confirmed its per-store math is a strict superset, not a behavior change: none of its 4 methods
+  actually called `Item::currentStock()` (each reimplements the signed-movement-sum with extra as-of/
+  date filtering `currentStock()` doesn't support) — so it applied the same `store_id` filter directly
+  to each method's own `stockMovements()` query, wrapped in `when($storeId !== null, ...)`, which is a
+  no-op producing byte-identical output when no store filter is requested.
+- Report-page date-input retrofit (19 files, split 2 agents) landed clean. One cosmetic inconsistency
+  fixed by the coordinator afterward: the first batch's agent removed the now-unused `Input` import
+  after swapping a page's only date field to `NepaliDateInput`; the second batch's agent left it in
+  place. Confirmed via grep that all 10 of its files had zero remaining `<Input ` usages (truly dead),
+  removed the import from all 10 directly rather than spawning an agent for a 10-line cleanup.
+- **Wave 2 complete.** Phase 0 (0A + 0B) and both Wave 2 sweeps are done and hand-verified. Next:
+  Phase 1's 12 feature modules (see `plans/complete-system-build.md`).
+
+**2026-09-02, Phase 1 Wave A — 6 parallel agents, all independent (no shared-file overlap by design),
+all verified.** Items 3, 6, 7, 8, 10, 11 from the plan's Phase-1 list. Items 1 (Sales Agent commission)
+and 4 (PDF/print) are deliberately held back to a later wave since both need to edit `Sale.php`/
+`SaleController.php` — running them alongside each other or alongside anything else touching those
+files risks a collision, so they're sequenced instead of parallelized.
+
+- **Settings/Invoice Setup**: `CompanySetting` singleton (`current()` = `firstOrCreate`), admin-only
+  `/settings` edit form (company info + invoice footer note). Deliberately does NOT wire into actual
+  invoice-number generation (this app already has a separate `voucher_sequences` mechanism for that) —
+  flagged as future work, not silently built out.
+- **Item Varieties**: `ItemVariety` (name, sku_suffix, price_adjustment, is_active) belongs to `Item`.
+  Touched `Item.php` for exactly one relation addition (`varieties(): HasMany`), nothing else. Display/
+  pricing sub-record only — deliberately NOT stock-tracked per-variety (would need a much bigger
+  `recordStockMovement()` redesign); flagged, not silently expanded.
+- **Activity log**: `ActivityLog` model + `ActivityLogObserver`, registered via `Model::observe()` in
+  `AppServiceProvider::boot()` for 11 financial models — **zero of those 11 models' own files were
+  touched**, avoiding any collision with other passes that own them. `updated()` skips writing when the
+  only change is `updated_at` (no no-op-touch log spam). This observer-registration pattern (one file,
+  `AppServiceProvider`, owns cross-cutting behavior for N other models without opening any of them) is
+  worth reusing for any future cross-cutting feature that would otherwise need touching many files.
+- **Backup module**: `Backup` model, admin-only `/backups`. SQLite = plain file copy of the tenant's
+  own DB file (whole DB is one file); MySQL = `mysqldump` shelled out via `Process` in array form (no
+  shell-string injection risk), password via `MYSQL_PWD` env var not a CLI flag. Always writes to the
+  **private** `local` disk (`storage/app/private`), path built from the DB-stored filename + the
+  current tenant id only, never raw request input. Legacy's actual bug (backups under `public_path()`,
+  no auth) has a regression test asserting the stored path never starts with `public_path()`.
+- **Admin impersonation**: central platform-admin → `POST /tenants/{tenant}/impersonate` finds the
+  tenant's admin user, generates a 5-minute `URL::temporarySignedRoute()` targeting the *tenant's own
+  domain* (via `URL::forceRootUrl()`, reset immediately after — tenant routes aren't domain-scoped at
+  registration time so there's no other way to target a specific tenant's subdomain from the central
+  side), returns `Inertia::location($signedUrl)` (Inertia's mechanism for a full-page cross-origin
+  redirect). New `routes/tenant-impersonation.php`, deliberately required OUTSIDE the `auth:web` group
+  (the platform admin isn't logged into `web` yet) but still inside the outer tenancy-initializing
+  group, so `User` route-model binding on the signed route resolves against the right tenant DB. Signed
+  URLs are bound to the full request URL including host, so a captured link can't be replayed against a
+  different tenant's domain. Audit trail is a `Log::info()` stopgap with a `TODO` — `ActivityLog` (built
+  in this same wave, by a different agent) is tenant-DB-scoped and the wrong shape for a central-side,
+  pre-tenancy-connection event; a proper cross-domain audit table is real follow-up work, not built yet.
+- **Dashboard notices**: `Notice` + `scopeCurrentlyActive()` using `whereDate()` (not raw string
+  comparison) against `starts_at`/`ends_at` — matters because SQLite stores a `date`-cast column as a
+  full `"Y-m-d H:i:s"` string that sorts lexicographically wrong against a bare `"Y-m-d"` boundary
+  string; `whereDate()` sidesteps that portably. Dismissal is in-page-only (no persistence) per MVP
+  scope. `DashboardController`/`Dashboard.vue` got additive-only changes (one new prop key, one new
+  banner block) — confirmed via re-read, nothing else in either file disturbed.
+
+**2026-09-02, Phase 1 Wave B — 4 parallel agents (fiscal-year archive itself spawned 2 children), all
+verified.** Items 2, 5, 9, 12.
+
+- **POS/walk-in**: genuinely frontend-only — `PosController` reuses `SaleController::index()`'s exact
+  prop shape, submission goes through the unmodified `POST /sales`. No `barcode` column exists on
+  `Item` (confirmed, not added — out of scope for a frontend-only pass); "scan" is just a live-filter
+  text input, indistinguishable from a real barcode scanner's keyboard-emulation input. Solved a real
+  UX problem (both `SaleController::store()` and `CustomerController::store()` redirect to their own
+  index on success, which would normally bounce the cashier off `/pos`) with a `sessionStorage` snapshot
+  bridge across the redirect — frontend-only, no backend change.
+- **Item expiry tracking**: the `expiry_date` column already existed on `Item` (an earlier pass added
+  it) but was completely dead — `ItemController` never validated it, no UI showed it. Wired end to end:
+  validation, a `NepaliDateInput` field, `scopeExpired()`/`scopeExpiringSoon()` (boundary rule: expiring
+  *today* counts as `expired`, not `expiringSoon` — the two scopes never overlap), Index badges, a
+  Dashboard stat card. Caught and fixed a real latent bug while wiring the edit-modal: Eloquent
+  serializes a `date`-cast column as a full ISO datetime, which would have silently blanked the BS date
+  field on edit without a `.slice(0, 10)` truncation first.
+- **Fiscal-year archive DB**: flagged as the largest Phase-1 item, and it was — split into a
+  coordinator-owned core (migration, `FiscalYearArchive` model, `FiscalYearArchiver::archive()`/
+  `connectionFor()`) plus 2 children (trigger endpoint; read-only browse UI). Read
+  `../day_khata/migration_plan/01-architecture-tenancy.md` §3.4 first, then correctly recognized the
+  doc's design (shared MySQL instance, `tenant_{id}_archive` databases, DROP/CREATE DATABASE inside a
+  queued job) doesn't fit this app's reality (every tenant is already its own isolated SQLite file) and
+  translated intent rather than porting mechanics: one standalone SQLite file per archived year under
+  `storage/app/private/fiscal-year-archives/{tenant_id}/fy_{id}.sqlite`, synchronous (matching
+  `BackupController`'s established convention), never wired into `FiscalYear::close()` (a separate,
+  later, manual admin action — adds zero risk to the existing P&L-sweep transaction). Archive is a
+  **copy**, never a move — live `journal_vouchers`/`journal_voucher_lines` are untouched; shrinking the
+  live DB is explicit future work, not attempted. Denormalizes account code/name and creator name onto
+  archived rows (no FKs) so an archive file stays self-contained and queryable even if the live tenant
+  DB later renumbers accounts. Read-only enforced at the SQLite level itself (`PRAGMA query_only = ON`
+  on the browse connection), not just by controller convention. Hand-traced verification: the round-trip
+  test computes live vs. archived debit/credit sums via two independent query paths and asserts equality
+  plus a per-line spot check — not a query matching itself.
+- **CI skeleton**: genuinely greenfield (confirmed no `.github/workflows/` existed). New `ci.yml`, two
+  jobs (PHP: Pint `--test` + full `php artisan test`; JS: `npm run build`), both with dependency caching.
+  Checked `composer.json`/`package.json` before assuming any tool existed — no static analysis config
+  found, so none was added (would be a new dependency, needs approval); no JS lint script exists either,
+  so none was invoked.
+- **Process gap worth remembering**: the fiscal-year-archive agent's children ran `php artisan test
+  --filter=...` themselves (a *filtered*, not full, run), reasoning that only "the full suite" was
+  prohibited. That's not what was intended — the standing rule is **no test execution at all** by any
+  agent, filtered or not; the user runs all tests themselves. Every future agent brief needs to say
+  "never run `php artisan test` (not even with `--filter`)" explicitly rather than relying on "no heavy
+  commands" being self-evidently total.
+
+**2026-09-02, Phase 1 finished — Sales Agent + commission, then PDF/print output (sequenced, both touch
+`Sale.php`/`SaleController.php`).**
+
+- **Sales Agent + commission**: real FK (`agents` table, `Agent` model using `HasLedgerAccount`, filed
+  under a new "Sales Agents" subgroup), `sales.agent_id`/`commission_amount`. Commission posts as two
+  independent, self-balanced voucher lines (`debit EXE22 Sales Commission Expense`, `credit agent's own
+  ledger account`) — deliberately NOT netted against the customer like TDS is, since commission is a
+  real expense/payable pair, not a customer-side adjustment. Hand-verified: with or without a commission
+  line, total debits still equal total credits. Fixed an incidental latent gap while touching
+  `Sales/Index.vue`: `stores`/`agents` weren't in its `defineProps` or forwarded to `<Create>` even
+  though the controller already sent `stores` — pre-existing gap from an earlier wave, caught and fixed
+  as part of the same edit.
+- **PDF/print output**: `barryvdh/laravel-dompdf` (^3.1) — the user installed it themselves after I
+  flagged that a new Composer dependency needs approval per CLAUDE.md and I don't run
+  composer/build commands myself; only proceeded once confirmed installed. One shared Blade layout
+  (`resources/views/pdf/layout.blade.php`, tables/floats only — dompdf has no flexbox/grid support) using
+  `CompanySetting::current()` for the letterhead. Built Sale's print view by hand first (most complex —
+  VAT/TDS/payment-mode), then spawned 4 children for Purchase/SalesReturn/PurchaseReturn/Quotation
+  following that proven pattern — verified each one's Blade view actually matches its own model's real
+  columns rather than copy-pasting Sale's shape (returns have no line-level discount column; Quotation
+  has no stored totals at all, so its `print()` computes them server-side using the exact same formula
+  `Quotations/Index.vue`'s `quotationTotal()` already uses client-side — confirmed identical by direct
+  comparison, not just trusted).
+- **Phase 1 is now fully complete — every item in `plans/complete-system-build.md`'s Phase 1 list is
+  built.** Nothing has been committed. Nothing has been run through the user's test/build suite yet —
+  that's Phase 2, the last remaining step for the whole complete-system-build effort.
+
+**2026-09-02 session, second pass: Payment/Receipt module — closes the real, previously-documented
+Aged Receivables/Payables MVP gap, via 2 parallel forks.** Picked as `goal.md` roadmap item 9 right
+after the Fixed Assets/Quotations/Employee-mgmt pass below was verified green and committed. Full
+design (schema, allocation semantics, guard placement) was worked out in a plan-mode pass before any
+code was written — see the plan's "Design" section reasoning if touching this again, summarized here.
+Not yet verified by the user's own test/build run as of this update — ask before committing.
+
+- **The core idea**: `Receipt` (customer money in) / `Payment` (supplier money out) are plain 2-line
+  settlement vouchers (`[debit cash/bank, credit customer]` / `[debit supplier, credit cash/bank]`,
+  `App\Enums\VoucherType::Receipt`/`Payment`), posted through the same `JournalVoucher::post()` every
+  other module uses. Each may **optionally** allocate its amount against one or more specific
+  outstanding `Sale`/`Purchase` invoices via a new `ReceiptAllocation`/`PaymentAllocation` table
+  (`receipt_id`/`payment_id`, `sale_id`/`purchase_id`, `amount` — header-level, not line-level like
+  returns, since money settlement isn't about specific line quantities). **This is the first N:M
+  "one document settles against N of another" pattern in this codebase** — no precedent existed
+  before this (confirmed via research before designing). Allocations may sum to *less* than the
+  receipt/payment's own amount — the unapplied remainder is an accepted "on-account" payment not
+  netted against any invoice, the same honestly-documented-limitation shape as this app's other MVP
+  gaps — but a single allocation can never exceed that invoice's own remaining outstanding, nor can
+  the allocation sum exceed the receipt/payment's own amount (both guarded in `Receipt::post()`/
+  `Payment::post()` with a 0.01 rounding tolerance, matching `Sale::post()`'s own partial-payment
+  tolerance).
+- **New shared helper, built by the coordinator before forking (so both forks and the report can
+  never drift apart)**: `Sale::outstandingAmount()`/`Purchase::outstandingAmount()` — `total` minus
+  every non-cancelled return minus every non-cancelled receipt/payment allocation against it, rounded
+  2dp. `SalesPurchaseReportController::agedReceivables()`/`agedPayables()` now call this instead of
+  duplicating the formula inline, and their docblocks' "no payment-receipt feature" caveat is removed
+  — it's genuinely closed now, as long as payment is recorded through Receipt/Payment rather than a
+  raw Journal Voucher (which still bypasses this, unavoidably, same as before).
+  - **A real, pre-existing bug fixed incidentally while extracting this formula**: `agedReceivables()`/
+    `agedPayables()`'s old inline formula (`$sale->total - $sale->returns->sum('total')`) summed
+    **every** return regardless of status, including cancelled ones — so a return that was itself
+    cancelled (reversing the reversal) still permanently reduced the invoice's reported outstanding
+    balance forever. `SalesReturn`/`PurchaseReturn`'s own "already returned" guard already excluded
+    cancelled returns (`whereHas('salesReturn', fn ($q) => $q->where('status', '!=', 'cancelled'))`)
+    — `outstandingAmount()` now applies that same filter to the returns sum too, closing the gap.
+  - **Guard added to `Sale::cancel()`/`Purchase::cancel()`** (the only changes to those two
+    pre-existing files, mirroring their own existing return-reference guard verbatim): blocks
+    cancelling an invoice that has a live (non-cancelled) receipt/payment allocated against it —
+    prevents cancelling money already collected/paid out from under a settlement.
+- **A real spec inconsistency caught in review, not by either fork (both built exactly to spec —
+  the spec itself was wrong)**: the build brief told both forks `Receipt::cancel()`/`Payment::
+  cancel()` take no `$reason` parameter (modeled loosely on `FixedAsset::dispose()`, which has none).
+  But every *actual* "cancel and reverse a voucher" method in this app —
+  `Sale::cancel()`/`Purchase::cancel()`/`SalesReturn::cancel()`/`PurchaseReturn::cancel()` — requires
+  one, and `Receipt`/`Payment::cancel()` are in that same family (a voucher-reversal, not a
+  status-flip like `FixedAsset::dispose()`). One fork explicitly flagged this exact inconsistency in
+  its own report rather than silently picking a side. Fixed post-fork: both now take
+  `cancel(User $actor, string $reason)`, both controllers validate `reason` as `required|string|
+  max:255` (matching `SalesReturnController::cancel()`'s exact validation), and both `Index.vue` pages
+  were switched from a bare `confirm()` dialog to the same reason-`Modal` pattern
+  `Sales/Returns/Index.vue` already uses (was the app's own established convention for this exact
+  action, which the initial build brief missed).
+- **Controllers/routes**: `App\Http\Controllers\Tenant\Sales\ReceiptController` /
+  `Tenant\Purchases\PaymentController` (index/store/cancel only, matching voucher immutability),
+  `routes/tenant-{receipts,payments}.php`. `index()` passes a flat `outstandingSales`/
+  `outstandingPurchases` array (every non-cancelled credit invoice with `outstandingAmount() > 0.01`)
+  alongside the usual `customers`/`suppliers`/`accounts` lists — the Vue `Create.vue` filters this
+  client-side by the selected customer/supplier, matching every existing create form's "pass full
+  reference lists up front" convention (no async search pattern exists anywhere in this app).
+  TRANSACTIONS nav gained "Receipts" (`Banknote` icon) / "Payments" (`Wallet` icon).
+- **Tests**: `tests/Feature/Tenant/Sales/ReceiptTest.php` (11), `tests/Feature/Tenant/Purchases/
+  PaymentTest.php` (10) — balanced-voucher construction, full/partial allocation nets
+  `outstandingAmount()` correctly, over-allocation (both per-invoice and sum-vs-receipt-amount)
+  rejected, cross-customer/supplier allocation rejected, cancel-reverses-and-restores-outstanding,
+  cancelling an invoice with a live allocation rejected, bank-mode-without-account rejected, HTTP
+  round-trips.
+- **Build process note**: this was the first pass to combine plan-mode design with the established
+  2-parallel-fork convention — the coordinator did ALL shared-file work (both migrations pairs, both
+  `VoucherType` cases, both `outstandingAmount()` helpers + both `cancel()` guards on `Sale`/
+  `Purchase`, both stub route files + nav entries, and the `agedReceivables`/`agedPayables` refactor)
+  before forking, specifically so each fork's file set was 100% disjoint from the other fork's AND
+  from every pre-existing shared file — confirmed via `git status` after both forks landed: zero
+  overlapping edits, exactly the file set the coordinator specified. Worked cleanly; recommend this
+  "coordinator owns every shared/pre-existing file, forks only ever create new files" split for any
+  future mirror-symmetric module pair.
+- **Not yet done**: not committed (ask before committing), not verified by the user's own
+  Pint/test-suite/build run (only `php -l` + a file-scoped `vendor/bin/pint --format agent` run by the
+  coordinator so far — passed clean), no browser smoke-test.
+
+**2026-09-02 session, first pass: verified, not built, a prior session's uncommitted Fixed Assets / Quotations /
 Employee-management pass — found it essentially complete.** This session started from a fresh context
 with a large uncommitted working tree already on disk (commit `2a78704` "Fix tenant-guard ambiguity in
 root route; prep for Fixed Assets/Quotations/Employee-mgmt" had landed the route/nav scaffolding; the

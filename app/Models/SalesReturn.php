@@ -31,7 +31,7 @@ use InvalidArgumentException;
  * in this app.
  */
 #[Fillable([
-    'sale_id', 'journal_voucher_id', 'date', 'reason',
+    'sale_id', 'journal_voucher_id', 'date', 'store_id', 'reason',
     'taxable_amount', 'nontaxable_amount', 'vat_amount', 'total', 'status',
     'refund_account_id', 'refund_journal_voucher_id', 'created_by',
 ])]
@@ -100,7 +100,15 @@ class SalesReturn extends Model
     }
 
     /**
-     * @param  array{sale_id: int, date: string, reason?: string|null, refund_account_id?: int|null}  $data
+     * @return BelongsTo<Store, $this>
+     */
+    public function store(): BelongsTo
+    {
+        return $this->belongsTo(Store::class);
+    }
+
+    /**
+     * @param  array{sale_id: int, date: string, reason?: string|null, refund_account_id?: int|null, store_id?: int|null}  $data
      * @param  array<int, array{sale_line_id: int, quantity: float}>  $lines
      *
      * Header-discount reversal: Sale::post() applies the header `discount`
@@ -130,6 +138,12 @@ class SalesReturn extends Model
 
             if ($sale->status === 'cancelled') {
                 throw new InvalidArgumentException('Cannot post a return against a cancelled sale.');
+            }
+
+            $storeId = isset($data['store_id']) ? (int) $data['store_id'] : Store::where('is_active', true)->orderBy('id')->value('id');
+
+            if (! $storeId) {
+                throw new InvalidArgumentException('No active store is configured.');
             }
 
             $vatableSubtotalBeforeDiscount = round((float) $sale->taxable_amount + (float) $sale->discount, 2);
@@ -224,6 +238,7 @@ class SalesReturn extends Model
                 'sale_id' => $sale->id,
                 'journal_voucher_id' => $voucher->id,
                 'date' => $data['date'],
+                'store_id' => $storeId,
                 'reason' => $data['reason'] ?? null,
                 'taxable_amount' => $taxableAmount,
                 'nontaxable_amount' => $nontaxableAmount,
@@ -249,6 +264,7 @@ class SalesReturn extends Model
                         StockMovementType::SaleReturn,
                         $line['quantity'],
                         $data['date'],
+                        $storeId,
                         $saleReturnLine,
                     );
                 }

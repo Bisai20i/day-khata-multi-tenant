@@ -6,6 +6,7 @@ import Button from '@/components/ui/Button.vue';
 import Input from '@/components/ui/Input.vue';
 import Select from '@/components/ui/Select.vue';
 import Combobox from '@/components/ui/Combobox.vue';
+import NepaliDateInput from '@/components/ui/NepaliDateInput.vue';
 
 const props = defineProps({
     accounts: { type: Array, default: () => [] },
@@ -105,7 +106,7 @@ function submit() {
                 </div>
                 <div>
                     <label class="mb-1 block text-sm font-semibold text-text-base">Purchase Date</label>
-                    <Input v-model="form.purchase_date" type="date" required />
+                    <NepaliDateInput v-model="form.purchase_date" required />
                     <p v-if="form.errors.purchase_date" class="mt-1 text-sm text-danger">{{ form.errors.purchase_date }}</p>
                 </div>
                 <div>

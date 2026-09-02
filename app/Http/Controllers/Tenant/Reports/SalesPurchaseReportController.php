@@ -8,6 +8,7 @@ use App\Models\Customer;
 use App\Models\FiscalYear;
 use App\Models\Purchase;
 use App\Models\Sale;
+use App\Models\Store;
 use App\Models\Supplier;
 use Illuminate\Http\Request;
 use Illuminate\Support\Carbon;
@@ -27,11 +28,13 @@ class SalesPurchaseReportController extends Controller
     {
         [$from, $to] = $this->resolveDateRange($request);
         $customerId = $request->integer('customer_id') ?: null;
+        $storeId = $request->integer('store_id') ?: null;
 
         $sales = Sale::query()
             ->with(['customer:id,name', 'journalVoucher:id,voucher_type,voucher_number'])
             ->whereBetween('date', [$from, $to])
             ->when($customerId, fn ($query) => $query->where('customer_id', $customerId))
+            ->when($storeId, fn ($query) => $query->where('store_id', $storeId))
             ->orderBy('date')
             ->orderBy('id')
             ->get();
@@ -59,9 +62,11 @@ class SalesPurchaseReportController extends Controller
                 'total' => (float) $posted->sum('total'),
             ],
             'customers' => Customer::query()->orderBy('name')->get(['id', 'name']),
+            'stores' => Store::where('is_active', true)->orderBy('name')->get(['id', 'name']),
             'from' => $from,
             'to' => $to,
             'customerId' => $customerId,
+            'storeId' => $storeId,
         ]);
     }
 
@@ -69,11 +74,13 @@ class SalesPurchaseReportController extends Controller
     {
         [$from, $to] = $this->resolveDateRange($request);
         $supplierId = $request->integer('supplier_id') ?: null;
+        $storeId = $request->integer('store_id') ?: null;
 
         $purchases = Purchase::query()
             ->with(['supplier:id,name', 'journalVoucher:id,voucher_type,voucher_number'])
             ->whereBetween('date', [$from, $to])
             ->when($supplierId, fn ($query) => $query->where('supplier_id', $supplierId))
+            ->when($storeId, fn ($query) => $query->where('store_id', $storeId))
             ->orderBy('date')
             ->orderBy('id')
             ->get();
@@ -102,20 +109,24 @@ class SalesPurchaseReportController extends Controller
                 'total' => (float) $posted->sum('total'),
             ],
             'suppliers' => Supplier::query()->orderBy('name')->get(['id', 'name']),
+            'stores' => Store::where('is_active', true)->orderBy('name')->get(['id', 'name']),
             'from' => $from,
             'to' => $to,
             'supplierId' => $supplierId,
+            'storeId' => $storeId,
         ]);
     }
 
     public function salesVatBook(Request $request): Response
     {
         [$from, $to] = $this->resolveDateRange($request);
+        $storeId = $request->integer('store_id') ?: null;
 
         $sales = Sale::query()
             ->with(['customer:id,name', 'journalVoucher:id,voucher_number'])
             ->where('status', 'posted')
             ->whereBetween('date', [$from, $to])
+            ->when($storeId, fn ($query) => $query->where('store_id', $storeId))
             ->orderBy('date')
             ->orderBy('id')
             ->get();
@@ -137,19 +148,23 @@ class SalesPurchaseReportController extends Controller
                 'nontaxable_amount' => (float) $sales->sum('nontaxable_amount'),
                 'total' => (float) $sales->sum('total'),
             ],
+            'stores' => Store::where('is_active', true)->orderBy('name')->get(['id', 'name']),
             'from' => $from,
             'to' => $to,
+            'storeId' => $storeId,
         ]);
     }
 
     public function purchaseVatBook(Request $request): Response
     {
         [$from, $to] = $this->resolveDateRange($request);
+        $storeId = $request->integer('store_id') ?: null;
 
         $purchases = Purchase::query()
             ->with(['supplier:id,name', 'journalVoucher:id,voucher_number'])
             ->where('status', 'posted')
             ->whereBetween('date', [$from, $to])
+            ->when($storeId, fn ($query) => $query->where('store_id', $storeId))
             ->orderBy('date')
             ->orderBy('id')
             ->get();
@@ -172,8 +187,10 @@ class SalesPurchaseReportController extends Controller
                 'nontaxable_amount' => (float) $purchases->sum('nontaxable_amount'),
                 'total' => (float) $purchases->sum('total'),
             ],
+            'stores' => Store::where('is_active', true)->orderBy('name')->get(['id', 'name']),
             'from' => $from,
             'to' => $to,
+            'storeId' => $storeId,
         ]);
     }
 
@@ -182,34 +199,32 @@ class SalesPurchaseReportController extends Controller
      * invoice date and `as_of`, bucketed Current (0-30) / 31-60 / 61-90 /
      * 90+, grouped by customer.
      *
-     * Deliberate MVP limitation, not a bug: this app has no dedicated
-     * "receive payment against invoice" feature anywhere (confirmed: no
-     * Receipt/Payment model exists). A `credit`-mode sale's outstanding
-     * balance is reduced here only by a SalesReturn linked to that specific
-     * sale. If a business later collects payment for a credit sale by
-     * posting a generic Journal Voucher directly against the customer's
-     * ledger account (the only mechanism currently available for that),
-     * that invoice keeps aging here even though it may have actually been
-     * settled - revisit if/when a real payment-receipt feature is built.
-     * Same category of documented gap as SalesReturn's own "does not
-     * reverse header discount/TDS" note.
+     * Outstanding is `Sale::outstandingAmount()` - total minus non-cancelled
+     * returns minus non-cancelled Receipt allocations against it. Until the
+     * Payment/Receipt module (2026-09-02), this app had no dedicated
+     * "receive payment against invoice" feature, so a credit sale settled
+     * via a generic Journal Voucher would keep aging here forever - that
+     * gap is now closed as long as the payment is recorded through Receipt,
+     * not a raw Journal Voucher (which still bypasses this, same as before).
      */
     public function agedReceivables(Request $request): Response
     {
         $asOf = Carbon::parse($request->string('as_of')->toString() ?: now()->toDateString());
+        $storeId = $request->integer('store_id') ?: null;
 
         $sales = Sale::query()
-            ->with(['customer:id,name', 'returns'])
+            ->with('customer:id,name')
             ->where('payment_mode', 'credit')
             ->where('status', 'posted')
             ->where('date', '<=', $asOf->toDateString())
+            ->when($storeId, fn ($query) => $query->where('store_id', $storeId))
             ->orderBy('date')
             ->get();
 
         $byCustomer = [];
 
         foreach ($sales as $sale) {
-            $outstanding = round((float) $sale->total - (float) $sale->returns->sum('total'), 2);
+            $outstanding = $sale->outstandingAmount();
 
             if ($outstanding <= 0.01) {
                 continue;
@@ -228,32 +243,35 @@ class SalesPurchaseReportController extends Controller
         return Inertia::render('Tenant/Reports/AgedReceivables', [
             'rows' => $rows,
             'totals' => $this->sumAgingTotals($rows),
+            'stores' => Store::where('is_active', true)->orderBy('name')->get(['id', 'name']),
             'asOf' => $asOf->toDateString(),
+            'storeId' => $storeId,
         ]);
     }
 
     /**
      * Exact mirror of agedReceivables() for `credit`-mode purchases /
-     * suppliers - see that method's docblock for the same deliberate
-     * payment-receipt-feature limitation, which applies identically here
-     * via PurchaseReturn instead of SalesReturn.
+     * suppliers, via Purchase::outstandingAmount() / PurchaseReturn /
+     * Payment instead of Sale::outstandingAmount() / SalesReturn / Receipt.
      */
     public function agedPayables(Request $request): Response
     {
         $asOf = Carbon::parse($request->string('as_of')->toString() ?: now()->toDateString());
+        $storeId = $request->integer('store_id') ?: null;
 
         $purchases = Purchase::query()
-            ->with(['supplier:id,name', 'returns'])
+            ->with('supplier:id,name')
             ->where('payment_mode', 'credit')
             ->where('status', 'posted')
             ->where('date', '<=', $asOf->toDateString())
+            ->when($storeId, fn ($query) => $query->where('store_id', $storeId))
             ->orderBy('date')
             ->get();
 
         $bySupplier = [];
 
         foreach ($purchases as $purchase) {
-            $outstanding = round((float) $purchase->total - (float) $purchase->returns->sum('total'), 2);
+            $outstanding = $purchase->outstandingAmount();
 
             if ($outstanding <= 0.01) {
                 continue;
@@ -272,7 +290,9 @@ class SalesPurchaseReportController extends Controller
         return Inertia::render('Tenant/Reports/AgedPayables', [
             'rows' => $rows,
             'totals' => $this->sumAgingTotals($rows),
+            'stores' => Store::where('is_active', true)->orderBy('name')->get(['id', 'name']),
             'asOf' => $asOf->toDateString(),
+            'storeId' => $storeId,
         ]);
     }
 

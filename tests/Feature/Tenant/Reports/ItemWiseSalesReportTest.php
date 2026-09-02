@@ -5,6 +5,7 @@ use App\Models\Customer;
 use App\Models\FiscalYear;
 use App\Models\Item;
 use App\Models\Sale;
+use App\Models\Store;
 use App\Models\Tenant;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -185,6 +186,47 @@ test('the item-wise sales report sorts by total value descending and grand-total
             ->where('items.1.total_value', 100)
             ->where('totals.total_quantity', 11)
             ->where('totals.total_value', 600)
+        );
+
+    $tenant->delete();
+});
+
+test('the item-wise sales report can be narrowed to a single store', function () {
+    $domain = 'item-wise-sales-store-filter.tenant-test';
+    $tenant = provisionItemWiseSalesTestTenant($domain);
+
+    $storeAId = null;
+    $tenant->run(function () use (&$storeAId) {
+        FiscalYear::create(['name' => 'FY1', 'start_date' => '2026-01-01', 'end_date' => '2026-12-31', 'status' => FiscalYearStatus::Open]);
+        $admin = User::factory()->create(['email' => 'owner@example.com']);
+        $customer = Customer::factory()->create();
+        $item = Item::factory()->create(['name' => 'Widget', 'unit' => 'pcs', 'is_vatable' => false, 'is_stockable' => false]);
+        $storeA = Store::where('is_active', true)->orderBy('id')->firstOrFail();
+        $storeB = Store::factory()->create(['name' => 'Branch Store']);
+
+        Sale::post(
+            ['customer_id' => $customer->id, 'store_id' => $storeA->id, 'invoice_type' => 'full', 'date' => '2026-06-01', 'payment_mode' => 'cash'],
+            [['item_id' => $item->id, 'quantity' => 2, 'rate' => 100, 'discount' => 0]],
+            $admin,
+        );
+        Sale::post(
+            ['customer_id' => $customer->id, 'store_id' => $storeB->id, 'invoice_type' => 'full', 'date' => '2026-06-01', 'payment_mode' => 'cash'],
+            [['item_id' => $item->id, 'quantity' => 5, 'rate' => 100, 'discount' => 0]],
+            $admin,
+        );
+
+        $storeAId = $storeA->id;
+    });
+
+    loginItemWiseSalesTestUser($domain);
+
+    $this->get("http://{$domain}/reports/item-wise-sales?from=2026-06-01&to=2026-06-30&store_id={$storeAId}")
+        ->assertOk()
+        ->assertInertia(fn ($page) => $page
+            ->has('items', 1)
+            ->where('items.0.total_quantity', 2)
+            ->where('items.0.total_value', 200)
+            ->where('totals.total_value', 200)
         );
 
     $tenant->delete();

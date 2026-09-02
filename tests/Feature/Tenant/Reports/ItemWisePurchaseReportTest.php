@@ -5,6 +5,7 @@ use App\Models\FiscalYear;
 use App\Models\Item;
 use App\Models\Purchase;
 use App\Models\Role;
+use App\Models\Store;
 use App\Models\Supplier;
 use App\Models\Tenant;
 use App\Models\User;
@@ -166,6 +167,47 @@ test('the item-wise purchase report excludes a purchase outside the requested da
         ->assertOk()
         ->assertInertia(fn ($page) => $page
             ->has('items', 1)
+            ->where('items.0.total_value', 100)
+            ->where('totals.total_value', 100)
+        );
+
+    $tenant->delete();
+});
+
+test('the item-wise purchase report can be narrowed to a single store', function () {
+    $domain = 'item-wise-purchase-store-filter.tenant-test';
+    $tenant = provisionItemWisePurchaseReportTestTenant($domain);
+
+    $storeAId = null;
+    $tenant->run(function () use (&$storeAId) {
+        itemWisePurchaseReportTestOpenFiscalYear();
+        $admin = itemWisePurchaseReportTestAdmin();
+        $supplier = Supplier::factory()->create();
+        $item = Item::factory()->create(['name' => 'Widget', 'unit' => 'pcs', 'is_vatable' => false, 'is_stockable' => false]);
+        $storeA = Store::where('is_active', true)->orderBy('id')->firstOrFail();
+        $storeB = Store::factory()->create(['name' => 'Branch Store']);
+
+        Purchase::post(
+            ['supplier_id' => $supplier->id, 'store_id' => $storeA->id, 'date' => '2026-06-01', 'payment_mode' => 'cash'],
+            [['item_id' => $item->id, 'quantity' => 1, 'rate' => 100, 'discount' => 0]],
+            $admin,
+        );
+        Purchase::post(
+            ['supplier_id' => $supplier->id, 'store_id' => $storeB->id, 'date' => '2026-06-01', 'payment_mode' => 'cash'],
+            [['item_id' => $item->id, 'quantity' => 10, 'rate' => 10, 'discount' => 0]],
+            $admin,
+        );
+
+        $storeAId = $storeA->id;
+    });
+
+    loginItemWisePurchaseReportTestUser($domain);
+
+    $this->get("http://{$domain}/reports/item-wise-purchase?from=2026-06-01&to=2026-06-30&store_id={$storeAId}")
+        ->assertOk()
+        ->assertInertia(fn ($page) => $page
+            ->has('items', 1)
+            ->where('items.0.total_quantity', 1)
             ->where('items.0.total_value', 100)
             ->where('totals.total_value', 100)
         );

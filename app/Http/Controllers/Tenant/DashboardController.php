@@ -7,6 +7,7 @@ use App\Models\Account;
 use App\Models\AccountHead;
 use App\Models\Customer;
 use App\Models\Item;
+use App\Models\Notice;
 use App\Models\Supplier;
 use Illuminate\Http\Request;
 use Inertia\Inertia;
@@ -22,6 +23,8 @@ class DashboardController extends Controller
         $request->user()->loadMissing('role');
 
         return Inertia::render('Tenant/Dashboard', [
+            'notices' => Notice::currentlyActive()->latest()->get(['id', 'title', 'body']),
+            'expiringItemsCount' => Item::expiringSoon()->count(),
             'kpis' => [
                 'customers' => [
                     'total' => Customer::count(),

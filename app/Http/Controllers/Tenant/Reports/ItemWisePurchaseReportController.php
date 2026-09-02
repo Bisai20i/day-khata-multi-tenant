@@ -6,6 +6,7 @@ use App\Enums\FiscalYearStatus;
 use App\Http\Controllers\Controller;
 use App\Models\FiscalYear;
 use App\Models\PurchaseLine;
+use App\Models\Store;
 use Illuminate\Http\Request;
 use Inertia\Inertia;
 use Inertia\Response;
@@ -23,12 +24,14 @@ class ItemWisePurchaseReportController extends Controller
     public function index(Request $request): Response
     {
         [$from, $to] = $this->resolveDateRange($request);
+        $storeId = $request->integer('store_id') ?: null;
 
         $rows = PurchaseLine::query()
             ->join('purchases', 'purchases.id', '=', 'purchase_lines.purchase_id')
             ->join('items', 'items.id', '=', 'purchase_lines.item_id')
             ->where('purchases.status', 'posted')
             ->whereBetween('purchases.date', [$from, $to])
+            ->when($storeId, fn ($query) => $query->where('purchases.store_id', $storeId))
             ->groupBy('purchase_lines.item_id', 'items.name', 'items.unit')
             ->orderByDesc('total_value')
             ->selectRaw('purchase_lines.item_id as item_id')
@@ -54,8 +57,10 @@ class ItemWisePurchaseReportController extends Controller
                 'total_quantity' => round((float) $items->sum('total_quantity'), 4),
                 'total_value' => round((float) $items->sum('total_value'), 2),
             ],
+            'stores' => Store::where('is_active', true)->orderBy('name')->get(['id', 'name']),
             'from' => $from,
             'to' => $to,
+            'storeId' => $storeId,
         ]);
     }
 

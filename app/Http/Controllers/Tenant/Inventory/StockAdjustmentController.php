@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Tenant\Inventory;
 use App\Http\Controllers\Controller;
 use App\Models\Item;
 use App\Models\StockAdjustment;
+use App\Models\Store;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Arr;
@@ -23,6 +24,7 @@ class StockAdjustmentController extends Controller
                 ->orderByDesc('id')
                 ->get(),
             'items' => Item::query()->where('is_stockable', true)->orderBy('name')->get(['id', 'name', 'unit']),
+            'stores' => Store::where('is_active', true)->orderBy('name')->get(),
         ]);
     }
 
@@ -31,6 +33,7 @@ class StockAdjustmentController extends Controller
         $data = $request->validate([
             'date' => ['required', 'date'],
             'note' => ['nullable', 'string', 'max:255'],
+            'store_id' => ['nullable', 'integer', 'exists:stores,id'],
             'lines' => ['required', 'array', 'min:1'],
             'lines.*.item_id' => ['required', 'exists:items,id'],
             'lines.*.direction' => ['required', 'in:in,out'],

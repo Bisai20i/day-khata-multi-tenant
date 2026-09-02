@@ -8,6 +8,7 @@ import Input from '@/components/ui/Input.vue';
 import Select from '@/components/ui/Select.vue';
 import Combobox from '@/components/ui/Combobox.vue';
 import Modal from '@/components/ui/Modal.vue';
+import NepaliDateInput from '@/components/ui/NepaliDateInput.vue';
 import DataTable from '@/components/ui/DataTable.vue';
 import { useToast } from '@/composables/useToast';
 import { navGroups } from '@/lib/nav-items.js';
@@ -171,7 +172,7 @@ const columns = [
                 </p>
                 <div>
                     <label class="mb-1 block text-sm font-semibold text-text-base">Disposal Date</label>
-                    <Input v-model="disposeForm.disposal_date" type="date" required />
+                    <NepaliDateInput v-model="disposeForm.disposal_date" required />
                     <p v-if="disposeForm.errors.disposal_date" class="mt-1 text-sm text-danger">{{ disposeForm.errors.disposal_date }}</p>
                 </div>
                 <div>

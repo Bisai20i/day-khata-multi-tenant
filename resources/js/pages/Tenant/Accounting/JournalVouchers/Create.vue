@@ -7,6 +7,7 @@ import Button from '@/components/ui/Button.vue';
 import Input from '@/components/ui/Input.vue';
 import Combobox from '@/components/ui/Combobox.vue';
 import Select from '@/components/ui/Select.vue';
+import NepaliDateInput from '@/components/ui/NepaliDateInput.vue';
 
 const props = defineProps({
     accounts: {
@@ -143,7 +144,7 @@ function submit() {
             <div class="grid grid-cols-2 gap-4">
                 <div>
                     <label for="jv-date" class="mb-1 block text-sm font-semibold text-text-base">Date</label>
-                    <Input id="jv-date" v-model="form.date" type="date" required />
+                    <NepaliDateInput id="jv-date" v-model="form.date" required />
                     <p v-if="form.errors.date" class="mt-1 text-sm text-danger">{{ form.errors.date }}</p>
                 </div>
                 <div>

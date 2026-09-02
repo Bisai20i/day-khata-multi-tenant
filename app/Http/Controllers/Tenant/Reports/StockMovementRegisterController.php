@@ -13,6 +13,7 @@ use App\Models\PurchaseReturnLine;
 use App\Models\SaleLine;
 use App\Models\SaleReturnLine;
 use App\Models\StockAdjustmentLine;
+use App\Models\Store;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\MorphTo;
 use Illuminate\Http\Request;
@@ -32,12 +33,14 @@ class StockMovementRegisterController extends Controller
     {
         [$from, $to] = $this->resolveDateRange($request);
         $itemId = $request->integer('item_id') ?: null;
+        $storeId = $request->integer('store_id') ?: null;
 
         $movements = ItemStockMovement::query()
             ->where('cancelled', false)
             ->whereBetween('date', [$from, $to])
             ->when($itemId, fn ($query) => $query->where('item_id', $itemId))
-            ->with(['item:id,name,unit'])
+            ->when($storeId, fn ($query) => $query->where('store_id', $storeId))
+            ->with(['item:id,name,unit', 'store:id,name'])
             ->with(['reference' => function (MorphTo $morphTo) {
                 $morphTo->morphWith([
                     SaleLine::class => ['sale.customer'],
@@ -55,6 +58,7 @@ class StockMovementRegisterController extends Controller
             'movements' => $movements->map(fn (ItemStockMovement $movement) => [
                 'date' => $movement->date->toDateString(),
                 'itemName' => $movement->item->name,
+                'storeName' => $movement->store?->name,
                 'unit' => $movement->item->unit,
                 'movementType' => $this->movementTypeLabel($movement->movement_type),
                 'quantity' => round((float) $movement->quantity * $movement->movement_type->direction(), 4),
@@ -62,9 +66,11 @@ class StockMovementRegisterController extends Controller
                 'reference' => $this->referenceDescription($movement->reference, $movement->narration),
             ])->values(),
             'items' => Item::query()->orderBy('name')->get(['id', 'name']),
+            'stores' => Store::where('is_active', true)->orderBy('name')->get(['id', 'name']),
             'from' => $from,
             'to' => $to,
             'itemId' => $itemId,
+            'storeId' => $storeId,
         ]);
     }
 

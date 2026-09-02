@@ -5,13 +5,18 @@ namespace App\Http\Controllers\Central\Tenants;
 use App\Enums\TenantStatus;
 use App\Http\Controllers\Controller;
 use App\Models\Tenant;
+use App\Models\User;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
+use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\URL;
 use Inertia\Inertia;
 use Inertia\Response;
 use Stancl\Tenancy\Database\Models\Domain;
+use Symfony\Component\HttpFoundation\Response as SymfonyResponse;
 use Throwable;
 
 class TenantController extends Controller
@@ -163,6 +168,75 @@ class TenantController extends Controller
         return redirect()
             ->route('central.tenants.show', $tenant)
             ->with('status', 'Tenant resumed.');
+    }
+
+    /**
+     * Generate a short-lived (5 minute), single-purpose signed URL that logs
+     * this platform admin in as the tenant's own admin user, on the
+     * tenant's own domain, and send the browser there.
+     *
+     * The signed URL is validated by the `signed` route middleware on
+     * routes/tenant-impersonation.php - it can only ever be used once
+     * within its 5-minute window and only for this exact user/tenant, since
+     * the signature covers the full URL (including host and the target
+     * user's id). Returns Inertia::location() rather than a normal redirect
+     * because the target is a different domain: a same-origin Inertia visit
+     * can't follow it, so the client is told to perform a full-page,
+     * non-XHR navigation instead (Inertia's documented mechanism for
+     * external redirects).
+     */
+    public function impersonate(Tenant $tenant): SymfonyResponse
+    {
+        $tenant->loadMissing('domains');
+
+        $domain = $tenant->domains->first()?->domain;
+
+        if ($domain === null) {
+            return redirect()
+                ->route('central.tenants.show', $tenant)
+                ->with('status', 'This tenant has no domain configured.');
+        }
+
+        $adminUserId = $tenant->run(
+            fn (): ?int => User::whereHas('role', fn ($query) => $query->where('slug', 'admin'))->value('id')
+        );
+
+        if ($adminUserId === null) {
+            return redirect()
+                ->route('central.tenants.show', $tenant)
+                ->with('status', 'This tenant has no admin user to impersonate.');
+        }
+
+        $scheme = parse_url((string) config('app.url'), PHP_URL_SCHEME) ?: 'http';
+
+        // Tenant routes aren't registered per-domain (see routes/tenant.php),
+        // so route/URL generation has no way to know which tenant's domain
+        // to target on its own - forceRootUrl() is how a signed URL destined
+        // for a specific tenant's own subdomain is generated from here, on
+        // the central domain. Reset immediately after so nothing else
+        // generated during this request is accidentally scoped to it.
+        URL::forceRootUrl("{$scheme}://{$domain}");
+
+        $signedUrl = URL::temporarySignedRoute(
+            'tenant.impersonate',
+            now()->addMinutes(5),
+            ['user' => $adminUserId],
+        );
+
+        URL::forceRootUrl(null);
+
+        // TODO: once a proper audit-log module (App\Models\ActivityLog)
+        // lands, record this there instead - this Log::info() call is a
+        // stopgap so impersonation is never silently unaudited in the
+        // meantime.
+        Log::info('Platform admin started tenant impersonation', [
+            'platform_admin_id' => Auth::guard('platform')->id(),
+            'tenant_id' => $tenant->id,
+            'impersonated_user_id' => $adminUserId,
+            'started_at' => now()->toDateTimeString(),
+        ]);
+
+        return Inertia::location($signedUrl);
     }
 
     /**

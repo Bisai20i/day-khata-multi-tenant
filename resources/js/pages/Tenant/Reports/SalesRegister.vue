@@ -3,7 +3,7 @@ import { computed, h, ref } from 'vue';
 import { router, usePage } from '@inertiajs/vue3';
 import AppLayout from '@/layouts/AppLayout.vue';
 import Card from '@/components/ui/Card.vue';
-import Input from '@/components/ui/Input.vue';
+import NepaliDateInput from '@/components/ui/NepaliDateInput.vue';
 import Select from '@/components/ui/Select.vue';
 import Button from '@/components/ui/Button.vue';
 import DataTable from '@/components/ui/DataTable.vue';
@@ -13,9 +13,11 @@ const props = defineProps({
     sales: { type: Array, default: () => [] },
     totals: { type: Object, default: () => ({ taxable_amount: 0, nontaxable_amount: 0, vat_amount: 0, total: 0 }) },
     customers: { type: Array, default: () => [] },
+    stores: { type: Array, default: () => [] },
     from: { type: String, required: true },
     to: { type: String, required: true },
     customerId: { type: [Number, null], default: null },
+    storeId: { type: [Number, null], default: null },
 });
 
 const page = usePage();
@@ -25,16 +27,22 @@ const navItems = computed(() => navGroups(isAdmin.value));
 const from = ref(props.from);
 const to = ref(props.to);
 const customerId = ref(props.customerId);
+const storeId = ref(props.storeId);
 
 const customerOptions = computed(() => [
     { value: null, label: 'All customers' },
     ...props.customers.map((customer) => ({ value: customer.id, label: customer.name })),
 ]);
 
+const storeOptions = computed(() => [
+    { value: null, label: 'All stores' },
+    ...props.stores.map((store) => ({ value: store.id, label: store.name })),
+]);
+
 function applyFilter() {
     router.get(
         window.location.pathname,
-        { from: from.value, to: to.value, customer_id: customerId.value ?? undefined },
+        { from: from.value, to: to.value, customer_id: customerId.value ?? undefined, store_id: storeId.value ?? undefined },
         { preserveState: true, preserveScroll: true },
     );
 }
@@ -86,15 +94,19 @@ const columns = [
             <div class="flex flex-wrap items-end gap-3">
                 <div>
                     <label class="mb-1 block text-xs font-semibold text-text-muted">From</label>
-                    <Input v-model="from" type="date" />
+                    <NepaliDateInput v-model="from" />
                 </div>
                 <div>
                     <label class="mb-1 block text-xs font-semibold text-text-muted">To</label>
-                    <Input v-model="to" type="date" />
+                    <NepaliDateInput v-model="to" />
                 </div>
                 <div class="w-56">
                     <label class="mb-1 block text-xs font-semibold text-text-muted">Customer</label>
                     <Select v-model="customerId" :options="customerOptions" />
+                </div>
+                <div class="w-56">
+                    <label class="mb-1 block text-xs font-semibold text-text-muted">Store</label>
+                    <Select v-model="storeId" :options="storeOptions" />
                 </div>
                 <Button variant="primary" tone="purple" @click="applyFilter">Apply</Button>
             </div>

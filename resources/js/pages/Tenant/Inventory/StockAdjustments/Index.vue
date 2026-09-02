@@ -16,6 +16,7 @@ import Create from './Create.vue';
 const props = defineProps({
     stockAdjustments: { type: Array, default: () => [] },
     items: { type: Array, default: () => [] },
+    stores: { type: Array, default: () => [] },
 });
 
 const page = usePage();
@@ -141,7 +142,7 @@ const columns = [
 <template>
     <AppLayout title="Stock Adjustments" :nav-items="navItems">
         <template v-if="showCreateForm">
-            <Create :items="items" @cancel="showCreateForm = false" @posted="showCreateForm = false" />
+            <Create :items="items" :stores="stores" @cancel="showCreateForm = false" @posted="showCreateForm = false" />
         </template>
 
         <template v-else>
