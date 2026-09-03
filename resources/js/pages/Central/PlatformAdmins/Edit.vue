@@ -1,0 +1,118 @@
+<script setup>
+import { computed } from 'vue';
+import { useForm, Link } from '@inertiajs/vue3';
+import { ArrowLeft, Building2, History, LayoutDashboard, Settings as SettingsIcon, ShieldCheck } from '@lucide/vue';
+import AppLayout from '@/layouts/AppLayout.vue';
+import Card from '@/components/ui/Card.vue';
+import Input from '@/components/ui/Input.vue';
+import Select from '@/components/ui/Select.vue';
+import Button from '@/components/ui/Button.vue';
+
+const props = defineProps({
+    admin: {
+        type: Object,
+        required: true,
+    },
+});
+
+const navItems = [
+    { label: 'Dashboard', href: '/admin', icon: LayoutDashboard },
+    { label: 'Tenants', href: '/tenants', icon: Building2 },
+    { label: 'Activity log', href: '/activity-log', icon: History },
+    { label: 'Settings', href: '/settings', icon: SettingsIcon },
+    { label: 'Platform admins', href: '/platform-admins', icon: ShieldCheck },
+];
+
+const roleOptions = [
+    { value: 'owner', label: 'Owner' },
+    { value: 'support', label: 'Support' },
+];
+
+// Select's modelValue only accepts String/Number/null, so is_active (a
+// boolean on the form) is bridged through 1/0 here rather than passed
+// straight through - avoids a Vue prop-type warning on every keystroke
+// (same bridge Tenant/Admin/Users.vue already uses for the same reason).
+const statusOptions = [
+    { value: 1, label: 'Active' },
+    { value: 0, label: 'Inactive' },
+];
+
+const form = useForm({
+    name: props.admin.name,
+    email: props.admin.email,
+    password: '',
+    password_confirmation: '',
+    role: props.admin.role,
+    is_active: props.admin.is_active,
+});
+
+const isActiveOption = computed({
+    get: () => (form.is_active ? 1 : 0),
+    set: (value) => {
+        form.is_active = value === 1;
+    },
+});
+
+function submit() {
+    form.put(`/platform-admins/${props.admin.id}`);
+}
+</script>
+
+<template>
+    <AppLayout :title="`Edit ${admin.name}`" :nav-items="navItems">
+        <Link href="/platform-admins" class="mb-2 inline-flex items-center gap-1 text-sm font-semibold text-primary">
+            <ArrowLeft class="size-4" />
+            All platform admins
+        </Link>
+
+        <Card variant="panel" class="max-w-lg">
+            <form class="flex flex-col gap-4" @submit.prevent="submit">
+                <div>
+                    <label for="name" class="mb-1 block text-sm font-semibold text-text-base">Name</label>
+                    <Input id="name" v-model="form.name" type="text" required />
+                    <p v-if="form.errors.name" class="mt-1 text-sm text-danger">{{ form.errors.name }}</p>
+                </div>
+
+                <div>
+                    <label for="email" class="mb-1 block text-sm font-semibold text-text-base">Email</label>
+                    <Input id="email" v-model="form.email" type="email" required />
+                    <p v-if="form.errors.email" class="mt-1 text-sm text-danger">{{ form.errors.email }}</p>
+                </div>
+
+                <div>
+                    <label for="role" class="mb-1 block text-sm font-semibold text-text-base">Role</label>
+                    <Select id="role" v-model="form.role" :options="roleOptions" />
+                    <p v-if="form.errors.role" class="mt-1 text-sm text-danger">{{ form.errors.role }}</p>
+                </div>
+
+                <div>
+                    <label for="is_active" class="mb-1 block text-sm font-semibold text-text-base">Status</label>
+                    <Select id="is_active" v-model="isActiveOption" :options="statusOptions" />
+                    <p v-if="form.errors.is_active" class="mt-1 text-sm text-danger">{{ form.errors.is_active }}</p>
+                </div>
+
+                <div>
+                    <label for="password" class="mb-1 block text-sm font-semibold text-text-base">
+                        New password (leave blank to keep current)
+                    </label>
+                    <Input id="password" v-model="form.password" type="password" />
+                    <p v-if="form.errors.password" class="mt-1 text-sm text-danger">{{ form.errors.password }}</p>
+                </div>
+
+                <div>
+                    <label for="password_confirmation" class="mb-1 block text-sm font-semibold text-text-base">Confirm password</label>
+                    <Input id="password_confirmation" v-model="form.password_confirmation" type="password" />
+                </div>
+
+                <div class="flex gap-2">
+                    <Button type="submit" variant="primary" tone="purple" :disabled="form.processing" class="flex-1">
+                        Save
+                    </Button>
+                    <Button :as="Link" href="/platform-admins" variant="secondary" tone="purple" class="flex-1 justify-center">
+                        Cancel
+                    </Button>
+                </div>
+            </form>
+        </Card>
+    </AppLayout>
+</template>

@@ -26,5 +26,9 @@ Route::middleware('auth:platform')->prefix('tenants')->name('central.tenants.')-
     Route::post('/{tenant}/suspend', [TenantController::class, 'suspend'])->name('suspend');
     Route::post('/{tenant}/resume', [TenantController::class, 'resume'])->name('resume');
     Route::post('/{tenant}/impersonate', [TenantController::class, 'impersonate'])->name('impersonate');
-    Route::delete('/{tenant}', [TenantController::class, 'destroy'])->name('destroy');
+
+    // Owner-only: deleting a tenant is a real DROP DATABASE, not a "support"-level action.
+    Route::delete('/{tenant}', [TenantController::class, 'destroy'])
+        ->middleware('can:platform-owner')
+        ->name('destroy');
 });

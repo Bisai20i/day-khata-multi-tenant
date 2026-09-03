@@ -1,6 +1,6 @@
 <script setup>
 import { useForm, Link } from '@inertiajs/vue3';
-import { ArrowLeft, Building2, History, LayoutDashboard, Settings as SettingsIcon } from '@lucide/vue';
+import { ArrowLeft, Building2, History, LayoutDashboard, Settings as SettingsIcon, ShieldCheck } from '@lucide/vue';
 import AppLayout from '@/layouts/AppLayout.vue';
 import Card from '@/components/ui/Card.vue';
 import Input from '@/components/ui/Input.vue';
@@ -18,6 +18,7 @@ const navItems = [
     { label: 'Tenants', href: '/tenants', icon: Building2 },
     { label: 'Activity log', href: '/activity-log', icon: History },
     { label: 'Settings', href: '/settings', icon: SettingsIcon },
+    { label: 'Platform admins', href: '/platform-admins', icon: ShieldCheck },
 ];
 
 const form = useForm({

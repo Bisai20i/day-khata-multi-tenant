@@ -105,6 +105,19 @@ test('sending a test email sends to the current platform admin and reports succe
     Mail::assertSent(TestMail::class, fn (TestMail $mail) => $mail->hasTo('owner@platform.test'));
 });
 
+test('a support admin can view but not update settings or send a test email', function () {
+    $support = PlatformAdmin::factory()->support()->create();
+
+    $this->actingAs($support, 'platform')->get(route('central.settings.edit'))->assertOk();
+
+    $this->actingAs($support, 'platform')->put(route('central.settings.update'), [
+        'default_trial_days' => 14,
+        'default_grace_period_days' => 30,
+    ])->assertForbidden();
+
+    $this->actingAs($support, 'platform')->post(route('central.settings.test-email'))->assertForbidden();
+});
+
 test('a tenant-side user cannot access the settings routes', function () {
     $webUser = User::factory()->make();
 

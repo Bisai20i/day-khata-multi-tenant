@@ -37,6 +37,18 @@ test('a platform admin cannot authenticate with an invalid password', function (
     expect(Auth::guard('platform')->check())->toBeFalse();
 });
 
+test('a deactivated platform admin cannot authenticate, with the same generic error a wrong password gets', function () {
+    $admin = PlatformAdmin::factory()->inactive()->create();
+
+    $response = $this->post('/login', [
+        'email' => $admin->email,
+        'password' => 'password',
+    ]);
+
+    expect(Auth::guard('platform')->check())->toBeFalse();
+    $response->assertSessionHasErrors(['email' => trans('auth.failed')]);
+});
+
 test('a platform admin can logout', function () {
     $admin = PlatformAdmin::factory()->create();
 

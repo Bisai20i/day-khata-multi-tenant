@@ -2,13 +2,14 @@
 
 namespace App\Models;
 
+use App\Enums\PlatformAdminRole;
 use Database\Factories\PlatformAdminFactory;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Attributes\Hidden;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Foundation\Auth\User as Authenticatable;
 
-#[Fillable(['name', 'email', 'password'])]
+#[Fillable(['name', 'email', 'password', 'role', 'is_active'])]
 #[Hidden(['password', 'remember_token', 'two_factor_secret', 'two_factor_recovery_codes'])]
 class PlatformAdmin extends Authenticatable
 {
@@ -27,6 +28,8 @@ class PlatformAdmin extends Authenticatable
             'two_factor_secret' => 'encrypted',
             'two_factor_recovery_codes' => 'encrypted:array',
             'two_factor_confirmed_at' => 'datetime',
+            'role' => PlatformAdminRole::class,
+            'is_active' => 'boolean',
         ];
     }
 
@@ -37,5 +40,10 @@ class PlatformAdmin extends Authenticatable
     public function hasTwoFactorEnabled(): bool
     {
         return $this->two_factor_confirmed_at !== null;
+    }
+
+    public function isOwner(): bool
+    {
+        return $this->role === PlatformAdminRole::Owner;
     }
 }

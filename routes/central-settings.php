@@ -17,6 +17,10 @@ use Illuminate\Support\Facades\Route;
 
 Route::middleware('auth:platform')->prefix('settings')->name('central.settings.')->group(function () {
     Route::get('/', [PlatformSettingController::class, 'edit'])->name('edit');
-    Route::put('/', [PlatformSettingController::class, 'update'])->name('update');
-    Route::post('/test-email', [PlatformSettingController::class, 'sendTestEmail'])->name('test-email');
+
+    // Owner-only: viewing settings is fine for "support", changing them isn't.
+    Route::middleware('can:platform-owner')->group(function () {
+        Route::put('/', [PlatformSettingController::class, 'update'])->name('update');
+        Route::post('/test-email', [PlatformSettingController::class, 'sendTestEmail'])->name('test-email');
+    });
 });

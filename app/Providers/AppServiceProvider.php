@@ -5,6 +5,7 @@ namespace App\Providers;
 use App\Models\FixedAsset;
 use App\Models\JournalVoucher;
 use App\Models\Payment;
+use App\Models\PlatformAdmin;
 use App\Models\Purchase;
 use App\Models\PurchaseReturn;
 use App\Models\Quotation;
@@ -14,6 +15,7 @@ use App\Models\SalesReturn;
 use App\Models\StockAdjustment;
 use App\Models\User;
 use App\Observers\ActivityLogObserver;
+use Illuminate\Support\Facades\Gate;
 use Illuminate\Support\ServiceProvider;
 
 class AppServiceProvider extends ServiceProvider
@@ -47,5 +49,11 @@ class AppServiceProvider extends ServiceProvider
         FixedAsset::observe(ActivityLogObserver::class);
         Quotation::observe(ActivityLogObserver::class);
         User::observe(ActivityLogObserver::class);
+
+        // Owner-only central actions: platform settings changes, tenant
+        // delete, platform-admin management. 'support' admins can do
+        // everything else (view, impersonate, suspend/resume, view users/
+        // audit log).
+        Gate::define('platform-owner', fn (PlatformAdmin $admin): bool => $admin->isOwner());
     }
 }

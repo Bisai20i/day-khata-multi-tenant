@@ -43,7 +43,10 @@ class TwoFactorChallengeController extends Controller
         /** @var PlatformAdmin $admin */
         $admin = PlatformAdmin::findOrFail($adminId);
 
-        if (! $this->verifyCode($admin, $validated['code'])) {
+        // Defense in depth: the password step already rejects a deactivated
+        // admin, but this also covers the (rare) case of being deactivated
+        // by someone else in the few minutes between that step and this one.
+        if (! $admin->is_active || ! $this->verifyCode($admin, $validated['code'])) {
             throw ValidationException::withMessages(['code' => 'The provided code is invalid.']);
         }
 
@@ -79,7 +82,7 @@ class TwoFactorChallengeController extends Controller
      */
     private function verifyCode(PlatformAdmin $admin, string $code): bool
     {
-        if ((new Google2FA())->verifyKey($admin->two_factor_secret, $code)) {
+        if ((new Google2FA)->verifyKey($admin->two_factor_secret, $code)) {
             return true;
         }
 

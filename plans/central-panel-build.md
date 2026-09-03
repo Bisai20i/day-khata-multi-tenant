@@ -1,9 +1,9 @@
 # Central panel build plan
 
-**Status as of 2026-09-03**: scope locked with the user; Phase A shipped and committed (`87ebfb6`),
-Phase B built and not yet committed (see its own Status line below). Read `goal.md` roadmap item 11 and
-`mem.md` for what's actually landed before trusting this doc's "Status" lines — same discipline as
-`plans/complete-system-build.md`.
+**Status as of 2026-09-03**: scope locked with the user; Phase A (`87ebfb6`) and Phase B (`c116337`)
+committed, Phase C built/test-verified/not yet committed (see its own Status line below). Read `goal.md`
+roadmap item 11 and `mem.md` for what's actually landed before trusting this doc's "Status" lines — same
+discipline as `plans/complete-system-build.md`.
 
 ## Why this exists
 
@@ -147,6 +147,19 @@ here.
    admins (ties into Phase D item 12). Sequenced after items 5–6 land, not bundled with them.
 
 ## Phase C — Platform admin management
+
+**Status: built and test-verified 2026-09-03, not yet committed.** Items 9-11 are done — see `mem.md`'s
+Phase C entry for the full breakdown. The `platform-owner` Gate deferred in Phase B is now wired up for
+real. Two deviations from this doc's literal wording, both deliberate: (1) deactivation is folded into
+`update()`'s `is_active` field rather than a separate `deactivate` action, mirroring the already-built
+tenant-side `Tenant\Admin\UserController` precedent; (2) a deactivated admin's login attempt gets the
+*same generic* `auth.failed` message a wrong password gets, not "a clear message" as originally written
+here — a distinct message would let a login form probe whether an email belongs to a deactivated account,
+which is exactly the kind of account-status leak the tenant-side login already avoids for `users.
+is_active`, so this phase matched that existing, more secure convention instead. Test command: `php
+artisan test --compact tests/Feature/Central/PlatformAdmins/PlatformAdminControllerTest.php
+tests/Feature/Central/Auth/LoginTest.php tests/Feature/Central/Tenants/TenantDeletionTest.php
+tests/Feature/Central/Settings/PlatformSettingControllerTest.php` — **26/26 passing**.
 
 9. **Schema**: `role`/`is_active` columns on `platform_admins` (shared schema above).
 10. **`Central\PlatformAdmins\PlatformAdminController`** — index/create/store/edit/update, plus a

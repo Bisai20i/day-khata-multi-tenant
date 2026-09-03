@@ -36,7 +36,9 @@ class AuthenticatedSessionController extends Controller
         $provider = Auth::guard('platform')->getProvider();
         $admin = $provider->retrieveByCredentials($credentials);
 
-        if (! $admin || ! $provider->validateCredentials($admin, $credentials)) {
+        if (! $admin || ! $provider->validateCredentials($admin, $credentials) || ! $admin->is_active) {
+            // A deactivated admin gets the exact same generic message as a
+            // wrong password - its status can't be probed from the login form.
             throw ValidationException::withMessages([
                 'email' => trans('auth.failed'),
             ]);

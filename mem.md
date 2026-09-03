@@ -3,13 +3,83 @@
 Living state doc. Read this before starting work, update it before stopping. See `goal.md` for
 direction/roadmap — this file is "what exists and why," not "what's next."
 
-**Last updated:** 2026-09-03. **Git status: working tree clean. Phase B of `plans/central-panel-build.md`
+**Last updated:** 2026-09-03. **Git status: working tree has uncommitted changes — Phase C of
+`plans/central-panel-build.md` (platform-admin management) built and test-verified, not yet committed.**
+Built directly (no forking, same call as Phase B). This finally wires up the `platform-owner` Gate that
+Phase B deliberately deferred (see that entry below) — now meaningful, since a real owner/support
+distinction and a UI to set it both exist.
+
+- **Schema**: `platform_admins` gains `role` (string, `owner`|`support`, default `owner` — every
+  pre-existing admin stays `owner`) and `is_active` (boolean, default `true`). New `App\Enums\
+  PlatformAdminRole` (`Owner`/`Support`), cast on `PlatformAdmin::role`. `PlatformAdmin::isOwner(): bool`
+  helper.
+- **The Gate, finally wired**: `Gate::define('platform-owner', fn (PlatformAdmin $admin) =>
+  $admin->isOwner())` registered in `AppServiceProvider::boot()` (this app has no `AuthServiceProvider` —
+  Laravel 11+ default skips it — so `AppServiceProvider` is the only registration point, same as the
+  `ActivityLogObserver` registrations already there). Laravel's built-in `can:platform-owner` route
+  middleware works correctly against the `platform` guard's user with **no explicit guard specified**,
+  confirmed by reading `Illuminate\Auth\Middleware\Authenticate::authenticate()` — it calls `Auth::
+  shouldUse($guard)` once a guard in its list authenticates, which flips `'platform'` to the *default*
+  guard for the rest of that request; every central route is already wrapped in `auth:platform` first, so
+  `can:` (which resolves the user via the default guard) sees the right user without needing `can:
+  platform-owner,platform` or similar. Applied to exactly the 3 places the locked decision named: tenant
+  `destroy()` (routes/central-tenants.php), settings `update()`/`sendTestEmail()` (not `edit()` — viewing
+  settings is fine for `support`), and platform-admin `create/store/edit/update` (not `index()` — any
+  admin can view the roster).
+- **`Central\PlatformAdmins\PlatformAdminController`** (index/create/store/edit/update, no `destroy()` —
+  same reasoning as `Tenant\Admin\UserController`: `platform_admin_activity_logs.platform_admin_id` is
+  `restrictOnDelete()`, so an admin who's ever taken a logged action can never be hard-deleted anyway;
+  deactivation via `update()`'s `is_active` field is the only lifecycle action). **Deviation from the plan
+  doc's literal wording** ("plus a deactivate action"): folded deactivation into `update()` rather than a
+  separate action, mirroring the tenant-side `UserController` precedent exactly rather than the plan
+  doc's abstract phrasing — consistency with an already-built, already-verified pattern wins over a
+  wishlist doc written before that pattern existed. `guardLastActiveOwner()` (verbatim port of
+  `UserController::guardLastActiveAdmin()`'s shape) blocks demoting-to-support or deactivating the sole
+  remaining active owner — this app has no separate "recover access" flow, so that would permanently lock
+  the platform out of its own settings/tenant-delete/admin-management tooling.
+- **Login-flow rejection**: `AuthenticatedSessionController::store()` now also fails a deactivated admin
+  with the exact same generic `auth.failed` message a wrong password gets (status can't be probed from
+  the form — same convention the tenant-side login already uses for `users.is_active`).
+  `TwoFactorChallengeController::store()` gets the identical check too, defense in depth for the rare case
+  of being deactivated by someone else in the few-minute window between the password step and completing
+  the 2FA challenge.
+- **UI**: `Central/PlatformAdmins/{Index,Create,Edit}.vue`, separate-page shape (not the tenant side's
+  single-page-modal shape) matching Central's own established convention (`Tenants/{Index,Create,Edit}.vue`
+  are already 3 separate pages) — the backend routes were already built that way before the UI, so this
+  followed naturally rather than being a separate style decision. `Index.vue` reads `page.props.auth.
+  platformAdmin.role` (already shared by `HandleInertiaRequests`, and Eloquent's `attributesToArray()`
+  auto-unwraps a `BackedEnum` cast to its raw scalar value during JSON serialization, confirmed rather
+  than assumed) to conditionally show the "New platform admin" button and per-row "Edit" links — UI-only
+  convenience, the real enforcement is server-side. **"Platform admins" nav entry added to all 11 other
+  Central Vue pages** (the 8 from Phase A/B plus Phase B's own `Settings/Edit.vue`, which needed the same
+  treatment) — this recurring per-page nav-array duplication (3rd time now touching every Central page for
+  one new nav entry) is worth flagging as a real refactor candidate (extract a shared `nav-items.js` like
+  the tenant side already has) if a 4th phase needs it too; not done now, out of scope for this phase.
+- **Tests**: `tests/Feature/Central/PlatformAdmins/PlatformAdminControllerTest.php` (view-by-either-role,
+  owner-can-create, support-blocked-403 on create/store/edit/update, owner-can-update-role-and-status,
+  last-active-owner guard both directions — demote and deactivate — rejected, same guard allowed when
+  another active owner exists, guest/tenant-web-user blocked). Extended 3 existing files: `LoginTest.php`
+  gained the deactivated-admin-rejected case, `TenantDeletionTest.php` gained a support-cannot-delete
+  case, `PlatformSettingControllerTest.php` gained a support-can-view-but-not-mutate case.
+  `PlatformAdminFactory` gained `support()`/`inactive()` states.
+- **Verification**: `php -l` + `vendor/bin/pint --format agent` on every touched file (one incidental
+  auto-fix in `TwoFactorChallengeController.php` — pre-existing style Pint flagged while formatting a
+  file this phase already had to touch, not something this phase's own diff introduced), `php artisan
+  migrate --pretend` then a real `migrate` against the dev central DB, `npm run build` (succeeded).
+  `php artisan test --compact` on the full Phase C-relevant scope (Auth + Settings + Tenants +
+  PlatformAdmins + ActivityLogControllerTest): **59/65 passing** — the 6 failures are the exact same
+  pre-existing-at-`87ebfb6` failures flagged at the end of the Phase B entry below, confirmed unchanged
+  (same test names, same error messages) and untouched by this phase's own work.
+
+---
+
+**2026-09-03 entry (Phase B — superseded by the Phase C entry above for "what's next," kept for the full
+build detail).** **Git status at the time: working tree clean. Phase B of `plans/central-panel-build.md`
 (system settings) is committed as `c116337` "Add platform settings, mail, and tenant grace period (Phase
 B)".** Built directly (no forking — the work didn't split cleanly enough to be worth the coordination
 overhead) right after Phase A's stale-doc correction (see the entry below this one for that correction
 and for Phase A's own content), then debugged/fixed against the user's real test run before committing
-(see the bug list below). **Now starting Phase C (platform-admin management).** All 4 of Phase B's plan
-items are done:
+(see the bug list below). All 4 of Phase B's plan items are done:
 
 - **`PlatformSetting` singleton** (`current()` = `firstOrCreate`, same pattern as tenant-side
   `CompanySetting`) — mail_*, platform_name, support_email, default_trial_days,

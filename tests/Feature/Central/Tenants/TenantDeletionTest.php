@@ -51,3 +51,25 @@ test('deleting a tenant removes its database from disk', function () {
         ->and($log->metadata['company_name'] ?? null)->toBe('Deleteme Inc')
         ->and($log->tenant_id)->toBeNull();
 });
+
+test('a support admin cannot delete a tenant', function () {
+    $owner = PlatformAdmin::factory()->create();
+    $support = PlatformAdmin::factory()->support()->create();
+
+    $this->actingAs($owner, 'platform')->post(route('central.tenants.store'), [
+        'company_name' => 'Ownedbyowner Inc',
+        'subdomain' => 'ownedbyowner',
+        'contact_email' => null,
+        'admin_name' => 'Admin',
+        'admin_email' => 'admin@ownedbyowner.test',
+        'admin_password' => 'password123',
+    ]);
+
+    $tenant = Tenant::where('company_name', 'Ownedbyowner Inc')->firstOrFail();
+
+    $this->actingAs($support, 'platform')
+        ->delete(route('central.tenants.destroy', $tenant))
+        ->assertForbidden();
+
+    expect(Tenant::find($tenant->id))->not->toBeNull();
+});

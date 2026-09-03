@@ -2,6 +2,7 @@
 
 namespace Database\Factories;
 
+use App\Enums\PlatformAdminRole;
 use App\Models\PlatformAdmin;
 use Illuminate\Database\Eloquent\Factories\Factory;
 use Illuminate\Support\Facades\Hash;
@@ -29,6 +30,18 @@ class PlatformAdminFactory extends Factory
             'email' => fake()->unique()->safeEmail(),
             'password' => static::$password ??= Hash::make('password'),
             'remember_token' => Str::random(10),
+            'role' => PlatformAdminRole::Owner,
+            'is_active' => true,
         ];
+    }
+
+    public function support(): static
+    {
+        return $this->state(fn (): array => ['role' => PlatformAdminRole::Support]);
+    }
+
+    public function inactive(): static
+    {
+        return $this->state(fn (): array => ['is_active' => false]);
     }
 }
