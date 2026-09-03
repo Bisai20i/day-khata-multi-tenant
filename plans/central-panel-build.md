@@ -1,9 +1,9 @@
 # Central panel build plan
 
-**Status as of 2026-09-03**: scope locked with the user; Phase A (`87ebfb6`) and Phase B (`c116337`)
-committed, Phase C built/test-verified/not yet committed (see its own Status line below). Read `goal.md`
-roadmap item 11 and `mem.md` for what's actually landed before trusting this doc's "Status" lines — same
-discipline as `plans/complete-system-build.md`.
+**Status as of 2026-09-03**: scope locked with the user; Phase A (`87ebfb6`), Phase B (`c116337`), and
+Phase C (`721193e`) committed. Phase D next. Read `goal.md` roadmap item 11 and `mem.md` for what's
+actually landed before trusting this doc's "Status" lines — same discipline as
+`plans/complete-system-build.md`.
 
 ## Why this exists
 
@@ -148,7 +148,7 @@ here.
 
 ## Phase C — Platform admin management
 
-**Status: built and test-verified 2026-09-03, not yet committed.** Items 9-11 are done — see `mem.md`'s
+**Status: DONE — built, test-verified, committed as `721193e` (2026-09-03).** Items 9-11 are done — see `mem.md`'s
 Phase C entry for the full breakdown. The `platform-owner` Gate deferred in Phase B is now wired up for
 real. Two deviations from this doc's literal wording, both deliberate: (1) deactivation is folded into
 `update()`'s `is_active` field rather than a separate `deactivate` action, mirroring the already-built

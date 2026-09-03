@@ -3,11 +3,13 @@
 Living state doc. Read this before starting work, update it before stopping. See `goal.md` for
 direction/roadmap — this file is "what exists and why," not "what's next."
 
-**Last updated:** 2026-09-03. **Git status: working tree has uncommitted changes — Phase C of
-`plans/central-panel-build.md` (platform-admin management) built and test-verified, not yet committed.**
-Built directly (no forking, same call as Phase B). This finally wires up the `platform-owner` Gate that
-Phase B deliberately deferred (see that entry below) — now meaningful, since a real owner/support
-distinction and a UI to set it both exist.
+**Last updated:** 2026-09-03. **Git status: working tree clean. Phase C of `plans/central-panel-build.md`
+(platform-admin management) is committed as `721193e` "Add platform-admin owner/support roles and
+management (Phase C)".** Built directly (no forking, same call as Phase B). This finally wires up the
+`platform-owner` Gate that Phase B deliberately deferred (see that entry below) — now meaningful, since a
+real owner/support distinction and a UI to set it both exist. **Next: Phase D (tenant lifecycle
+hardening — trial tracking, provisioning-failure visibility, domain management, stronger delete
+confirmation).**
 
 - **Schema**: `platform_admins` gains `role` (string, `owner`|`support`, default `owner` — every
   pre-existing admin stays `owner`) and `is_active` (boolean, default `true`). New `App\Enums\
