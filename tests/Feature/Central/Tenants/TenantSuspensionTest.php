@@ -2,6 +2,7 @@
 
 use App\Enums\TenantStatus;
 use App\Models\PlatformAdmin;
+use App\Models\PlatformAdminActivityLog;
 use App\Models\Tenant;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Tests\TestCase;
@@ -42,6 +43,11 @@ test('suspending a tenant blocks requests to its domain with a 403', function ()
     expect($tenant->fresh()->status)->toBe(TenantStatus::Suspended);
 
     $this->get('http://suspendme.localhost/')->assertStatus(403);
+
+    expect(PlatformAdminActivityLog::where('action', 'tenant.suspend')
+        ->where('tenant_id', $tenant->id)
+        ->where('platform_admin_id', $admin->id)
+        ->exists())->toBeTrue();
 });
 
 test('resuming a suspended tenant restores access to its domain', function () {
@@ -61,4 +67,9 @@ test('resuming a suspended tenant restores access to its domain', function () {
     // a bare 200 (see routes/tenant.php) - a resumed, unauthenticated tenant
     // domain is reachable again, which here means "redirects to login", not 403.
     $this->get('http://resumeme.localhost/')->assertRedirect(route('tenant.login'));
+
+    expect(PlatformAdminActivityLog::where('action', 'tenant.resume')
+        ->where('tenant_id', $tenant->id)
+        ->where('platform_admin_id', $admin->id)
+        ->exists())->toBeTrue();
 });

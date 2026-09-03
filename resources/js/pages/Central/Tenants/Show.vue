@@ -1,7 +1,7 @@
 <script setup>
 import { ref, onMounted } from 'vue';
 import { Link, router, usePage } from '@inertiajs/vue3';
-import { ArrowLeft, Building2, CirclePause, CirclePlay, LayoutDashboard, LogIn, Trash2 } from '@lucide/vue';
+import { ArrowLeft, Building2, CirclePause, CirclePlay, History, LayoutDashboard, LogIn, Pencil, Trash2, Users } from '@lucide/vue';
 import AppLayout from '@/layouts/AppLayout.vue';
 import Card from '@/components/ui/Card.vue';
 import Badge from '@/components/ui/Badge.vue';
@@ -28,6 +28,7 @@ onMounted(() => {
 const navItems = [
     { label: 'Dashboard', href: '/admin', icon: LayoutDashboard },
     { label: 'Tenants', href: '/tenants', icon: Building2 },
+    { label: 'Activity log', href: '/activity-log', icon: History },
 ];
 
 const showDeleteModal = ref(false);
@@ -93,6 +94,16 @@ function confirmDelete() {
             </dl>
 
             <div class="flex gap-2">
+                <Button :as="Link" :href="`/tenants/${tenant.id}/edit`" variant="secondary" tone="blue">
+                    <Pencil class="size-4" />
+                    Edit
+                </Button>
+
+                <Button :as="Link" :href="`/tenants/${tenant.id}/users`" variant="secondary" tone="blue">
+                    <Users class="size-4" />
+                    View users
+                </Button>
+
                 <Button v-if="tenant.status === 'active'" variant="secondary" tone="purple" @click="suspend">
                     <CirclePause class="size-4" />
                     Suspend

@@ -2,6 +2,7 @@
 
 use App\Enums\TenantStatus;
 use App\Models\PlatformAdmin;
+use App\Models\PlatformAdminActivityLog;
 use App\Models\Tenant;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -59,6 +60,11 @@ test('creating a tenant via the endpoint provisions a working tenant database wi
 
     expect($adminUser['name'])->toBe('Acme Admin')
         ->and($adminUser['role_slug'])->toBe('admin');
+
+    expect(PlatformAdminActivityLog::where('action', 'tenant.create')
+        ->where('tenant_id', $tenant->id)
+        ->where('platform_admin_id', $admin->id)
+        ->exists())->toBeTrue();
 });
 
 test('a request into a still-provisioning tenant is blocked instead of hitting a missing database', function () {

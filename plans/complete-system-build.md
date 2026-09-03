@@ -169,6 +169,8 @@ verified batch by batch.
 
 **Status: DONE 2026-09-02 — all green.** `vendor/bin/pint --dirty --format agent` clean,
 `php artisan test` 345/347 (2 real failures found and fixed — see `mem.md`'s Phase 2 entry for both),
-`npm run build` succeeded. **This closes out the entire complete-system-build effort.** The only thing
-left is committing: batch by batch (0A, 0B, then each Phase-1 item or small related group), starting
-with the still-earlier uncommitted Payment/Receipt module — not started yet, next session's first task.
+`npm run build` succeeded. **This closes out the entire complete-system-build effort.** Committed by the
+user as a single commit, `8482319` "gaps filled" (209 files, +15,697/-298) — including the Payment/
+Receipt module, which was built after this Phase 2 run and not independently re-verified before
+committing. Working tree is clean. **Next: manual browser smoke-test** — no actual browser click-through
+has ever been done on this app; see `mem.md`'s top entry.

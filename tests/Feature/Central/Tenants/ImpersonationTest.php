@@ -1,6 +1,7 @@
 <?php
 
 use App\Models\PlatformAdmin;
+use App\Models\PlatformAdminActivityLog;
 use App\Models\Tenant;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -57,6 +58,11 @@ test('a platform admin can trigger impersonation and land authenticated as the t
     $landing->assertRedirect('http://impersonateme.localhost/dashboard');
     expect(Auth::guard('web')->check())->toBeTrue();
     expect(Auth::guard('web')->id())->toBe($adminUserId);
+
+    expect(PlatformAdminActivityLog::where('action', 'tenant.impersonate')
+        ->where('tenant_id', $tenant->id)
+        ->where('platform_admin_id', $admin->id)
+        ->exists())->toBeTrue();
 });
 
 test('a non-platform-admin cannot trigger impersonation', function () {

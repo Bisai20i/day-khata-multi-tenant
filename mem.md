@@ -3,10 +3,63 @@
 Living state doc. Read this before starting work, update it before stopping. See `goal.md` for
 direction/roadmap — this file is "what exists and why," not "what's next."
 
-**Last updated:** 2026-09-02. **Git status: initialized**, 17 commits on `main`, plus a substantial
-**uncommitted** working tree (Payment/Receipt module, plus the entire complete-system-build effort below
-— Phase 0 and Phase 1, both now fully built AND verified green) as of this update. No remote configured
-yet — this protects against a bad `git clean`/`reset`/`checkout`, not disk loss.
+**Last updated:** 2026-09-03. **Git status: working tree has uncommitted changes — Phase A of
+`plans/central-panel-build.md` (central panel build-out), not yet committed.** Manual browser testing of
+the fully-committed `8482319` "gaps filled" state (see the entry below) surfaced that the central
+(platform-admin) panel was minimal: impersonation 404'd, no way to view a tenant's users, no persisted
+audit trail. `plans/central-panel-build.md` was written, scoped with the user (full 5-phase scope: A-E,
+locked decisions on admin roles and grace-period behavior — see that doc), and **Phase A is now built**:
+- Fixed the impersonate 404 — `TenantController::impersonate()` was dropping the port from `APP_URL`
+  when building the forced root URL (`parse_url(..., PHP_URL_SCHEME)` only grabs scheme); now carries
+  the port through too.
+- New `platform_admin_activity_logs` table (central DB) + `App\Models\PlatformAdminActivityLog::record()`
+  — replaces the old `Log::info()` stopgap in `impersonate()`. Wired into every sensitive `TenantController`
+  action: create/update/suspend/resume/delete/impersonate. The `destroy()` wiring records **before**
+  `$tenant->delete()` deliberately — `tenant_id` is a real FK (`nullOnDelete`), and this app's SQLite test
+  suite actually enforces FKs (`config/database.php` default, not overridden in `phpunit.xml`), so
+  recording after delete would either fail or lose the tenant reference.
+- Tenant edit (`central.tenants.edit`/`update` — company name + contact email only, domain/status
+  excluded deliberately) and a tenant users read-only view (`central.tenants.users`, runs
+  `$tenant->run(fn () => User::with('role')->get())` — the same `$tenant->run()` pattern `impersonate()`
+  already used) — both close gaps the user hit directly during testing.
+- A filterable, paginated activity-log page (`central.activity-log.index`) — reuses the existing
+  tenant-side `Tenant/Admin/ActivityLogController`'s filter-bar/pagination pattern rather than inventing
+  a new one (`DataTable` only paginates client-side over whatever array it's handed, so real server-side
+  paging needed hand-rolled prev/next links, same as that existing page already does).
+Built via 3 parallel general-purpose agents (tenant edit+audit-wiring, tenant-users view, activity-log
+UI) after the coordinator pre-built the shared foundation (migration, model, route-file stubs, the
+impersonate fix itself) so no agent collided on `TenantController.php`/`routes/central-tenants.php`.
+Coordinator then wired the final cross-links (`Show.vue`'s "Edit"/"View users" buttons, an "Activity log"
+nav entry added consistently across all 7 Central Vue pages) after all three agents finished. All 8
+Phase-A test files pass `php -l`/file-scoped Pint; **not yet run through the user's `php artisan test`**
+— that's the immediate next step, test command: `php artisan test --compact
+tests/Feature/Central/Tenants/ImpersonationTest.php tests/Feature/Central/Tenants/TenantDeletionTest.php
+tests/Feature/Central/Tenants/TenantProvisioningTest.php tests/Feature/Central/Tenants/TenantSuspensionTest.php
+tests/Feature/Central/Tenants/TenantUpdateTest.php tests/Feature/Central/Tenants/TenantUserControllerTest.php
+tests/Feature/Central/ActivityLogControllerTest.php`. Phases B-E (system settings/mail/grace period,
+platform-admin roles, trial/provisioning-visibility/domains, dashboard metrics/search) are designed in
+the plan doc but not started.
+
+---
+
+**2026-09-02 entry (prior state, kept for history).** **Git status: initialized, working tree clean.** The entire
+complete-system-build effort (Phase 0, Wave 2, Phase 1 Wave A/B, Sales Agent + PDF/print, and the
+Payment/Receipt module — everything described below as "uncommitted" as of the previous update) has now
+been committed by the user as a single commit, `8482319` "gaps filled" (209 files changed,
++15,697/-298), on top of `4a975b1`. No remote configured yet — this protects against a bad `git
+clean`/`reset`/`checkout`, not disk loss.
+
+**Code-complete status**: per `plans/complete-system-build.md`, Phase 2 (full verification) was DONE
+before this commit — `vendor/bin/pint --dirty --format agent` clean, `php artisan test` 345/347 (2 real
+bugs found and fixed, see the Phase 2 entry below), `npm run build` succeeded. The Payment/Receipt module
+was built after that Phase 2 run and wasn't covered by it; the user has since run its tests directly
+(`php artisan test tests/Feature/Tenant/Sales/ReceiptTest.php tests/Feature/Tenant/Purchases/
+PaymentTest.php`, 2026-09-03) — **all 21 green**. Every module in the effort is now verified. **The one
+gap called out repeatedly throughout this file and never yet closed: no actual browser click-through has
+been done** — everything server-side/data-level has been verified (Pest suite, one HTTP-level curl
+walkthrough), but JS hydration/reactivity, console errors, and visual/CSS correctness across the ~20+
+pages added since the last real UI look have never been checked in a live browser. The user is now doing
+that manual browser test — this is the natural next/current step.
 
 **2026-09-02, Phase 2 (full verification pass) — DONE, all green.** The user ran the full suite
 themselves: `vendor/bin/pint --dirty --format agent` clean, `php artisan test` **345/347 passed** (2

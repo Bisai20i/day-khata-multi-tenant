@@ -21,6 +21,8 @@ Route::middleware('auth:platform')->prefix('tenants')->name('central.tenants.')-
     Route::get('/create', [TenantController::class, 'create'])->name('create');
     Route::post('/', [TenantController::class, 'store'])->name('store');
     Route::get('/{tenant}', [TenantController::class, 'show'])->name('show');
+    Route::get('/{tenant}/edit', [TenantController::class, 'edit'])->name('edit');
+    Route::put('/{tenant}', [TenantController::class, 'update'])->name('update');
     Route::post('/{tenant}/suspend', [TenantController::class, 'suspend'])->name('suspend');
     Route::post('/{tenant}/resume', [TenantController::class, 'resume'])->name('resume');
     Route::post('/{tenant}/impersonate', [TenantController::class, 'impersonate'])->name('impersonate');

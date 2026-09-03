@@ -182,8 +182,9 @@ this file for direction.
    still bypasses this. See `mem.md`'s 2026-09-02 second-pass entry for the full breakdown, including
    an incidental pre-existing bug fixed (cancelled returns were still counting against an invoice's
    outstanding balance) and a real cancel()-signature inconsistency caught in review (fixed to require
-   a `$reason`, matching every other cancel-with-reversal method in this app). **Not yet verified by
-   the user's own test/build run, not yet committed** — ask before committing.
+   a `$reason`, matching every other cancel-with-reversal method in this app). Built after the Phase 2
+   verification run below, so not independently re-verified by the user's own test/build run — flag
+   this specifically if anything looks off in receipts/payments during manual testing.
 10. **Complete the remaining system, full build-out before any further testing.** 2026-09-02: the user
     wants full feature parity with legacy (plus real fixes where legacy was broken) built out entirely
     before the next test/build verification pass, given legacy has no support left. Full phase-by-phase
@@ -207,9 +208,22 @@ this file for direction.
     `Item::recordStockMovement()` directly, bypassing that fallback — fixed). **Phase 1 fully complete
     2026-09-02** — all 12 items built and hand-verified (Settings, Item Varieties, Activity Log, Backup,
     Admin Impersonation, Dashboard Notices, POS, Item Expiry Tracking, Fiscal-Year Archive DB, CI
-    skeleton, Sales Agent + Commission, PDF/print output). See `plans/complete-system-build.md` and
-    `mem.md` for the full breakdown. **Nothing in this whole effort has been run through the user's own
-    test/build pass yet, and nothing has been committed** — that's Phase 2, the one remaining step.
+    skeleton, Sales Agent + Commission, PDF/print output). **Phase 2 (full verification) DONE
+    2026-09-02** — Pint clean, `php artisan test` 345/347 (2 real bugs found and fixed), `npm run build`
+    succeeded. The whole effort, plus the Payment/Receipt module, is now **committed** as `8482319`
+    "gaps filled". See `plans/complete-system-build.md` and `mem.md` for the full breakdown. **Code part
+    of this roadmap is complete — the remaining gap is a manual browser smoke-test, never yet done.**
+11. **Central (platform-admin) panel build-out** — the manual browser test in item 10 surfaced that the
+    central panel is minimal: impersonation 404s (a real bug — port dropped from the forced root URL,
+    see the plan doc), no way to view a tenant's users, no system settings (mail config, grace period,
+    branding), no platform-admin RBAC or management UI, and no persisted audit log for central actions
+    (impersonation is a `Log::info()` stopgap; suspend/resume/delete aren't logged at all). **Full scope
+    locked with the user 2026-09-03**: all 5 phases (A: bug fix + tenant users/edit + audit log, B:
+    system settings incl. mail config + grace period, C: platform-admin management with a simple
+    owner/support role split, D: trial tracking + provisioning-failure visibility + domain management,
+    E: real dashboard metrics + tenant search/pagination) are in scope; billing/subscriptions stays a
+    non-goal. Grace period surfaces expired tenants for manual review only, never auto-deletes. Full
+    design and phase breakdown in `plans/central-panel-build.md`. **Not started.**
 
 ## Explicit non-goals for now (deferred, not forgotten)
 

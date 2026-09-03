@@ -4,14 +4,13 @@ namespace App\Http\Controllers\Central\Tenants;
 
 use App\Enums\TenantStatus;
 use App\Http\Controllers\Controller;
+use App\Models\PlatformAdminActivityLog;
 use App\Models\Tenant;
 use App\Models\User;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
-use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
-use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\URL;
 use Inertia\Inertia;
 use Inertia\Response;
@@ -122,6 +121,11 @@ class TenantController extends Controller
             throw $e;
         }
 
+        PlatformAdminActivityLog::record('tenant.create', $tenant, [
+            'company_name' => $tenant->company_name,
+            'subdomain' => $validated['subdomain'],
+        ]);
+
         return redirect()
             ->route('central.tenants.show', $tenant)
             ->with('status', 'Tenant provisioning started — it will be ready shortly.');
@@ -147,11 +151,53 @@ class TenantController extends Controller
     }
 
     /**
+     * Show the form for editing a tenant's company name and contact email.
+     * Domain and status are managed through their own dedicated actions, not
+     * this form.
+     */
+    public function edit(Tenant $tenant): Response
+    {
+        return Inertia::render('Central/Tenants/Edit', [
+            'tenant' => [
+                'id' => $tenant->id,
+                'company_name' => $tenant->company_name,
+                'contact_email' => $tenant->contact_email,
+            ],
+        ]);
+    }
+
+    /**
+     * Update a tenant's company name and/or contact email.
+     */
+    public function update(Request $request, Tenant $tenant): RedirectResponse
+    {
+        $validated = $request->validate([
+            'company_name' => ['required', 'string', 'max:255'],
+            'contact_email' => ['nullable', 'string', 'email', 'max:255'],
+        ]);
+
+        $tenant->fill($validated);
+        $changed = $tenant->getDirty();
+
+        if ($changed !== []) {
+            $tenant->save();
+
+            PlatformAdminActivityLog::record('tenant.update', $tenant, ['changed' => $changed]);
+        }
+
+        return redirect()
+            ->route('central.tenants.show', $tenant)
+            ->with('status', 'Tenant updated.');
+    }
+
+    /**
      * Suspend a tenant, blocking further access to its subdomain.
      */
     public function suspend(Tenant $tenant): RedirectResponse
     {
         $tenant->update(['status' => TenantStatus::Suspended]);
+
+        PlatformAdminActivityLog::record('tenant.suspend', $tenant);
 
         return redirect()
             ->route('central.tenants.show', $tenant)
@@ -164,6 +210,8 @@ class TenantController extends Controller
     public function resume(Tenant $tenant): RedirectResponse
     {
         $tenant->update(['status' => TenantStatus::Active]);
+
+        PlatformAdminActivityLog::record('tenant.resume', $tenant);
 
         return redirect()
             ->route('central.tenants.show', $tenant)
@@ -207,15 +255,23 @@ class TenantController extends Controller
                 ->with('status', 'This tenant has no admin user to impersonate.');
         }
 
-        $scheme = parse_url((string) config('app.url'), PHP_URL_SCHEME) ?: 'http';
+        $appUrl = (string) config('app.url');
+        $scheme = parse_url($appUrl, PHP_URL_SCHEME) ?: 'http';
+        $port = parse_url($appUrl, PHP_URL_PORT);
+        $portSuffix = $port !== null ? ":{$port}" : '';
 
         // Tenant routes aren't registered per-domain (see routes/tenant.php),
         // so route/URL generation has no way to know which tenant's domain
         // to target on its own - forceRootUrl() is how a signed URL destined
         // for a specific tenant's own subdomain is generated from here, on
-        // the central domain. Reset immediately after so nothing else
-        // generated during this request is accidentally scoped to it.
-        URL::forceRootUrl("{$scheme}://{$domain}");
+        // the central domain. The port must be carried over explicitly (e.g.
+        // local dev's APP_URL=http://localhost:8000) - parse_url() only
+        // returns the scheme, so a bare "{scheme}://{domain}" silently drops
+        // it and the signed URL 404s against whatever (if anything) is
+        // listening on the default port instead. Reset immediately after so
+        // nothing else generated during this request is accidentally scoped
+        // to it.
+        URL::forceRootUrl("{$scheme}://{$domain}{$portSuffix}");
 
         $signedUrl = URL::temporarySignedRoute(
             'tenant.impersonate',
@@ -225,15 +281,8 @@ class TenantController extends Controller
 
         URL::forceRootUrl(null);
 
-        // TODO: once a proper audit-log module (App\Models\ActivityLog)
-        // lands, record this there instead - this Log::info() call is a
-        // stopgap so impersonation is never silently unaudited in the
-        // meantime.
-        Log::info('Platform admin started tenant impersonation', [
-            'platform_admin_id' => Auth::guard('platform')->id(),
-            'tenant_id' => $tenant->id,
+        PlatformAdminActivityLog::record('tenant.impersonate', $tenant, [
             'impersonated_user_id' => $adminUserId,
-            'started_at' => now()->toDateTimeString(),
         ]);
 
         return Inertia::location($signedUrl);
@@ -245,6 +294,15 @@ class TenantController extends Controller
      */
     public function destroy(Tenant $tenant): RedirectResponse
     {
+        // Recorded before delete(), not after: platform_admin_activity_logs.
+        // tenant_id is a real FK (nullOnDelete), and delete() kicks off the
+        // async TenantDeleted job pipeline that drops the tenant's database -
+        // logging afterwards would race that pipeline and risks losing who
+        // deleted it if the FK insert fails against an already-gone row.
+        PlatformAdminActivityLog::record('tenant.delete', $tenant, [
+            'company_name' => $tenant->company_name,
+        ]);
+
         $tenant->delete();
 
         return redirect()
