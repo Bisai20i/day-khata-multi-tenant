@@ -3,11 +3,15 @@
 Living state doc. Read this before starting work, update it before stopping. See `goal.md` for
 direction/roadmap — this file is "what exists and why," not "what's next."
 
-**Last updated:** 2026-09-04. **Git status: working tree clean (docs excepted). Phase D of
+**Last updated:** 2026-09-04. **Git status: working tree fully clean (including docs, `84c624e`). Phase D of
 `plans/central-panel-build.md` (tenant lifecycle hardening) is committed as `01561fc` "Add tenant trial
 tracking, provisioning-failure visibility, domain management (Phase D)".** Built directly (no forking, same
 call as A/B/C). Test-verified by the coordinator this time (not just the user) since fixing the bugs below
-required it. **Next: Phase E (real dashboard + tenant search/pagination) — the last phase in the plan.**
+required it. **Session paused here by user request — nothing in flight, nothing uncommitted.** **Next
+session: start Phase E (real dashboard + tenant search/pagination) — the last phase in
+`plans/central-panel-build.md`.** Read that doc's Phase E section (items 16-17) before starting: item 16
+also needs to finally add the trial-expiring-this-week dashboard widget Phase D deliberately deferred (see
+that phase's own entry below for why).
 
 - **Schema**: `tenants` gains `trial_ends_at` (nullable timestamp, set at creation from
   `platform_settings.default_trial_days`, same "surface only, never auto-act" posture as `suspended_at`/
