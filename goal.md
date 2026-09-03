@@ -225,8 +225,8 @@ this file for direction.
     non-goal. Grace period surfaces expired tenants for manual review only, never auto-deletes. Full
     design and phase breakdown in `plans/central-panel-build.md`. **Phase A done and committed
     (`87ebfb6`); Phase B (system settings, mail runtime, grace period, welcome/suspension mailables)
-    built 2026-09-03, pending the user's test run and a commit. C-E not started.** See `mem.md` for
-    the full breakdown.
+    done and committed (`c116337`). Phase C (platform-admin management) starting now; D-E not started.**
+    See `mem.md` for the full breakdown.
 
 ## Explicit non-goals for now (deferred, not forgotten)
 

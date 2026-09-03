@@ -3,11 +3,13 @@
 Living state doc. Read this before starting work, update it before stopping. See `goal.md` for
 direction/roadmap — this file is "what exists and why," not "what's next."
 
-**Last updated:** 2026-09-03. **Git status: working tree has uncommitted changes — Phase B of
-`plans/central-panel-build.md` (system settings), not yet run through the user's `php artisan test` /
-committed.** Built directly (no forking — the work didn't split cleanly enough to be worth the
-coordination overhead) right after Phase A's stale-doc correction (see the entry below this one for that
-correction and for Phase A's own content). All 4 of Phase B's plan items are done:
+**Last updated:** 2026-09-03. **Git status: working tree clean. Phase B of `plans/central-panel-build.md`
+(system settings) is committed as `c116337` "Add platform settings, mail, and tenant grace period (Phase
+B)".** Built directly (no forking — the work didn't split cleanly enough to be worth the coordination
+overhead) right after Phase A's stale-doc correction (see the entry below this one for that correction
+and for Phase A's own content), then debugged/fixed against the user's real test run before committing
+(see the bug list below). **Now starting Phase C (platform-admin management).** All 4 of Phase B's plan
+items are done:
 
 - **`PlatformSetting` singleton** (`current()` = `firstOrCreate`, same pattern as tenant-side
   `CompanySetting`) — mail_*, platform_name, support_email, default_trial_days,

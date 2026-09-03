@@ -104,7 +104,7 @@ tenant users view, and the filterable activity-log page).
 
 ## Phase B — System settings
 
-**Status: built and test-verified 2026-09-03, not yet committed.** Items 5-8 are done — see `mem.md`'s
+**Status: DONE — built, test-verified, committed as `c116337` (2026-09-03).** Items 5-8 are done — see `mem.md`'s
 Phase B entry for the full breakdown, including 3 real bugs the user's first test run caught and this
 session fixed (a silently-non-persisting `suspended_at` from a missing `#[Fillable(...)]` entry, a
 pre-existing missing `tenancy()->end()` in `TenantSuspensionTest` that actually predates this phase, and a
