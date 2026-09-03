@@ -226,8 +226,10 @@ this file for direction.
     design and phase breakdown in `plans/central-panel-build.md`. **Phase A done and committed
     (`87ebfb6`); Phase B (system settings, mail runtime, grace period, welcome/suspension mailables)
     done and committed (`c116337`); Phase C (platform-admin owner/support roles, the `platform-owner`
-    Gate wired up for real, deactivation, login rejection) done and committed (`721193e`). Phase D
-    (tenant lifecycle hardening) next; E not started.** See `mem.md` for the full breakdown.
+    Gate wired up for real, deactivation, login rejection) done and committed (`721193e`); Phase D
+    (trial tracking, provisioning-failure visibility via a `JobFailed` listener, domain management,
+    stronger delete confirmation) done and committed (`01561fc`). Phase E (real dashboard, tenant
+    search/pagination) is the last phase remaining.** See `mem.md` for the full breakdown.
 
 ## Explicit non-goals for now (deferred, not forgotten)
 

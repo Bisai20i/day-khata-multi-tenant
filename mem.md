@@ -3,13 +3,113 @@
 Living state doc. Read this before starting work, update it before stopping. See `goal.md` for
 direction/roadmap — this file is "what exists and why," not "what's next."
 
-**Last updated:** 2026-09-03. **Git status: working tree clean. Phase C of `plans/central-panel-build.md`
+**Last updated:** 2026-09-04. **Git status: working tree clean (docs excepted). Phase D of
+`plans/central-panel-build.md` (tenant lifecycle hardening) is committed as `01561fc` "Add tenant trial
+tracking, provisioning-failure visibility, domain management (Phase D)".** Built directly (no forking, same
+call as A/B/C). Test-verified by the coordinator this time (not just the user) since fixing the bugs below
+required it. **Next: Phase E (real dashboard + tenant search/pagination) — the last phase in the plan.**
+
+- **Schema**: `tenants` gains `trial_ends_at` (nullable timestamp, set at creation from
+  `platform_settings.default_trial_days`, same "surface only, never auto-act" posture as `suspended_at`/
+  grace period). Added to `Tenant`'s `#[Fillable(...)]` and `getCustomColumns()` (the same
+  silently-non-persisting trap Phase B hit with `suspended_at` — caught this time before it needed a bug
+  report) and cast `datetime`. New `Tenant::isTrialExpired(): bool`, same shape as `isPastGracePeriod()`.
+- **Provisioning-failure visibility — the interesting part of this phase.** The `TenantCreated` job
+  pipeline (`TenancyServiceProvider`: `CreateDatabase`/`MigrateDatabase`/`SeedDatabase`/
+  `CreateTenantFirstAdmin`) is a single `Stancl\JobPipeline\JobPipeline` queued job whose own `handle()`
+  loops through those four sub-jobs and only swallows a sub-job's exception if that sub-job defines its
+  own `failed()` method — none of the four do, so any exception one throws re-throws out of
+  `JobPipeline::handle()` uncaught, which fails the **outer** `JobPipeline` job and fires Laravel's
+  `Illuminate\Queue\Events\JobFailed` (confirmed by reading `vendor/stancl/jobpipeline/src/JobPipeline.php`
+  and all four job classes, not assumed). `App\Listeners\RecordProvisioningFailure` listens for that event
+  globally (registered in `AppServiceProvider::boot()`), filters to just this pipeline via the failed
+  job's own `payload()['displayName'] === JobPipeline::class`, then recovers the tenant by `unserialize()`-
+  ing `payload()['data']['command']` — the same serialized-command string `Illuminate\Queue\Queue::
+  createObjectPayload()` puts there for every queue driver (`sync` and `database` alike, confirmed by
+  reading that method) — and reading `$command->passable[0]`, the tenant `JobPipeline`'s own `->send()`
+  callback stashed there. Deliberately **not** parsing the `failed_jobs` table (tenant id isn't a
+  queryable column there, and the payload shape is a queue-driver implementation detail) — this hooks the
+  framework's own stable event instead. Records `provisioning.failed` to `platform_admin_activity_logs`
+  with the tenant and the exception message. `TenantController::show()` surfaces the latest such entry as
+  `provisioning_error` whenever the tenant is still `Provisioning`; a new `retryProvisioning()` action
+  (gated to `Provisioning`-status tenants only) re-fires `event(new TenantCreated($tenant))` — safe to
+  retry because `pending_admin` is only ever cleared once `CreateTenantFirstAdmin` actually succeeds, so
+  it's still there regardless of which pipeline step failed.
+- **Domain management**: new `Central\Tenants\TenantDomainController` (`store`/`destroy`) on top of
+  `stancl/tenancy`'s existing `domains` table/`HasDomains` trait — no new schema needed. `destroy()` blocks
+  removing a tenant's last domain (blank subdomain routing would otherwise silently break) and 404s if the
+  given domain doesn't actually belong to the given tenant (route-model-bound `{tenant}/domains/{domain}`
+  doesn't enforce that relationship on its own). New UI section on `Tenants/Show.vue`: list + remove
+  buttons (disabled with a tooltip on the last domain) + a small add-domain form.
+- **Stronger delete confirmation (UX only, per the plan doc's own framing — backend authorization was
+  already correct)**: `Tenants/Show.vue`'s delete modal now requires typing the tenant's exact
+  `company_name` before the Delete button enables (`computed` equality check) — proportionate given this
+  triggers a real `DROP DATABASE`. No backend test needed for this one; nothing server-side changed.
+- **Trial badge UI**: `Tenants/{Index,Show}.vue` gained a `trial_expired` warning badge next to the
+  existing status/`past_grace_period` badges. **Deviation from the plan doc's literal wording** ("Surfaced
+  on tenant list/show **+ dashboard**"): the dashboard half is deferred to Phase E, since the dashboard is
+  still the inline closure in `routes/central-auth.php` this whole plan document itself flags for Phase E
+  item 16 to replace with a real controller — adding a trial-expiring widget to a placeholder that's about
+  to be rebuilt would be wasted, throwaway work. Noted in the Phase E section of the plan doc as something
+  that phase's dashboard build should pick up.
+- **Tests**: `TrialTrackingTest.php` (trial_ends_at set from settings on creation, `isTrialExpired()`
+  before/after/never-set, surfaced on list+show), `ProvisioningFailureTest.php` (the `JobFailed`→activity-
+  log path tested by constructing a real payload-shaped event rather than forcing an actual vendor-level DB
+  failure — deliberately more unit-ish than the rest of this suite's HTTP-driven style, because reliably
+  forcing `CreateDatabase`/`MigrateDatabase` to fail against a real SQLite file without touching vendor
+  code isn't practical; the retry-dispatch path itself IS tested through the real HTTP endpoint with
+  `Queue::fake()` + `Queue::assertPushed()`, matching `TenantProvisioningTest`'s own established
+  still-provisioning-tenant technique), `DomainManagementTest.php` (add/remove/last-domain-blocked/
+  cross-tenant-404/unique/guest-blocked). No `App\Models\Tenant` factory exists (a stancl/tenancy base
+  model) — new tests construct tenants the same way `GracePeriodTest`/`TenantSuspensionTest` already do
+  (provision through the real HTTP endpoint, or `new Tenant([...])->save()` + `Queue::fake()` for a
+  genuinely-stuck-in-Provisioning tenant), not a new pattern.
+- **3 real bugs the user's first test run caught, all fixed this session** (same rhythm as Phase B's own
+  first test run): (1) **`PlatformSetting::current()` returned an in-memory model missing its DB-default
+  columns.** `firstOrCreate([])`'s create path calls `fill([])` (no-op) then `save()` - `default_trial_days`/
+  `default_grace_period_days` never get assigned on the PHP object, so even though the actual DB row gets
+  its column defaults (14/30) applied on INSERT, the returned instance's `$attributes` only has `id`/
+  timestamps; reading `->default_grace_period_days` on that exact instance returns null, not 30. Confirmed
+  via a throwaway scratch test comparing `$settings->getAttributes()` (missing the columns) against a raw
+  `DB::table('platform_settings')->find(1)` (correct values) - not theorized, verified. Every *later* call
+  to `current()` is fine (the row exists by then, so `firstOrCreate` takes its `->first()` branch, a real
+  SELECT that hydrates everything) - this is why it was never caught in Phase B/C's own tests: something
+  else (usually `store()`, or `suspend()`'s conditional mail lookup) always happened to touch
+  `PlatformSetting::current()` first in those tests, before `show()`/`index()`'s own call. Phase D's new
+  tests were the first ones where `show()` could be the *very first* touch in a fresh test. Fixed by
+  checking `$settings->wasRecentlyCreated` and calling `->fresh()` only on that one-time path - no cost on
+  every other call. This bug was latent since Phase B and could have hit a real fresh production install
+  the same way; not a Phase D regression in the sense of new code causing it, but Phase D's tests are what
+  finally exercised the exposing code path. (2) **`PlatformAdminActivityLog::record()` requires an
+  authenticated platform admin actor** (`platform_admin_id` was `NOT NULL`), but `provisioning.failed`
+  entries are written from `RecordProvisioningFailure`, a queue-worker context with no session at all -
+  every insert threw a NOT NULL constraint violation. Fixed with a new migration making
+  `platform_admin_id` nullable (Laravel 11's native, non-doctrine SQLite `->change()` handled the rebuild
+  correctly - confirmed, not assumed). (3) **`provisioning_error` picked the wrong entry when two
+  `provisioning.failed` rows shared the same `created_at` second** - the column has no fractional-second
+  precision, so `->latest('created_at')->first()` alone doesn't reliably return the actually-latest row on
+  a same-second tie. Fixed by adding `->latest('id')` as a tiebreaker. Also one test-only bug (not shipped
+  code): `DomainManagementTest`'s guest-blocked case reused a `PlatformAdmin` `actingAs()` session left over
+  from provisioning the test tenant - `actingAs()` isn't request-scoped, it persists on the guard for the
+  rest of the test - needed an explicit `Auth::guard('platform')->logout()` first, the same convention
+  `PlatformSettingControllerTest`'s tenant-web-user-blocked case already uses.
+- **Verification**: `php -l` + `vendor/bin/pint --dirty --format agent` (passed) on every touched file,
+  `npm run build` (succeeded), and (after the fixes above) `php artisan test --compact` on the full
+  Phase-D-relevant scope: **24/24 passing, 108 assertions**. Also ran the full `tests/Feature/Central`
+  suite as a regression check on the `PlatformSetting::current()` fix specifically (it's called from
+  several other controllers): **76/82 passing** - the exact same 6 pre-existing failures flagged since the
+  end of the Phase B entry below (`ActivityLogControllerTest` x1, `ImpersonationTest` x1,
+  `TenantUserControllerTest` x4), confirmed unchanged (same test names, same errors), still not
+  investigated (still out of scope, still flagged).
+
+---
+
+**2026-09-03 entry (Phase C — superseded by the Phase D entry above for "what's next," kept for the full
+build detail).** **Git status at the time: working tree clean. Phase C of `plans/central-panel-build.md`
 (platform-admin management) is committed as `721193e` "Add platform-admin owner/support roles and
 management (Phase C)".** Built directly (no forking, same call as Phase B). This finally wires up the
 `platform-owner` Gate that Phase B deliberately deferred (see that entry below) — now meaningful, since a
-real owner/support distinction and a UI to set it both exist. **Next: Phase D (tenant lifecycle
-hardening — trial tracking, provisioning-failure visibility, domain management, stronger delete
-confirmation).**
+real owner/support distinction and a UI to set it both exist.
 
 - **Schema**: `platform_admins` gains `role` (string, `owner`|`support`, default `owner` — every
   pre-existing admin stays `owner`) and `is_active` (boolean, default `true`). New `App\Enums\

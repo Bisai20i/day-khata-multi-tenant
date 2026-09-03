@@ -1,9 +1,9 @@
 # Central panel build plan
 
-**Status as of 2026-09-03**: scope locked with the user; Phase A (`87ebfb6`), Phase B (`c116337`), and
-Phase C (`721193e`) committed. Phase D next. Read `goal.md` roadmap item 11 and `mem.md` for what's
-actually landed before trusting this doc's "Status" lines — same discipline as
-`plans/complete-system-build.md`.
+**Status as of 2026-09-04**: scope locked with the user; Phase A (`87ebfb6`), Phase B (`c116337`), Phase C
+(`721193e`), and Phase D (`01561fc`) committed. Phase E (real dashboard + tenant search/pagination) is the
+last phase remaining. Read `goal.md` roadmap item 11 and `mem.md` for what's actually landed before
+trusting this doc's "Status" lines — same discipline as `plans/complete-system-build.md`.
 
 ## Why this exists
 
@@ -170,6 +170,27 @@ tests/Feature/Central/Settings/PlatformSettingControllerTest.php` — **26/26 pa
 
 ## Phase D — Tenant lifecycle hardening
 
+**Status: DONE — built, test-verified, committed as `01561fc` (2026-09-04).** Items 12-15 are done — see
+`mem.md`'s Phase D entry for the full breakdown, including how provisioning-failure visibility (item 13)
+was actually implemented (a global `Illuminate\Queue\Events\JobFailed` listener, since the vendor
+`JobPipeline` job re-throws any sub-job's exception uncaught rather than needing a listener wrapped around
+the pipeline itself) and the exact `unserialize()`-based tenant-recovery mechanism used to get from that
+event back to which tenant failed. One deliberate deviation from this doc's literal wording: item 12's
+"surfaced on tenant list/show + dashboard" only got the list/show half — the dashboard is still Phase E's
+inline-closure placeholder (see item 16 below), so a trial-expiring widget belongs in that phase's real
+dashboard build, not bolted onto what's about to be replaced. The user's first test run caught 3 real bugs
+this session fixed (a `PlatformSetting::current()` hydration bug latent since Phase B — the create-path
+instance was missing its DB-default columns, only exposed once a test made `show()`/`index()` the first
+ever caller instead of `store()`; a `platform_admin_activity_logs.platform_admin_id` NOT NULL constraint
+that broke the queue-worker-context `provisioning.failed` writes; and a same-second activity-log
+ordering tie) — see `mem.md` for the full detail on each. Test command: `php artisan test --compact
+tests/Feature/Central/Tenants/TrialTrackingTest.php tests/Feature/Central/Tenants/ProvisioningFailureTest.php
+tests/Feature/Central/Tenants/DomainManagementTest.php tests/Feature/Central/Tenants/GracePeriodTest.php
+tests/Feature/Central/Tenants/TenantProvisioningTest.php` — **24/24 passing, 108 assertions**, confirmed by
+the coordinator after the fixes above (also ran the full `tests/Feature/Central` suite as a regression
+check on the `PlatformSetting` fix: 76/82, the same 6 pre-existing failures flagged since Phase B,
+unchanged).
+
 12. **Trial tracking**: `trial_ends_at` set at creation from `platform_settings.default_trial_days`
     (shared schema above). Surfaced on tenant list/show + dashboard ("trials expiring this week").
     No auto-action on expiry — same posture as grace period.
@@ -192,8 +213,9 @@ tests/Feature/Central/Settings/PlatformSettingControllerTest.php` — **26/26 pa
 16. **Real dashboard.** The dashboard is currently an inline closure in `routes/central-auth.php`
     (`Route::get('/admin', function () {...})`) rather than a controller — move it to a proper
     `Central\DashboardController@index` as part of this work. Metrics: tenant counts by status, created
-    this week/month, trials expiring within 7 days (Phase D), tenants past grace period (Phase B), most
-    recent activity log entries (Phase A, last 10).
+    this week/month, trials expiring within 7 days (`Tenant::trial_ends_at`/`isTrialExpired()` from Phase
+    D — deliberately deferred to land here rather than in Phase D itself, see that phase's status note),
+    tenants past grace period (Phase B), most recent activity log entries (Phase A, last 10).
 17. **Tenant list search + pagination.** `Tenant::with('domains')->latest()->get()` has no pagination
     today — fine at current scale, will break as tenant count grows. Add search by company
     name/domain/email + standard pagination; check whether a pagination UI component already exists
