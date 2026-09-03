@@ -1,10 +1,12 @@
 <?php
 
 use App\Enums\TenantStatus;
+use App\Mail\TenantSuspensionMail;
 use App\Models\PlatformAdmin;
 use App\Models\PlatformAdminActivityLog;
 use App\Models\Tenant;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Mail;
 use Tests\TestCase;
 
 uses(RefreshDatabase::class);
@@ -41,8 +43,18 @@ test('suspending a tenant blocks requests to its domain with a 403', function ()
         ->assertRedirect(route('central.tenants.show', $tenant));
 
     expect($tenant->fresh()->status)->toBe(TenantStatus::Suspended);
+    expect($tenant->fresh()->suspended_at)->not->toBeNull();
 
     $this->get('http://suspendme.localhost/')->assertStatus(403);
+
+    // Reverts the DB-connection/tenant-context switch the tenant-domain
+    // request above left in place, so the central-DB query below actually
+    // runs against the central connection - same convention as the ~58
+    // tenant-side test files' afterEach(fn () => tenancy()->end()), applied
+    // mid-test here since this test interleaves tenant- and central-domain
+    // requests within a single method instead of only visiting a tenant
+    // domain once at the very end.
+    tenancy()->end();
 
     expect(PlatformAdminActivityLog::where('action', 'tenant.suspend')
         ->where('tenant_id', $tenant->id)
@@ -56,20 +68,51 @@ test('resuming a suspended tenant restores access to its domain', function () {
 
     $this->actingAs($admin, 'platform')->post(route('central.tenants.suspend', $tenant));
     $this->get('http://resumeme.localhost/')->assertStatus(403);
+    tenancy()->end();
 
     $this->actingAs($admin, 'platform')
         ->post(route('central.tenants.resume', $tenant))
         ->assertRedirect(route('central.tenants.show', $tenant));
 
     expect($tenant->fresh()->status)->toBe(TenantStatus::Active);
+    expect($tenant->fresh()->suspended_at)->toBeNull();
 
     // The tenant root route redirects guests to login rather than returning
     // a bare 200 (see routes/tenant.php) - a resumed, unauthenticated tenant
     // domain is reachable again, which here means "redirects to login", not 403.
     $this->get('http://resumeme.localhost/')->assertRedirect(route('tenant.login'));
 
+    // See the comment on the first tenancy()->end() call above - this
+    // request goes further into the tenant middleware stack than the
+    // earlier 403 case (status is Active now), which does leave tenancy
+    // initialized on the connection default afterward.
+    tenancy()->end();
+
     expect(PlatformAdminActivityLog::where('action', 'tenant.resume')
         ->where('tenant_id', $tenant->id)
         ->where('platform_admin_id', $admin->id)
         ->exists())->toBeTrue();
+});
+
+test('suspending a tenant with a contact email sends it a suspension notice', function () {
+    Mail::fake();
+
+    $admin = PlatformAdmin::factory()->create();
+    $tenant = provisionSuspensionTestTenant($this, $admin, 'notifyme');
+    $tenant->update(['contact_email' => 'billing@notifyme.test']);
+
+    $this->actingAs($admin, 'platform')->post(route('central.tenants.suspend', $tenant));
+
+    Mail::assertSent(TenantSuspensionMail::class, fn (TenantSuspensionMail $mail) => $mail->hasTo('billing@notifyme.test'));
+});
+
+test('suspending a tenant with no contact email sends no suspension notice', function () {
+    Mail::fake();
+
+    $admin = PlatformAdmin::factory()->create();
+    $tenant = provisionSuspensionTestTenant($this, $admin, 'nocontact');
+
+    $this->actingAs($admin, 'platform')->post(route('central.tenants.suspend', $tenant));
+
+    Mail::assertNotSent(TenantSuspensionMail::class);
 });

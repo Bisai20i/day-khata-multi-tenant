@@ -5,14 +5,18 @@ declare(strict_types=1);
 namespace App\Jobs;
 
 use App\Enums\TenantStatus;
+use App\Mail\TenantWelcomeMail;
 use App\Models\Role;
 use App\Models\User;
+use App\Support\PlatformMailer;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Bus\Dispatchable;
 use Illuminate\Queue\InteractsWithQueue;
 use Illuminate\Queue\SerializesModels;
+use Illuminate\Support\Facades\Mail;
 use Stancl\Tenancy\Contracts\TenantWithDatabase;
+use Throwable;
 
 /**
  * Last step of the TenantCreated job pipeline (app/Providers/TenancyServiceProvider.php),
@@ -62,10 +66,38 @@ class CreateTenantFirstAdmin implements ShouldQueue
                     'role_id' => $role->id,
                 ]);
             });
+
+            $this->sendWelcomeMail($tenant, $pendingAdmin);
         }
 
         $tenant->status = TenantStatus::Active;
         $tenant->pending_admin = null;
         $tenant->save();
+    }
+
+    /**
+     * Best-effort: a mail failure never blocks provisioning itself, since
+     * the admin user has already been created successfully by this point.
+     *
+     * @param  array{name: string, email: string, password: string, domain: string}  $pendingAdmin
+     */
+    private function sendWelcomeMail(TenantWithDatabase $tenant, array $pendingAdmin): void
+    {
+        $appUrl = (string) config('app.url');
+        $scheme = parse_url($appUrl, PHP_URL_SCHEME) ?: 'http';
+        $port = parse_url($appUrl, PHP_URL_PORT);
+        $portSuffix = $port !== null ? ":{$port}" : '';
+
+        try {
+            PlatformMailer::apply();
+
+            Mail::to($pendingAdmin['email'])->send(new TenantWelcomeMail(
+                companyName: $tenant->company_name,
+                adminName: $pendingAdmin['name'],
+                loginUrl: "{$scheme}://{$pendingAdmin['domain']}{$portSuffix}/login",
+            ));
+        } catch (Throwable) {
+            // Intentionally swallowed - see comment above.
+        }
     }
 }

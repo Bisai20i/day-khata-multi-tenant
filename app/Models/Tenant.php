@@ -9,7 +9,7 @@ use Stancl\Tenancy\Database\Concerns\HasDatabase;
 use Stancl\Tenancy\Database\Concerns\HasDomains;
 use Stancl\Tenancy\Database\Models\Tenant as BaseTenant;
 
-#[Fillable(['company_name', 'status', 'contact_email'])]
+#[Fillable(['company_name', 'status', 'suspended_at', 'contact_email'])]
 class Tenant extends BaseTenant implements TenantWithDatabase
 {
     use HasDatabase, HasDomains;
@@ -23,7 +23,24 @@ class Tenant extends BaseTenant implements TenantWithDatabase
     {
         return [
             'status' => TenantStatus::class,
+            'suspended_at' => 'datetime',
         ];
+    }
+
+    /**
+     * Whether this tenant has been suspended longer than the given grace
+     * period. Computed at read time from suspended_at + the grace-period
+     * days setting rather than stored, so it can never drift out of sync
+     * with a later change to platform_settings.default_grace_period_days.
+     * Surfaced only (tenant list/show, dashboard) - never auto-deletes.
+     */
+    public function isPastGracePeriod(int $gracePeriodDays): bool
+    {
+        if ($this->suspended_at === null) {
+            return false;
+        }
+
+        return now()->greaterThan($this->suspended_at->clone()->addDays($gracePeriodDays));
     }
 
     /**
@@ -38,6 +55,7 @@ class Tenant extends BaseTenant implements TenantWithDatabase
             'id',
             'company_name',
             'status',
+            'suspended_at',
             'contact_email',
         ];
     }

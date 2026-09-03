@@ -1,7 +1,19 @@
 <script setup>
 import { ref, onMounted } from 'vue';
 import { Link, router, usePage } from '@inertiajs/vue3';
-import { ArrowLeft, Building2, CirclePause, CirclePlay, History, LayoutDashboard, LogIn, Pencil, Trash2, Users } from '@lucide/vue';
+import {
+    ArrowLeft,
+    Building2,
+    CirclePause,
+    CirclePlay,
+    History,
+    LayoutDashboard,
+    LogIn,
+    Pencil,
+    Settings as SettingsIcon,
+    Trash2,
+    Users,
+} from '@lucide/vue';
 import AppLayout from '@/layouts/AppLayout.vue';
 import Card from '@/components/ui/Card.vue';
 import Badge from '@/components/ui/Badge.vue';
@@ -29,6 +41,7 @@ const navItems = [
     { label: 'Dashboard', href: '/admin', icon: LayoutDashboard },
     { label: 'Tenants', href: '/tenants', icon: Building2 },
     { label: 'Activity log', href: '/activity-log', icon: History },
+    { label: 'Settings', href: '/settings', icon: SettingsIcon },
 ];
 
 const showDeleteModal = ref(false);
@@ -75,9 +88,14 @@ function confirmDelete() {
             <dl class="mb-6 text-sm">
                 <div class="flex items-center justify-between border-b border-border-soft py-2">
                     <dt class="text-text-muted">Status</dt>
-                    <dd>
+                    <dd class="flex items-center gap-1.5">
                         <Badge :variant="statusBadgeVariant[tenant.status] ?? 'neutral'" pill>{{ tenant.status }}</Badge>
+                        <Badge v-if="tenant.past_grace_period" variant="danger" pill>Past grace period</Badge>
                     </dd>
+                </div>
+                <div v-if="tenant.suspended_at" class="flex items-center justify-between border-b border-border-soft py-2">
+                    <dt class="text-text-muted">Suspended on</dt>
+                    <dd class="text-text-strong">{{ tenant.suspended_at }}</dd>
                 </div>
                 <div class="flex items-center justify-between border-b border-border-soft py-2">
                     <dt class="text-text-muted">Domain</dt>

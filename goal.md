@@ -223,7 +223,10 @@ this file for direction.
     owner/support role split, D: trial tracking + provisioning-failure visibility + domain management,
     E: real dashboard metrics + tenant search/pagination) are in scope; billing/subscriptions stays a
     non-goal. Grace period surfaces expired tenants for manual review only, never auto-deletes. Full
-    design and phase breakdown in `plans/central-panel-build.md`. **Not started.**
+    design and phase breakdown in `plans/central-panel-build.md`. **Phase A done and committed
+    (`87ebfb6`); Phase B (system settings, mail runtime, grace period, welcome/suspension mailables)
+    built 2026-09-03, pending the user's test run and a commit. C-E not started.** See `mem.md` for
+    the full breakdown.
 
 ## Explicit non-goals for now (deferred, not forgotten)
 

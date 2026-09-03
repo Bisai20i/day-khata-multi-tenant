@@ -1,8 +1,9 @@
 # Central panel build plan
 
-**Status as of 2026-09-03**: scope locked with the user, written, not yet started. Read `goal.md`
-roadmap item 11 and `mem.md` for what's actually landed before trusting this doc's "Status" lines —
-same discipline as `plans/complete-system-build.md`.
+**Status as of 2026-09-03**: scope locked with the user; Phase A shipped and committed (`87ebfb6`),
+Phase B built and not yet committed (see its own Status line below). Read `goal.md` roadmap item 11 and
+`mem.md` for what's actually landed before trusting this doc's "Status" lines — same discipline as
+`plans/complete-system-build.md`.
 
 ## Why this exists
 
@@ -78,15 +79,11 @@ new registration point). Applied to: tenant delete, platform-admin management, s
 
 ## Phase A — Fix the bug, close the gaps already hit in manual testing
 
-**Status: built 2026-09-03, not yet run through the user's `php artisan test` / committed.** All 4 items
-below are done — see `mem.md`'s top entry for the full breakdown (the impersonate port-drop fix, the
+**Status: DONE — built, tests green, committed as `87ebfb6` "all checks green" (2026-09-03).** All 4 items
+below shipped — see `mem.md`'s Phase A entry for the full breakdown (the impersonate port-drop fix, the
 `platform_admin_activity_logs` table + `PlatformAdminActivityLog::record()` wired into every sensitive
 `TenantController` action with the FK-ordering detail handled correctly in `destroy()`, tenant edit,
-tenant users view, and the filterable activity-log page). Test command:
-`php artisan test --compact tests/Feature/Central/Tenants/ImpersonationTest.php
-tests/Feature/Central/Tenants/TenantDeletionTest.php tests/Feature/Central/Tenants/TenantProvisioningTest.php
-tests/Feature/Central/Tenants/TenantSuspensionTest.php tests/Feature/Central/Tenants/TenantUpdateTest.php
-tests/Feature/Central/Tenants/TenantUserControllerTest.php tests/Feature/Central/ActivityLogControllerTest.php`.
+tenant users view, and the filterable activity-log page).
 
 1. **Fix impersonate 404.** `TenantController::impersonate()` currently does
    `parse_url(config('app.url'), PHP_URL_SCHEME)` — grabs only the scheme, silently drops the port. With
@@ -106,6 +103,31 @@ tests/Feature/Central/Tenants/TenantUserControllerTest.php tests/Feature/Central
    admin) + `Central/ActivityLog/Index.vue`.
 
 ## Phase B — System settings
+
+**Status: built and test-verified 2026-09-03, not yet committed.** Items 5-8 are done — see `mem.md`'s
+Phase B entry for the full breakdown, including 3 real bugs the user's first test run caught and this
+session fixed (a silently-non-persisting `suspended_at` from a missing `#[Fillable(...)]` entry, a
+pre-existing missing `tenancy()->end()` in `TenantSuspensionTest` that actually predates this phase, and a
+welcome-mail domain-lookup race against tenant provisioning's own event timing). Test command: `php
+artisan test --compact tests/Feature/Central/Settings/PlatformSettingControllerTest.php
+tests/Feature/Central/Tenants/GracePeriodTest.php tests/Feature/Central/Tenants/TenantSuspensionTest.php
+tests/Feature/Central/Tenants/TenantProvisioningTest.php` — **19/19 passing, 77 assertions**. One
+deliberate deviation from this doc's original design: the `platform-owner` Gate (and the
+`platform_admins.role` column it needs) was **not** built now — every platform admin today is
+functionally equal (no Phase C role-management UI exists yet to ever set anyone to `support`), so a gate
+that always evaluates true for everyone would be dead schema. The Settings page is gated `auth:platform`
+only for now; `Gate::define('platform-owner', ...)` and the `role` column land in Phase C alongside the
+admin-management UI that actually needs to differentiate admins.
+
+**Separately, the user's full `tests/Feature/Central` run also surfaced 6 failures in files this phase
+never touched** (`ActivityLogControllerTest` x1, `ImpersonationTest` x1, `TenantUserControllerTest` x4,
+all Phase A files) — confirmed via `git stash` back to the untouched `87ebfb6` baseline that all 6 already
+fail there too, so they predate this phase and aren't a Phase B regression. Not fixed here (out of scope);
+`ImpersonationTest`'s failure looks like a local-environment difference (a portful `APP_URL` vs. the
+test's hardcoded portless expectation) rather than a real bug, but the `TenantUserControllerTest` ones
+(`InvalidArgumentException: Database connection [tenant] not configured`, a real 500) look like a genuine
+latent bug worth a real look before Phase C — flagged for the user/next session, not investigated further
+here.
 
 5. **Platform settings page.** `PlatformSetting` model + `Central\Settings\PlatformSettingController`
    (`edit`/`update`, single page — mirrors the existing `Tenant/Admin/SettingsController` pattern already

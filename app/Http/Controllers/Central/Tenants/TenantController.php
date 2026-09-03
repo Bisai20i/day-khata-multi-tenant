@@ -4,13 +4,17 @@ namespace App\Http\Controllers\Central\Tenants;
 
 use App\Enums\TenantStatus;
 use App\Http\Controllers\Controller;
+use App\Mail\TenantSuspensionMail;
 use App\Models\PlatformAdminActivityLog;
+use App\Models\PlatformSetting;
 use App\Models\Tenant;
 use App\Models\User;
+use App\Support\PlatformMailer;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
+use Illuminate\Support\Facades\Mail;
 use Illuminate\Support\Facades\URL;
 use Inertia\Inertia;
 use Inertia\Response;
@@ -26,6 +30,7 @@ class TenantController extends Controller
     public function index(): Response
     {
         $tenants = Tenant::with('domains')->latest()->get();
+        $gracePeriodDays = PlatformSetting::current()->default_grace_period_days;
 
         return Inertia::render('Central/Tenants/Index', [
             'tenants' => $tenants->map(fn (Tenant $tenant): array => [
@@ -34,6 +39,7 @@ class TenantController extends Controller
                 'domain' => $tenant->domains->pluck('domain')->join(', '),
                 'status' => $tenant->status->value,
                 'created_at' => $tenant->created_at?->toDateString(),
+                'past_grace_period' => $tenant->isPastGracePeriod($gracePeriodDays),
             ]),
         ]);
     }
@@ -93,11 +99,19 @@ class TenantController extends Controller
             // Not a real column (see Tenant::getCustomColumns()) — swept into
             // the `data` JSON column and read back by App\Jobs\CreateTenantFirstAdmin
             // once the tenant database exists. Hashed here, never stored in
-            // plaintext even transiently.
+            // plaintext even transiently. `domain` is stashed here (rather
+            // than CreateTenantFirstAdmin querying $tenant->domains()->first())
+            // because $tenant->save() below fires the TenantCreated pipeline
+            // synchronously on the `sync` queue connection (tests) — that
+            // pipeline, including CreateTenantFirstAdmin, runs and completes
+            // BEFORE the domains()->create() call further down even executes,
+            // so a domains() lookup from inside the job would always find
+            // nothing at that point.
             $tenant->pending_admin = [
                 'name' => $validated['admin_name'],
                 'email' => $validated['admin_email'],
                 'password' => Hash::make($validated['admin_password']),
+                'domain' => "{$validated['subdomain']}.localhost",
             ];
 
             $tenant->save();
@@ -137,6 +151,7 @@ class TenantController extends Controller
     public function show(Tenant $tenant): Response
     {
         $tenant->load('domains');
+        $gracePeriodDays = PlatformSetting::current()->default_grace_period_days;
 
         return Inertia::render('Central/Tenants/Show', [
             'tenant' => [
@@ -146,6 +161,8 @@ class TenantController extends Controller
                 'domain' => $tenant->domains->pluck('domain')->join(', '),
                 'contact_email' => $tenant->contact_email,
                 'created_at' => $tenant->created_at?->toDateString(),
+                'suspended_at' => $tenant->suspended_at?->toDateString(),
+                'past_grace_period' => $tenant->isPastGracePeriod($gracePeriodDays),
             ],
         ]);
     }
@@ -195,7 +212,22 @@ class TenantController extends Controller
      */
     public function suspend(Tenant $tenant): RedirectResponse
     {
-        $tenant->update(['status' => TenantStatus::Suspended]);
+        $tenant->update(['status' => TenantStatus::Suspended, 'suspended_at' => now()]);
+
+        if ($tenant->contact_email !== null) {
+            // Best-effort: a mail failure (e.g. misconfigured SMTP settings)
+            // must never block the suspension itself.
+            try {
+                PlatformMailer::apply();
+
+                Mail::to($tenant->contact_email)->send(new TenantSuspensionMail(
+                    companyName: $tenant->company_name,
+                    supportEmail: PlatformSetting::current()->support_email,
+                ));
+            } catch (Throwable) {
+                // Intentionally swallowed - see comment above.
+            }
+        }
 
         PlatformAdminActivityLog::record('tenant.suspend', $tenant);
 
@@ -209,7 +241,7 @@ class TenantController extends Controller
      */
     public function resume(Tenant $tenant): RedirectResponse
     {
-        $tenant->update(['status' => TenantStatus::Active]);
+        $tenant->update(['status' => TenantStatus::Active, 'suspended_at' => null]);
 
         PlatformAdminActivityLog::record('tenant.resume', $tenant);
 

@@ -1,7 +1,7 @@
 <script setup>
 import { h, onMounted } from 'vue';
 import { Link, usePage } from '@inertiajs/vue3';
-import { Building2, History, LayoutDashboard } from '@lucide/vue';
+import { Building2, History, LayoutDashboard, Settings as SettingsIcon } from '@lucide/vue';
 import AppLayout from '@/layouts/AppLayout.vue';
 import Card from '@/components/ui/Card.vue';
 import Button from '@/components/ui/Button.vue';
@@ -29,6 +29,7 @@ const navItems = [
     { label: 'Dashboard', href: '/admin', icon: LayoutDashboard },
     { label: 'Tenants', href: '/tenants', icon: Building2 },
     { label: 'Activity log', href: '/activity-log', icon: History },
+    { label: 'Settings', href: '/settings', icon: SettingsIcon },
 ];
 
 const statusBadgeVariant = {
@@ -45,7 +46,12 @@ const columns = [
         header: 'Status',
         numeric: false,
         cell: ({ row }) =>
-            h(Badge, { variant: statusBadgeVariant[row.original.status] ?? 'neutral', pill: true }, () => row.original.status),
+            h('div', { class: 'flex items-center gap-1.5' }, [
+                h(Badge, { variant: statusBadgeVariant[row.original.status] ?? 'neutral', pill: true }, () => row.original.status),
+                row.original.past_grace_period
+                    ? h(Badge, { variant: 'danger', pill: true }, () => 'Past grace period')
+                    : null,
+            ]),
     },
     { accessorKey: 'created_at', header: 'Created' },
     {

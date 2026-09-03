@@ -1,11 +1,13 @@
 <?php
 
 use App\Enums\TenantStatus;
+use App\Mail\TenantWelcomeMail;
 use App\Models\PlatformAdmin;
 use App\Models\PlatformAdminActivityLog;
 use App\Models\Tenant;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Mail;
 use Illuminate\Support\Facades\Queue;
 
 uses(RefreshDatabase::class);
@@ -22,6 +24,8 @@ test('guests are redirected away from tenant management routes', function () {
 });
 
 test('creating a tenant via the endpoint provisions a working tenant database with a first admin user', function () {
+    Mail::fake();
+
     $admin = PlatformAdmin::factory()->create();
 
     $response = $this->actingAs($admin, 'platform')->post(route('central.tenants.store'), [
@@ -65,6 +69,10 @@ test('creating a tenant via the endpoint provisions a working tenant database wi
         ->where('tenant_id', $tenant->id)
         ->where('platform_admin_id', $admin->id)
         ->exists())->toBeTrue();
+
+    Mail::assertSent(TenantWelcomeMail::class, fn (TenantWelcomeMail $mail) => $mail->hasTo('admin@acme.test')
+        && $mail->companyName === 'Acme Inc'
+        && str_contains($mail->loginUrl, 'acme.localhost'));
 });
 
 test('a request into a still-provisioning tenant is blocked instead of hitting a missing database', function () {
