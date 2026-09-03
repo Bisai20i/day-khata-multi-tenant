@@ -52,6 +52,9 @@ const columns = [
                 row.original.past_grace_period
                     ? h(Badge, { variant: 'danger', pill: true }, () => 'Past grace period')
                     : null,
+                row.original.trial_expired
+                    ? h(Badge, { variant: 'warning', pill: true }, () => 'Trial expired')
+                    : null,
             ]),
     },
     { accessorKey: 'created_at', header: 'Created' },

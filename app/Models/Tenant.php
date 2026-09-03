@@ -9,7 +9,7 @@ use Stancl\Tenancy\Database\Concerns\HasDatabase;
 use Stancl\Tenancy\Database\Concerns\HasDomains;
 use Stancl\Tenancy\Database\Models\Tenant as BaseTenant;
 
-#[Fillable(['company_name', 'status', 'suspended_at', 'contact_email'])]
+#[Fillable(['company_name', 'status', 'suspended_at', 'trial_ends_at', 'contact_email'])]
 class Tenant extends BaseTenant implements TenantWithDatabase
 {
     use HasDatabase, HasDomains;
@@ -24,6 +24,7 @@ class Tenant extends BaseTenant implements TenantWithDatabase
         return [
             'status' => TenantStatus::class,
             'suspended_at' => 'datetime',
+            'trial_ends_at' => 'datetime',
         ];
     }
 
@@ -44,6 +45,15 @@ class Tenant extends BaseTenant implements TenantWithDatabase
     }
 
     /**
+     * Whether this tenant's trial period is over. Surfaced only (tenant
+     * list/show) - never auto-suspends, same posture as the grace period.
+     */
+    public function isTrialExpired(): bool
+    {
+        return $this->trial_ends_at !== null && now()->greaterThan($this->trial_ends_at);
+    }
+
+    /**
      * Columns that live as real columns on the `tenants` table rather than
      * being swept into the `data` JSON column by the VirtualColumn trait.
      *
@@ -56,6 +66,7 @@ class Tenant extends BaseTenant implements TenantWithDatabase
             'company_name',
             'status',
             'suspended_at',
+            'trial_ends_at',
             'contact_email',
         ];
     }

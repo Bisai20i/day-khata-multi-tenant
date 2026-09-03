@@ -33,8 +33,20 @@ class PlatformSetting extends Model
         ];
     }
 
+    /**
+     * firstOrCreate([]) on the create path never assigns default_trial_days/
+     * default_grace_period_days on the model itself (fill([]) sets nothing),
+     * so those columns are absent from the in-memory instance even though
+     * the DB row gets its column defaults applied on insert - a bare
+     * ->default_grace_period_days read on that exact instance returns null,
+     * not 30. wasRecentlyCreated is only true on that one path, so this only
+     * pays for an extra query on a fresh install's very first call, not on
+     * every call.
+     */
     public static function current(): self
     {
-        return static::firstOrCreate([]);
+        $settings = static::firstOrCreate([]);
+
+        return $settings->wasRecentlyCreated ? $settings->fresh() : $settings;
     }
 }

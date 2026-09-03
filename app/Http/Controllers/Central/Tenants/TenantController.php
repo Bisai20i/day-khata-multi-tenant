@@ -19,6 +19,7 @@ use Illuminate\Support\Facades\URL;
 use Inertia\Inertia;
 use Inertia\Response;
 use Stancl\Tenancy\Database\Models\Domain;
+use Stancl\Tenancy\Events\TenantCreated;
 use Symfony\Component\HttpFoundation\Response as SymfonyResponse;
 use Throwable;
 
@@ -40,6 +41,7 @@ class TenantController extends Controller
                 'status' => $tenant->status->value,
                 'created_at' => $tenant->created_at?->toDateString(),
                 'past_grace_period' => $tenant->isPastGracePeriod($gracePeriodDays),
+                'trial_expired' => $tenant->isTrialExpired(),
             ]),
         ]);
     }
@@ -94,6 +96,7 @@ class TenantController extends Controller
                 'company_name' => $validated['company_name'],
                 'status' => TenantStatus::Provisioning,
                 'contact_email' => $validated['contact_email'] ?? null,
+                'trial_ends_at' => now()->addDays(PlatformSetting::current()->default_trial_days),
             ]);
 
             // Not a real column (see Tenant::getCustomColumns()) — swept into
@@ -153,16 +156,35 @@ class TenantController extends Controller
         $tenant->load('domains');
         $gracePeriodDays = PlatformSetting::current()->default_grace_period_days;
 
+        // Tie-broken by id, not just created_at: platform_admin_activity_logs.
+        // created_at has no fractional-second precision, so two entries
+        // recorded within the same second (e.g. a fast retry-then-fail loop)
+        // would otherwise sort arbitrarily against each other.
+        $lastFailure = $tenant->status === TenantStatus::Provisioning
+            ? PlatformAdminActivityLog::where('tenant_id', $tenant->id)
+                ->where('action', 'provisioning.failed')
+                ->latest('created_at')
+                ->latest('id')
+                ->first()
+            : null;
+
         return Inertia::render('Central/Tenants/Show', [
             'tenant' => [
                 'id' => $tenant->id,
                 'company_name' => $tenant->company_name,
                 'status' => $tenant->status->value,
+                'domains' => $tenant->domains->map(fn (Domain $domain): array => [
+                    'id' => $domain->id,
+                    'domain' => $domain->domain,
+                ]),
                 'domain' => $tenant->domains->pluck('domain')->join(', '),
                 'contact_email' => $tenant->contact_email,
                 'created_at' => $tenant->created_at?->toDateString(),
                 'suspended_at' => $tenant->suspended_at?->toDateString(),
                 'past_grace_period' => $tenant->isPastGracePeriod($gracePeriodDays),
+                'trial_ends_at' => $tenant->trial_ends_at?->toDateString(),
+                'trial_expired' => $tenant->isTrialExpired(),
+                'provisioning_error' => $lastFailure !== null ? ($lastFailure->metadata['error'] ?? null) : null,
             ],
         ]);
     }
@@ -248,6 +270,30 @@ class TenantController extends Controller
         return redirect()
             ->route('central.tenants.show', $tenant)
             ->with('status', 'Tenant resumed.');
+    }
+
+    /**
+     * Re-fire the TenantCreated job pipeline for a tenant stuck in
+     * Provisioning after a failed run (see App\Listeners\
+     * RecordProvisioningFailure). pending_admin is only ever cleared once
+     * CreateTenantFirstAdmin actually succeeds, so it's still present for a
+     * retry to pick up regardless of which pipeline step failed.
+     */
+    public function retryProvisioning(Tenant $tenant): RedirectResponse
+    {
+        if ($tenant->status !== TenantStatus::Provisioning) {
+            return redirect()
+                ->route('central.tenants.show', $tenant)
+                ->with('status', 'Only a still-provisioning tenant can be retried.');
+        }
+
+        event(new TenantCreated($tenant));
+
+        PlatformAdminActivityLog::record('tenant.retry_provisioning', $tenant);
+
+        return redirect()
+            ->route('central.tenants.show', $tenant)
+            ->with('status', 'Provisioning retried.');
     }
 
     /**

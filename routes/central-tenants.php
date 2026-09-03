@@ -1,6 +1,7 @@
 <?php
 
 use App\Http\Controllers\Central\Tenants\TenantController;
+use App\Http\Controllers\Central\Tenants\TenantDomainController;
 use Illuminate\Support\Facades\Route;
 
 /*
@@ -26,6 +27,10 @@ Route::middleware('auth:platform')->prefix('tenants')->name('central.tenants.')-
     Route::post('/{tenant}/suspend', [TenantController::class, 'suspend'])->name('suspend');
     Route::post('/{tenant}/resume', [TenantController::class, 'resume'])->name('resume');
     Route::post('/{tenant}/impersonate', [TenantController::class, 'impersonate'])->name('impersonate');
+    Route::post('/{tenant}/retry-provisioning', [TenantController::class, 'retryProvisioning'])->name('retry-provisioning');
+
+    Route::post('/{tenant}/domains', [TenantDomainController::class, 'store'])->name('domains.store');
+    Route::delete('/{tenant}/domains/{domain}', [TenantDomainController::class, 'destroy'])->name('domains.destroy');
 
     // Owner-only: deleting a tenant is a real DROP DATABASE, not a "support"-level action.
     Route::delete('/{tenant}', [TenantController::class, 'destroy'])
