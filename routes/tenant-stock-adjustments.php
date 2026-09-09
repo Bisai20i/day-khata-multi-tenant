@@ -21,5 +21,7 @@ Route::name('tenant.')->group(function () {
         Route::get('/', [StockAdjustmentController::class, 'index'])->name('index');
         Route::post('/', [StockAdjustmentController::class, 'store'])->name('store');
         Route::post('/{stock_adjustment}/cancel', [StockAdjustmentController::class, 'cancel'])->name('cancel');
+        Route::get('/opening-stock/template', [StockAdjustmentController::class, 'openingStockTemplate'])->name('opening-stock.template');
+        Route::post('/opening-stock/import', [StockAdjustmentController::class, 'importOpeningStock'])->name('opening-stock.import');
     });
 });

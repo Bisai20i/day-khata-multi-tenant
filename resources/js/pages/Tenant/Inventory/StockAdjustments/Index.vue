@@ -9,6 +9,8 @@ import Input from '@/components/ui/Input.vue';
 import Modal from '@/components/ui/Modal.vue';
 import DataTable from '@/components/ui/DataTable.vue';
 import Tooltip from '@/components/ui/Tooltip.vue';
+import Combobox from '@/components/ui/Combobox.vue';
+import NepaliDateInput from '@/components/ui/NepaliDateInput.vue';
 import { useToast } from '@/composables/useToast';
 import { navGroups } from '@/lib/nav-items.js';
 import Create from './Create.vue';
@@ -38,6 +40,51 @@ watch(
 );
 
 const showCreateForm = ref(false);
+
+const storeOptions = computed(() => props.stores.map((s) => ({ value: s.id, label: s.name })));
+
+const importModalOpen = ref(false);
+const importForm = useForm({ file: null, date: '', store_id: null });
+const importResult = ref(null);
+
+// Same flash-watch reasoning as flash.status above: the import submit
+// redirects back to this same route + component instead of navigating away.
+watch(
+    () => page.props.flash?.importResult,
+    (result) => {
+        if (result) importResult.value = result;
+    },
+);
+
+function openImport() {
+    importForm.reset();
+    importForm.clearErrors();
+    importResult.value = null;
+    importModalOpen.value = true;
+}
+
+function closeImportModal() {
+    importModalOpen.value = false;
+    importForm.reset();
+    importForm.clearErrors();
+    importResult.value = null;
+}
+
+function onImportModalOpenChange(value) {
+    if (value) {
+        importModalOpen.value = true;
+    } else {
+        closeImportModal();
+    }
+}
+
+function onImportFileChange(event) {
+    importForm.file = event.target.files[0] ?? null;
+}
+
+function submitImport() {
+    importForm.post('/stock-adjustments/opening-stock/import', { forceFormData: true });
+}
 
 const reasonLabels = {
     damage: 'Damage',
@@ -155,10 +202,13 @@ const columns = [
         <template v-else>
             <div class="mb-4 flex items-center justify-between">
                 <h2 class="text-base font-bold text-text-strong">Stock Adjustments</h2>
-                <Button variant="primary" tone="purple" @click="showCreateForm = true">
-                    <Plus class="size-4" />
-                    New adjustment
-                </Button>
+                <div class="flex items-center gap-2">
+                    <Button variant="secondary" tone="purple" @click="openImport">Import opening stock</Button>
+                    <Button variant="primary" tone="purple" @click="showCreateForm = true">
+                        <Plus class="size-4" />
+                        New adjustment
+                    </Button>
+                </div>
             </div>
 
             <Card variant="panel">
@@ -183,6 +233,100 @@ const columns = [
                 <Button variant="primary" tone="purple" type="button" :disabled="cancelForm.processing" @click="submitCancel">
                     Confirm cancellation
                 </Button>
+            </template>
+        </Modal>
+
+        <Modal :open="importModalOpen" title="Import opening stock" @update:open="onImportModalOpenChange">
+            <div v-if="!importResult" class="flex flex-col gap-4">
+                <p class="text-[13px] text-text-muted">
+                    Download the template, fill in one item per row (items are matched by exact name), then
+                    upload the completed CSV file. Every row is posted as an "opening" stock adjustment line on
+                    the date and store below. Rows with an unknown item, a non-stockable item, an invalid
+                    quantity, or a repeated item are skipped and reported after import.
+                </p>
+                <a
+                    href="/stock-adjustments/opening-stock/template"
+                    class="inline-flex w-fit items-center gap-1.5 text-[13px] font-bold text-primary hover:underline"
+                >
+                    Download CSV template
+                </a>
+
+                <div class="grid grid-cols-2 gap-4">
+                    <div>
+                        <label class="mb-1 block text-sm font-semibold text-text-base">Date <span class="text-danger">*</span></label>
+                        <NepaliDateInput v-model="importForm.date" required />
+                        <p v-if="importForm.errors.date" class="mt-1 text-sm text-danger">{{ importForm.errors.date }}</p>
+                    </div>
+                    <div>
+                        <label class="mb-1 block text-sm font-semibold text-text-base">Store</label>
+                        <Combobox
+                            :model-value="importForm.store_id"
+                            :options="storeOptions"
+                            placeholder="Default store"
+                            @update:model-value="(v) => (importForm.store_id = v)"
+                        />
+                        <p v-if="importForm.errors.store_id" class="mt-1 text-sm text-danger">{{ importForm.errors.store_id }}</p>
+                    </div>
+                </div>
+
+                <div>
+                    <label for="opening-stock-import-file" class="mb-1 block text-sm font-semibold text-text-base">
+                        CSV file <span class="text-danger">*</span>
+                    </label>
+                    <input
+                        id="opening-stock-import-file"
+                        type="file"
+                        accept=".csv,text/csv"
+                        class="w-full border-[1.5px] border-border bg-bg-subtle px-3 py-2 text-[13px] text-text-base outline-none file:mr-3 file:cursor-pointer file:border-0 file:bg-primary-tint file:px-3 file:py-1.5 file:text-[12px] file:font-bold file:text-primary"
+                        @change="onImportFileChange"
+                    />
+                    <p v-if="importForm.errors.file" class="mt-1 text-sm text-danger">{{ importForm.errors.file }}</p>
+                    <p v-if="importForm.errors.lines" class="mt-1 text-sm text-danger">{{ importForm.errors.lines }}</p>
+                </div>
+            </div>
+
+            <div v-else class="flex flex-col gap-4">
+                <p class="text-[13px] font-semibold text-text-base">
+                    Imported opening stock for {{ importResult.imported }} of
+                    {{ importResult.imported + importResult.skipped.length }} row(s).
+                </p>
+                <div v-if="importResult.skipped.length" class="max-h-64 overflow-auto border-[1.5px] border-border">
+                    <table class="w-full text-left text-[12px]">
+                        <thead class="bg-bg-subtle">
+                            <tr>
+                                <th class="px-2 py-1.5">Row</th>
+                                <th class="px-2 py-1.5">Item</th>
+                                <th class="px-2 py-1.5">Reason</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <tr v-for="item in importResult.skipped" :key="item.row" class="border-t border-border">
+                                <td class="px-2 py-1.5">{{ item.row }}</td>
+                                <td class="px-2 py-1.5">{{ item.name || '—' }}</td>
+                                <td class="px-2 py-1.5">{{ item.reason }}</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+            <template #footer>
+                <template v-if="!importResult">
+                    <Button variant="secondary" tone="purple" type="button" @click="closeImportModal">Cancel</Button>
+                    <Button
+                        variant="primary"
+                        tone="purple"
+                        type="button"
+                        :loading="importForm.processing"
+                        :disabled="importForm.processing || !importForm.file || !importForm.date"
+                        @click="submitImport"
+                    >
+                        Import
+                    </Button>
+                </template>
+                <template v-else>
+                    <Button variant="primary" tone="purple" type="button" @click="closeImportModal">Done</Button>
+                </template>
             </template>
         </Modal>
     </AppLayout>

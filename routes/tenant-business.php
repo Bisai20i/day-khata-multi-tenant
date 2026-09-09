@@ -45,6 +45,8 @@ Route::name('tenant.')->group(function () {
         Route::post('/', [AccountController::class, 'store'])->name('store');
         Route::put('/{account}', [AccountController::class, 'update'])->name('update');
         Route::delete('/{account}', [AccountController::class, 'destroy'])->name('destroy');
+        Route::get('/opening-balances/template', [AccountController::class, 'openingBalanceTemplate'])->name('opening-balances.template');
+        Route::post('/opening-balances/import', [AccountController::class, 'importOpeningBalances'])->name('opening-balances.import');
     });
 
     Route::prefix('customers')->name('customers.')->group(function () {
@@ -84,5 +86,7 @@ Route::name('tenant.')->group(function () {
         Route::post('/', [ItemController::class, 'store'])->name('store');
         Route::put('/{item}', [ItemController::class, 'update'])->name('update');
         Route::delete('/{item}', [ItemController::class, 'destroy'])->name('destroy');
+        Route::get('/import/template', [ItemController::class, 'importTemplate'])->name('import.template');
+        Route::post('/import', [ItemController::class, 'import'])->name('import');
     });
 });
