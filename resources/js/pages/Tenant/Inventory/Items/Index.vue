@@ -12,6 +12,7 @@ import Select from '@/components/ui/Select.vue';
 import NepaliDateInput from '@/components/ui/NepaliDateInput.vue';
 import RowActions from '@/components/ui/RowActions.vue';
 import { useToast } from '@/composables/useToast';
+import { useConfirm } from '@/composables/useConfirm';
 import { navGroups } from '@/lib/nav-items.js';
 
 const props = defineProps({
@@ -31,6 +32,7 @@ const props = defineProps({
 
 const page = usePage();
 const { toast } = useToast();
+const { confirm } = useConfirm();
 
 // Create/edit/delete all redirect back to this same route/component - Inertia
 // patches the already-mounted instance rather than remounting it, so a plain
@@ -61,8 +63,12 @@ const form = useForm({
     description: '',
     unit: '',
     hs_code: '',
+    barcode: '',
     min_stock: '',
     expiry_date: '',
+    purchase_rate: '',
+    sale_rate: '',
+    image: null,
     is_vatable: false,
     is_stockable: true,
     is_active: true,
@@ -73,9 +79,25 @@ form.transform((data) => ({
     item_subcategory_id: data.item_subcategory_id === '' ? null : data.item_subcategory_id,
     description: data.description === '' ? null : data.description,
     hs_code: data.hs_code === '' ? null : data.hs_code,
+    barcode: data.barcode === '' ? null : data.barcode,
     min_stock: data.min_stock === '' ? null : data.min_stock,
     expiry_date: data.expiry_date === '' ? null : data.expiry_date,
+    purchase_rate: data.purchase_rate === '' ? null : data.purchase_rate,
+    sale_rate: data.sale_rate === '' ? null : data.sale_rate,
 }));
+
+// Local-only preview for the image picker - shows the item's existing
+// image when editing, or a fresh blob preview once a new file is chosen.
+// Not part of `form` since the file input itself can't be pre-filled from
+// an existing image_path (browsers refuse to set <input type="file">
+// programmatically), so this is tracked separately.
+const imagePreviewUrl = ref('');
+
+function onImageChange(event) {
+    const file = event.target.files?.[0] ?? null;
+    form.image = file;
+    imagePreviewUrl.value = file ? URL.createObjectURL(file) : '';
+}
 
 const subcategoryOptions = computed(() => {
     const filtered = props.subcategories.filter((subcategory) => subcategory.item_category_id === form.item_category_id);
@@ -103,6 +125,7 @@ function openEdit(item) {
     form.description = item.description ?? '';
     form.unit = item.unit;
     form.hs_code = item.hs_code ?? '';
+    form.barcode = item.barcode ?? '';
     form.min_stock = item.min_stock ?? '';
     // item.expiry_date comes back from the server as a full ISO datetime
     // string (Eloquent's default 'date'-cast serialization), not the plain
@@ -110,6 +133,10 @@ function openEdit(item) {
     // portion so editing an item with an existing expiry date doesn't
     // silently blank out the BS fields.
     form.expiry_date = item.expiry_date ? item.expiry_date.slice(0, 10) : '';
+    form.purchase_rate = item.purchase_rate ?? '';
+    form.sale_rate = item.sale_rate ?? '';
+    form.image = null;
+    imagePreviewUrl.value = item.image_path ? `/storage/${item.image_path}` : '';
     form.is_vatable = !!item.is_vatable;
     form.is_stockable = !!item.is_stockable;
     form.is_active = !!item.is_active;
@@ -121,6 +148,7 @@ function closeModal() {
     editing.value = null;
     form.reset();
     form.clearErrors();
+    imagePreviewUrl.value = '';
 }
 
 function onModalOpenChange(value) {
@@ -135,8 +163,8 @@ function submit() {
     }
 }
 
-function destroy(item) {
-    if (!confirm('Delete this item?')) return;
+async function destroy(item) {
+    if (!(await confirm({ message: 'Delete this item?', tone: 'danger', confirmLabel: 'Delete' }))) return;
     router.delete(`/items/${item.id}`);
 }
 
@@ -163,6 +191,19 @@ function expiryStatus(item) {
 }
 
 const columns = [
+    {
+        id: 'image',
+        header: '',
+        numeric: false,
+        cell: ({ row }) =>
+            row.original.image_path
+                ? h('img', {
+                      src: `/storage/${row.original.image_path}`,
+                      alt: row.original.name,
+                      class: 'h-8 w-8 border-[1.5px] border-border object-cover',
+                  })
+                : h('div', { class: 'h-8 w-8 border-[1.5px] border-dashed border-border' }),
+    },
     { accessorKey: 'name', header: 'Name' },
     {
         id: 'category',
@@ -177,6 +218,18 @@ const columns = [
         cell: ({ row }) => row.original.subcategory?.name ?? '—',
     },
     { accessorKey: 'unit', header: 'Unit', numeric: false },
+    {
+        id: 'purchase_rate',
+        header: 'Purchase rate',
+        numeric: true,
+        cell: ({ row }) => (row.original.purchase_rate != null ? Number(row.original.purchase_rate).toFixed(2) : '—'),
+    },
+    {
+        id: 'sale_rate',
+        header: 'Sale rate',
+        numeric: true,
+        cell: ({ row }) => (row.original.sale_rate != null ? Number(row.original.sale_rate).toFixed(2) : '—'),
+    },
     {
         id: 'expiry',
         header: 'Expiry',
@@ -234,7 +287,7 @@ const columns = [
             <form id="item-form" class="flex flex-col gap-4" @submit.prevent="submit">
                 <div class="grid grid-cols-2 gap-4">
                     <div>
-                        <label for="item_category_id" class="mb-1 block text-sm font-semibold text-text-base">Category</label>
+                        <label for="item_category_id" class="mb-1 block text-sm font-semibold text-text-base">Category <span class="text-danger">*</span></label>
                         <Select
                             id="item_category_id"
                             :model-value="form.item_category_id"
@@ -258,8 +311,8 @@ const columns = [
                 </div>
 
                 <div>
-                    <label for="name" class="mb-1 block text-sm font-semibold text-text-base">Name</label>
-                    <Input id="name" v-model="form.name" type="text" required />
+                    <label for="name" class="mb-1 block text-sm font-semibold text-text-base">Name <span class="text-danger">*</span></label>
+                    <Input id="name" v-model="form.name" type="text" placeholder="Enter item name" required />
                     <p v-if="form.errors.name" class="mt-1 text-sm text-danger">{{ form.errors.name }}</p>
                 </div>
 
@@ -269,6 +322,7 @@ const columns = [
                         id="description"
                         v-model="form.description"
                         rows="3"
+                        placeholder="Optional notes"
                         class="w-full border-[1.5px] border-border bg-bg-subtle px-3 py-2 text-[13px] text-text-base transition-colors duration-150 outline-none placeholder:text-text-faint focus:border-primary focus:bg-white focus:[box-shadow:0_0_0_3px_var(--color-primary-focus-ring)]"
                     ></textarea>
                     <p v-if="form.errors.description" class="mt-1 text-sm text-danger">{{ form.errors.description }}</p>
@@ -276,22 +330,30 @@ const columns = [
 
                 <div class="grid grid-cols-2 gap-4">
                     <div>
-                        <label for="unit" class="mb-1 block text-sm font-semibold text-text-base">Unit</label>
+                        <label for="unit" class="mb-1 block text-sm font-semibold text-text-base">Unit <span class="text-danger">*</span></label>
                         <Input id="unit" v-model="form.unit" type="text" placeholder="pcs" required />
                         <p v-if="form.errors.unit" class="mt-1 text-sm text-danger">{{ form.errors.unit }}</p>
                     </div>
 
                     <div>
                         <label for="hs_code" class="mb-1 block text-sm font-semibold text-text-base">HS code</label>
-                        <Input id="hs_code" v-model="form.hs_code" type="text" />
+                        <Input id="hs_code" v-model="form.hs_code" type="text" placeholder="e.g. 8471.30" />
                         <p v-if="form.errors.hs_code" class="mt-1 text-sm text-danger">{{ form.errors.hs_code }}</p>
                     </div>
                 </div>
 
                 <div class="grid grid-cols-2 gap-4">
                     <div>
+                        <label for="barcode" class="mb-1 block text-sm font-semibold text-text-base">Barcode</label>
+                        <Input id="barcode" v-model="form.barcode" type="text" placeholder="Scan or type a barcode" />
+                        <p v-if="form.errors.barcode" class="mt-1 text-sm text-danger">{{ form.errors.barcode }}</p>
+                    </div>
+                </div>
+
+                <div class="grid grid-cols-2 gap-4">
+                    <div>
                         <label for="min_stock" class="mb-1 block text-sm font-semibold text-text-base">Minimum stock</label>
-                        <Input id="min_stock" v-model="form.min_stock" type="number" step="0.01" class="max-w-[160px]" />
+                        <Input id="min_stock" v-model="form.min_stock" type="number" step="0.01" placeholder="e.g. 10" class="max-w-[160px]" />
                         <p v-if="form.errors.min_stock" class="mt-1 text-sm text-danger">{{ form.errors.min_stock }}</p>
                     </div>
 
@@ -300,6 +362,41 @@ const columns = [
                         <NepaliDateInput v-model="form.expiry_date" />
                         <p v-if="form.errors.expiry_date" class="mt-1 text-sm text-danger">{{ form.errors.expiry_date }}</p>
                     </div>
+                </div>
+
+                <div class="grid grid-cols-2 gap-4">
+                    <div>
+                        <label for="purchase_rate" class="mb-1 block text-sm font-semibold text-text-base">Purchase rate</label>
+                        <Input id="purchase_rate" v-model="form.purchase_rate" type="number" step="0.01" min="0" placeholder="0.00" />
+                        <p v-if="form.errors.purchase_rate" class="mt-1 text-sm text-danger">{{ form.errors.purchase_rate }}</p>
+                    </div>
+
+                    <div>
+                        <label for="sale_rate" class="mb-1 block text-sm font-semibold text-text-base">Sale rate</label>
+                        <Input id="sale_rate" v-model="form.sale_rate" type="number" step="0.01" min="0" placeholder="0.00" />
+                        <p v-if="form.errors.sale_rate" class="mt-1 text-sm text-danger">{{ form.errors.sale_rate }}</p>
+                    </div>
+                </div>
+
+                <div>
+                    <label for="image" class="mb-1 block text-sm font-semibold text-text-base">Item image</label>
+                    <div class="flex items-center gap-3">
+                        <img
+                            v-if="imagePreviewUrl"
+                            :src="imagePreviewUrl"
+                            alt="Item image preview"
+                            class="h-16 w-16 border-[1.5px] border-border object-cover"
+                        />
+                        <input
+                            id="image"
+                            type="file"
+                            accept="image/*"
+                            class="w-full border-[1.5px] border-border bg-bg-subtle px-3 py-2 text-[13px] text-text-base transition-colors duration-150 outline-none file:mr-3 file:border-0 file:bg-transparent file:text-[13px] file:font-semibold file:text-primary focus:border-primary focus:bg-white focus:[box-shadow:0_0_0_3px_var(--color-primary-focus-ring)]"
+                            @change="onImageChange"
+                        />
+                    </div>
+                    <p class="mt-1 text-xs text-text-faint">JPEG, PNG, or WebP up to 2MB.</p>
+                    <p v-if="form.errors.image" class="mt-1 text-sm text-danger">{{ form.errors.image }}</p>
                 </div>
 
                 <div class="flex flex-wrap items-center gap-4">
