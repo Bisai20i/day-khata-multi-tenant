@@ -31,6 +31,7 @@ import {
     Landmark,
     ArrowLeftRight,
     Factory,
+    Award,
 } from '@lucide/vue';
 
 /**
@@ -90,6 +91,7 @@ export function navGroups(isAdmin) {
                 { label: 'Item Varieties', href: '/item-varieties', icon: Shapes },
                 { label: 'Item Subcategories', href: '/item-subcategories', icon: Tag },
                 { label: 'Items', href: '/items', icon: Package },
+                { label: 'Brands', href: '/brands', icon: Award },
                 { label: 'Stock Adjustments', href: '/stock-adjustments', icon: ClipboardList },
                 { label: 'Stock Transfers', href: '/stock-transfers', icon: ArrowLeftRight },
                 { label: 'Production & Refining', href: '/stock-conversions', icon: Factory },
@@ -142,6 +144,7 @@ export function navGroups(isAdmin) {
                 { label: 'Stock by Category', href: '/reports/stock-by-category', icon: FileBarChart },
                 { label: 'Stock Movement Register', href: '/reports/stock-movement-register', icon: FileBarChart },
                 { label: 'Damage & Lost Stock', href: '/reports/damage-lost-stock', icon: FileBarChart },
+                { label: 'Stock by Brand', href: '/reports/stock-by-brand', icon: FileBarChart },
             ],
         },
     ];
