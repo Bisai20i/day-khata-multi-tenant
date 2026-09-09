@@ -13,6 +13,7 @@ use App\Models\PurchaseReturnLine;
 use App\Models\SaleLine;
 use App\Models\SaleReturnLine;
 use App\Models\StockAdjustmentLine;
+use App\Models\StockTransferLine;
 use App\Models\Store;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\MorphTo;
@@ -48,6 +49,7 @@ class StockMovementRegisterController extends Controller
                     SaleReturnLine::class => ['salesReturn'],
                     PurchaseReturnLine::class => ['purchaseReturn'],
                     StockAdjustmentLine::class => ['stockAdjustment'],
+                    StockTransferLine::class => ['stockTransfer.fromStore', 'stockTransfer.toStore'],
                 ]);
             }])
             ->orderBy('date')
@@ -84,6 +86,8 @@ class StockMovementRegisterController extends Controller
             StockMovementType::Opening => 'Opening',
             StockMovementType::AdjustmentIn => 'Adjustment In',
             StockMovementType::AdjustmentOut => 'Adjustment Out',
+            StockMovementType::TransferIn => 'Transfer In',
+            StockMovementType::TransferOut => 'Transfer Out',
             StockMovementType::ProductionIn => 'Production In',
             StockMovementType::ProductionOut => 'Production Out',
             StockMovementType::RefiningIn => 'Refining In',
@@ -110,6 +114,8 @@ class StockMovementRegisterController extends Controller
             $reference instanceof PurchaseReturnLine => 'Purchase Return #'.$reference->purchase_return_id
                 .($reference->purchaseReturn?->purchase_id ? ' (Purchase #'.$reference->purchaseReturn->purchase_id.')' : ''),
             $reference instanceof StockAdjustmentLine => 'Stock Adjustment #'.$reference->stock_adjustment_id,
+            $reference instanceof StockTransferLine => 'Stock Transfer #'.$reference->stock_transfer_id
+                .($reference->stockTransfer ? ' ('.$reference->stockTransfer->fromStore?->name.' → '.$reference->stockTransfer->toStore?->name.')' : ''),
             default => $narration ?: '—',
         };
     }

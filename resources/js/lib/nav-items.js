@@ -29,6 +29,7 @@ import {
     ScanBarcode,
     Handshake,
     Landmark,
+    ArrowLeftRight,
     Factory,
 } from '@lucide/vue';
 
@@ -90,6 +91,7 @@ export function navGroups(isAdmin) {
                 { label: 'Item Subcategories', href: '/item-subcategories', icon: Tag },
                 { label: 'Items', href: '/items', icon: Package },
                 { label: 'Stock Adjustments', href: '/stock-adjustments', icon: ClipboardList },
+                { label: 'Stock Transfers', href: '/stock-transfers', icon: ArrowLeftRight },
                 { label: 'Production & Refining', href: '/stock-conversions', icon: Factory },
             ],
         },
