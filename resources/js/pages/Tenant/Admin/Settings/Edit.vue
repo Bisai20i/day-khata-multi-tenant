@@ -1,10 +1,11 @@
 <script setup>
-import { computed, watch } from 'vue';
+import { computed, ref, watch } from 'vue';
 import { useForm, usePage } from '@inertiajs/vue3';
 import AppLayout from '@/layouts/AppLayout.vue';
 import Card from '@/components/ui/Card.vue';
 import Button from '@/components/ui/Button.vue';
 import Input from '@/components/ui/Input.vue';
+import Select from '@/components/ui/Select.vue';
 import { useToast } from '@/composables/useToast';
 import { navGroups } from '@/lib/nav-items.js';
 
@@ -12,6 +13,10 @@ const props = defineProps({
     settings: {
         type: Object,
         required: true,
+    },
+    stores: {
+        type: Array,
+        default: () => [],
     },
 });
 
@@ -21,6 +26,18 @@ const { toast } = useToast();
 const isAdmin = computed(() => page.props.auth?.user?.role?.slug === 'admin');
 
 const navItems = computed(() => navGroups(isAdmin.value));
+
+const paperSizeOptions = [
+    { value: 'a4', label: 'A4' },
+    { value: 'a5', label: 'A5' },
+    { value: '58mm', label: 'Thermal 58mm' },
+    { value: '80mm', label: 'Thermal 80mm' },
+];
+
+const storeOptions = computed(() => [
+    { value: null, label: 'None (first active store)' },
+    ...props.stores.map((store) => ({ value: store.id, label: store.name })),
+]);
 
 // Update redirects back to this same route/component - Inertia patches the
 // already-mounted instance rather than remounting it, so watching the flash
@@ -41,10 +58,49 @@ const form = useForm({
     email: props.settings.email ?? '',
     pan_vat_number: props.settings.pan_vat_number ?? '',
     invoice_footer_note: props.settings.invoice_footer_note ?? '',
+    print_paper_size: props.settings.print_paper_size ?? 'a4',
+    default_vat_rate: props.settings.default_vat_rate ?? '13.00',
+    allow_negative_stock: props.settings.allow_negative_stock ?? false,
+    default_store_id: props.settings.default_store_id ?? null,
+    sale_full_prefix: props.settings.sale_full_prefix ?? 'SL',
+    sale_full_enabled: props.settings.sale_full_enabled ?? true,
+    sale_abbreviated_prefix: props.settings.sale_abbreviated_prefix ?? 'SLA',
+    sale_abbreviated_enabled: props.settings.sale_abbreviated_enabled ?? true,
+    sale_pan_prefix: props.settings.sale_pan_prefix ?? 'SLP',
+    sale_pan_enabled: props.settings.sale_pan_enabled ?? true,
+    purchase_prefix: props.settings.purchase_prefix ?? 'PU',
 });
 
 function submit() {
     form.put('/settings');
+}
+
+// Logo upload is a separate form/route from the main settings form (see
+// SettingsController::uploadLogo()) so a logo change doesn't require
+// re-submitting the whole settings form.
+const logoForm = useForm({
+    logo: null,
+});
+
+// Local-only preview for the logo picker - shows the current logo when one
+// exists, or a fresh blob preview once a new file is chosen. Not part of
+// logoForm since the file input itself can't be pre-filled from an existing
+// logo_path (browsers refuse to set <input type="file">'s value).
+const logoPreviewUrl = ref(props.settings.logo_url ?? '');
+
+function onLogoChange(event) {
+    const file = event.target.files?.[0] ?? null;
+    logoForm.logo = file;
+    logoPreviewUrl.value = file ? URL.createObjectURL(file) : (props.settings.logo_url ?? '');
+}
+
+function submitLogo() {
+    logoForm.post('/settings/logo', {
+        preserveScroll: true,
+        onSuccess: () => {
+            logoForm.reset();
+        },
+    });
 }
 </script>
 
@@ -54,40 +110,141 @@ function submit() {
             <h2 class="text-base font-bold text-text-strong">Invoice Setup</h2>
         </div>
 
-        <Card variant="panel">
-            <form class="flex flex-col gap-4" @submit.prevent="submit">
-                <div class="grid grid-cols-2 gap-4">
-                    <div>
-                        <label for="company_name" class="mb-1 block text-sm font-semibold text-text-base">Company Name</label>
-                        <Input id="company_name" v-model="form.company_name" type="text" required />
-                        <p v-if="form.errors.company_name" class="mt-1 text-sm text-danger">{{ form.errors.company_name }}</p>
+        <div class="flex flex-col gap-4">
+            <Card variant="panel" title="Company Info">
+                <form class="flex flex-col gap-4" @submit.prevent="submit">
+                    <div class="grid grid-cols-2 gap-4">
+                        <div>
+                            <label for="company_name" class="mb-1 block text-sm font-semibold text-text-base">Company Name <span class="text-danger">*</span></label>
+                            <Input id="company_name" v-model="form.company_name" type="text" placeholder="e.g. Sharma Traders Pvt. Ltd." required />
+                            <p v-if="form.errors.company_name" class="mt-1 text-sm text-danger">{{ form.errors.company_name }}</p>
+                        </div>
+
+                        <div>
+                            <label for="pan_vat_number" class="mb-1 block text-sm font-semibold text-text-base">PAN/VAT Number</label>
+                            <Input id="pan_vat_number" v-model="form.pan_vat_number" type="text" placeholder="e.g. 123456789" />
+                            <p v-if="form.errors.pan_vat_number" class="mt-1 text-sm text-danger">{{ form.errors.pan_vat_number }}</p>
+                        </div>
+
+                        <div class="col-span-2">
+                            <label for="address" class="mb-1 block text-sm font-semibold text-text-base">Address</label>
+                            <Input id="address" v-model="form.address" type="text" placeholder="e.g. Kathmandu-10" />
+                            <p v-if="form.errors.address" class="mt-1 text-sm text-danger">{{ form.errors.address }}</p>
+                        </div>
+
+                        <div>
+                            <label for="phone" class="mb-1 block text-sm font-semibold text-text-base">Phone</label>
+                            <Input id="phone" v-model="form.phone" type="text" placeholder="98XXXXXXXX" />
+                            <p v-if="form.errors.phone" class="mt-1 text-sm text-danger">{{ form.errors.phone }}</p>
+                        </div>
+
+                        <div>
+                            <label for="email" class="mb-1 block text-sm font-semibold text-text-base">Email</label>
+                            <Input id="email" v-model="form.email" type="email" placeholder="name@example.com" />
+                            <p v-if="form.errors.email" class="mt-1 text-sm text-danger">{{ form.errors.email }}</p>
+                        </div>
                     </div>
 
-                    <div>
-                        <label for="pan_vat_number" class="mb-1 block text-sm font-semibold text-text-base">PAN/VAT Number</label>
-                        <Input id="pan_vat_number" v-model="form.pan_vat_number" type="text" />
-                        <p v-if="form.errors.pan_vat_number" class="mt-1 text-sm text-danger">{{ form.errors.pan_vat_number }}</p>
+                    <div class="flex items-center justify-end gap-2">
+                        <Button variant="primary" tone="purple" type="submit" :disabled="form.processing">Save changes</Button>
+                    </div>
+                </form>
+
+                <div class="mt-4 border-t border-border pt-4">
+                    <label for="logo" class="mb-1 block text-sm font-semibold text-text-base">Company Logo</label>
+                    <div class="flex items-end gap-4">
+                        <img
+                            v-if="logoPreviewUrl"
+                            :src="logoPreviewUrl"
+                            alt="Company logo preview"
+                            class="h-16 w-16 shrink-0 border-[1.5px] border-border bg-white object-contain"
+                        />
+                        <div class="flex-1">
+                            <input
+                                id="logo"
+                                type="file"
+                                accept="image/*"
+                                class="w-full border-[1.5px] border-border bg-bg-subtle px-3 py-2 text-[13px] text-text-base transition-colors duration-150 outline-none file:mr-3 file:border-0 file:bg-transparent file:text-[13px] file:font-semibold file:text-primary focus:border-primary focus:bg-white focus:[box-shadow:0_0_0_3px_var(--color-primary-focus-ring)]"
+                                @change="onLogoChange"
+                            />
+                            <p v-if="logoForm.errors.logo" class="mt-1 text-sm text-danger">{{ logoForm.errors.logo }}</p>
+                        </div>
+                        <Button
+                            variant="secondary"
+                            tone="purple"
+                            type="button"
+                            :disabled="!logoForm.logo || logoForm.processing"
+                            @click="submitLogo"
+                        >
+                            Upload logo
+                        </Button>
+                    </div>
+                </div>
+            </Card>
+
+            <Card variant="panel" title="Invoicing">
+                <form class="flex flex-col gap-4" @submit.prevent="submit">
+                    <div class="grid grid-cols-2 gap-4">
+                        <div>
+                            <label class="mb-1 block text-sm font-semibold text-text-base">Print Paper Size</label>
+                            <Select v-model="form.print_paper_size" :options="paperSizeOptions" />
+                            <p v-if="form.errors.print_paper_size" class="mt-1 text-sm text-danger">{{ form.errors.print_paper_size }}</p>
+                        </div>
+
+                        <div>
+                            <label for="default_vat_rate" class="mb-1 block text-sm font-semibold text-text-base">Default VAT Rate (%)</label>
+                            <Input id="default_vat_rate" v-model="form.default_vat_rate" type="number" min="0" max="100" step="0.01" placeholder="13.00" />
+                            <p v-if="form.errors.default_vat_rate" class="mt-1 text-sm text-danger">{{ form.errors.default_vat_rate }}</p>
+                        </div>
                     </div>
 
-                    <div class="col-span-2">
-                        <label for="address" class="mb-1 block text-sm font-semibold text-text-base">Address</label>
-                        <Input id="address" v-model="form.address" type="text" />
-                        <p v-if="form.errors.address" class="mt-1 text-sm text-danger">{{ form.errors.address }}</p>
+                    <div class="border-t border-border pt-4">
+                        <p class="mb-3 text-[10px] font-bold tracking-[.8px] text-text-muted uppercase">Sale Invoice Types</p>
+                        <div class="grid grid-cols-3 gap-4">
+                            <div>
+                                <label for="sale_full_prefix" class="mb-1 block text-sm font-semibold text-text-base">Full Invoice Prefix</label>
+                                <Input id="sale_full_prefix" v-model="form.sale_full_prefix" type="text" placeholder="SL" />
+                                <p v-if="form.errors.sale_full_prefix" class="mt-1 text-sm text-danger">{{ form.errors.sale_full_prefix }}</p>
+                                <div class="mt-2 flex items-center gap-2">
+                                    <input id="sale_full_enabled" v-model="form.sale_full_enabled" type="checkbox" class="size-4 border-[1.5px] border-border" />
+                                    <label for="sale_full_enabled" class="text-sm text-text-base">Enabled</label>
+                                </div>
+                            </div>
+
+                            <div>
+                                <label for="sale_abbreviated_prefix" class="mb-1 block text-sm font-semibold text-text-base">Abbreviated Invoice Prefix</label>
+                                <Input id="sale_abbreviated_prefix" v-model="form.sale_abbreviated_prefix" type="text" placeholder="SLA" />
+                                <p v-if="form.errors.sale_abbreviated_prefix" class="mt-1 text-sm text-danger">{{ form.errors.sale_abbreviated_prefix }}</p>
+                                <div class="mt-2 flex items-center gap-2">
+                                    <input id="sale_abbreviated_enabled" v-model="form.sale_abbreviated_enabled" type="checkbox" class="size-4 border-[1.5px] border-border" />
+                                    <label for="sale_abbreviated_enabled" class="text-sm text-text-base">Enabled</label>
+                                </div>
+                            </div>
+
+                            <div>
+                                <label for="sale_pan_prefix" class="mb-1 block text-sm font-semibold text-text-base">PAN Invoice Prefix</label>
+                                <Input id="sale_pan_prefix" v-model="form.sale_pan_prefix" type="text" placeholder="SLP" />
+                                <p v-if="form.errors.sale_pan_prefix" class="mt-1 text-sm text-danger">{{ form.errors.sale_pan_prefix }}</p>
+                                <div class="mt-2 flex items-center gap-2">
+                                    <input id="sale_pan_enabled" v-model="form.sale_pan_enabled" type="checkbox" class="size-4 border-[1.5px] border-border" />
+                                    <label for="sale_pan_enabled" class="text-sm text-text-base">Enabled</label>
+                                </div>
+                            </div>
+                        </div>
                     </div>
 
-                    <div>
-                        <label for="phone" class="mb-1 block text-sm font-semibold text-text-base">Phone</label>
-                        <Input id="phone" v-model="form.phone" type="text" />
-                        <p v-if="form.errors.phone" class="mt-1 text-sm text-danger">{{ form.errors.phone }}</p>
+                    <div class="border-t border-border pt-4">
+                        <p class="mb-3 text-[10px] font-bold tracking-[.8px] text-text-muted uppercase">Purchase</p>
+                        <div class="grid grid-cols-3 gap-4">
+                            <div>
+                                <label for="purchase_prefix" class="mb-1 block text-sm font-semibold text-text-base">Purchase Prefix</label>
+                                <Input id="purchase_prefix" v-model="form.purchase_prefix" type="text" placeholder="PU" />
+                                <p v-if="form.errors.purchase_prefix" class="mt-1 text-sm text-danger">{{ form.errors.purchase_prefix }}</p>
+                            </div>
+                        </div>
                     </div>
 
-                    <div>
-                        <label for="email" class="mb-1 block text-sm font-semibold text-text-base">Email</label>
-                        <Input id="email" v-model="form.email" type="email" />
-                        <p v-if="form.errors.email" class="mt-1 text-sm text-danger">{{ form.errors.email }}</p>
-                    </div>
-
-                    <div class="col-span-2">
+                    <div class="border-t border-border pt-4">
                         <label for="invoice_footer_note" class="mb-1 block text-sm font-semibold text-text-base">
                             Invoice Footer Note
                         </label>
@@ -102,12 +259,39 @@ function submit() {
                             {{ form.errors.invoice_footer_note }}
                         </p>
                     </div>
-                </div>
 
-                <div class="flex items-center justify-end gap-2">
-                    <Button variant="primary" tone="purple" type="submit" :disabled="form.processing">Save changes</Button>
-                </div>
-            </form>
-        </Card>
+                    <div class="flex items-center justify-end gap-2">
+                        <Button variant="primary" tone="purple" type="submit" :disabled="form.processing">Save changes</Button>
+                    </div>
+                </form>
+            </Card>
+
+            <Card variant="panel" title="Stock & Discount Policy">
+                <form class="flex flex-col gap-4" @submit.prevent="submit">
+                    <div class="grid grid-cols-2 gap-4">
+                        <div>
+                            <div class="flex items-center gap-2">
+                                <input id="allow_negative_stock" v-model="form.allow_negative_stock" type="checkbox" class="size-4 border-[1.5px] border-border" />
+                                <label for="allow_negative_stock" class="text-sm font-semibold text-text-base">Allow negative stock</label>
+                            </div>
+                            <p class="mt-1 text-sm text-text-muted">
+                                When off, a sale that would drive an item's stock below zero is rejected server-side. When on, sales are allowed to oversell.
+                            </p>
+                            <p v-if="form.errors.allow_negative_stock" class="mt-1 text-sm text-danger">{{ form.errors.allow_negative_stock }}</p>
+                        </div>
+
+                        <div>
+                            <label class="mb-1 block text-sm font-semibold text-text-base">Default Store</label>
+                            <Select v-model="form.default_store_id" :options="storeOptions" />
+                            <p v-if="form.errors.default_store_id" class="mt-1 text-sm text-danger">{{ form.errors.default_store_id }}</p>
+                        </div>
+                    </div>
+
+                    <div class="flex items-center justify-end gap-2">
+                        <Button variant="primary" tone="purple" type="submit" :disabled="form.processing">Save changes</Button>
+                    </div>
+                </form>
+            </Card>
+        </div>
     </AppLayout>
 </template>

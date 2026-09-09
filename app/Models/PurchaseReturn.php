@@ -125,18 +125,30 @@ class PurchaseReturn extends Model
             $exe8 = Account::where('code', 'EXE8')->firstOrFail();
 
             // Purchase::post() applies the header discount as a uniform
-            // percentage of the vatable subtotal (headerDiscount /
-            // vatableSubtotal), reducing every vatable item account's debit
-            // by that same ratio - see Purchase::post()'s own docblock.
-            // vatableSubtotal itself isn't stored on the Purchase row, but
-            // it's recoverable as taxable_amount + discount (taxable_amount
-            // IS the post-discount vatable subtotal). Reversing a vatable
-            // line's return at the same ratio keeps this return consistent
-            // with what the original purchase actually booked per account.
-            $vatableSubtotalOriginal = round((float) $purchase->taxable_amount + (float) $purchase->discount, 2);
-            $discountRatio = ((float) $purchase->discount > 0 && $vatableSubtotalOriginal > 0)
-                ? (float) $purchase->discount / $vatableSubtotalOriginal
-                : 0.0;
+            // fraction of the vatable subtotal, reducing every vatable item
+            // account's debit by that same ratio - see Purchase::post()'s
+            // own docblock. That ratio reconstructs without needing the
+            // (unstored) original vatable subtotal:
+            // - 'flat': discount is a Rs amount, and vatableSubtotal is
+            //   recoverable as taxable_amount + discount (taxable_amount IS
+            //   the post-discount vatable subtotal), so ratio = discount /
+            //   vatableSubtotal.
+            // - 'percentage': discount already IS the raw percentage (e.g.
+            //   20 for 20%), so the ratio is simply discount / 100 directly
+            //   - Purchase::post() computes headerDiscount = vatableSubtotal
+            //   * discount / 100, which removes exactly that fraction from
+            //   every vatable rupee uniformly.
+            // Reversing a vatable line's return at the same ratio keeps this
+            // return consistent with what the original purchase actually
+            // booked per account.
+            if ($purchase->discount_type === 'percentage') {
+                $discountRatio = (float) $purchase->discount / 100;
+            } else {
+                $vatableSubtotalOriginal = round((float) $purchase->taxable_amount + (float) $purchase->discount, 2);
+                $discountRatio = ((float) $purchase->discount > 0 && $vatableSubtotalOriginal > 0)
+                    ? (float) $purchase->discount / $vatableSubtotalOriginal
+                    : 0.0;
+            }
 
             $preparedLines = [];
             $vatableAccountTotals = [];

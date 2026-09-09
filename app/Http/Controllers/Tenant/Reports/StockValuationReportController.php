@@ -26,6 +26,32 @@ class StockValuationReportController extends Controller
         $asOf = ($request->date('as_of') ?? now())->copy()->endOfDay();
         $storeId = $request->integer('store_id') ?: null;
 
+        ['rows' => $rows, 'grandTotalValuation' => $grandTotalValuation] = $this->calculateValuation($asOf, $storeId);
+
+        return Inertia::render('Tenant/Reports/StockValuation', [
+            'asOf' => $asOf->toDateString(),
+            'rows' => $rows,
+            'grandTotalValuation' => $grandTotalValuation,
+            'stores' => Store::where('is_active', true)->orderBy('name')->get(['id', 'name']),
+            'storeId' => $storeId,
+        ]);
+    }
+
+    /**
+     * Today's grand total valuation only, for dashboard-style callers that
+     * don't need the per-item breakdown. Reuses the exact same weighted-
+     * average-cost calculation as index() so the two never drift apart.
+     */
+    public function currentTotalValuation(): float
+    {
+        return $this->calculateValuation(now()->copy()->endOfDay(), null)['grandTotalValuation'];
+    }
+
+    /**
+     * @return array{rows: array<int, array{itemId: int, name: string, unit: string, quantity: float, avgCost: float, valuation: float}>, grandTotalValuation: float}
+     */
+    private function calculateValuation(\DateTimeInterface $asOf, ?int $storeId): array
+    {
         $rows = [];
         $grandTotalValuation = 0.0;
 
@@ -71,12 +97,9 @@ class StockValuationReportController extends Controller
 
         usort($rows, fn (array $a, array $b): int => $b['valuation'] <=> $a['valuation']);
 
-        return Inertia::render('Tenant/Reports/StockValuation', [
-            'asOf' => $asOf->toDateString(),
+        return [
             'rows' => $rows,
             'grandTotalValuation' => round($grandTotalValuation, 2),
-            'stores' => Store::where('is_active', true)->orderBy('name')->get(['id', 'name']),
-            'storeId' => $storeId,
-        ]);
+        ];
     }
 }

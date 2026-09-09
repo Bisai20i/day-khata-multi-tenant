@@ -3,6 +3,7 @@
 use App\Enums\FiscalYearStatus;
 use App\Enums\StockMovementType;
 use App\Models\Account;
+use App\Models\CompanySetting;
 use App\Models\Customer;
 use App\Models\FiscalYear;
 use App\Models\Item;
@@ -44,6 +45,9 @@ test('returning part of one line posts a balanced voucher and increases stock', 
 
     $tenant->run(function () {
         salesReturnTestOpenFiscalYear();
+        // Sold without any prior stock - this test is only about the return
+        // flow, not stock policy.
+        CompanySetting::current()->update(['allow_negative_stock' => true]);
         $admin = salesReturnTestAdmin();
         $customer = Customer::factory()->create();
         $itemA = Item::factory()->create(['is_vatable' => true, 'is_stockable' => true]);
@@ -179,6 +183,9 @@ test('cancelling a sales return reverses its voucher, frees the returned quantit
 
     $tenant->run(function () {
         salesReturnTestOpenFiscalYear();
+        // Sold without any prior stock - this test is only about the
+        // cancel-a-return flow, not stock policy.
+        CompanySetting::current()->update(['allow_negative_stock' => true]);
         $admin = salesReturnTestAdmin();
         $customer = Customer::factory()->create();
         $item = Item::factory()->create(['is_vatable' => false, 'is_stockable' => true]);
@@ -300,6 +307,66 @@ test('a return proportionally reverses the header discount and TDS withheld on t
         // TDS share: 50 * (406.8 / 1017) = 20 exactly. The customer is
         // credited total-minus-tdsShare (386.8), and the TDS account is
         // credited the 20 being clawed back.
+        $tdsLine = $voucher->lines()->where('account_id', $tdsAccount->id)->firstOrFail();
+        expect((float) $tdsLine->credit)->toBe(20.0);
+
+        $customerLine = $voucher->lines()->where('account_id', $customer->account_id)->firstOrFail();
+        expect((float) $customerLine->credit)->toBe(386.8);
+    });
+
+    $tenant->delete();
+});
+
+test('a return proportionally reverses a percentage header discount identically to the equivalent flat discount', function () {
+    $tenant = provisionSalesReturnTestTenant('sales-return-percentage-discount.tenant-test');
+
+    $tenant->run(function () {
+        salesReturnTestOpenFiscalYear();
+        $admin = salesReturnTestAdmin();
+        $customer = Customer::factory()->create();
+        $item = Item::factory()->create(['is_vatable' => true, 'is_stockable' => false]);
+        $tdsAccount = Account::factory()->create();
+
+        // Same shape as the flat-discount test above (1000 vatable subtotal,
+        // 10% off = 100 Rs) - discount_type=percentage stores the raw "10"
+        // in the `discount` column instead of the Rs amount, so this proves
+        // the return reconstructs the same 40 Rs (not 400% of the line).
+        $sale = Sale::post(
+            [
+                'customer_id' => $customer->id,
+                'invoice_type' => 'full',
+                'date' => '2026-06-01',
+                'payment_mode' => 'credit',
+                'discount' => 10,
+                'discount_type' => 'percentage',
+                'tds_account_id' => $tdsAccount->id,
+                'tds_amount' => 50,
+            ],
+            [['item_id' => $item->id, 'quantity' => 10, 'rate' => 100, 'discount' => 0]],
+            $admin,
+        );
+        expect((float) $sale->discount)->toBe(10.0)
+            ->and((float) $sale->taxable_amount)->toBe(900.0)
+            ->and((float) $sale->total)->toBe(1017.0);
+
+        $saleLine = $sale->lines()->firstOrFail();
+
+        $return = SalesReturn::post(
+            ['sale_id' => $sale->id, 'date' => '2026-06-05', 'reason' => 'Partial return'],
+            [['sale_line_id' => $saleLine->id, 'quantity' => 4]],
+            $admin,
+        );
+
+        // 4 of 10 units = 400 gross; 10% of that (40, not 400) is the
+        // proportional discount reversal, so 360 counts as taxable; VAT at
+        // 13% = 46.8; total = 406.8 - identical to the flat-discount case.
+        expect((float) $return->taxable_amount)->toBe(360.0)
+            ->and((float) $return->vat_amount)->toBe(46.8)
+            ->and((float) $return->total)->toBe(406.8);
+
+        $voucher = $return->journalVoucher;
+        expect((float) $voucher->lines->sum('debit'))->toBe((float) $voucher->lines->sum('credit'));
+
         $tdsLine = $voucher->lines()->where('account_id', $tdsAccount->id)->firstOrFail();
         expect((float) $tdsLine->credit)->toBe(20.0);
 

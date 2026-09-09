@@ -9,12 +9,16 @@ use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Casts\Attribute;
 use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\Relations\HasOne;
 use Illuminate\Support\Facades\DB;
 use InvalidArgumentException;
 
-#[Fillable(['name', 'start_date', 'end_date', 'status'])]
+#[Fillable([
+    'name', 'start_date', 'end_date', 'status',
+    'closed_by', 'closed_at', 'reopened_by', 'reopened_at', 'reopen_reason', 'relocked_at',
+])]
 class FiscalYear extends Model
 {
     protected static function booted(): void
@@ -56,6 +60,9 @@ class FiscalYear extends Model
             'start_date' => 'date',
             'end_date' => 'date',
             'status' => FiscalYearStatus::class,
+            'closed_at' => 'datetime',
+            'reopened_at' => 'datetime',
+            'relocked_at' => 'datetime',
         ];
     }
 
@@ -104,9 +111,111 @@ class FiscalYear extends Model
         return $this->hasOne(FiscalYearArchive::class);
     }
 
+    /**
+     * @return BelongsTo<User, $this>
+     */
+    public function closedBy(): BelongsTo
+    {
+        return $this->belongsTo(User::class, 'closed_by');
+    }
+
+    /**
+     * @return BelongsTo<User, $this>
+     */
+    public function reopenedBy(): BelongsTo
+    {
+        return $this->belongsTo(User::class, 'reopened_by');
+    }
+
     public static function current(): self
     {
         return static::where('status', FiscalYearStatus::Open)->firstOrFail();
+    }
+
+    /**
+     * The single closed year currently reopened for correction, if any -
+     * shared lookup used by PurchaseController/JournalVoucherController/
+     * StockAdjustmentController's create-side actions to offer it as the
+     * only non-current fiscal-year option on their forms (see
+     * isOpenForCorrection()'s docblock). There can only ever be one, since
+     * relock() must run before a different year can be reopened.
+     */
+    public static function openForCorrection(): ?self
+    {
+        return static::query()->whereNotNull('reopened_at')->whereNull('relocked_at')->first();
+    }
+
+    /**
+     * True while this closed year has been deliberately reopened for a
+     * Purchase/Journal Voucher/Stock Adjustment correction and not yet
+     * relocked - a flag on the closed year, not a distinct FiscalYearStatus
+     * case (see the migration's docblock), so this checks reopened_at/
+     * relocked_at directly rather than `status`.
+     */
+    public function isOpenForCorrection(): bool
+    {
+        return $this->reopened_at !== null && $this->relocked_at === null;
+    }
+
+    /**
+     * Reopens this closed year for correction: an admin-only, mandatory-
+     * reason action (enforced by the caller/route, see FiscalYearController
+     * ::reopen()'s role:admin middleware) that flips on the window
+     * ClosedFiscalYearGuard checks. Locked design decision - see
+     * plans/invoicing-settings-sale-purchase-ux.md "Locked decisions" #3 and
+     * Phase D's recommended option (a): the Purchase/Journal Voucher/Stock
+     * Adjustment create forms gain a fiscal-year picker offering only this
+     * reopened year as an alternate to the current one, rather than a
+     * separate "post correction" flow.
+     */
+    public function reopen(User $actor, string $reason): void
+    {
+        if ($this->status !== FiscalYearStatus::Closed) {
+            throw new InvalidArgumentException('Only a closed fiscal year can be reopened.');
+        }
+
+        if ($this->archive()->exists()) {
+            throw new InvalidArgumentException('An archived fiscal year cannot be reopened.');
+        }
+
+        if (trim($reason) === '') {
+            throw new InvalidArgumentException('A reason is required to reopen a fiscal year.');
+        }
+
+        $alreadyOpenForCorrection = static::openForCorrection();
+        if ($alreadyOpenForCorrection && $alreadyOpenForCorrection->isNot($this)) {
+            throw new InvalidArgumentException("\"{$alreadyOpenForCorrection->name}\" is already reopened for correction; relock it first.");
+        }
+
+        $this->reopened_by = $actor->id;
+        $this->reopened_at = now();
+        $this->reopen_reason = $reason;
+
+        // Best-effort backfill for a year that was closed before closed_by/
+        // closed_at existed (see the migration's docblock) - never
+        // overwrites a real value already on record.
+        if ($this->closed_by === null) {
+            $this->closed_by = $actor->id;
+        }
+        if ($this->closed_at === null) {
+            $this->closed_at = now();
+        }
+
+        $this->save();
+    }
+
+    /**
+     * Ends this year's reopened-for-correction window, re-blocking
+     * Purchase/Journal Voucher/Stock Adjustment postings against it.
+     */
+    public function relock(): void
+    {
+        if (! $this->isOpenForCorrection()) {
+            throw new InvalidArgumentException('This fiscal year is not currently reopened for correction.');
+        }
+
+        $this->relocked_at = now();
+        $this->save();
     }
 
     /**
@@ -130,6 +239,8 @@ class FiscalYear extends Model
             $this->postOpeningBalances($next, $actor);
 
             $this->status = FiscalYearStatus::Closed;
+            $this->closed_by = $actor->id;
+            $this->closed_at = now();
             $this->save();
 
             $next->status = FiscalYearStatus::Open;

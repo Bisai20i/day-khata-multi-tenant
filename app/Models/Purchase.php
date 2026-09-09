@@ -4,6 +4,8 @@ namespace App\Models;
 
 use App\Enums\StockMovementType;
 use App\Enums\VoucherType;
+use App\Support\ClosedFiscalYearGuard;
+use Illuminate\Auth\Access\AuthorizationException;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
@@ -26,8 +28,8 @@ use InvalidArgumentException;
  * account; a "service" purchase is an item with is_stockable=false.
  */
 #[Fillable([
-    'supplier_id', 'store_id', 'journal_voucher_id', 'bill_number', 'pan_number', 'date',
-    'payment_mode', 'bank_account_id', 'discount', 'taxable_amount',
+    'supplier_id', 'store_id', 'journal_voucher_id', 'bill_number', 'pan_number', 'chalani_number', 'date',
+    'payment_mode', 'bank_account_id', 'discount', 'discount_type', 'taxable_amount',
     'nontaxable_amount', 'vat_rate', 'vat_amount', 'total', 'cash_amount',
     'bank_amount', 'tds_account_id', 'tds_amount', 'narration', 'status',
     'created_by',
@@ -144,19 +146,61 @@ class Purchase extends Model
     }
 
     /**
+     * The actual Rs amount removed from the vatable subtotal by the header
+     * discount at posting time - for display (e.g. on the purchase PDF),
+     * which can't just print `discount` directly since that column means
+     * different things depending on `discount_type`. Mirrors Sale::
+     * discountAmount() exactly, including its 100%-percentage edge case.
+     */
+    public function discountAmount(): float
+    {
+        if ($this->discount_type !== 'percentage') {
+            return round((float) $this->discount, 2);
+        }
+
+        $discount = (float) $this->discount;
+        $denominator = 100 - $discount;
+
+        if ($denominator <= 0) {
+            return 0.0;
+        }
+
+        return round((float) $this->taxable_amount * $discount / $denominator, 2);
+    }
+
+    /**
      * Builds and posts the purchase's JournalVoucher, then creates the
      * Purchase + PurchaseLine rows and (for stockable items) records a
      * stock movement per line.
      *
-     * @param  array{supplier_id: int, bill_number?: string, pan_number?: string, date: string, payment_mode: string, bank_account_id?: int, discount?: float, vat_rate?: float, cash_amount?: float, bank_amount?: float, tds_account_id?: int, tds_amount?: float, narration?: string}  $data
-     * @param  array<int, array{item_id: int, quantity: float, rate: float, discount?: float}>  $lines
+     * $data['fiscal_year_id']/['reason'] target a specific, non-current
+     * fiscal year for a correction posting - see ClosedFiscalYearGuard's
+     * docblock and the locked design decision in plans/invoicing-settings-
+     * sale-purchase-ux.md. Omitted, this defaults to FiscalYear::current()
+     * exactly as before.
+     *
+     * @param  array{supplier_id: int, bill_number?: string, pan_number?: string, chalani_number?: string|null, date: string, payment_mode: string, bank_account_id?: int, discount?: float, discount_type?: string, vat_rate?: float, cash_amount?: float, bank_amount?: float, tds_account_id?: int, tds_amount?: float, narration?: string, fiscal_year_id?: int, reason?: string|null}  $data
+     * @param  array<int, array{item_id: int, quantity: float, rate: float, discount?: float, discount_type?: string}>  $lines
      */
     public static function post(array $data, array $lines, User $actor): self
     {
         return DB::transaction(function () use ($data, $lines, $actor) {
+            $targetFiscalYear = isset($data['fiscal_year_id'])
+                ? FiscalYear::findOrFail($data['fiscal_year_id'])
+                : FiscalYear::current();
+            $reason = $data['reason'] ?? null;
+            $isCorrection = $targetFiscalYear->id !== FiscalYear::current()->id;
+
+            ClosedFiscalYearGuard::ensurePostable($targetFiscalYear, $reason);
+
+            if ($isCorrection && $actor->role?->slug !== 'admin') {
+                throw new AuthorizationException('Only an admin may post into a reopened fiscal year.');
+            }
+
             $supplier = Supplier::findOrFail($data['supplier_id']);
             $vatRate = (float) ($data['vat_rate'] ?? 13.00);
-            $headerDiscount = round((float) ($data['discount'] ?? 0), 2);
+            $headerDiscountType = static::validatedDiscountType($data['discount_type'] ?? 'flat');
+            $headerDiscountRaw = static::validatedDiscountValue(round((float) ($data['discount'] ?? 0), 2), $headerDiscountType);
 
             $storeId = isset($data['store_id']) ? (int) $data['store_id'] : Store::where('is_active', true)->orderBy('id')->value('id');
             if (! $storeId) {
@@ -171,14 +215,20 @@ class Purchase extends Model
                 $item = Item::findOrFail($line['item_id']);
                 $quantity = (float) $line['quantity'];
                 $rate = (float) $line['rate'];
-                $discount = round((float) ($line['discount'] ?? 0), 2);
-                $lineTotal = round($quantity * $rate - $discount, 2);
+                $lineDiscountType = static::validatedDiscountType($line['discount_type'] ?? 'flat');
+                $lineDiscountRaw = static::validatedDiscountValue(round((float) ($line['discount'] ?? 0), 2), $lineDiscountType);
+                $lineBase = round($quantity * $rate, 2);
+                $discount = $lineDiscountType === 'percentage'
+                    ? round($lineBase * $lineDiscountRaw / 100, 2)
+                    : $lineDiscountRaw;
+                $lineTotal = round($lineBase - $discount, 2);
 
                 $lineModels[] = [
                     'item' => $item,
                     'quantity' => $quantity,
                     'rate' => $rate,
-                    'discount' => $discount,
+                    'discount' => $lineDiscountRaw,
+                    'discount_type' => $lineDiscountType,
                     'vatable' => $item->is_vatable,
                     'line_total' => $lineTotal,
                 ];
@@ -189,6 +239,10 @@ class Purchase extends Model
                     $nonVatableSubtotal = round($nonVatableSubtotal + $lineTotal, 2);
                 }
             }
+
+            $headerDiscount = $headerDiscountType === 'percentage'
+                ? round($vatableSubtotal * $headerDiscountRaw / 100, 2)
+                : $headerDiscountRaw;
 
             $taxableAmount = round($vatableSubtotal - $headerDiscount, 2);
             $nontaxableAmount = $nonVatableSubtotal;
@@ -319,6 +373,8 @@ class Purchase extends Model
                     'voucher_type' => VoucherType::Purchase->value,
                     'date' => $data['date'],
                     'narration' => $data['narration'] ?? "Purchase from {$supplier->name}",
+                    'fiscal_year_id' => $targetFiscalYear->id,
+                    'reason' => $reason,
                 ],
                 $voucherLines,
                 $actor,
@@ -330,10 +386,12 @@ class Purchase extends Model
                 'journal_voucher_id' => $voucher->id,
                 'bill_number' => $data['bill_number'] ?? null,
                 'pan_number' => $data['pan_number'] ?? null,
+                'chalani_number' => $data['chalani_number'] ?? null,
                 'date' => $data['date'],
                 'payment_mode' => $paymentMode,
                 'bank_account_id' => $data['bank_account_id'] ?? null,
-                'discount' => $headerDiscount,
+                'discount' => $headerDiscountRaw,
+                'discount_type' => $headerDiscountType,
                 'taxable_amount' => $taxableAmount,
                 'nontaxable_amount' => $nontaxableAmount,
                 'vat_rate' => $vatRate,
@@ -354,6 +412,7 @@ class Purchase extends Model
                     'quantity' => $line['quantity'],
                     'rate' => $line['rate'],
                     'discount' => $line['discount'],
+                    'discount_type' => $line['discount_type'],
                     'vatable' => $line['vatable'],
                     'line_total' => $line['line_total'],
                 ]);
@@ -370,8 +429,43 @@ class Purchase extends Model
                 }
             }
 
+            if ($isCorrection) {
+                ClosedFiscalYearGuard::logCorrection($targetFiscalYear, $reason, "Purchase #{$purchase->id} from {$supplier->name}");
+            }
+
             return $purchase;
         });
+    }
+
+    /**
+     * Validates a discount type string, defaulting an empty/missing value to
+     * 'flat'. Mirrors Sale::validatedDiscountType() exactly.
+     */
+    private static function validatedDiscountType(string $type): string
+    {
+        if (! in_array($type, ['percentage', 'flat'], true)) {
+            throw new InvalidArgumentException("Invalid discount type [{$type}]. Expected 'percentage' or 'flat'.");
+        }
+
+        return $type;
+    }
+
+    /**
+     * Validates a raw discount value against its type: never negative, and
+     * capped at 100 when the type is 'percentage' (a flat Rs discount has no
+     * such ceiling). Mirrors Sale::validatedDiscountValue() exactly.
+     */
+    private static function validatedDiscountValue(float $value, string $type): float
+    {
+        if ($value < 0) {
+            throw new InvalidArgumentException('Discount value cannot be negative.');
+        }
+
+        if ($type === 'percentage' && $value > 100) {
+            throw new InvalidArgumentException('A percentage discount cannot exceed 100.');
+        }
+
+        return $value;
     }
 
     /**

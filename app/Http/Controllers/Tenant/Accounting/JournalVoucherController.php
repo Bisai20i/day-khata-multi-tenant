@@ -25,7 +25,14 @@ class JournalVoucherController extends Controller
                 ->orderByDesc('id')
                 ->get(),
             'accounts' => Account::query()->orderBy('name')->get(['id', 'code', 'name']),
-            'fiscalYears' => FiscalYear::query()->orderByDesc('start_date')->get(['id', 'name', 'status']),
+            // The one closed year currently reopened for correction, if
+            // any - lets Create.vue offer it as the only non-current
+            // fiscal-year option, per the locked design decision (see
+            // ClosedFiscalYearGuard's docblock). Replaces the previous
+            // "every fiscal year, closed or not" picker, which allowed an
+            // admin+reason override into any closed year regardless of
+            // whether it had been deliberately reopened.
+            'correctionFiscalYear' => FiscalYear::openForCorrection()?->only(['id', 'name', 'reopen_reason']),
         ]);
     }
 

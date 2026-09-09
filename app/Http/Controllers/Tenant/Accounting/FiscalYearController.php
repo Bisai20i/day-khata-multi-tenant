@@ -58,4 +58,43 @@ class FiscalYearController extends Controller
 
         return redirect()->route('tenant.fiscal-years.index')->with('status', 'Fiscal year closed.');
     }
+
+    /**
+     * Reopens a closed fiscal year for correction: Purchase/Journal
+     * Voucher/Stock Adjustment postings may then target it (with a reason)
+     * until it's relocked. FiscalYear::reopen() logs to the tenant
+     * activity log itself, via the generic ActivityLogObserver now
+     * attached to this model (see AppServiceProvider::boot()) - its own
+     * plain update() already carries reopened_by/reopened_at/reopen_reason
+     * in `changes`, so no separate logging call is needed here.
+     */
+    public function reopen(Request $request, FiscalYear $fiscalYear): RedirectResponse
+    {
+        $data = $request->validate([
+            'reason' => ['required', 'string', 'max:1000'],
+        ]);
+
+        try {
+            $fiscalYear->reopen($request->user(), $data['reason']);
+        } catch (InvalidArgumentException $e) {
+            return back()->withErrors(['reason' => $e->getMessage()]);
+        }
+
+        return redirect()->route('tenant.fiscal-years.index')->with('status', "\"{$fiscalYear->name}\" reopened for correction.");
+    }
+
+    /**
+     * Ends a fiscal year's reopened-for-correction window. See reopen()'s
+     * docblock for why no separate logging call is needed here either.
+     */
+    public function relock(FiscalYear $fiscalYear): RedirectResponse
+    {
+        try {
+            $fiscalYear->relock();
+        } catch (InvalidArgumentException $e) {
+            return back()->withErrors(['fiscal_year' => $e->getMessage()]);
+        }
+
+        return redirect()->route('tenant.fiscal-years.index')->with('status', "\"{$fiscalYear->name}\" relocked.");
+    }
 }

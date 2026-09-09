@@ -2,6 +2,7 @@
 
 use App\Enums\FiscalYearStatus;
 use App\Enums\StockMovementType;
+use App\Models\CompanySetting;
 use App\Models\Customer;
 use App\Models\FiscalYear;
 use App\Models\Item;
@@ -288,6 +289,10 @@ test('grand totals sum correctly across all three category-wise reports', functi
 
     $tenant->run(function () {
         categoryWiseReportTestOpenFiscalYear();
+        // Sold before any purchase gives the items stock, purely to
+        // exercise the report's sales-side totals independently of its
+        // purchase-side totals - opt out of the negative-stock guard.
+        CompanySetting::current()->update(['allow_negative_stock' => true]);
         $admin = categoryWiseReportTestAdmin();
         $customer = Customer::factory()->create();
         $supplier = Supplier::factory()->create();

@@ -1,11 +1,14 @@
 <?php
 
 use App\Enums\FiscalYearStatus;
+use App\Enums\StockMovementType;
 use App\Models\Account;
+use App\Models\CompanySetting;
 use App\Models\Customer;
 use App\Models\FiscalYear;
 use App\Models\Item;
 use App\Models\Sale;
+use App\Models\Store;
 use App\Models\Tenant;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -49,8 +52,40 @@ test('the pos page renders its expected Inertia component with items and custome
         ->assertInertia(fn ($page) => $page->component('Tenant/Sales/Pos')
             ->has('customers', 1)
             ->has('items', 1)
+            ->has('categories')
             ->has('accounts')
             ->has('stores')
+            ->where('items.0.current_stock', 0.0)
+        );
+
+    $tenant->delete();
+});
+
+test('the pos page reports each stockable item\'s net on-hand quantity across all its movements', function () {
+    $domain = 'pos-current-stock.tenant-test';
+    $tenant = provisionPosTestTenant($domain);
+
+    $tenant->run(function () {
+        User::factory()->create(['email' => 'owner@example.com']);
+        $store = Store::factory()->create();
+        $stockable = Item::factory()->create(['name' => 'Stockable Item', 'is_stockable' => true]);
+        Item::factory()->create(['name' => 'Service Item', 'is_stockable' => false]);
+
+        $stockable->recordStockMovement(StockMovementType::Opening, 20, '2026-01-01', $store->id);
+        $stockable->recordStockMovement(StockMovementType::Sale, 6, '2026-01-02', $store->id);
+    });
+
+    loginPosTestUser($domain);
+
+    // Items are ordered by name: "Service Item" (non-stockable) sorts before
+    // "Stockable Item" (opening 20 minus a sale of 6 = 14 on hand).
+    $this->get("http://{$domain}/pos")
+        ->assertOk()
+        ->assertInertia(fn ($page) => $page->component('Tenant/Sales/Pos')
+            ->where('items.0.name', 'Service Item')
+            ->where('items.0.current_stock', null)
+            ->where('items.1.name', 'Stockable Item')
+            ->where('items.1.current_stock', 14.0)
         );
 
     $tenant->delete();
@@ -65,6 +100,10 @@ test('a POS-shaped payload posts a sale through the existing sales store route',
     $tenant->run(function () use (&$customerId, &$itemId) {
         User::factory()->create(['email' => 'owner@example.com']);
         FiscalYear::create(['name' => 'FY1', 'start_date' => '2026-01-01', 'end_date' => '2026-12-31', 'status' => FiscalYearStatus::Open]);
+        // Sold without any prior stock - this test is only about the HTTP
+        // payload shape, not stock policy, so opt out of the negative-stock
+        // guard.
+        CompanySetting::current()->update(['allow_negative_stock' => true]);
         $customerId = Customer::factory()->create()->id;
         $itemId = Item::factory()->create(['is_vatable' => true, 'is_stockable' => true])->id;
     });

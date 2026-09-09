@@ -25,6 +25,12 @@ Route::name('tenant.')->group(function () {
         Route::post('/{fiscalYear}/close', [FiscalYearController::class, 'close'])
             ->middleware('role:admin')
             ->name('close');
+        Route::post('/{fiscalYear}/reopen', [FiscalYearController::class, 'reopen'])
+            ->middleware('role:admin')
+            ->name('reopen');
+        Route::post('/{fiscalYear}/lock', [FiscalYearController::class, 'relock'])
+            ->middleware('role:admin')
+            ->name('lock');
     });
 
     Route::prefix('journal-vouchers')->name('journal-vouchers.')->group(function () {

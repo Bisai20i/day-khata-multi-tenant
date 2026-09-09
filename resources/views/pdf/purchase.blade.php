@@ -62,7 +62,13 @@
                     </td>
                     <td class="text-right">{{ number_format((float) $line->quantity, 2) }}</td>
                     <td class="text-right">{{ number_format((float) $line->rate, 2) }}</td>
-                    <td class="text-right">{{ number_format((float) $line->discount, 2) }}</td>
+                    <td class="text-right">
+                        @if($line->discount_type === 'percentage' && (float) $line->discount > 0)
+                            {{ number_format((float) $line->discount, 2) }}% (Rs {{ number_format(($line->quantity * $line->rate) - $line->line_total, 2) }})
+                        @else
+                            {{ number_format((float) $line->discount, 2) }}
+                        @endif
+                    </td>
                     <td class="text-right">{{ number_format((float) $line->line_total, 2) }}</td>
                 </tr>
             @endforeach
@@ -82,8 +88,13 @@
         @endif
         @if((float) $purchase->discount > 0)
             <tr>
-                <td>Discount</td>
-                <td class="text-right">-{{ number_format((float) $purchase->discount, 2) }}</td>
+                <td>
+                    Discount
+                    @if($purchase->discount_type === 'percentage')
+                        ({{ number_format((float) $purchase->discount, 2) }}%)
+                    @endif
+                </td>
+                <td class="text-right">-{{ number_format($purchase->discountAmount(), 2) }}</td>
             </tr>
         @endif
         <tr>

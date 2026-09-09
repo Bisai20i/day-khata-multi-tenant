@@ -4,6 +4,8 @@ namespace App\Models;
 
 use App\Enums\StockAdjustmentReason;
 use App\Enums\StockMovementType;
+use App\Support\ClosedFiscalYearGuard;
+use Illuminate\Auth\Access\AuthorizationException;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
@@ -74,7 +76,16 @@ class StockAdjustment extends Model
      * no-op on SQLite/tests, a real lock on MySQL/prod - same pattern
      * VoucherSequence::class already uses for its own counter).
      *
-     * @param  array{date: string, note?: string|null, store_id?: int|null}  $data
+     * $data['fiscal_year_id']/['reason'] target a specific, non-current
+     * fiscal year for a correction posting - see ClosedFiscalYearGuard's
+     * docblock. Omitted (the ordinary case), no fiscal year is looked up or
+     * checked at all, exactly as before this parameter existed - a stock
+     * adjustment never touches the ledger (see this class's own docblock)
+     * and has never required a fiscal year to exist. When given, the
+     * target fiscal year isn't stored anywhere on the record itself; it's
+     * used only for the guard check and the correction log entry.
+     *
+     * @param  array{date: string, note?: string|null, store_id?: int|null, fiscal_year_id?: int, reason?: string|null}  $data
      * @param  array<int, array{item_id: int, direction: string, reason_type: string, quantity: float, unit_cost_rate?: float|null, remarks?: string|null}>  $lines
      */
     public static function post(array $data, array $lines, User $actor): self
@@ -82,6 +93,30 @@ class StockAdjustment extends Model
         return DB::transaction(function () use ($data, $lines, $actor) {
             if (empty($lines)) {
                 throw new InvalidArgumentException('At least one line is required.');
+            }
+
+            // Unlike Purchase/Journal Voucher, a stock adjustment never
+            // touches the ledger at all (see this class's own docblock), so
+            // it has never required a fiscal year to exist. Preserve that:
+            // only resolve/guard a target fiscal year when the caller
+            // explicitly names one (the correction picker's job), rather
+            // than unconditionally requiring FiscalYear::current() to
+            // exist for every ordinary adjustment.
+            $targetFiscalYear = null;
+            // Named distinctly from the per-line $reason below (a
+            // StockAdjustmentReason enum) to avoid shadowing it.
+            $correctionReason = $data['reason'] ?? null;
+            $isCorrection = false;
+
+            if (isset($data['fiscal_year_id'])) {
+                $targetFiscalYear = FiscalYear::findOrFail($data['fiscal_year_id']);
+                $isCorrection = $targetFiscalYear->id !== FiscalYear::current()->id;
+
+                ClosedFiscalYearGuard::ensurePostable($targetFiscalYear, $correctionReason);
+
+                if ($isCorrection && $actor->role?->slug !== 'admin') {
+                    throw new AuthorizationException('Only an admin may post into a reopened fiscal year.');
+                }
             }
 
             $storeId = isset($data['store_id']) ? (int) $data['store_id'] : Store::where('is_active', true)->orderBy('id')->value('id');
@@ -199,6 +234,10 @@ class StockAdjustment extends Model
                     $adjustmentLine,
                     $line['unit_cost_rate'],
                 );
+            }
+
+            if ($isCorrection) {
+                ClosedFiscalYearGuard::logCorrection($targetFiscalYear, $correctionReason, "Stock adjustment #{$adjustment->id}");
             }
 
             return $adjustment;

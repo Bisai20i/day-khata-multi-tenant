@@ -2,6 +2,7 @@
 
 use App\Enums\FiscalYearStatus;
 use App\Models\Account;
+use App\Models\CompanySetting;
 use App\Models\Customer;
 use App\Models\FiscalYear;
 use App\Models\Item;
@@ -58,6 +59,9 @@ test('an authenticated user can post a sale through the store route', function (
     $tenant->run(function () use (&$customerId, &$itemId) {
         User::factory()->create(['email' => 'owner@example.com']);
         FiscalYear::create(['name' => 'FY1', 'start_date' => '2026-01-01', 'end_date' => '2026-12-31', 'status' => FiscalYearStatus::Open]);
+        // Sold without any prior stock - this test is only about the HTTP
+        // wiring, not stock policy, so opt out of the negative-stock guard.
+        CompanySetting::current()->update(['allow_negative_stock' => true]);
         $customerId = Customer::factory()->create()->id;
         $itemId = Item::factory()->create(['is_vatable' => true, 'is_stockable' => true])->id;
     });

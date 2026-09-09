@@ -22,8 +22,8 @@ use InvalidArgumentException;
  * this was built from.
  */
 #[Fillable([
-    'customer_id', 'agent_id', 'commission_amount', 'store_id', 'journal_voucher_id', 'invoice_type', 'date', 'payment_mode',
-    'bank_account_id', 'discount', 'taxable_amount', 'nontaxable_amount',
+    'customer_id', 'agent_id', 'commission_amount', 'store_id', 'journal_voucher_id', 'invoice_type', 'chalani_number', 'date', 'payment_mode',
+    'bank_account_id', 'discount', 'discount_type', 'taxable_amount', 'nontaxable_amount',
     'vat_rate', 'vat_amount', 'total', 'cash_amount', 'bank_amount',
     'tds_account_id', 'tds_amount', 'narration', 'status', 'created_by',
 ])]
@@ -150,19 +150,53 @@ class Sale extends Model
     }
 
     /**
+     * The actual Rs amount removed from the vatable subtotal by the header
+     * discount at posting time - for display (e.g. on the sale PDF), which
+     * can't just print `discount` directly since that column means
+     * different things depending on `discount_type`.
+     *
+     * When 'flat', `discount` already IS that Rs amount. When 'percentage',
+     * `discount` stores the raw entered percentage instead (post() applies
+     * it against the pre-discount vatable subtotal, which isn't stored on
+     * this row), so it's reconstructed from the stored post-discount
+     * `taxable_amount`: since `taxable_amount = vatableSubtotal * (1 -
+     * discount / 100)`, solving for the removed amount gives
+     * `taxable_amount * discount / (100 - discount)`. Degenerates to 0 at
+     * exactly 100% (division by zero) since `taxable_amount` is already 0
+     * there and the original vatable subtotal can't be recovered from it
+     * alone - a benign display-only edge case.
+     */
+    public function discountAmount(): float
+    {
+        if ($this->discount_type !== 'percentage') {
+            return round((float) $this->discount, 2);
+        }
+
+        $discount = (float) $this->discount;
+        $denominator = 100 - $discount;
+
+        if ($denominator <= 0) {
+            return 0.0;
+        }
+
+        return round((float) $this->taxable_amount * $discount / $denominator, 2);
+    }
+
+    /**
      * Computes the sale's totals, posts one balanced JournalVoucher for
      * the money side, creates the Sale + SaleLine rows, and records a
      * stock movement per stockable line.
      *
-     * @param  array{customer_id: int, invoice_type: string, date: string, payment_mode: string, bank_account_id?: int|null, discount?: float, vat_rate?: float, cash_amount?: float|null, bank_amount?: float|null, tds_account_id?: int|null, tds_amount?: float, agent_id?: int|null, commission_amount?: float, narration?: string|null}  $data
-     * @param  array<int, array{item_id: int, quantity: float, rate: float, discount?: float}>  $lines
+     * @param  array{customer_id: int, invoice_type: string, chalani_number?: string|null, date: string, payment_mode: string, bank_account_id?: int|null, discount?: float, discount_type?: string, vat_rate?: float, cash_amount?: float|null, bank_amount?: float|null, tds_account_id?: int|null, tds_amount?: float, agent_id?: int|null, commission_amount?: float, narration?: string|null}  $data
+     * @param  array<int, array{item_id: int, quantity: float, rate: float, discount?: float, discount_type?: string}>  $lines
      */
     public static function post(array $data, array $lines, User $actor): self
     {
         return DB::transaction(function () use ($data, $lines, $actor) {
             $customer = Customer::findOrFail($data['customer_id']);
             $vatRate = (float) ($data['vat_rate'] ?? 13.00);
-            $headerDiscount = (float) ($data['discount'] ?? 0);
+            $headerDiscountType = static::validatedDiscountType($data['discount_type'] ?? 'flat');
+            $headerDiscountRaw = static::validatedDiscountValue((float) ($data['discount'] ?? 0), $headerDiscountType);
 
             $agentId = $data['agent_id'] ?? null;
             $agent = $agentId ? Agent::findOrFail($agentId) : null;
@@ -182,6 +216,7 @@ class Sale extends Model
             $preparedLines = [];
             $vatableSubtotal = 0.0;
             $nonVatableSubtotal = 0.0;
+            $requestedQtyByItem = [];
 
             foreach ($lines as $line) {
                 if (! $items->has($line['item_id'])) {
@@ -191,8 +226,13 @@ class Sale extends Model
                 $item = $items[$line['item_id']];
                 $quantity = (float) $line['quantity'];
                 $rate = (float) $line['rate'];
-                $lineDiscount = (float) ($line['discount'] ?? 0);
-                $lineTotal = round($quantity * $rate - $lineDiscount, 2);
+                $lineDiscountType = static::validatedDiscountType($line['discount_type'] ?? 'flat');
+                $lineDiscountRaw = static::validatedDiscountValue((float) ($line['discount'] ?? 0), $lineDiscountType);
+                $lineBase = round($quantity * $rate, 2);
+                $lineDiscountAmount = $lineDiscountType === 'percentage'
+                    ? round($lineBase * $lineDiscountRaw / 100, 2)
+                    : round($lineDiscountRaw, 2);
+                $lineTotal = round($lineBase - $lineDiscountAmount, 2);
 
                 if ($item->is_vatable) {
                     $vatableSubtotal += $lineTotal;
@@ -200,17 +240,51 @@ class Sale extends Model
                     $nonVatableSubtotal += $lineTotal;
                 }
 
+                if ($item->is_stockable) {
+                    $requestedQtyByItem[$item->id] = ($requestedQtyByItem[$item->id] ?? 0) + $quantity;
+                }
+
                 $preparedLines[] = [
                     'item' => $item,
                     'quantity' => $quantity,
                     'rate' => $rate,
-                    'discount' => $lineDiscount,
+                    'discount' => $lineDiscountRaw,
+                    'discount_type' => $lineDiscountType,
                     'vatable' => $item->is_vatable,
                     'line_total' => $lineTotal,
                 ];
             }
 
-            $taxableAmount = round($vatableSubtotal - $headerDiscount, 2);
+            // Negative-stock enforcement (sales only - purchases only ever
+            // increase stock, so there's nothing to check there). Skipped
+            // entirely when the tenant has opted into overselling via
+            // CompanySetting::allow_negative_stock. Checked per item, at the
+            // sale's store, using the same Item::currentStock() every other
+            // store-scoped stock read in this app uses (see PosController's
+            // stock badges) so this can never drift from what the cashier
+            // was shown on screen.
+            if (! CompanySetting::current()->allow_negative_stock) {
+                $shortages = [];
+
+                foreach ($requestedQtyByItem as $itemId => $requestedQty) {
+                    $item = $items[$itemId];
+                    $available = $item->currentStock($storeId);
+
+                    if (round($available - $requestedQty, 4) < 0) {
+                        $shortages[] = "{$item->name} (available {$available}, requested {$requestedQty})";
+                    }
+                }
+
+                if ($shortages !== []) {
+                    throw new InvalidArgumentException('Insufficient stock for: '.implode(', ', $shortages));
+                }
+            }
+
+            $headerDiscountAmount = $headerDiscountType === 'percentage'
+                ? round($vatableSubtotal * $headerDiscountRaw / 100, 2)
+                : round($headerDiscountRaw, 2);
+
+            $taxableAmount = round($vatableSubtotal - $headerDiscountAmount, 2);
             $nontaxableAmount = round($nonVatableSubtotal, 2);
             $vatAmount = round($taxableAmount * $vatRate / 100, 2);
             $total = round($taxableAmount + $nontaxableAmount + $vatAmount, 2);
@@ -308,10 +382,12 @@ class Sale extends Model
                 'store_id' => $storeId,
                 'journal_voucher_id' => $voucher->id,
                 'invoice_type' => $data['invoice_type'] ?? 'full',
+                'chalani_number' => $data['chalani_number'] ?? null,
                 'date' => $data['date'],
                 'payment_mode' => $paymentMode,
                 'bank_account_id' => $bankAccountId,
-                'discount' => $headerDiscount,
+                'discount' => $headerDiscountRaw,
+                'discount_type' => $headerDiscountType,
                 'taxable_amount' => $taxableAmount,
                 'nontaxable_amount' => $nontaxableAmount,
                 'vat_rate' => $vatRate,
@@ -332,6 +408,7 @@ class Sale extends Model
                     'quantity' => $line['quantity'],
                     'rate' => $line['rate'],
                     'discount' => $line['discount'],
+                    'discount_type' => $line['discount_type'],
                     'vatable' => $line['vatable'],
                     'line_total' => $line['line_total'],
                 ]);
@@ -349,6 +426,37 @@ class Sale extends Model
 
             return $sale;
         });
+    }
+
+    /**
+     * Validates a discount type string, defaulting an empty/missing value to
+     * 'flat'. Mirrors Purchase::validatedDiscountType() exactly.
+     */
+    private static function validatedDiscountType(string $type): string
+    {
+        if (! in_array($type, ['percentage', 'flat'], true)) {
+            throw new InvalidArgumentException("Invalid discount type [{$type}]. Expected 'percentage' or 'flat'.");
+        }
+
+        return $type;
+    }
+
+    /**
+     * Validates a raw discount value against its type: never negative, and
+     * capped at 100 when the type is 'percentage' (a flat Rs discount has no
+     * such ceiling). Mirrors Purchase::validatedDiscountValue() exactly.
+     */
+    private static function validatedDiscountValue(float $value, string $type): float
+    {
+        if ($value < 0) {
+            throw new InvalidArgumentException('Discount value cannot be negative.');
+        }
+
+        if ($type === 'percentage' && $value > 100) {
+            throw new InvalidArgumentException('A percentage discount cannot exceed 100.');
+        }
+
+        return $value;
     }
 
     /**

@@ -5,6 +5,7 @@
 <title>@yield('title', 'Document')</title>
 <style>
     @page {
+        size: {{ ($company->print_paper_size ?? 'a4') === 'a5' ? 'A5' : 'A4' }};
         margin: 28px 32px;
     }
 
@@ -25,6 +26,12 @@
 
     .header-table td {
         vertical-align: top;
+    }
+
+    .company-logo {
+        max-height: 46px;
+        max-width: 180px;
+        margin-bottom: 6px;
     }
 
     .company-name {
@@ -164,12 +171,65 @@
         font-size: 9px;
         color: #555;
     }
+
+    .pan-section {
+        margin-bottom: 12px;
+        font-size: 9px;
+    }
+
+    .pan-section .pan-label {
+        font-weight: bold;
+        margin-bottom: 4px;
+    }
+
+    .pan-box-wrapper {
+        display: flex;
+        width: fit-content;
+        border: 1.3px solid #1a1a1a;
+    }
+
+    .pan-box {
+        width: 16px;
+        height: 16px;
+        border-right: 1px solid #1a1a1a;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-weight: bold;
+        font-size: 9px;
+    }
+
+    .pan-box:last-child {
+        border-right: none;
+    }
+
+    .legal-note {
+        margin-top: 10px;
+        padding: 6px 8px;
+        border: 1px solid #1a1a1a;
+        font-size: 8.5px;
+        line-height: 1.4;
+    }
+
 </style>
 </head>
 <body>
+    @php
+        // DomPDF's `enable_remote` is off (config/dompdf.php), so the
+        // browser-facing logo_url (a full http(s) URL, for the Settings page
+        // preview) won't resolve here - PDF rendering resolves the logo from
+        // its local filesystem path instead, which works regardless of that
+        // setting since it's never treated as a remote fetch.
+        $logoPath = $company->logo_path
+            ? \Illuminate\Support\Facades\Storage::disk('public')->path($company->logo_path)
+            : null;
+    @endphp
     <table class="header-table">
         <tr>
             <td style="width: 55%;">
+                @if($logoPath)
+                    <img src="{{ $logoPath }}" alt="{{ $company->company_name }} logo" class="company-logo">
+                @endif
                 <div class="company-name">{{ $company->company_name }}</div>
                 <div class="company-meta">
                     @if($company->address)

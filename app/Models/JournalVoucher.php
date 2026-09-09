@@ -4,6 +4,7 @@ namespace App\Models;
 
 use App\Enums\FiscalYearStatus;
 use App\Enums\VoucherType;
+use App\Support\ClosedFiscalYearGuard;
 use Illuminate\Auth\Access\AuthorizationException;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Model;
@@ -53,9 +54,12 @@ class JournalVoucher extends Model
     /**
      * The one user-facing entry point for posting a journal voucher.
      * Resolves the target fiscal year (defaults to the currently open one),
-     * gates posting into a closed year behind an admin+reason override, and
-     * rolls a closed-year correction's effect forward through any
-     * already-created subsequent fiscal years.
+     * gates posting into a closed year behind ClosedFiscalYearGuard (only
+     * postable once a closed year has been deliberately reopened for
+     * correction - see FiscalYear::isOpenForCorrection() - and even then
+     * only by an admin, with a reason), and rolls a closed-year
+     * correction's effect forward through any already-created subsequent
+     * fiscal years.
      *
      * @param  array{voucher_type?: string, date: string, narration: string, reason?: string, fiscal_year_id?: int}  $header
      * @param  array<int, array{account_id: int, debit?: float|string, credit?: float|string, narration?: string}>  $lines
@@ -70,14 +74,15 @@ class JournalVoucher extends Model
             $reason = $header['reason'] ?? null;
             $isOverride = $fiscalYear->status === FiscalYearStatus::Closed;
 
-            if ($isOverride) {
-                if (! $reason) {
-                    throw new InvalidArgumentException('A reason is required to post into a closed fiscal year.');
-                }
+            // Only postable when $fiscalYear is the open year, or a closed
+            // year that's been deliberately reopened for correction (see
+            // FiscalYear::isOpenForCorrection()) - never a plain closed
+            // year, admin+reason or not. See ClosedFiscalYearGuard's
+            // docblock for the locked design decision this implements.
+            ClosedFiscalYearGuard::ensurePostable($fiscalYear, $reason);
 
-                if ($actor->role?->slug !== 'admin') {
-                    throw new AuthorizationException('Only an admin may post into a closed fiscal year.');
-                }
+            if ($isOverride && $actor->role?->slug !== 'admin') {
+                throw new AuthorizationException('Only an admin may post into a reopened fiscal year.');
             }
 
             $voucher = static::write(
@@ -92,6 +97,7 @@ class JournalVoucher extends Model
 
             if ($isOverride) {
                 static::rollForward($voucher, $actor);
+                ClosedFiscalYearGuard::logCorrection($fiscalYear, $reason, "Journal voucher #{$voucher->voucher_number}: {$header['narration']}");
             }
 
             return $voucher;

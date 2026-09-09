@@ -169,13 +169,39 @@ test('voucher numbering is independent per voucher type', function () {
     $tenant->delete();
 });
 
-test('posting into a closed fiscal year without a reason is rejected', function () {
+test('posting into a plain closed fiscal year is rejected outright, admin and reason or not', function () {
+    // The critical Phase D invariant: ClosedFiscalYearGuard never allows a
+    // posting into a closed year that has never been reopen()'d, no matter
+    // who's posting or whether a reason is given - see App\Support\
+    // ClosedFiscalYearGuard's docblock.
+    $tenant = provisionVoucherTestTenant('jv-closed-never-reopened.tenant-test');
+
+    $tenant->run(function () {
+        $closed = FiscalYear::create(['name' => 'FY1', 'start_date' => '2026-01-01', 'end_date' => '2026-12-31', 'status' => FiscalYearStatus::Closed]);
+        FiscalYear::create(['name' => 'FY2', 'start_date' => '2027-01-01', 'end_date' => '2027-12-31', 'status' => FiscalYearStatus::Open]);
+        $actor = adminUser();
+
+        expect(fn () => JournalVoucher::post(
+            ['fiscal_year_id' => $closed->id, 'reason' => 'Missed expense', 'date' => '2026-06-01', 'narration' => 'Correction'],
+            [
+                ['account_id' => cashAccount()->id, 'debit' => 0, 'credit' => 50],
+                ['account_id' => salesAccount()->id, 'debit' => 50, 'credit' => 0],
+            ],
+            $actor,
+        ))->toThrow(InvalidArgumentException::class);
+    });
+
+    $tenant->delete();
+});
+
+test('posting into a reopened fiscal year without a reason is rejected', function () {
     $tenant = provisionVoucherTestTenant('jv-closed-no-reason.tenant-test');
 
     $tenant->run(function () {
         $closed = FiscalYear::create(['name' => 'FY1', 'start_date' => '2026-01-01', 'end_date' => '2026-12-31', 'status' => FiscalYearStatus::Closed]);
         FiscalYear::create(['name' => 'FY2', 'start_date' => '2027-01-01', 'end_date' => '2027-12-31', 'status' => FiscalYearStatus::Open]);
         $actor = adminUser();
+        $closed->reopen($actor, 'Auditor found a missed expense');
 
         expect(fn () => JournalVoucher::post(
             ['fiscal_year_id' => $closed->id, 'date' => '2026-06-01', 'narration' => 'Correction'],
@@ -190,12 +216,14 @@ test('posting into a closed fiscal year without a reason is rejected', function 
     $tenant->delete();
 });
 
-test('posting into a closed fiscal year with a reason but a non-admin actor is rejected', function () {
+test('posting into a reopened fiscal year with a reason but a non-admin actor is rejected', function () {
     $tenant = provisionVoucherTestTenant('jv-closed-non-admin.tenant-test');
 
     $tenant->run(function () {
         $closed = FiscalYear::create(['name' => 'FY1', 'start_date' => '2026-01-01', 'end_date' => '2026-12-31', 'status' => FiscalYearStatus::Closed]);
         FiscalYear::create(['name' => 'FY2', 'start_date' => '2027-01-01', 'end_date' => '2027-12-31', 'status' => FiscalYearStatus::Open]);
+        $admin = adminUser();
+        $closed->reopen($admin, 'Auditor found a missed expense');
         $actor = staffUser();
 
         expect(fn () => JournalVoucher::post(
@@ -211,13 +239,14 @@ test('posting into a closed fiscal year with a reason but a non-admin actor is r
     $tenant->delete();
 });
 
-test('an admin can post a reasoned correction into a closed fiscal year and it rolls forward into the open year', function () {
+test('an admin can post a reasoned correction into a reopened fiscal year and it rolls forward into the open year', function () {
     $tenant = provisionVoucherTestTenant('jv-closed-override.tenant-test');
 
     $tenant->run(function () {
         $closed = FiscalYear::create(['name' => 'FY1', 'start_date' => '2026-01-01', 'end_date' => '2026-12-31', 'status' => FiscalYearStatus::Closed]);
         $open = FiscalYear::create(['name' => 'FY2', 'start_date' => '2027-01-01', 'end_date' => '2027-12-31', 'status' => FiscalYearStatus::Open]);
         $actor = adminUser();
+        $closed->reopen($actor, 'Auditor found a duplicate sale');
 
         // "We recorded a sale that shouldn't have been recorded": debit
         // Sales (reduces income), credit Cash (reduces cash), 100 each.

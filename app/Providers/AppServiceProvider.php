@@ -3,6 +3,7 @@
 namespace App\Providers;
 
 use App\Listeners\RecordProvisioningFailure;
+use App\Models\FiscalYear;
 use App\Models\FixedAsset;
 use App\Models\JournalVoucher;
 use App\Models\Payment;
@@ -52,6 +53,10 @@ class AppServiceProvider extends ServiceProvider
         FixedAsset::observe(ActivityLogObserver::class);
         Quotation::observe(ActivityLogObserver::class);
         User::observe(ActivityLogObserver::class);
+        // Covers close()/reopen()/relock() - each is a plain field-setting
+        // update() under the hood, so the generic observer's 'updated'
+        // write already logs them without any bespoke logging call.
+        FiscalYear::observe(ActivityLogObserver::class);
 
         // Owner-only central actions: platform settings changes, tenant
         // delete, platform-admin management. 'support' admins can do

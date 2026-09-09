@@ -7,7 +7,7 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\MorphMany;
 
-#[Fillable(['purchase_id', 'item_id', 'quantity', 'rate', 'discount', 'vatable', 'line_total'])]
+#[Fillable(['purchase_id', 'item_id', 'quantity', 'rate', 'discount', 'discount_type', 'vatable', 'line_total'])]
 class PurchaseLine extends Model
 {
     /**

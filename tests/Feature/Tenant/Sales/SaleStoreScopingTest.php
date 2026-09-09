@@ -1,6 +1,7 @@
 <?php
 
 use App\Enums\FiscalYearStatus;
+use App\Models\CompanySetting;
 use App\Models\Customer;
 use App\Models\FiscalYear;
 use App\Models\Item;
@@ -40,6 +41,10 @@ test('posting a sale with an explicit store_id records the stock movement agains
 
     $tenant->run(function () {
         saleStoreScopingOpenFiscalYear();
+        // These tests sell without any prior purchase, purely to exercise
+        // store-scoped stock math with easy negative numbers - opt out of
+        // the negative-stock guard rather than pre-stocking every item.
+        CompanySetting::current()->update(['allow_negative_stock' => true]);
         $actor = saleStoreScopingActor();
         $customer = Customer::factory()->create();
         $item = Item::factory()->create(['is_vatable' => true, 'is_stockable' => true]);
@@ -65,6 +70,10 @@ test('omitting store_id on a sale falls back to the tenant default (only) active
 
     $tenant->run(function () {
         saleStoreScopingOpenFiscalYear();
+        // These tests sell without any prior purchase, purely to exercise
+        // store-scoped stock math with easy negative numbers - opt out of
+        // the negative-stock guard rather than pre-stocking every item.
+        CompanySetting::current()->update(['allow_negative_stock' => true]);
         $actor = saleStoreScopingActor();
         $customer = Customer::factory()->create();
         $item = Item::factory()->create(['is_vatable' => true, 'is_stockable' => true]);
@@ -93,6 +102,10 @@ test('an inactive-only store setup rejects a sale with no active store to fall b
 
     $tenant->run(function () {
         saleStoreScopingOpenFiscalYear();
+        // These tests sell without any prior purchase, purely to exercise
+        // store-scoped stock math with easy negative numbers - opt out of
+        // the negative-stock guard rather than pre-stocking every item.
+        CompanySetting::current()->update(['allow_negative_stock' => true]);
         $actor = saleStoreScopingActor();
         $customer = Customer::factory()->create();
         $item = Item::factory()->create(['is_vatable' => true, 'is_stockable' => true]);
@@ -115,6 +128,10 @@ test('Item::currentStock($storeId) returns only that store net quantity, and nul
 
     $tenant->run(function () {
         saleStoreScopingOpenFiscalYear();
+        // These tests sell without any prior purchase, purely to exercise
+        // store-scoped stock math with easy negative numbers - opt out of
+        // the negative-stock guard rather than pre-stocking every item.
+        CompanySetting::current()->update(['allow_negative_stock' => true]);
         $actor = saleStoreScopingActor();
         $customer = Customer::factory()->create();
         $item = Item::factory()->create(['is_vatable' => true, 'is_stockable' => true]);

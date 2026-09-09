@@ -111,16 +111,23 @@ class SalesReturn extends Model
      * @param  array{sale_id: int, date: string, reason?: string|null, refund_account_id?: int|null, store_id?: int|null}  $data
      * @param  array<int, array{sale_line_id: int, quantity: float}>  $lines
      *
-     * Header-discount reversal: Sale::post() applies the header `discount`
-     * only against the vatable subtotal before crediting Sales Revenue
-     * (`taxable_amount = vatableSubtotal - discount`). Reconstructing
-     * `vatableSubtotalBeforeDiscount = sale.taxable_amount + sale.discount`
-     * gives back that pre-discount vatable subtotal, so each returned
-     * vatable line's share of the discount is
-     * `discount * (lineTotal / vatableSubtotalBeforeDiscount)` - subtracted
-     * from that line's contribution to this return's own taxable_amount, so
-     * the amount debited back out of Sales Revenue matches what was
-     * actually credited there net of discount (not the gross line total).
+     * Header-discount reversal: Sale::post() applies the header discount as
+     * a uniform fraction of the vatable subtotal before crediting Sales
+     * Revenue, so it reconstructs to a per-rupee ratio without needing the
+     * original (unstored) vatable subtotal:
+     * - `discount_type === 'flat'`: `discount` is already a Rs amount, and
+     *   `vatableSubtotalBeforeDiscount = sale.taxable_amount + sale.discount`
+     *   gives back the pre-discount vatable subtotal, so the ratio is
+     *   `discount / vatableSubtotalBeforeDiscount`.
+     * - `discount_type === 'percentage'`: `discount` already IS the raw
+     *   percentage (e.g. `20` for 20%), so the ratio is simply
+     *   `discount / 100` directly - Sale::post() computes
+     *   `headerDiscountAmount = vatableSubtotal * discount / 100`, which
+     *   removes exactly that fraction from every vatable rupee uniformly.
+     * That ratio is applied to each returned vatable line's `lineTotal` and
+     * subtracted from this return's own taxable_amount, so the amount
+     * debited back out of Sales Revenue matches what was actually credited
+     * there net of discount (not the gross line total).
      *
      * TDS reversal: at sale time TDS is booked as
      * `[debit tds_account, credit customer]` for `tds_amount`, netting the
@@ -146,7 +153,14 @@ class SalesReturn extends Model
                 throw new InvalidArgumentException('No active store is configured.');
             }
 
-            $vatableSubtotalBeforeDiscount = round((float) $sale->taxable_amount + (float) $sale->discount, 2);
+            if ($sale->discount_type === 'percentage') {
+                $discountRatio = (float) $sale->discount / 100;
+            } else {
+                $vatableSubtotalBeforeDiscount = round((float) $sale->taxable_amount + (float) $sale->discount, 2);
+                $discountRatio = ((float) $sale->discount > 0 && $vatableSubtotalBeforeDiscount > 0)
+                    ? (float) $sale->discount / $vatableSubtotalBeforeDiscount
+                    : 0.0;
+            }
 
             $preparedLines = [];
             $taxableAmount = 0.0;
@@ -178,11 +192,7 @@ class SalesReturn extends Model
                 $lineTotal = round($effectiveUnitPrice * $quantity, 2);
 
                 if ($saleLine->vatable) {
-                    $proportionalDiscount = 0.0;
-
-                    if ((float) $sale->discount > 0 && $vatableSubtotalBeforeDiscount > 0) {
-                        $proportionalDiscount = round((float) $sale->discount * ($lineTotal / $vatableSubtotalBeforeDiscount), 2);
-                    }
+                    $proportionalDiscount = $discountRatio > 0 ? round($lineTotal * $discountRatio, 2) : 0.0;
 
                     $taxableAmount = round($taxableAmount + ($lineTotal - $proportionalDiscount), 2);
                 } else {

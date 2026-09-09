@@ -3,6 +3,7 @@
 use App\Enums\FiscalYearStatus;
 use App\Models\Account;
 use App\Models\Agent;
+use App\Models\CompanySetting;
 use App\Models\Customer;
 use App\Models\FiscalYear;
 use App\Models\Item;
@@ -62,6 +63,9 @@ test('a sale with an agent and commission posts a balanced voucher with the extr
 
     $tenant->run(function () {
         commissionTestOpenFiscalYear();
+        // Sold without any prior stock - this test is only about commission
+        // ledger lines, not stock policy.
+        CompanySetting::current()->update(['allow_negative_stock' => true]);
         $admin = commissionTestAdmin();
         $customer = Customer::factory()->create();
         $agent = Agent::factory()->create(['commission_rate' => 5]);
@@ -175,6 +179,9 @@ test('a sale with no agent posts exactly as before, with no commission lines', f
 
     $tenant->run(function () {
         commissionTestOpenFiscalYear();
+        // Sold without any prior stock - this test is only about the
+        // absence of commission lines, not stock policy.
+        CompanySetting::current()->update(['allow_negative_stock' => true]);
         $admin = commissionTestAdmin();
         $customer = Customer::factory()->create();
         $item = Item::factory()->create(['is_vatable' => true, 'is_stockable' => true]);

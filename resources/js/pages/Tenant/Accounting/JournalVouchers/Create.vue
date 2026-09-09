@@ -14,9 +14,14 @@ const props = defineProps({
         type: Array,
         default: () => [],
     },
-    fiscalYears: {
-        type: Array,
-        default: () => [],
+    // The one closed fiscal year currently reopened for correction, or
+    // null - the create form only ever offers this single alternate to the
+    // currently open year (never any other closed year), per the locked
+    // design decision in plans/invoicing-settings-sale-purchase-ux.md
+    // ("Locked decisions" #3 / Phase D's recommended option (a)).
+    correctionFiscalYear: {
+        type: Object,
+        default: null,
     },
 });
 
@@ -34,12 +39,13 @@ const accountOptions = computed(() =>
 
 // Only admins see this picker at all (see isAdmin above) — for everyone
 // else the voucher always posts into whichever fiscal year is currently
-// open, which the backend defaults to when fiscal_year_id is omitted.
+// open, which the backend defaults to when fiscal_year_id is omitted. The
+// single option offered is the reopened-for-correction year itself -
+// leaving the select blank keeps posting into the current open year.
 const fiscalYearOptions = computed(() =>
-    props.fiscalYears.map((year) => ({
-        value: year.id,
-        label: year.status === 'closed' ? `${year.name} (Closed)` : year.name,
-    })),
+    props.correctionFiscalYear
+        ? [{ value: props.correctionFiscalYear.id, label: `${props.correctionFiscalYear.name} (reopened for correction)` }]
+        : [],
 );
 
 function emptyLine() {
@@ -54,8 +60,9 @@ const form = useForm({
     lines: [emptyLine(), emptyLine()],
 });
 
-const selectedFiscalYear = computed(() => props.fiscalYears.find((year) => year.id === form.fiscal_year_id));
-const isClosedYearSelected = computed(() => selectedFiscalYear.value?.status === 'closed');
+const isClosedYearSelected = computed(
+    () => !!props.correctionFiscalYear && form.fiscal_year_id === props.correctionFiscalYear.id,
+);
 
 function addLine() {
     form.lines.push(emptyLine());
@@ -112,7 +119,7 @@ function submit() {
         </p>
 
         <form class="flex flex-col gap-4" @submit.prevent="submit">
-            <div v-if="isAdmin">
+            <div v-if="isAdmin && correctionFiscalYear">
                 <label for="jv-fiscal-year" class="mb-1 block text-sm font-semibold text-text-base">Fiscal year</label>
                 <Select
                     id="jv-fiscal-year"
@@ -125,15 +132,16 @@ function submit() {
 
             <div v-if="isClosedYearSelected" class="flex flex-col gap-3 border-[1.5px] border-warning-text bg-warning-bg px-3 py-3">
                 <p class="text-sm text-warning-text">
-                    {{ selectedFiscalYear.name }} is closed. Posting here is a correction and will roll forward
+                    {{ correctionFiscalYear.name }} is reopened for correction. Posting here will roll forward
                     through every fiscal year after it, up to the currently open one.
                 </p>
                 <div>
-                    <label for="jv-reason" class="mb-1 block text-sm font-semibold text-text-base">Reason</label>
+                    <label for="jv-reason" class="mb-1 block text-sm font-semibold text-text-base">Reason <span class="text-danger">*</span></label>
                     <textarea
                         id="jv-reason"
                         v-model="form.reason"
                         rows="2"
+                        placeholder="Explain why this correction is needed"
                         required
                         class="w-full border-[1.5px] border-border bg-bg-subtle px-3 py-2 text-[13px] text-text-base outline-none transition-colors duration-150 focus:border-primary focus:bg-white focus:[box-shadow:0_0_0_3px_var(--color-primary-focus-ring)]"
                     ></textarea>
@@ -143,13 +151,13 @@ function submit() {
 
             <div class="grid grid-cols-2 gap-4">
                 <div>
-                    <label for="jv-date" class="mb-1 block text-sm font-semibold text-text-base">Date</label>
+                    <label for="jv-date" class="mb-1 block text-sm font-semibold text-text-base">Date <span class="text-danger">*</span></label>
                     <NepaliDateInput id="jv-date" v-model="form.date" required />
                     <p v-if="form.errors.date" class="mt-1 text-sm text-danger">{{ form.errors.date }}</p>
                 </div>
                 <div>
-                    <label for="jv-narration" class="mb-1 block text-sm font-semibold text-text-base">Narration</label>
-                    <Input id="jv-narration" v-model="form.narration" type="text" required />
+                    <label for="jv-narration" class="mb-1 block text-sm font-semibold text-text-base">Narration <span class="text-danger">*</span></label>
+                    <Input id="jv-narration" v-model="form.narration" type="text" placeholder="Describe this transaction" required />
                     <p v-if="form.errors.narration" class="mt-1 text-sm text-danger">{{ form.errors.narration }}</p>
                 </div>
             </div>
@@ -221,7 +229,7 @@ function submit() {
             <div class="flex items-center justify-end gap-2">
                 <Button variant="secondary" tone="purple" type="button" @click="emit('cancel')">Cancel</Button>
                 <Button variant="primary" tone="purple" type="submit" :disabled="form.processing || !canSubmit">
-                    Post voucher
+                    Create Journal Voucher
                 </Button>
             </div>
         </form>

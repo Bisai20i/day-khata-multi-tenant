@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Tenant\Admin;
 
 use App\Http\Controllers\Controller;
 use App\Models\ActivityLog;
+use App\Models\FiscalYear;
 use App\Models\FixedAsset;
 use App\Models\JournalVoucher;
 use App\Models\Payment;
@@ -48,6 +49,7 @@ class ActivityLogController extends Controller
             FixedAsset::class,
             Quotation::class,
             User::class,
+            FiscalYear::class,
         ];
 
         return collect($models)

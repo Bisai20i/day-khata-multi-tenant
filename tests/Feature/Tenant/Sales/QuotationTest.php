@@ -2,6 +2,7 @@
 
 use App\Enums\FiscalYearStatus;
 use App\Enums\QuotationStatus;
+use App\Models\CompanySetting;
 use App\Models\Customer;
 use App\Models\FiscalYear;
 use App\Models\Item;
@@ -106,6 +107,9 @@ test('converting a draft quotation posts a real sale with matching lines and fli
 
     $tenant->run(function () {
         quotationTestOpenFiscalYear();
+        // Converted without any prior stock - this test is only about the
+        // conversion flow, not stock policy.
+        CompanySetting::current()->update(['allow_negative_stock' => true]);
         $admin = quotationTestAdmin();
         $customer = Customer::factory()->create();
         $item = Item::factory()->create(['is_vatable' => true, 'is_stockable' => true]);

@@ -361,6 +361,76 @@ test('a return proportionally reverses header discount and TDS and stays balance
     $tenant->delete();
 });
 
+test('a return proportionally reverses a percentage header discount identically to the equivalent flat discount', function () {
+    $tenant = provisionPurchaseReturnTestTenant('purchase-return-percentage-discount.tenant-test');
+
+    $tenant->run(function () {
+        purchaseReturnOpenFiscalYear();
+        $actor = purchaseReturnTestActor();
+        $supplier = Supplier::factory()->create();
+        $item = Item::factory()->create(['is_vatable' => true, 'is_stockable' => true]);
+        $tdsAccount = Account::factory()->create();
+
+        // Same shape as the flat-discount test above (1000 vatable subtotal,
+        // 10% off = 100 Rs) - discount_type=percentage stores the raw "10"
+        // in the `discount` column instead of the Rs amount, so this proves
+        // the return reconstructs the same 40 Rs (not 400% of the line).
+        $purchase = Purchase::post(
+            [
+                'supplier_id' => $supplier->id,
+                'date' => '2026-06-01',
+                'payment_mode' => 'credit',
+                'discount' => 10,
+                'discount_type' => 'percentage',
+                'tds_account_id' => $tdsAccount->id,
+                'tds_amount' => 50,
+            ],
+            [['item_id' => $item->id, 'quantity' => 10, 'rate' => 100]],
+            $actor,
+        );
+
+        expect((float) $purchase->discount)->toBe(10.0)
+            ->and((float) $purchase->taxable_amount)->toBe(900.0)
+            ->and((float) $purchase->vat_amount)->toBe(117.0)
+            ->and((float) $purchase->total)->toBe(1017.0);
+
+        $line = PurchaseLine::where('purchase_id', $purchase->id)->firstOrFail();
+
+        $return = PurchaseReturn::post(
+            ['purchase_id' => $purchase->id, 'date' => '2026-06-05', 'reason' => 'Partial damage'],
+            [['purchase_line_id' => $line->id, 'quantity' => 4]],
+            $actor,
+        );
+
+        // Line total returned = 400 (4 of 10 units @ 100). 10% of that (40,
+        // not 400) is backed out, leaving an effective taxable return of
+        // 360. VAT at 13% = 46.8. Total = 406.8 - identical to the
+        // flat-discount case above.
+        expect((float) $return->taxable_amount)->toBe(360.0)
+            ->and((float) $return->vat_amount)->toBe(46.8)
+            ->and((float) $return->total)->toBe(406.8);
+
+        $voucher = $return->journalVoucher()->with('lines')->first();
+        $totalDebit = round((float) $voucher->lines->sum('debit'), 2);
+        $totalCredit = round((float) $voucher->lines->sum('credit'), 2);
+        expect($totalDebit)->toBe($totalCredit)->and($totalDebit)->toBe(406.8);
+
+        $exe8 = Account::where('code', 'EXE8')->firstOrFail();
+        $itemAccountCredit = (float) $voucher->lines->where('account_id', $exe8->id)->sum('credit');
+        $asa23 = Account::where('code', 'ASA23')->firstOrFail();
+        $vatCredit = (float) $voucher->lines->where('account_id', $asa23->id)->sum('credit');
+        $tdsDebit = (float) $voucher->lines->where('account_id', $tdsAccount->id)->sum('debit');
+        $supplierDebit = (float) $voucher->lines->where('account_id', $supplier->account_id)->sum('debit');
+
+        expect($itemAccountCredit)->toBe(360.0)
+            ->and($vatCredit)->toBe(46.8)
+            ->and($tdsDebit)->toBe(20.0)
+            ->and($supplierDebit)->toBe(386.8);
+    });
+
+    $tenant->delete();
+});
+
 test('a return with a refund account posts a second settlement voucher that nets the supplier back to zero for that amount, and cancelling both reverses cleanly', function () {
     $tenant = provisionPurchaseReturnTestTenant('purchase-return-refund.tenant-test');
 

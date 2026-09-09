@@ -1,6 +1,6 @@
 <script setup>
 import { computed, watch } from 'vue';
-import { useForm } from '@inertiajs/vue3';
+import { useForm, usePage } from '@inertiajs/vue3';
 import { Plus, X } from '@lucide/vue';
 import Card from '@/components/ui/Card.vue';
 import Button from '@/components/ui/Button.vue';
@@ -12,9 +12,22 @@ import NepaliDateInput from '@/components/ui/NepaliDateInput.vue';
 const props = defineProps({
     items: { type: Array, default: () => [] },
     stores: { type: Array, default: () => [] },
+    // The one closed fiscal year currently reopened for correction, or
+    // null - this create form only ever offers this single alternate to
+    // the currently open year (never any other closed year), per the
+    // locked design decision in plans/invoicing-settings-sale-purchase-ux.
+    // md ("Locked decisions" #3 / Phase D's recommended option (a)).
+    correctionFiscalYear: { type: Object, default: null },
 });
 
 const emit = defineEmits(['cancel', 'posted']);
+const page = usePage();
+const isAdmin = computed(() => page.props.auth?.user?.role?.slug === 'admin');
+const fiscalYearOptions = computed(() =>
+    props.correctionFiscalYear
+        ? [{ value: props.correctionFiscalYear.id, label: `${props.correctionFiscalYear.name} (reopened for correction)` }]
+        : [],
+);
 
 const itemOptions = computed(() => props.items.map((i) => ({ value: i.id, label: `${i.name} (${i.unit})` })));
 const storeOptions = computed(() => props.stores.map((s) => ({ value: s.id, label: s.name })));
@@ -43,8 +56,19 @@ const form = useForm({
     date: '',
     note: '',
     store_id: null,
+    // Blank fiscal_year_id posts into whichever year is currently open;
+    // the only other value the picker offers is correctionFiscalYear's
+    // id, in which case reason becomes required (see
+    // isCorrectionSelected/submit()).
+    fiscal_year_id: null,
+    reason: '',
     lines: [emptyLine()],
 });
+
+const isCorrectionSelected = computed(
+    () => !!props.correctionFiscalYear && form.fiscal_year_id === props.correctionFiscalYear.id,
+);
+const canSubmit = computed(() => !isCorrectionSelected.value || form.reason.trim().length > 0);
 
 function addLine() {
     form.lines.push(emptyLine());
@@ -82,6 +106,8 @@ const totalValue = computed(() =>
 function submit() {
     form.transform((data) => ({
         ...data,
+        fiscal_year_id: data.fiscal_year_id || undefined,
+        reason: isCorrectionSelected.value ? data.reason : undefined,
         lines: data.lines.map((line) => ({
             item_id: line.item_id,
             direction: line.reason_type === 'opening' ? 'in' : line.direction,
@@ -109,9 +135,39 @@ function submit() {
         </p>
 
         <form class="flex flex-col gap-4" @submit.prevent="submit">
+            <div v-if="isAdmin && correctionFiscalYear">
+                <label for="adjustment-fiscal-year" class="mb-1 block text-sm font-semibold text-text-base">Fiscal year</label>
+                <Select
+                    id="adjustment-fiscal-year"
+                    v-model="form.fiscal_year_id"
+                    :options="fiscalYearOptions"
+                    placeholder="Currently open fiscal year"
+                />
+                <p v-if="form.errors.fiscal_year_id" class="mt-1 text-sm text-danger">{{ form.errors.fiscal_year_id }}</p>
+            </div>
+
+            <div v-if="isCorrectionSelected" class="flex flex-col gap-3 border-[1.5px] border-warning-text bg-warning-bg px-3 py-3">
+                <p class="text-sm text-warning-text">
+                    {{ correctionFiscalYear.name }} is reopened for correction. This adjustment will post into
+                    that year's window instead of the currently open one.
+                </p>
+                <div>
+                    <label for="adjustment-reason" class="mb-1 block text-sm font-semibold text-text-base">Reason <span class="text-danger">*</span></label>
+                    <textarea
+                        id="adjustment-reason"
+                        v-model="form.reason"
+                        rows="2"
+                        placeholder="Explain why this correction is needed"
+                        required
+                        class="w-full border-[1.5px] border-border bg-bg-subtle px-3 py-2 text-[13px] text-text-base outline-none transition-colors duration-150 focus:border-primary focus:bg-white focus:[box-shadow:0_0_0_3px_var(--color-primary-focus-ring)]"
+                    ></textarea>
+                    <p v-if="form.errors.reason" class="mt-1 text-sm text-danger">{{ form.errors.reason }}</p>
+                </div>
+            </div>
+
             <div class="grid grid-cols-3 gap-4">
                 <div>
-                    <label class="mb-1 block text-sm font-semibold text-text-base">Date</label>
+                    <label class="mb-1 block text-sm font-semibold text-text-base">Date <span class="text-danger">*</span></label>
                     <NepaliDateInput v-model="form.date" required />
                     <p v-if="form.errors.date" class="mt-1 text-sm text-danger">{{ form.errors.date }}</p>
                 </div>
@@ -195,8 +251,8 @@ function submit() {
 
             <div class="flex items-center justify-end gap-2">
                 <Button variant="secondary" tone="purple" type="button" @click="emit('cancel')">Cancel</Button>
-                <Button variant="primary" tone="purple" type="submit" :disabled="form.processing || !form.date">
-                    Post adjustment
+                <Button variant="primary" tone="purple" type="submit" :disabled="form.processing || !form.date || !canSubmit">
+                    Create Stock Adjustment
                 </Button>
             </div>
         </form>

@@ -4,6 +4,7 @@ use App\Enums\FiscalYearStatus;
 use App\Enums\StockMovementType;
 use App\Enums\VoucherType;
 use App\Models\Account;
+use App\Models\CompanySetting;
 use App\Models\Customer;
 use App\Models\FiscalYear;
 use App\Models\Item;
@@ -67,6 +68,11 @@ test('a cash sale posts a balanced voucher, nets the customer account to zero, a
 
     $tenant->run(function () {
         saleTestOpenFiscalYear();
+        // This test sells more than is in stock (there's no prior purchase)
+        // purely to exercise the stock-movement/currentStock() assertions
+        // below - opt into the negative-stock policy rather than pre-
+        // stocking the item, since going negative is the point here.
+        CompanySetting::current()->update(['allow_negative_stock' => true]);
         $admin = saleTestAdmin();
         $customer = Customer::factory()->create();
         $item = Item::factory()->create(['is_vatable' => true, 'is_stockable' => true]);
@@ -109,6 +115,10 @@ test('a credit sale skips the settlement leg and leaves the total owed on the cu
 
     $tenant->run(function () {
         saleTestOpenFiscalYear();
+        // Sold without any prior stock, purely to exercise credit-sale
+        // ledger behavior below - the stock level isn't what this test is
+        // about, so opt out of the negative-stock guard.
+        CompanySetting::current()->update(['allow_negative_stock' => true]);
         $admin = saleTestAdmin();
         $customer = Customer::factory()->create();
         $item = Item::factory()->create(['is_vatable' => true, 'is_stockable' => true]);
@@ -230,6 +240,9 @@ test('cancelling a sale posts a mirrored SaleReturn voucher, flags stock movemen
 
     $tenant->run(function () {
         saleTestOpenFiscalYear();
+        // Sold without any prior stock, purely to exercise the
+        // cancellation/reversal assertions below.
+        CompanySetting::current()->update(['allow_negative_stock' => true]);
         $admin = saleTestAdmin();
         $customer = Customer::factory()->create();
         $item = Item::factory()->create(['is_vatable' => true, 'is_stockable' => true]);
@@ -251,6 +264,207 @@ test('cancelling a sale posts a mirrored SaleReturn voucher, flags stock movemen
             ->and($item->fresh()->currentStock())->toBe(0.0);
 
         expect(fn () => $sale->cancel($admin, 'Again'))->toThrow(InvalidArgumentException::class);
+    });
+
+    $tenant->delete();
+});
+
+test('a percentage header discount is computed against the vatable subtotal and persists its raw value and type', function () {
+    $tenant = provisionSaleTestTenant('sale-header-discount-percentage.tenant-test');
+
+    $tenant->run(function () {
+        saleTestOpenFiscalYear();
+        $admin = saleTestAdmin();
+        $customer = Customer::factory()->create();
+        $item = Item::factory()->create(['is_vatable' => true, 'is_stockable' => false]);
+
+        $sale = Sale::post(
+            [
+                'customer_id' => $customer->id,
+                'invoice_type' => 'full',
+                'date' => '2026-06-01',
+                'payment_mode' => 'credit',
+                'discount' => 20,
+                'discount_type' => 'percentage',
+            ],
+            [['item_id' => $item->id, 'quantity' => 2, 'rate' => 100, 'discount' => 0]],
+            $admin,
+        );
+
+        // 20% of a 200 vatable subtotal = 40 discount.
+        expect((float) $sale->taxable_amount)->toBe(160.0)
+            ->and((float) $sale->discount)->toBe(20.0)
+            ->and($sale->discount_type)->toBe('percentage');
+    });
+
+    $tenant->delete();
+});
+
+test('a percentage line discount is computed against that line\'s own base and persists its raw value and type', function () {
+    $tenant = provisionSaleTestTenant('sale-line-discount-percentage.tenant-test');
+
+    $tenant->run(function () {
+        saleTestOpenFiscalYear();
+        $admin = saleTestAdmin();
+        $customer = Customer::factory()->create();
+        $item = Item::factory()->create(['is_vatable' => false, 'is_stockable' => false]);
+
+        $sale = Sale::post(
+            ['customer_id' => $customer->id, 'invoice_type' => 'full', 'date' => '2026-06-01', 'payment_mode' => 'credit'],
+            [['item_id' => $item->id, 'quantity' => 4, 'rate' => 50, 'discount' => 10, 'discount_type' => 'percentage']],
+            $admin,
+        );
+
+        // qty 4 * rate 50 = 200 base, 10% off = 180 line total.
+        $line = $sale->lines()->firstOrFail();
+        expect((float) $line->line_total)->toBe(180.0)
+            ->and((float) $line->discount)->toBe(10.0)
+            ->and($line->discount_type)->toBe('percentage');
+    });
+
+    $tenant->delete();
+});
+
+test('a percentage discount over 100 is rejected', function () {
+    $tenant = provisionSaleTestTenant('sale-discount-over-100.tenant-test');
+
+    $tenant->run(function () {
+        saleTestOpenFiscalYear();
+        $admin = saleTestAdmin();
+        $customer = Customer::factory()->create();
+        $item = Item::factory()->create(['is_vatable' => false, 'is_stockable' => false]);
+
+        expect(fn () => Sale::post(
+            ['customer_id' => $customer->id, 'invoice_type' => 'full', 'date' => '2026-06-01', 'payment_mode' => 'credit'],
+            [['item_id' => $item->id, 'quantity' => 1, 'rate' => 100, 'discount' => 150, 'discount_type' => 'percentage']],
+            $admin,
+        ))->toThrow(InvalidArgumentException::class);
+    });
+
+    $tenant->delete();
+});
+
+test('a chalani number persists on the sale', function () {
+    $tenant = provisionSaleTestTenant('sale-chalani-number.tenant-test');
+
+    $tenant->run(function () {
+        saleTestOpenFiscalYear();
+        $admin = saleTestAdmin();
+        $customer = Customer::factory()->create();
+        $item = Item::factory()->create(['is_vatable' => false, 'is_stockable' => false]);
+
+        $sale = Sale::post(
+            ['customer_id' => $customer->id, 'invoice_type' => 'full', 'chalani_number' => 'CH-2026-042', 'date' => '2026-06-01', 'payment_mode' => 'credit'],
+            [['item_id' => $item->id, 'quantity' => 1, 'rate' => 100, 'discount' => 0]],
+            $admin,
+        );
+
+        expect($sale->fresh()->chalani_number)->toBe('CH-2026-042');
+    });
+
+    $tenant->delete();
+});
+
+test('a sale that would drive stock negative is rejected by default', function () {
+    $tenant = provisionSaleTestTenant('sale-negative-stock-blocked.tenant-test');
+
+    $tenant->run(function () {
+        saleTestOpenFiscalYear();
+        $admin = saleTestAdmin();
+        $customer = Customer::factory()->create();
+        $item = Item::factory()->create(['is_vatable' => false, 'is_stockable' => true, 'name' => 'Short Stock Widget']);
+
+        // Only 5 in stock (a real prior purchase, not a raw stock movement,
+        // so this exercises Item::currentStock() the same way the app does).
+        \App\Models\Purchase::post(
+            ['supplier_id' => \App\Models\Supplier::factory()->create()->id, 'date' => '2026-06-01', 'payment_mode' => 'cash'],
+            [['item_id' => $item->id, 'quantity' => 5, 'rate' => 50]],
+            $admin,
+        );
+
+        expect(CompanySetting::current()->allow_negative_stock)->toBeFalse();
+
+        expect(fn () => Sale::post(
+            ['customer_id' => $customer->id, 'invoice_type' => 'full', 'date' => '2026-06-02', 'payment_mode' => 'credit'],
+            [['item_id' => $item->id, 'quantity' => 10, 'rate' => 100, 'discount' => 0]],
+            $admin,
+        ))->toThrow(InvalidArgumentException::class, 'Short Stock Widget');
+
+        // Stock is untouched - the rejected sale posted nothing at all.
+        expect($item->fresh()->currentStock())->toBe(5.0);
+    });
+
+    $tenant->delete();
+});
+
+test('a sale that would drive stock negative is allowed once allow_negative_stock is on', function () {
+    $tenant = provisionSaleTestTenant('sale-negative-stock-allowed.tenant-test');
+
+    $tenant->run(function () {
+        saleTestOpenFiscalYear();
+        $admin = saleTestAdmin();
+        $customer = Customer::factory()->create();
+        $item = Item::factory()->create(['is_vatable' => false, 'is_stockable' => true]);
+
+        CompanySetting::current()->update(['allow_negative_stock' => true]);
+
+        $sale = Sale::post(
+            ['customer_id' => $customer->id, 'invoice_type' => 'full', 'date' => '2026-06-01', 'payment_mode' => 'credit'],
+            [['item_id' => $item->id, 'quantity' => 10, 'rate' => 100, 'discount' => 0]],
+            $admin,
+        );
+
+        expect($sale->exists)->toBeTrue()
+            ->and($item->fresh()->currentStock())->toBe(-10.0);
+    });
+
+    $tenant->delete();
+});
+
+test('a sale within available stock is unaffected by the negative-stock guard', function () {
+    $tenant = provisionSaleTestTenant('sale-negative-stock-within-limit.tenant-test');
+
+    $tenant->run(function () {
+        saleTestOpenFiscalYear();
+        $admin = saleTestAdmin();
+        $customer = Customer::factory()->create();
+        $item = Item::factory()->create(['is_vatable' => false, 'is_stockable' => true]);
+
+        \App\Models\Purchase::post(
+            ['supplier_id' => \App\Models\Supplier::factory()->create()->id, 'date' => '2026-06-01', 'payment_mode' => 'cash'],
+            [['item_id' => $item->id, 'quantity' => 10, 'rate' => 50]],
+            $admin,
+        );
+
+        $sale = Sale::post(
+            ['customer_id' => $customer->id, 'invoice_type' => 'full', 'date' => '2026-06-02', 'payment_mode' => 'credit'],
+            [['item_id' => $item->id, 'quantity' => 4, 'rate' => 100, 'discount' => 0]],
+            $admin,
+        );
+
+        expect($sale->exists)->toBeTrue()
+            ->and($item->fresh()->currentStock())->toBe(6.0);
+    });
+
+    $tenant->delete();
+});
+
+test('a non-stockable item is never subject to the negative-stock guard', function () {
+    $tenant = provisionSaleTestTenant('sale-negative-stock-non-stockable.tenant-test');
+
+    $tenant->run(function () {
+        saleTestOpenFiscalYear();
+        $admin = saleTestAdmin();
+        $customer = Customer::factory()->create();
+        $item = Item::factory()->create(['is_vatable' => false, 'is_stockable' => false]);
+
+        $sale = Sale::post(
+            ['customer_id' => $customer->id, 'invoice_type' => 'full', 'date' => '2026-06-01', 'payment_mode' => 'credit'],
+            [['item_id' => $item->id, 'quantity' => 1000, 'rate' => 1, 'discount' => 0]],
+            $admin,
+        );
+
+        expect($sale->exists)->toBeTrue();
     });
 
     $tenant->delete();

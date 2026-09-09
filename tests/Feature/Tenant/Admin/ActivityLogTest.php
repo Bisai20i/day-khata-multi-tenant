@@ -2,6 +2,7 @@
 
 use App\Enums\FiscalYearStatus;
 use App\Models\ActivityLog;
+use App\Models\CompanySetting;
 use App\Models\Customer;
 use App\Models\FiscalYear;
 use App\Models\Item;
@@ -63,6 +64,9 @@ test('posting a sale writes an ActivityLog row, without touching Sale.php', func
 
     $tenant->run(function () {
         activityLogTestOpenFiscalYear();
+        // Sold without any prior stock - this test is only about
+        // ActivityLog wiring, not stock policy.
+        CompanySetting::current()->update(['allow_negative_stock' => true]);
         $admin = activityLogTestAdmin();
         $customer = Customer::factory()->create();
         $item = Item::factory()->create(['is_vatable' => true, 'is_stockable' => true]);
@@ -90,6 +94,9 @@ test('a bare touch() does not write an ActivityLog row', function () {
 
     $tenant->run(function () {
         activityLogTestOpenFiscalYear();
+        // Sold without any prior stock - this test is only about
+        // ActivityLog wiring, not stock policy.
+        CompanySetting::current()->update(['allow_negative_stock' => true]);
         $admin = activityLogTestAdmin();
         $customer = Customer::factory()->create();
         $item = Item::factory()->create(['is_vatable' => true, 'is_stockable' => true]);

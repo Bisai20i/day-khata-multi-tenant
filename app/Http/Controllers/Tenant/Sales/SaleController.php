@@ -29,8 +29,8 @@ class SaleController extends Controller
                 ->orderByDesc('date')
                 ->orderByDesc('id')
                 ->get(),
-            'customers' => Customer::query()->orderBy('name')->get(['id', 'name']),
-            'items' => Item::query()->where('is_active', true)->orderBy('name')->get(['id', 'name', 'unit', 'is_vatable', 'is_stockable']),
+            'customers' => Customer::query()->orderBy('name')->get(['id', 'name', 'mobile_no']),
+            'items' => Item::query()->where('is_active', true)->orderBy('name')->get(['id', 'name', 'unit', 'is_vatable', 'is_stockable', 'barcode']),
             'accounts' => Account::query()->orderBy('name')->get(['id', 'code', 'name']),
             'stores' => Store::where('is_active', true)->orderBy('name')->get(['id', 'name']),
             'agents' => Agent::query()->where('is_active', true)->orderBy('name')->get(['id', 'name', 'commission_rate']),
@@ -41,12 +41,14 @@ class SaleController extends Controller
     {
         $data = $request->validate([
             'customer_id' => ['required', 'exists:customers,id'],
-            'invoice_type' => ['required', 'in:abbreviated,full'],
+            'invoice_type' => ['required', 'in:abbreviated,full,pan'],
+            'chalani_number' => ['nullable', 'string', 'max:100'],
             'date' => ['required', 'date'],
             'payment_mode' => ['required', 'in:cash,bank,partial,credit'],
             'bank_account_id' => ['nullable', 'exists:accounts,id'],
             'store_id' => ['nullable', 'integer', 'exists:stores,id'],
             'discount' => ['nullable', 'numeric', 'min:0'],
+            'discount_type' => ['nullable', 'in:percentage,flat'],
             'vat_rate' => ['nullable', 'numeric', 'min:0'],
             'cash_amount' => ['nullable', 'numeric', 'min:0'],
             'bank_amount' => ['nullable', 'numeric', 'min:0'],
@@ -60,6 +62,7 @@ class SaleController extends Controller
             'lines.*.quantity' => ['required', 'numeric', 'min:0.0001'],
             'lines.*.rate' => ['required', 'numeric', 'min:0'],
             'lines.*.discount' => ['nullable', 'numeric', 'min:0'],
+            'lines.*.discount_type' => ['nullable', 'in:percentage,flat'],
         ]);
 
         try {
@@ -98,16 +101,36 @@ class SaleController extends Controller
     {
         $sale->load(['customer', 'agent', 'bankAccount', 'lines.item', 'journalVoucher']);
 
-        $prefix = $sale->invoice_type === 'abbreviated' ? 'SLA' : 'SL';
+        $company = CompanySetting::current();
+
+        $prefix = match ($sale->invoice_type) {
+            'abbreviated' => $company->sale_abbreviated_prefix,
+            'pan' => $company->sale_pan_prefix,
+            default => $company->sale_full_prefix,
+        };
         $documentNumber = $sale->journalVoucher
             ? "{$prefix}-{$sale->journalVoucher->voucher_number}"
-            : "SL-{$sale->id}";
+            : "{$prefix}-{$sale->id}";
 
-        return Pdf::loadView('pdf.sale', [
+        // Thermal paper sizes get a lightweight narrow-column receipt layout
+        // instead of the full A4/A5 letterhead invoice - dompdf has no
+        // built-in 58mm/80mm paper preset, so the width is passed as an
+        // explicit [x1, y1, x2, y2] point box (1mm ≈ 2.83pt) with a generous
+        // unbounded height for a continuous thermal roll.
+        $isThermal = in_array($company->print_paper_size, ['58mm', '80mm'], true);
+
+        $pdf = Pdf::loadView($isThermal ? 'pdf.sale-receipt' : 'pdf.sale', [
             'sale' => $sale,
-            'company' => CompanySetting::current(),
+            'company' => $company,
             'documentNumber' => $documentNumber,
             'documentDate' => $sale->date->format('Y-m-d'),
-        ])->stream("sale-{$sale->id}.pdf");
+        ]);
+
+        if ($isThermal) {
+            $width = $company->print_paper_size === '58mm' ? 164 : 227;
+            $pdf->setPaper([0, 0, $width, 2000]);
+        }
+
+        return $pdf->stream("sale-{$sale->id}.pdf");
     }
 }

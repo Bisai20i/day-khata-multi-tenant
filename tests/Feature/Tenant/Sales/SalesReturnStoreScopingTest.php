@@ -1,6 +1,7 @@
 <?php
 
 use App\Enums\FiscalYearStatus;
+use App\Models\CompanySetting;
 use App\Models\Customer;
 use App\Models\FiscalYear;
 use App\Models\Item;
@@ -42,6 +43,9 @@ test('posting a sales return with an explicit store_id records the return moveme
 
     $tenant->run(function () {
         salesReturnStoreScopingOpenFiscalYear();
+        // Sold without any prior stock, purely to exercise store-scoped
+        // return movements - opt out of the negative-stock guard.
+        CompanySetting::current()->update(['allow_negative_stock' => true]);
         $admin = salesReturnStoreScopingAdmin();
         $customer = Customer::factory()->create();
         $item = Item::factory()->create(['is_vatable' => false, 'is_stockable' => true]);
@@ -76,6 +80,9 @@ test('omitting store_id on a sales return falls back to the default active store
 
     $tenant->run(function () {
         salesReturnStoreScopingOpenFiscalYear();
+        // Sold without any prior stock, purely to exercise store-scoped
+        // return movements - opt out of the negative-stock guard.
+        CompanySetting::current()->update(['allow_negative_stock' => true]);
         $admin = salesReturnStoreScopingAdmin();
         $customer = Customer::factory()->create();
         $item = Item::factory()->create(['is_vatable' => false, 'is_stockable' => true]);

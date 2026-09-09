@@ -1,7 +1,7 @@
 <script setup>
 import { computed, h, ref, watch } from 'vue';
 import { usePage } from '@inertiajs/vue3';
-import { Eye } from '@lucide/vue';
+import { Eye, Plus } from '@lucide/vue';
 import AppLayout from '@/layouts/AppLayout.vue';
 import Card from '@/components/ui/Card.vue';
 import Button from '@/components/ui/Button.vue';
@@ -21,9 +21,9 @@ const props = defineProps({
         type: Array,
         default: () => [],
     },
-    fiscalYears: {
-        type: Array,
-        default: () => [],
+    correctionFiscalYear: {
+        type: Object,
+        default: null,
     },
 });
 
@@ -149,7 +149,7 @@ const columns = [
         <template v-if="showCreateForm">
             <Create
                 :accounts="accounts"
-                :fiscal-years="fiscalYears"
+                :correction-fiscal-year="correctionFiscalYear"
                 @cancel="showCreateForm = false"
                 @posted="showCreateForm = false"
             />
@@ -158,7 +158,10 @@ const columns = [
         <template v-else>
             <div class="mb-4 flex items-center justify-between">
                 <h2 class="text-base font-bold text-text-strong">Journal Vouchers</h2>
-                <Button variant="primary" tone="purple" @click="showCreateForm = true">New journal voucher</Button>
+                <Button variant="primary" tone="purple" @click="showCreateForm = true">
+                    <Plus class="size-4" />
+                    New journal voucher
+                </Button>
             </div>
 
             <Card variant="panel">

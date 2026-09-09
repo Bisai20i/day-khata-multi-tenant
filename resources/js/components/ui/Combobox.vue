@@ -33,6 +33,15 @@ const modelValue = computed({
 function displayValue(value) {
     return props.options.find((option) => option.value === value)?.label ?? '';
 }
+
+// Filtering matches against this instead of the displayed label when an
+// option supplies one - lets a caller (e.g. the item pickers on the Sales/
+// Purchases Create forms) make an option findable by a second value, such
+// as a barcode, without cluttering what's actually shown in the dropdown
+// row or the input once selected.
+function searchText(option) {
+    return option.searchValue ?? option.label;
+}
 </script>
 
 <template>
@@ -69,7 +78,7 @@ function displayValue(value) {
                         v-for="option in options"
                         :key="option.value"
                         :value="option.value"
-                        :text-value="option.label"
+                        :text-value="searchText(option)"
                         class="relative flex cursor-pointer select-none items-center justify-between px-2.5 py-2 text-[13px] text-text-base outline-none data-[highlighted]:bg-primary-tint data-[highlighted]:text-primary"
                     >
                         {{ option.label }}

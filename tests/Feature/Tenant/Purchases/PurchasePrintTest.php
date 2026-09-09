@@ -1,12 +1,14 @@
 <?php
 
 use App\Enums\FiscalYearStatus;
+use App\Models\CompanySetting;
 use App\Models\FiscalYear;
 use App\Models\Item;
 use App\Models\Purchase;
 use App\Models\Supplier;
 use App\Models\Tenant;
 use App\Models\User;
+use Barryvdh\DomPDF\Facade\Pdf;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 
 uses(RefreshDatabase::class);
@@ -78,6 +80,45 @@ test('the purchase print route is rejected for an unauthenticated request', func
 
     $this->get("http://{$domain}/purchases/{$purchaseId}/print")
         ->assertRedirect("http://{$domain}/login");
+
+    $tenant->delete();
+});
+
+test('the purchase print route resolves the document number prefix from configured invoicing settings', function () {
+    $domain = 'purchase-print-custom-prefix.tenant-test';
+    $tenant = provisionPurchasePrintTestTenant($domain);
+
+    $purchaseId = null;
+    $voucherNumber = null;
+    $tenant->run(function () use (&$purchaseId, &$voucherNumber) {
+        $admin = User::factory()->create(['email' => 'owner@example.com']);
+        FiscalYear::create(['name' => 'FY1', 'start_date' => '2026-01-01', 'end_date' => '2026-12-31', 'status' => FiscalYearStatus::Open]);
+        $supplier = Supplier::factory()->create();
+        $item = Item::factory()->create(['is_vatable' => false, 'is_stockable' => false]);
+
+        CompanySetting::current()->update(['purchase_prefix' => 'CUSTOMPU']);
+
+        $purchase = Purchase::post(
+            ['supplier_id' => $supplier->id, 'date' => '2026-06-01', 'payment_mode' => 'cash'],
+            [['item_id' => $item->id, 'quantity' => 1, 'rate' => 100, 'discount' => 0]],
+            $admin,
+        );
+
+        $purchaseId = $purchase->id;
+        $voucherNumber = $purchase->journalVoucher->voucher_number;
+    });
+
+    loginPurchasePrintTestUser($domain);
+
+    $fakePdf = Mockery::mock();
+    $fakePdf->shouldReceive('stream')->once()->andReturn(response('fake-pdf-bytes', 200, ['Content-Type' => 'application/pdf']));
+
+    Pdf::shouldReceive('loadView')
+        ->once()
+        ->withArgs(fn (string $view, array $data) => $view === 'pdf.purchase' && $data['documentNumber'] === "CUSTOMPU-{$voucherNumber}")
+        ->andReturn($fakePdf);
+
+    $this->get("http://{$domain}/purchases/{$purchaseId}/print")->assertOk();
 
     $tenant->delete();
 });

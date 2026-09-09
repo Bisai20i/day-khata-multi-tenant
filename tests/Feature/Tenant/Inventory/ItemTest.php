@@ -150,6 +150,71 @@ test('an item subcategory from a different category is rejected', function () {
     $tenant->delete();
 });
 
+test('an item can be created with a barcode, and a duplicate barcode is rejected', function () {
+    $domain = 'item-barcode.tenant-test';
+    $tenant = provisionItemTestTenant($domain);
+
+    $categoryId = null;
+    $tenant->run(function () use (&$categoryId) {
+        User::factory()->create(['email' => 'owner@example.com']);
+        $categoryId = ItemCategory::factory()->create(['name' => 'Groceries'])->id;
+    });
+
+    $this->post("http://{$domain}/login", [
+        'email' => 'owner@example.com',
+        'password' => 'password',
+    ]);
+
+    $store = $this->post("http://{$domain}/items", [
+        'item_category_id' => $categoryId,
+        'name' => 'Canned Beans',
+        'unit' => 'pcs',
+        'barcode' => '8901234567890',
+    ]);
+    $store->assertRedirect("http://{$domain}/items");
+
+    $tenant->run(function () {
+        $item = Item::query()->where('name', 'Canned Beans')->firstOrFail();
+        expect($item->barcode)->toBe('8901234567890');
+
+        // The exact lookup the barcode-aware item search relies on
+        // (Sales/Purchases Create.vue's Combobox searchValue, Pos.vue's
+        // scan-to-add) - confirms a barcode round-trips to a real,
+        // findable row rather than only being stored.
+        expect(Item::query()->where('barcode', '8901234567890')->first()?->name)->toBe('Canned Beans');
+    });
+
+    $duplicate = $this->post("http://{$domain}/items", [
+        'item_category_id' => $categoryId,
+        'name' => 'Another Item',
+        'unit' => 'pcs',
+        'barcode' => '8901234567890',
+    ]);
+    $duplicate->assertSessionHasErrors('barcode');
+
+    // Multiple items with no barcode at all must not collide with each
+    // other under the unique index (SQLite allows multiple NULLs).
+    $first = $this->post("http://{$domain}/items", [
+        'item_category_id' => $categoryId,
+        'name' => 'No Barcode One',
+        'unit' => 'pcs',
+    ]);
+    $first->assertRedirect("http://{$domain}/items");
+
+    $second = $this->post("http://{$domain}/items", [
+        'item_category_id' => $categoryId,
+        'name' => 'No Barcode Two',
+        'unit' => 'pcs',
+    ]);
+    $second->assertRedirect("http://{$domain}/items");
+
+    $tenant->run(function () {
+        expect(Item::query()->whereNull('barcode')->count())->toBe(2);
+    });
+
+    $tenant->delete();
+});
+
 test('an authenticated user can create, update, and delete an item', function () {
     $domain = 'item-crud.tenant-test';
     $tenant = provisionItemTestTenant($domain);

@@ -293,6 +293,107 @@ test('a header discount keeps the voucher balanced', function () {
     $tenant->delete();
 });
 
+test('a percentage header discount is computed against the vatable subtotal and persists its raw value and type', function () {
+    $tenant = provisionPurchasePostingTestTenant('purchase-header-discount-percentage.tenant-test');
+
+    $tenant->run(function () {
+        purchasePostingOpenFiscalYear();
+        $actor = purchasePostingTestActor();
+        $supplier = Supplier::factory()->create();
+        $item = Item::factory()->create(['is_vatable' => true]);
+
+        $purchase = Purchase::post(
+            [
+                'supplier_id' => $supplier->id,
+                'date' => '2026-06-01',
+                'payment_mode' => 'cash',
+                'discount' => 10,
+                'discount_type' => 'percentage',
+            ],
+            [['item_id' => $item->id, 'quantity' => 10, 'rate' => 100]],
+            $actor,
+        );
+
+        // 10% of a 1000 vatable subtotal = 100 discount, same Rs amount as
+        // the existing flat-100 test, but entered/persisted as "10%".
+        expect((float) $purchase->taxable_amount)->toBe(900.0)
+            ->and((float) $purchase->discount)->toBe(10.0)
+            ->and($purchase->discount_type)->toBe('percentage');
+
+        $voucher = $purchase->journalVoucher()->with('lines')->first();
+        $totalDebit = round((float) $voucher->lines->sum(fn ($l) => (float) $l->debit), 2);
+        $totalCredit = round((float) $voucher->lines->sum(fn ($l) => (float) $l->credit), 2);
+        expect($totalDebit)->toBe($totalCredit);
+    });
+
+    $tenant->delete();
+});
+
+test('a percentage line discount is computed against that line\'s own base and persists its raw value and type', function () {
+    $tenant = provisionPurchasePostingTestTenant('purchase-line-discount-percentage.tenant-test');
+
+    $tenant->run(function () {
+        purchasePostingOpenFiscalYear();
+        $actor = purchasePostingTestActor();
+        $supplier = Supplier::factory()->create();
+        $item = Item::factory()->create(['is_vatable' => false]);
+
+        $purchase = Purchase::post(
+            ['supplier_id' => $supplier->id, 'date' => '2026-06-01', 'payment_mode' => 'credit'],
+            [['item_id' => $item->id, 'quantity' => 2, 'rate' => 100, 'discount' => 25, 'discount_type' => 'percentage']],
+            $actor,
+        );
+
+        // qty 2 * rate 100 = 200 base, 25% off = 150 line total.
+        $line = PurchaseLine::query()->where('purchase_id', $purchase->id)->firstOrFail();
+        expect((float) $line->line_total)->toBe(150.0)
+            ->and((float) $line->discount)->toBe(25.0)
+            ->and($line->discount_type)->toBe('percentage');
+    });
+
+    $tenant->delete();
+});
+
+test('a percentage discount over 100 is rejected', function () {
+    $tenant = provisionPurchasePostingTestTenant('purchase-discount-over-100.tenant-test');
+
+    $tenant->run(function () {
+        purchasePostingOpenFiscalYear();
+        $actor = purchasePostingTestActor();
+        $supplier = Supplier::factory()->create();
+        $item = Item::factory()->create(['is_vatable' => false]);
+
+        expect(fn () => Purchase::post(
+            ['supplier_id' => $supplier->id, 'date' => '2026-06-01', 'payment_mode' => 'credit'],
+            [['item_id' => $item->id, 'quantity' => 1, 'rate' => 100, 'discount' => 150, 'discount_type' => 'percentage']],
+            $actor,
+        ))->toThrow(InvalidArgumentException::class);
+    });
+
+    $tenant->delete();
+});
+
+test('a chalani number persists on the purchase', function () {
+    $tenant = provisionPurchasePostingTestTenant('purchase-chalani-number.tenant-test');
+
+    $tenant->run(function () {
+        purchasePostingOpenFiscalYear();
+        $actor = purchasePostingTestActor();
+        $supplier = Supplier::factory()->create();
+        $item = Item::factory()->create(['is_vatable' => false]);
+
+        $purchase = Purchase::post(
+            ['supplier_id' => $supplier->id, 'date' => '2026-06-01', 'payment_mode' => 'credit', 'chalani_number' => 'CH-2026-001'],
+            [['item_id' => $item->id, 'quantity' => 1, 'rate' => 100]],
+            $actor,
+        );
+
+        expect($purchase->fresh()->chalani_number)->toBe('CH-2026-001');
+    });
+
+    $tenant->delete();
+});
+
 test('cancelling a purchase posts a mirrored reversal and flags stock movements cancelled', function () {
     $tenant = provisionPurchasePostingTestTenant('purchase-cancel.tenant-test');
 

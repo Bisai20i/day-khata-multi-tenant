@@ -5,11 +5,13 @@ namespace App\Http\Controllers\Tenant\Purchases;
 use App\Http\Controllers\Controller;
 use App\Models\Account;
 use App\Models\CompanySetting;
+use App\Models\FiscalYear;
 use App\Models\Item;
 use App\Models\Purchase;
 use App\Models\Store;
 use App\Models\Supplier;
 use Barryvdh\DomPDF\Facade\Pdf;
+use Illuminate\Auth\Access\AuthorizationException;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\Response as HttpResponse;
@@ -27,10 +29,16 @@ class PurchaseController extends Controller
                 ->orderByDesc('date')
                 ->orderByDesc('id')
                 ->get(),
-            'suppliers' => Supplier::query()->orderBy('name')->get(['id', 'name']),
-            'items' => Item::query()->orderBy('name')->get(['id', 'name', 'unit', 'is_vatable', 'is_stockable']),
+            'suppliers' => Supplier::query()->orderBy('name')->get(['id', 'name', 'mobile_no']),
+            'items' => Item::query()->orderBy('name')->get(['id', 'name', 'unit', 'is_vatable', 'is_stockable', 'barcode']),
             'accounts' => Account::query()->orderBy('name')->get(['id', 'code', 'name']),
             'stores' => Store::where('is_active', true)->orderBy('name')->get(['id', 'name']),
+            // The one closed year currently reopened for correction, if
+            // any - lets Create.vue offer it as the only non-current
+            // fiscal-year option, per the locked design decision (see
+            // ClosedFiscalYearGuard's docblock). Null hides the picker
+            // entirely, same as before this feature existed.
+            'correctionFiscalYear' => FiscalYear::openForCorrection()?->only(['id', 'name', 'reopen_reason']),
         ]);
     }
 
@@ -40,28 +48,35 @@ class PurchaseController extends Controller
             'supplier_id' => ['required', 'exists:suppliers,id'],
             'bill_number' => ['nullable', 'string', 'max:255'],
             'pan_number' => ['nullable', 'string', 'max:50'],
+            'chalani_number' => ['nullable', 'string', 'max:100'],
             'date' => ['required', 'date'],
             'payment_mode' => ['required', 'in:cash,bank,partial,credit'],
             'bank_account_id' => ['nullable', 'exists:accounts,id'],
             'store_id' => ['nullable', 'integer', 'exists:stores,id'],
             'discount' => ['nullable', 'numeric', 'min:0'],
+            'discount_type' => ['nullable', 'in:percentage,flat'],
             'vat_rate' => ['nullable', 'numeric', 'min:0'],
             'cash_amount' => ['nullable', 'numeric', 'min:0'],
             'bank_amount' => ['nullable', 'numeric', 'min:0'],
             'tds_account_id' => ['nullable', 'exists:accounts,id'],
             'tds_amount' => ['nullable', 'numeric', 'min:0'],
             'narration' => ['nullable', 'string', 'max:255'],
+            'fiscal_year_id' => ['nullable', 'integer', 'exists:fiscal_years,id'],
+            'reason' => ['nullable', 'string', 'max:255'],
             'lines' => ['required', 'array', 'min:1'],
             'lines.*.item_id' => ['required', 'exists:items,id'],
             'lines.*.quantity' => ['required', 'numeric', 'min:0.0001'],
             'lines.*.rate' => ['required', 'numeric', 'min:0'],
             'lines.*.discount' => ['nullable', 'numeric', 'min:0'],
+            'lines.*.discount_type' => ['nullable', 'in:percentage,flat'],
         ]);
 
         try {
             Purchase::post($data, $data['lines'], $request->user());
         } catch (InvalidArgumentException $e) {
             return back()->withErrors(['lines' => $e->getMessage()])->withInput();
+        } catch (AuthorizationException $e) {
+            return back()->withErrors(['reason' => $e->getMessage()])->withInput();
         }
 
         return redirect()->route('tenant.purchases.index')->with('status', 'Purchase posted.');
@@ -90,13 +105,15 @@ class PurchaseController extends Controller
     {
         $purchase->load(['supplier', 'bankAccount', 'lines.item', 'journalVoucher']);
 
+        $company = CompanySetting::current();
+
         $documentNumber = $purchase->journalVoucher
-            ? "PU-{$purchase->journalVoucher->voucher_number}"
-            : "PU-{$purchase->id}";
+            ? "{$company->purchase_prefix}-{$purchase->journalVoucher->voucher_number}"
+            : "{$company->purchase_prefix}-{$purchase->id}";
 
         return Pdf::loadView('pdf.purchase', [
             'purchase' => $purchase,
-            'company' => CompanySetting::current(),
+            'company' => $company,
             'documentNumber' => $documentNumber,
             'documentDate' => $purchase->date->format('Y-m-d'),
         ])->stream("purchase-{$purchase->id}.pdf");
