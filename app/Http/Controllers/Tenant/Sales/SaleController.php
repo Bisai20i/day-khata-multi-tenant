@@ -8,6 +8,7 @@ use App\Models\Agent;
 use App\Models\CompanySetting;
 use App\Models\Customer;
 use App\Models\Item;
+use App\Models\ItemStockMovement;
 use App\Models\Sale;
 use App\Models\Store;
 use Barryvdh\DomPDF\Facade\Pdf;
@@ -15,6 +16,8 @@ use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\Response as HttpResponse;
 use Illuminate\Support\Arr;
+use Illuminate\Support\Collection;
+use Illuminate\Validation\Rule;
 use Inertia\Inertia;
 use Inertia\Response;
 use InvalidArgumentException;
@@ -23,6 +26,16 @@ class SaleController extends Controller
 {
     public function index(): Response
     {
+        $stockByItem = $this->currentStockByItem();
+
+        $items = Item::query()->where('is_active', true)->orderBy('name')
+            ->get(['id', 'name', 'unit', 'is_vatable', 'is_stockable', 'barcode'])
+            ->map(function (Item $item) use ($stockByItem) {
+                $item->current_stock = $item->is_stockable ? round($stockByItem->get($item->id, 0.0), 4) : null;
+
+                return $item;
+            });
+
         return Inertia::render('Tenant/Sales/Index', [
             'sales' => Sale::query()
                 ->with(['customer:id,name', 'agent:id,name', 'lines.item:id,name,unit', 'journalVoucher:id,voucher_type,voucher_number'])
@@ -30,11 +43,34 @@ class SaleController extends Controller
                 ->orderByDesc('id')
                 ->get(),
             'customers' => Customer::query()->orderBy('name')->get(['id', 'name', 'mobile_no']),
-            'items' => Item::query()->where('is_active', true)->orderBy('name')->get(['id', 'name', 'unit', 'is_vatable', 'is_stockable', 'barcode']),
+            'items' => $items,
             'accounts' => Account::query()->orderBy('name')->get(['id', 'code', 'name']),
             'stores' => Store::where('is_active', true)->orderBy('name')->get(['id', 'name']),
             'agents' => Agent::query()->where('is_active', true)->orderBy('name')->get(['id', 'name', 'commission_rate']),
         ]);
+    }
+
+    /**
+     * Net on-hand quantity per item, across every store, keyed by item_id -
+     * exact copy of PosController::currentStockByItem() (same bulk-query
+     * approach, same cross-store scope - it is NOT store-scoped despite
+     * Sale::post()'s own per-store Item::currentStock($storeId) check at
+     * posting time; kept identical to POS deliberately so the item picker
+     * on this page and on the POS tiles never show two different numbers
+     * for the same item). Used only to annotate the 'items' prop with a
+     * `current_stock` figure for Create.vue's item Combobox.
+     *
+     * @return Collection<int, float>
+     */
+    private function currentStockByItem(): Collection
+    {
+        return ItemStockMovement::query()
+            ->where('cancelled', false)
+            ->get(['item_id', 'quantity', 'movement_type'])
+            ->groupBy('item_id')
+            ->map(fn (Collection $movements) => (float) $movements->sum(
+                fn (ItemStockMovement $movement) => (float) $movement->quantity * $movement->movement_type->direction(),
+            ));
     }
 
     public function store(Request $request): RedirectResponse
@@ -59,7 +95,14 @@ class SaleController extends Controller
             'narration' => ['nullable', 'string', 'max:255'],
             'lines' => ['required', 'array', 'min:1'],
             'lines.*.item_id' => ['required', 'exists:items,id'],
-            'lines.*.quantity' => ['required', 'numeric', 'min:0.0001'],
+            // Negative allowed on purpose: a negative-quantity line is how
+            // this app models an in-bill return/adjustment line (legacy
+            // parity) - Sale::post() reduces revenue/VAT by the (negative)
+            // line total and, via Item::recordStockMovement()'s fixed
+            // StockMovementType::Sale direction, correctly nets the stock
+            // effect back to a restock instead of a sale. Only exactly zero
+            // is meaningless and rejected.
+            'lines.*.quantity' => ['required', 'numeric', Rule::notIn([0])],
             'lines.*.rate' => ['required', 'numeric', 'min:0'],
             'lines.*.discount' => ['nullable', 'numeric', 'min:0'],
             'lines.*.discount_type' => ['nullable', 'in:percentage,flat'],

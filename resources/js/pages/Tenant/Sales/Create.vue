@@ -369,11 +369,19 @@ onMounted(() => applyPendingCustomer());
                             placeholder="Select item"
                             @update:model-value="(v) => (line.item_id = v)"
                         />
+                        <p v-if="itemsById[line.item_id]?.current_stock !== null && itemsById[line.item_id]?.current_stock !== undefined" class="mt-1 text-xs text-text-muted">
+                            Stock: {{ itemsById[line.item_id].current_stock }}
+                        </p>
                         <p v-if="form.errors[`lines.${index}.item_id`]" class="mt-1 text-xs text-danger">
                             {{ form.errors[`lines.${index}.item_id`] }}
                         </p>
                     </div>
-                    <Input v-model="line.quantity" type="number" min="0" step="0.0001" placeholder="0" />
+                    <!-- No min="0": a negative quantity is a valid in-bill
+                         return/adjustment line (see SaleController::store()'s
+                         validation comment) - Input.vue doesn't forward
+                         min/step to the real <input> anyway (they'd land on
+                         its wrapper <div>), so this was always inert. -->
+                    <Input v-model="line.quantity" type="number" step="0.0001" placeholder="0" />
                     <Input v-model="line.rate" type="number" min="0" step="0.01" placeholder="0.00" />
                     <Input
                         v-model="line.discount"
