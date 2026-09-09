@@ -28,6 +28,7 @@ import {
     Shapes,
     ScanBarcode,
     Handshake,
+    Landmark,
 } from '@lucide/vue';
 
 /**
@@ -43,6 +44,21 @@ export function navGroups(isAdmin) {
             items: [{ label: 'Dashboard', href: '/dashboard', icon: LayoutDashboard }],
         },
         {
+            label: 'TRANSACTIONS',
+            items: [
+                { label: 'POS', href: '/pos', icon: ScanBarcode },
+                { label: 'Quotations', href: '/quotations', icon: FileSignature },
+                { label: 'Sales', href: '/sales', icon: ShoppingCart },
+                { label: 'Purchases', href: '/purchases', icon: PackageSearch },
+                { label: 'Capital Sales', href: '/capital-sales', icon: Landmark },
+                { label: 'Capital Purchases', href: '/capital-purchases', icon: Landmark },
+                { label: 'Sales Returns', href: '/sales-returns', icon: Undo2 },
+                { label: 'Purchase Returns', href: '/purchase-returns', icon: Undo2 },
+                { label: 'Receipts', href: '/receipts', icon: Banknote },
+                { label: 'Payments', href: '/payments', icon: Wallet },
+            ],
+        },
+        {
             label: 'ACCOUNTING',
             items: [
                 { label: 'Account Groups', href: '/account-groups', icon: Layers },
@@ -50,19 +66,6 @@ export function navGroups(isAdmin) {
                 { label: 'Accounts', href: '/accounts', icon: BookOpen },
                 { label: 'Fiscal Years', href: '/fiscal-years', icon: CalendarRange },
                 { label: 'Journal Vouchers', href: '/journal-vouchers', icon: NotebookPen },
-            ],
-        },
-        {
-            label: 'TRANSACTIONS',
-            items: [
-                { label: 'POS', href: '/pos', icon: ScanBarcode },
-                { label: 'Quotations', href: '/quotations', icon: FileSignature },
-                { label: 'Sales', href: '/sales', icon: ShoppingCart },
-                { label: 'Purchases', href: '/purchases', icon: PackageSearch },
-                { label: 'Sales Returns', href: '/sales-returns', icon: Undo2 },
-                { label: 'Purchase Returns', href: '/purchase-returns', icon: Undo2 },
-                { label: 'Receipts', href: '/receipts', icon: Banknote },
-                { label: 'Payments', href: '/payments', icon: Wallet },
             ],
         },
         {
@@ -89,29 +92,49 @@ export function navGroups(isAdmin) {
             ],
         },
         {
-            label: 'REPORTS',
+            label: 'ACCOUNT REPORTS',
             items: [
                 { label: 'Trial Balance', href: '/reports/trial-balance', icon: FileBarChart },
                 { label: 'Income Statement', href: '/reports/income-statement', icon: FileBarChart },
                 { label: 'Balance Sheet', href: '/reports/balance-sheet', icon: FileBarChart },
-                { label: 'Sales Register', href: '/reports/sales-register', icon: FileBarChart },
-                { label: 'Purchase Register', href: '/reports/purchase-register', icon: FileBarChart },
-                { label: 'Sales VAT Book', href: '/reports/sales-vat-book', icon: FileBarChart },
-                { label: 'Purchase VAT Book', href: '/reports/purchase-vat-book', icon: FileBarChart },
-                { label: 'Stock Summary', href: '/reports/stock-summary', icon: FileBarChart },
+                { label: 'TDS Report', href: '/reports/tds', icon: FileBarChart },
                 { label: 'Day Book', href: '/reports/day-book', icon: FileBarChart },
                 { label: 'Cash Book', href: '/reports/cash-book', icon: FileBarChart },
                 { label: 'Bank Book', href: '/reports/bank-book', icon: FileBarChart },
                 { label: 'Aged Receivables', href: '/reports/aged-receivables', icon: FileBarChart },
                 { label: 'Aged Payables', href: '/reports/aged-payables', icon: FileBarChart },
-                { label: 'TDS Report', href: '/reports/tds', icon: FileBarChart },
-                { label: 'Stock Valuation', href: '/reports/stock-valuation', icon: FileBarChart },
-                { label: 'Item-wise Sales', href: '/reports/item-wise-sales', icon: FileBarChart },
-                { label: 'Item-wise Purchase', href: '/reports/item-wise-purchase', icon: FileBarChart },
-                { label: 'Sales by Category', href: '/reports/sales-by-category', icon: FileBarChart },
-                { label: 'Purchase by Category', href: '/reports/purchase-by-category', icon: FileBarChart },
-                { label: 'Stock by Category', href: '/reports/stock-by-category', icon: FileBarChart },
+            ],
+        },
+        {
+            label: 'VAT REPORTS',
+            items: [
+                { label: 'Sales VAT Book', href: '/reports/sales-vat-book', icon: FileBarChart },
+                { label: 'Purchase VAT Book', href: '/reports/purchase-vat-book', icon: FileBarChart },
                 { label: 'VAT Summary', href: '/reports/vat-summary', icon: FileBarChart },
+            ],
+        },
+        {
+            label: 'SALES REPORTS',
+            items: [
+                { label: 'Sales Register', href: '/reports/sales-register', icon: FileBarChart },
+                { label: 'Item-wise Sales', href: '/reports/item-wise-sales', icon: FileBarChart },
+                { label: 'Sales by Category', href: '/reports/sales-by-category', icon: FileBarChart },
+            ],
+        },
+        {
+            label: 'PURCHASE REPORTS',
+            items: [
+                { label: 'Purchase Register', href: '/reports/purchase-register', icon: FileBarChart },
+                { label: 'Item-wise Purchase', href: '/reports/item-wise-purchase', icon: FileBarChart },
+                { label: 'Purchase by Category', href: '/reports/purchase-by-category', icon: FileBarChart },
+            ],
+        },
+        {
+            label: 'STOCK REPORTS',
+            items: [
+                { label: 'Stock Summary', href: '/reports/stock-summary', icon: FileBarChart },
+                { label: 'Stock Valuation', href: '/reports/stock-valuation', icon: FileBarChart },
+                { label: 'Stock by Category', href: '/reports/stock-by-category', icon: FileBarChart },
                 { label: 'Stock Movement Register', href: '/reports/stock-movement-register', icon: FileBarChart },
             ],
         },

@@ -104,7 +104,7 @@ function submit() {
         <form class="flex flex-col gap-4" @submit.prevent="submit">
             <div class="grid grid-cols-3 gap-4">
                 <div>
-                    <label class="mb-1 block text-sm font-semibold text-text-base">Customer</label>
+                    <label class="mb-1 block text-sm font-semibold text-text-base">Customer <span class="text-danger">*</span></label>
                     <Combobox
                         :model-value="form.customer_id"
                         :options="customerOptions"
@@ -114,7 +114,7 @@ function submit() {
                     <p v-if="form.errors.customer_id" class="mt-1 text-sm text-danger">{{ form.errors.customer_id }}</p>
                 </div>
                 <div>
-                    <label class="mb-1 block text-sm font-semibold text-text-base">Date</label>
+                    <label class="mb-1 block text-sm font-semibold text-text-base">Date <span class="text-danger">*</span></label>
                     <NepaliDateInput v-model="form.date" required />
                     <p v-if="form.errors.date" class="mt-1 text-sm text-danger">{{ form.errors.date }}</p>
                 </div>

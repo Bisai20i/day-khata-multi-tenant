@@ -93,7 +93,7 @@ function submit() {
         <form class="flex flex-col gap-4" @submit.prevent="submit">
             <div class="grid grid-cols-5 gap-4">
                 <div>
-                    <label class="mb-1 block text-sm font-semibold text-text-base">Purchase</label>
+                    <label class="mb-1 block text-sm font-semibold text-text-base">Purchase <span class="text-danger">*</span></label>
                     <Combobox
                         :model-value="form.purchase_id"
                         :options="purchaseOptions"
@@ -103,7 +103,7 @@ function submit() {
                     <p v-if="form.errors.purchase_id" class="mt-1 text-sm text-danger">{{ form.errors.purchase_id }}</p>
                 </div>
                 <div>
-                    <label class="mb-1 block text-sm font-semibold text-text-base">Date</label>
+                    <label class="mb-1 block text-sm font-semibold text-text-base">Date <span class="text-danger">*</span></label>
                     <NepaliDateInput v-model="form.date" required />
                     <p v-if="form.errors.date" class="mt-1 text-sm text-danger">{{ form.errors.date }}</p>
                 </div>
@@ -155,7 +155,7 @@ function submit() {
             <div class="flex items-center justify-end gap-2">
                 <Button variant="secondary" tone="purple" type="button" @click="emit('cancel')">Cancel</Button>
                 <Button variant="primary" tone="purple" type="submit" :disabled="form.processing || !selectedPurchase">
-                    Post return
+                    Create Purchase Return
                 </Button>
             </div>
         </form>

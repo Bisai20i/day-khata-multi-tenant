@@ -10,6 +10,7 @@ import Modal from '@/components/ui/Modal.vue';
 import Input from '@/components/ui/Input.vue';
 import RowActions from '@/components/ui/RowActions.vue';
 import { useToast } from '@/composables/useToast';
+import { useConfirm } from '@/composables/useConfirm';
 import { navGroups } from '@/lib/nav-items.js';
 
 defineProps({
@@ -21,6 +22,7 @@ defineProps({
 
 const page = usePage();
 const { toast } = useToast();
+const { confirm } = useConfirm();
 
 // Create/edit/delete all redirect back to this same route/component - Inertia
 // patches the already-mounted instance rather than remounting it, so a plain
@@ -85,8 +87,8 @@ function submit() {
     }
 }
 
-function destroy(store) {
-    if (!confirm('Delete this store?')) return;
+async function destroy(store) {
+    if (!(await confirm({ message: 'Delete this store?', tone: 'danger', confirmLabel: 'Delete' }))) return;
     router.delete(`/stores/${store.id}`);
 }
 
@@ -135,20 +137,20 @@ const columns = [
         >
             <form id="store-form" class="flex flex-col gap-4" @submit.prevent="submit">
                 <div>
-                    <label for="name" class="mb-1 block text-sm font-semibold text-text-base">Name</label>
-                    <Input id="name" v-model="form.name" type="text" required />
+                    <label for="name" class="mb-1 block text-sm font-semibold text-text-base">Name <span class="text-danger">*</span></label>
+                    <Input id="name" v-model="form.name" type="text" placeholder="e.g. Main Warehouse" required />
                     <p v-if="form.errors.name" class="mt-1 text-sm text-danger">{{ form.errors.name }}</p>
                 </div>
 
                 <div>
                     <label for="address" class="mb-1 block text-sm font-semibold text-text-base">Address</label>
-                    <Input id="address" v-model="form.address" type="text" />
+                    <Input id="address" v-model="form.address" type="text" placeholder="e.g. Street, City" />
                     <p v-if="form.errors.address" class="mt-1 text-sm text-danger">{{ form.errors.address }}</p>
                 </div>
 
                 <div>
                     <label for="phone" class="mb-1 block text-sm font-semibold text-text-base">Phone</label>
-                    <Input id="phone" v-model="form.phone" type="text" />
+                    <Input id="phone" v-model="form.phone" type="text" placeholder="e.g. 98XXXXXXXX" />
                     <p v-if="form.errors.phone" class="mt-1 text-sm text-danger">{{ form.errors.phone }}</p>
                 </div>
 

@@ -1,7 +1,7 @@
 <script setup>
 import { h, ref } from 'vue';
 import { Link, router } from '@inertiajs/vue3';
-import { Building2, History, LayoutDashboard, Settings as SettingsIcon, ShieldCheck } from '@lucide/vue';
+import { Building2, Filter, History, LayoutDashboard, Settings as SettingsIcon, ShieldCheck, X } from '@lucide/vue';
 import AppLayout from '@/layouts/AppLayout.vue';
 import Card from '@/components/ui/Card.vue';
 import Button from '@/components/ui/Button.vue';
@@ -34,6 +34,7 @@ const navItems = [
 const tenantId = ref(props.filters.tenant_id ?? null);
 const action = ref(props.filters.action ?? null);
 const platformAdminId = ref(props.filters.platform_admin_id ?? null);
+const filtering = ref(false);
 
 function applyFilter() {
     router.get(
@@ -43,7 +44,7 @@ function applyFilter() {
             action: action.value || undefined,
             platform_admin_id: platformAdminId.value || undefined,
         },
-        { preserveState: true, preserveScroll: true },
+        { preserveState: true, preserveScroll: true, onStart: () => (filtering.value = true), onFinish: () => (filtering.value = false) },
     );
 }
 
@@ -51,7 +52,11 @@ function clearFilter() {
     tenantId.value = null;
     action.value = null;
     platformAdminId.value = null;
-    router.get(window.location.pathname, {}, { preserveState: true, preserveScroll: true });
+    router.get(
+        window.location.pathname,
+        {},
+        { preserveState: true, preserveScroll: true, onStart: () => (filtering.value = true), onFinish: () => (filtering.value = false) },
+    );
 }
 
 const columns = [
@@ -102,8 +107,14 @@ const columns = [
                     <label class="mb-1 block text-xs font-semibold text-text-muted">Platform admin</label>
                     <Select v-model="platformAdminId" :options="platformAdminOptions" placeholder="All admins" />
                 </div>
-                <Button variant="primary" tone="purple" @click="applyFilter">Apply</Button>
-                <Button variant="secondary" tone="purple" @click="clearFilter">Clear</Button>
+                <Button variant="primary" tone="purple" :loading="filtering" @click="applyFilter">
+                    <Filter class="size-4" />
+                    Apply
+                </Button>
+                <Button variant="secondary" tone="purple" @click="clearFilter">
+                    <X class="size-4" />
+                    Clear
+                </Button>
             </div>
         </Card>
 

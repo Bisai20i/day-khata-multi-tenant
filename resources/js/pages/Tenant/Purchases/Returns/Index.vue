@@ -1,6 +1,7 @@
 <script setup>
 import { computed, h, ref, watch } from 'vue';
 import { useForm, usePage } from '@inertiajs/vue3';
+import { Plus } from '@lucide/vue';
 import AppLayout from '@/layouts/AppLayout.vue';
 import Card from '@/components/ui/Card.vue';
 import Button from '@/components/ui/Button.vue';
@@ -145,7 +146,10 @@ const columns = [
         <template v-else>
             <div class="mb-4 flex items-center justify-between">
                 <h2 class="text-base font-bold text-text-strong">Purchase Returns</h2>
-                <Button variant="primary" tone="purple" @click="showCreateForm = true">New return</Button>
+                <Button variant="primary" tone="purple" @click="showCreateForm = true">
+                    <Plus class="size-4" />
+                    New return
+                </Button>
             </div>
 
             <Card variant="panel">
@@ -165,7 +169,7 @@ const columns = [
                     ({{ Number(cancelling.total).toFixed(2) }}). This cannot be undone.
                 </p>
                 <div>
-                    <label class="mb-1 block text-sm font-semibold text-text-base">Reason</label>
+                    <label class="mb-1 block text-sm font-semibold text-text-base">Reason <span class="text-danger">*</span></label>
                     <Input v-model="reasonForm.reason" type="text" placeholder="Reason for cancellation" required />
                     <p v-if="reasonForm.errors.reason" class="mt-1 text-sm text-danger">{{ reasonForm.errors.reason }}</p>
                 </div>

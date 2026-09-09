@@ -91,7 +91,7 @@ function submit() {
         <form class="flex flex-col gap-4" @submit.prevent="submit">
             <div class="grid grid-cols-3 gap-4">
                 <div>
-                    <label class="mb-1 block text-sm font-semibold text-text-base">Customer</label>
+                    <label class="mb-1 block text-sm font-semibold text-text-base">Customer <span class="text-danger">*</span></label>
                     <Combobox
                         :model-value="form.customer_id"
                         :options="customerOptions"
@@ -101,17 +101,17 @@ function submit() {
                     <p v-if="form.errors.customer_id" class="mt-1 text-sm text-danger">{{ form.errors.customer_id }}</p>
                 </div>
                 <div>
-                    <label class="mb-1 block text-sm font-semibold text-text-base">Date</label>
+                    <label class="mb-1 block text-sm font-semibold text-text-base">Date <span class="text-danger">*</span></label>
                     <NepaliDateInput v-model="form.date" required />
                     <p v-if="form.errors.date" class="mt-1 text-sm text-danger">{{ form.errors.date }}</p>
                 </div>
                 <div>
-                    <label class="mb-1 block text-sm font-semibold text-text-base">Amount</label>
+                    <label class="mb-1 block text-sm font-semibold text-text-base">Amount <span class="text-danger">*</span></label>
                     <Input v-model="form.amount" type="number" min="0.01" step="0.01" placeholder="0.00" required />
                     <p v-if="form.errors.amount" class="mt-1 text-sm text-danger">{{ form.errors.amount }}</p>
                 </div>
                 <div>
-                    <label class="mb-1 block text-sm font-semibold text-text-base">Payment Mode</label>
+                    <label class="mb-1 block text-sm font-semibold text-text-base">Payment Mode <span class="text-danger">*</span></label>
                     <Select
                         :model-value="form.payment_mode"
                         :options="paymentModeOptions"

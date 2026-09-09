@@ -1,5 +1,6 @@
 <script setup>
 import { useForm } from '@inertiajs/vue3';
+import { Lock, Mail } from '@lucide/vue';
 import AuthLayout from '@/layouts/AuthLayout.vue';
 import Input from '@/components/ui/Input.vue';
 import Button from '@/components/ui/Button.vue';
@@ -18,17 +19,19 @@ function submit() {
 </script>
 
 <template>
-    <AuthLayout title="Platform Admin Login">
-        <h1 class="mb-4 text-base font-bold text-text-strong">Platform Admin Login</h1>
+    <AuthLayout title="Platform Admin Login" tagline="Manage every business running on Day Khata.">
+        <h1 class="mb-1 text-xl font-bold text-text-strong">Platform admin login</h1>
+        <p class="mb-6 text-sm text-text-muted">Sign in with your platform admin account.</p>
 
         <form class="flex flex-col gap-4" @submit.prevent="submit">
             <div>
-                <label for="email" class="mb-1 block text-sm font-semibold text-text-base">Email</label>
+                <label for="email" class="mb-1 block text-sm font-semibold text-text-base">Email <span class="text-danger">*</span></label>
                 <Input
                     id="email"
                     v-model="form.email"
                     type="email"
                     placeholder="you@example.com"
+                    :icon="Mail"
                     autofocus
                     required
                 />
@@ -36,8 +39,8 @@ function submit() {
             </div>
 
             <div>
-                <label for="password" class="mb-1 block text-sm font-semibold text-text-base">Password</label>
-                <Input id="password" v-model="form.password" type="password" required />
+                <label for="password" class="mb-1 block text-sm font-semibold text-text-base">Password <span class="text-danger">*</span></label>
+                <Input id="password" v-model="form.password" type="password" placeholder="Enter your password" :icon="Lock" required />
                 <p v-if="form.errors.password" class="mt-1 text-sm text-danger">{{ form.errors.password }}</p>
             </div>
 
@@ -46,7 +49,7 @@ function submit() {
                 Remember me
             </label>
 
-            <Button type="submit" variant="primary" tone="purple" :disabled="form.processing" class="w-full">
+            <Button type="submit" variant="primary" tone="purple" :loading="form.processing" class="w-full">
                 Log in
             </Button>
         </form>

@@ -1,6 +1,6 @@
 <script setup>
 import { useForm, Link } from '@inertiajs/vue3';
-import { ArrowLeft, Building2, History, LayoutDashboard, Settings as SettingsIcon, ShieldCheck } from '@lucide/vue';
+import { ArrowLeft, Building2, Check, History, LayoutDashboard, Settings as SettingsIcon, ShieldCheck } from '@lucide/vue';
 import AppLayout from '@/layouts/AppLayout.vue';
 import Card from '@/components/ui/Card.vue';
 import Input from '@/components/ui/Input.vue';
@@ -41,19 +41,20 @@ function submit() {
         <Card variant="panel" class="max-w-lg">
             <form class="flex flex-col gap-4" @submit.prevent="submit">
                 <div>
-                    <label for="company_name" class="mb-1 block text-sm font-semibold text-text-base">Company name</label>
-                    <Input id="company_name" v-model="form.company_name" type="text" required />
+                    <label for="company_name" class="mb-1 block text-sm font-semibold text-text-base">Company name <span class="text-danger">*</span></label>
+                    <Input id="company_name" v-model="form.company_name" type="text" placeholder="e.g. Acme Traders" required />
                     <p v-if="form.errors.company_name" class="mt-1 text-sm text-danger">{{ form.errors.company_name }}</p>
                 </div>
 
                 <div>
                     <label for="contact_email" class="mb-1 block text-sm font-semibold text-text-base">Contact email</label>
-                    <Input id="contact_email" v-model="form.contact_email" type="email" />
+                    <Input id="contact_email" v-model="form.contact_email" type="email" placeholder="you@example.com" />
                     <p v-if="form.errors.contact_email" class="mt-1 text-sm text-danger">{{ form.errors.contact_email }}</p>
                 </div>
 
                 <div class="flex gap-2">
-                    <Button type="submit" variant="primary" tone="purple" :disabled="form.processing" class="flex-1">
+                    <Button type="submit" variant="primary" tone="purple" :loading="form.processing" class="flex-1">
+                        <Check class="size-4" />
                         Save
                     </Button>
                     <Button :as="Link" :href="`/tenants/${tenant.id}`" variant="secondary" tone="purple" class="flex-1 justify-center">

@@ -90,12 +90,12 @@ function submit() {
         <form class="flex flex-col gap-4" @submit.prevent="submit">
             <div class="grid grid-cols-3 gap-4">
                 <div>
-                    <label class="mb-1 block text-sm font-semibold text-text-base">Asset Name</label>
+                    <label class="mb-1 block text-sm font-semibold text-text-base">Asset Name <span class="text-danger">*</span></label>
                     <Input v-model="form.asset_name" type="text" placeholder="e.g. Office Laptop" required />
                     <p v-if="form.errors.asset_name" class="mt-1 text-sm text-danger">{{ form.errors.asset_name }}</p>
                 </div>
                 <div>
-                    <label class="mb-1 block text-sm font-semibold text-text-base">Depreciation Pool</label>
+                    <label class="mb-1 block text-sm font-semibold text-text-base">Depreciation Pool <span class="text-danger">*</span></label>
                     <Select
                         :model-value="form.category"
                         :options="poolOptions"
@@ -105,13 +105,13 @@ function submit() {
                     <p v-if="form.errors.category" class="mt-1 text-sm text-danger">{{ form.errors.category }}</p>
                 </div>
                 <div>
-                    <label class="mb-1 block text-sm font-semibold text-text-base">Purchase Date</label>
+                    <label class="mb-1 block text-sm font-semibold text-text-base">Purchase Date <span class="text-danger">*</span></label>
                     <NepaliDateInput v-model="form.purchase_date" required />
                     <p v-if="form.errors.purchase_date" class="mt-1 text-sm text-danger">{{ form.errors.purchase_date }}</p>
                 </div>
                 <div>
-                    <label class="mb-1 block text-sm font-semibold text-text-base">Cost</label>
-                    <Input v-model="form.cost" type="number" min="0.01" step="0.01" required />
+                    <label class="mb-1 block text-sm font-semibold text-text-base">Cost <span class="text-danger">*</span></label>
+                    <Input v-model="form.cost" type="number" min="0.01" step="0.01" placeholder="e.g. 50000" required />
                     <p v-if="form.errors.cost" class="mt-1 text-sm text-danger">{{ form.errors.cost }}</p>
                 </div>
                 <div>
@@ -119,7 +119,7 @@ function submit() {
                     <Input v-model="form.salvage_value" type="number" min="0" step="0.01" placeholder="0.00" />
                 </div>
                 <div>
-                    <label class="mb-1 block text-sm font-semibold text-text-base">Depreciation Method</label>
+                    <label class="mb-1 block text-sm font-semibold text-text-base">Depreciation Method <span class="text-danger">*</span></label>
                     <Select
                         :model-value="form.depreciation_method"
                         :options="methodOptions"
@@ -127,12 +127,12 @@ function submit() {
                     />
                 </div>
                 <div>
-                    <label class="mb-1 block text-sm font-semibold text-text-base">Depreciation Rate (%)</label>
-                    <Input v-model="form.depreciation_rate" type="number" min="0" max="100" step="0.01" required />
+                    <label class="mb-1 block text-sm font-semibold text-text-base">Depreciation Rate (%) <span class="text-danger">*</span></label>
+                    <Input v-model="form.depreciation_rate" type="number" min="0" max="100" step="0.01" placeholder="e.g. 15" required />
                     <p v-if="form.errors.depreciation_rate" class="mt-1 text-sm text-danger">{{ form.errors.depreciation_rate }}</p>
                 </div>
                 <div>
-                    <label class="mb-1 block text-sm font-semibold text-text-base">Payment Mode</label>
+                    <label class="mb-1 block text-sm font-semibold text-text-base">Payment Mode <span class="text-danger">*</span></label>
                     <Select
                         :model-value="form.payment_mode"
                         :options="paymentModeOptions"

@@ -11,6 +11,7 @@ import Modal from '@/components/ui/Modal.vue';
 import DataTable from '@/components/ui/DataTable.vue';
 import RowActions from '@/components/ui/RowActions.vue';
 import { useToast } from '@/composables/useToast';
+import { useConfirm } from '@/composables/useConfirm';
 import { navGroups } from '@/lib/nav-items.js';
 
 const props = defineProps({
@@ -34,6 +35,7 @@ const isAdmin = computed(() => page.props.auth?.user?.role?.slug === 'admin');
 const navItems = computed(() => navGroups(isAdmin.value));
 
 const { toast } = useToast();
+const { confirm } = useConfirm();
 
 onMounted(() => {
     if (page.props.flash?.status) {
@@ -131,8 +133,8 @@ function submit() {
     }
 }
 
-function destroy(account) {
-    if (!confirm('Delete this account?')) return;
+async function destroy(account) {
+    if (!(await confirm({ message: 'Delete this account?', tone: 'danger', confirmLabel: 'Delete' }))) return;
     router.delete(`/accounts/${account.id}`, {
         onSuccess: () => toast({ message: 'Account deleted', variant: 'success' }),
     });
@@ -191,7 +193,7 @@ const columns = [
                 </div>
 
                 <div v-if="parentType === 'group'">
-                    <label for="account_group_id" class="mb-1 block text-sm font-semibold text-text-base">Account group</label>
+                    <label for="account_group_id" class="mb-1 block text-sm font-semibold text-text-base">Account group <span class="text-danger">*</span></label>
                     <Select
                         id="account_group_id"
                         v-model="form.account_group_id"
@@ -202,7 +204,7 @@ const columns = [
                 </div>
 
                 <div v-else>
-                    <label for="account_subgroup_id" class="mb-1 block text-sm font-semibold text-text-base">Account subgroup</label>
+                    <label for="account_subgroup_id" class="mb-1 block text-sm font-semibold text-text-base">Account subgroup <span class="text-danger">*</span></label>
                     <Select
                         id="account_subgroup_id"
                         v-model="form.account_subgroup_id"
@@ -214,25 +216,25 @@ const columns = [
 
                 <div>
                     <label for="code" class="mb-1 block text-sm font-semibold text-text-base">Code</label>
-                    <Input id="code" v-model="form.code" type="text" />
+                    <Input id="code" v-model="form.code" type="text" placeholder="e.g. 1001" />
                     <p v-if="form.errors.code" class="mt-1 text-sm text-danger">{{ form.errors.code }}</p>
                 </div>
 
                 <div>
-                    <label for="name" class="mb-1 block text-sm font-semibold text-text-base">Name</label>
-                    <Input id="name" v-model="form.name" type="text" required />
+                    <label for="name" class="mb-1 block text-sm font-semibold text-text-base">Name <span class="text-danger">*</span></label>
+                    <Input id="name" v-model="form.name" type="text" placeholder="e.g. Cash in Hand" required />
                     <p v-if="form.errors.name" class="mt-1 text-sm text-danger">{{ form.errors.name }}</p>
                 </div>
 
                 <div>
                     <label for="phone" class="mb-1 block text-sm font-semibold text-text-base">Phone</label>
-                    <Input id="phone" v-model="form.phone" type="text" />
+                    <Input id="phone" v-model="form.phone" type="text" placeholder="98XXXXXXXX" />
                     <p v-if="form.errors.phone" class="mt-1 text-sm text-danger">{{ form.errors.phone }}</p>
                 </div>
 
                 <div>
                     <label for="address" class="mb-1 block text-sm font-semibold text-text-base">Address</label>
-                    <Input id="address" v-model="form.address" type="text" />
+                    <Input id="address" v-model="form.address" type="text" placeholder="e.g. Kathmandu-10" />
                     <p v-if="form.errors.address" class="mt-1 text-sm text-danger">{{ form.errors.address }}</p>
                 </div>
             </form>

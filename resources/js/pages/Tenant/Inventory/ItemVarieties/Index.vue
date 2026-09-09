@@ -11,6 +11,7 @@ import Input from '@/components/ui/Input.vue';
 import Select from '@/components/ui/Select.vue';
 import RowActions from '@/components/ui/RowActions.vue';
 import { useToast } from '@/composables/useToast';
+import { useConfirm } from '@/composables/useConfirm';
 import { navGroups } from '@/lib/nav-items.js';
 
 const props = defineProps({
@@ -26,6 +27,7 @@ const props = defineProps({
 
 const page = usePage();
 const { toast } = useToast();
+const { confirm } = useConfirm();
 
 // Create/edit/delete all redirect back to this same route/component - Inertia
 // patches the already-mounted instance rather than remounting it, so a plain
@@ -94,8 +96,8 @@ function submit() {
     }
 }
 
-function destroy(variety) {
-    if (!confirm('Delete this variety?')) return;
+async function destroy(variety) {
+    if (!(await confirm({ message: 'Delete this variety?', tone: 'danger', confirmLabel: 'Delete' }))) return;
     router.delete(`/item-varieties/${variety.id}`);
 }
 
@@ -160,20 +162,20 @@ const columns = [
         >
             <form id="item-variety-form" class="flex flex-col gap-4" @submit.prevent="submit">
                 <div>
-                    <label for="item_id" class="mb-1 block text-sm font-semibold text-text-base">Item</label>
+                    <label for="item_id" class="mb-1 block text-sm font-semibold text-text-base">Item <span class="text-danger">*</span></label>
                     <Select id="item_id" v-model="form.item_id" :options="itemOptions" placeholder="Select item" />
                     <p v-if="form.errors.item_id" class="mt-1 text-sm text-danger">{{ form.errors.item_id }}</p>
                 </div>
 
                 <div>
-                    <label for="name" class="mb-1 block text-sm font-semibold text-text-base">Name</label>
+                    <label for="name" class="mb-1 block text-sm font-semibold text-text-base">Name <span class="text-danger">*</span></label>
                     <Input id="name" v-model="form.name" type="text" placeholder="e.g. Red / Large" required />
                     <p v-if="form.errors.name" class="mt-1 text-sm text-danger">{{ form.errors.name }}</p>
                 </div>
 
                 <div>
                     <label for="sku_suffix" class="mb-1 block text-sm font-semibold text-text-base">SKU Suffix</label>
-                    <Input id="sku_suffix" v-model="form.sku_suffix" type="text" />
+                    <Input id="sku_suffix" v-model="form.sku_suffix" type="text" placeholder="e.g. RED-L" />
                     <p v-if="form.errors.sku_suffix" class="mt-1 text-sm text-danger">{{ form.errors.sku_suffix }}</p>
                 </div>
 
@@ -181,7 +183,7 @@ const columns = [
                     <label for="price_adjustment" class="mb-1 block text-sm font-semibold text-text-base">
                         Price Adjustment
                     </label>
-                    <Input id="price_adjustment" v-model="form.price_adjustment" type="number" step="0.01" />
+                    <Input id="price_adjustment" v-model="form.price_adjustment" type="number" step="0.01" placeholder="0.00" />
                     <p v-if="form.errors.price_adjustment" class="mt-1 text-sm text-danger">
                         {{ form.errors.price_adjustment }}
                     </p>

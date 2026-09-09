@@ -11,6 +11,7 @@ import Input from '@/components/ui/Input.vue';
 import NepaliDateInput from '@/components/ui/NepaliDateInput.vue';
 import RowActions from '@/components/ui/RowActions.vue';
 import { useToast } from '@/composables/useToast';
+import { useConfirm } from '@/composables/useConfirm';
 import { navGroups } from '@/lib/nav-items.js';
 
 defineProps({
@@ -22,6 +23,7 @@ defineProps({
 
 const page = usePage();
 const { toast } = useToast();
+const { confirm } = useConfirm();
 
 // Create/edit/delete all redirect back to this same route/component -
 // Inertia patches the already-mounted instance rather than remounting it,
@@ -87,8 +89,8 @@ function submit() {
     }
 }
 
-function destroy(notice) {
-    if (!confirm('Delete this notice?')) return;
+async function destroy(notice) {
+    if (!(await confirm({ message: 'Delete this notice?', tone: 'danger', confirmLabel: 'Delete' }))) return;
     router.delete(`/notices/${notice.id}`);
 }
 
@@ -140,17 +142,18 @@ const columns = [
         >
             <form id="notice-form" class="flex flex-col gap-4" @submit.prevent="submit">
                 <div>
-                    <label for="title" class="mb-1 block text-sm font-semibold text-text-base">Title</label>
-                    <Input id="title" v-model="form.title" type="text" required />
+                    <label for="title" class="mb-1 block text-sm font-semibold text-text-base">Title <span class="text-danger">*</span></label>
+                    <Input id="title" v-model="form.title" type="text" placeholder="e.g. Holiday hours" required />
                     <p v-if="form.errors.title" class="mt-1 text-sm text-danger">{{ form.errors.title }}</p>
                 </div>
 
                 <div>
-                    <label for="body" class="mb-1 block text-sm font-semibold text-text-base">Body</label>
+                    <label for="body" class="mb-1 block text-sm font-semibold text-text-base">Body <span class="text-danger">*</span></label>
                     <textarea
                         id="body"
                         v-model="form.body"
                         rows="4"
+                        placeholder="Write the notice message..."
                         required
                         class="w-full border-[1.5px] border-border bg-bg-subtle px-3 py-2 text-[13px] text-text-base outline-none transition-colors duration-150 focus:border-primary focus:bg-white focus:[box-shadow:0_0_0_3px_var(--color-primary-focus-ring)]"
                     ></textarea>

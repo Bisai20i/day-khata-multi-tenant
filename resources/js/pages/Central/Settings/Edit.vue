@@ -1,7 +1,7 @@
 <script setup>
-import { watch } from 'vue';
+import { ref, watch } from 'vue';
 import { router, useForm, usePage } from '@inertiajs/vue3';
-import { Building2, History, LayoutDashboard, Settings as SettingsIcon, ShieldCheck } from '@lucide/vue';
+import { Building2, Check, History, LayoutDashboard, Send, Settings as SettingsIcon, ShieldCheck } from '@lucide/vue';
 import AppLayout from '@/layouts/AppLayout.vue';
 import Card from '@/components/ui/Card.vue';
 import Button from '@/components/ui/Button.vue';
@@ -57,8 +57,14 @@ function submit() {
     form.put('/settings');
 }
 
+const sendingTestEmail = ref(false);
+
 function sendTestEmail() {
-    router.post('/settings/test-email', {}, { preserveScroll: true });
+    router.post(
+        '/settings/test-email',
+        {},
+        { preserveScroll: true, onStart: () => (sendingTestEmail.value = true), onFinish: () => (sendingTestEmail.value = false) },
+    );
 }
 </script>
 
@@ -74,12 +80,12 @@ function sendTestEmail() {
                 <div class="grid grid-cols-2 gap-4">
                     <div>
                         <label for="platform_name" class="mb-1 block text-sm font-semibold text-text-base">Platform name</label>
-                        <Input id="platform_name" v-model="form.platform_name" type="text" />
+                        <Input id="platform_name" v-model="form.platform_name" type="text" placeholder="e.g. Acme Cloud" />
                         <p v-if="form.errors.platform_name" class="mt-1 text-sm text-danger">{{ form.errors.platform_name }}</p>
                     </div>
                     <div>
                         <label for="support_email" class="mb-1 block text-sm font-semibold text-text-base">Support email</label>
-                        <Input id="support_email" v-model="form.support_email" type="email" />
+                        <Input id="support_email" v-model="form.support_email" type="email" placeholder="you@example.com" />
                         <p v-if="form.errors.support_email" class="mt-1 text-sm text-danger">{{ form.errors.support_email }}</p>
                     </div>
                 </div>
@@ -89,13 +95,13 @@ function sendTestEmail() {
                 <h3 class="mb-3 text-sm font-bold text-text-strong">Tenant lifecycle defaults</h3>
                 <div class="grid grid-cols-2 gap-4">
                     <div>
-                        <label for="default_trial_days" class="mb-1 block text-sm font-semibold text-text-base">Default trial days</label>
+                        <label for="default_trial_days" class="mb-1 block text-sm font-semibold text-text-base">Default trial days <span class="text-danger">*</span></label>
                         <Input id="default_trial_days" v-model="form.default_trial_days" type="number" min="0" max="365" required />
                         <p v-if="form.errors.default_trial_days" class="mt-1 text-sm text-danger">{{ form.errors.default_trial_days }}</p>
                     </div>
                     <div>
                         <label for="default_grace_period_days" class="mb-1 block text-sm font-semibold text-text-base">
-                            Default grace period days
+                            Default grace period days <span class="text-danger">*</span>
                         </label>
                         <Input
                             id="default_grace_period_days"
@@ -115,7 +121,10 @@ function sendTestEmail() {
             <Card variant="panel">
                 <div class="mb-3 flex items-center justify-between">
                     <h3 class="text-sm font-bold text-text-strong">Mail</h3>
-                    <Button variant="secondary" tone="purple" type="button" @click="sendTestEmail">Send test email</Button>
+                    <Button variant="secondary" tone="purple" type="button" :loading="sendingTestEmail" @click="sendTestEmail">
+                        <Send class="size-4" />
+                        Send test email
+                    </Button>
                 </div>
                 <div class="grid grid-cols-2 gap-4">
                     <div>
@@ -130,17 +139,17 @@ function sendTestEmail() {
                     </div>
                     <div>
                         <label for="mail_host" class="mb-1 block text-sm font-semibold text-text-base">Host</label>
-                        <Input id="mail_host" v-model="form.mail_host" type="text" />
+                        <Input id="mail_host" v-model="form.mail_host" type="text" placeholder="smtp.example.com" />
                         <p v-if="form.errors.mail_host" class="mt-1 text-sm text-danger">{{ form.errors.mail_host }}</p>
                     </div>
                     <div>
                         <label for="mail_port" class="mb-1 block text-sm font-semibold text-text-base">Port</label>
-                        <Input id="mail_port" v-model="form.mail_port" type="number" min="1" max="65535" />
+                        <Input id="mail_port" v-model="form.mail_port" type="number" min="1" max="65535" placeholder="587" />
                         <p v-if="form.errors.mail_port" class="mt-1 text-sm text-danger">{{ form.errors.mail_port }}</p>
                     </div>
                     <div>
                         <label for="mail_username" class="mb-1 block text-sm font-semibold text-text-base">Username</label>
-                        <Input id="mail_username" v-model="form.mail_username" type="text" />
+                        <Input id="mail_username" v-model="form.mail_username" type="text" placeholder="you@example.com" />
                         <p v-if="form.errors.mail_username" class="mt-1 text-sm text-danger">{{ form.errors.mail_username }}</p>
                     </div>
                     <div>
@@ -148,24 +157,33 @@ function sendTestEmail() {
                             Password
                             <span v-if="settings.mail_password_set" class="font-normal text-text-muted">(leave blank to keep current)</span>
                         </label>
-                        <Input id="mail_password" v-model="form.mail_password" type="password" autocomplete="new-password" />
+                        <Input
+                            id="mail_password"
+                            v-model="form.mail_password"
+                            type="password"
+                            placeholder="Leave blank to keep current"
+                            autocomplete="new-password"
+                        />
                         <p v-if="form.errors.mail_password" class="mt-1 text-sm text-danger">{{ form.errors.mail_password }}</p>
                     </div>
                     <div>
                         <label for="mail_from_address" class="mb-1 block text-sm font-semibold text-text-base">From address</label>
-                        <Input id="mail_from_address" v-model="form.mail_from_address" type="email" />
+                        <Input id="mail_from_address" v-model="form.mail_from_address" type="email" placeholder="noreply@example.com" />
                         <p v-if="form.errors.mail_from_address" class="mt-1 text-sm text-danger">{{ form.errors.mail_from_address }}</p>
                     </div>
                     <div>
                         <label for="mail_from_name" class="mb-1 block text-sm font-semibold text-text-base">From name</label>
-                        <Input id="mail_from_name" v-model="form.mail_from_name" type="text" />
+                        <Input id="mail_from_name" v-model="form.mail_from_name" type="text" placeholder="e.g. Support Team" />
                         <p v-if="form.errors.mail_from_name" class="mt-1 text-sm text-danger">{{ form.errors.mail_from_name }}</p>
                     </div>
                 </div>
             </Card>
 
             <div class="flex items-center justify-end gap-2">
-                <Button variant="primary" tone="purple" type="submit" :disabled="form.processing">Save changes</Button>
+                <Button variant="primary" tone="purple" type="submit" :loading="form.processing">
+                    <Check class="size-4" />
+                    Save changes
+                </Button>
             </div>
         </form>
     </AppLayout>

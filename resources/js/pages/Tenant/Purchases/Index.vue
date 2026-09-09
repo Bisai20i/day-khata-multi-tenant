@@ -1,6 +1,7 @@
 <script setup>
-import { computed, h, ref, watch } from 'vue';
+import { computed, h, onMounted, ref, watch } from 'vue';
 import { useForm, usePage } from '@inertiajs/vue3';
+import { Plus } from '@lucide/vue';
 import AppLayout from '@/layouts/AppLayout.vue';
 import Card from '@/components/ui/Card.vue';
 import Button from '@/components/ui/Button.vue';
@@ -17,6 +18,7 @@ defineProps({
     items: { type: Array, default: () => [] },
     accounts: { type: Array, default: () => [] },
     stores: { type: Array, default: () => [] },
+    correctionFiscalYear: { type: Object, default: null },
 });
 
 const page = usePage();
@@ -37,6 +39,43 @@ watch(
 );
 
 const showCreateForm = ref(false);
+
+// Restores an in-progress New purchase draft after Create.vue's inline
+// "+ New supplier" modal bounces the browser away to /suppliers and back
+// here (see Create.vue's submitSupplier()) - this component fully
+// unmounts/remounts across that round trip, so the draft is stashed in
+// sessionStorage right before the bounce and picked back up here. Mirrors
+// Sales/Index.vue's identical bridge exactly.
+const DRAFT_KEY = 'purchases-create-draft';
+const initialDraft = ref(null);
+
+onMounted(() => {
+    let raw;
+    try {
+        raw = sessionStorage.getItem(DRAFT_KEY);
+    } catch {
+        return;
+    }
+    if (!raw) return;
+
+    try {
+        sessionStorage.removeItem(DRAFT_KEY);
+        initialDraft.value = JSON.parse(raw);
+        showCreateForm.value = true;
+    } catch {
+        // malformed sessionStorage payload - nothing to recover, ignore.
+    }
+});
+
+function openCreateForm() {
+    initialDraft.value = null;
+    showCreateForm.value = true;
+}
+
+function closeCreateForm() {
+    initialDraft.value = null;
+    showCreateForm.value = false;
+}
 
 const paymentModeLabels = {
     cash: 'Cash',
@@ -146,13 +185,25 @@ const columns = [
 <template>
     <AppLayout title="Purchases" :nav-items="navItems">
         <template v-if="showCreateForm">
-            <Create :suppliers="suppliers" :items="items" :accounts="accounts" :stores="stores" @cancel="showCreateForm = false" @posted="showCreateForm = false" />
+            <Create
+                :suppliers="suppliers"
+                :items="items"
+                :accounts="accounts"
+                :stores="stores"
+                :correction-fiscal-year="correctionFiscalYear"
+                :initial-draft="initialDraft"
+                @cancel="closeCreateForm"
+                @posted="closeCreateForm"
+            />
         </template>
 
         <template v-else>
             <div class="mb-4 flex items-center justify-between">
                 <h2 class="text-base font-bold text-text-strong">Purchases</h2>
-                <Button variant="primary" tone="purple" @click="showCreateForm = true">New purchase</Button>
+                <Button variant="primary" tone="purple" @click="openCreateForm">
+                    <Plus class="size-4" />
+                    New purchase
+                </Button>
             </div>
 
             <Card variant="panel">
@@ -171,7 +222,7 @@ const columns = [
                     This posts a reversing voucher for purchase from {{ cancelling.supplier?.name }} ({{ Number(cancelling.total).toFixed(2) }}). This cannot be undone.
                 </p>
                 <div>
-                    <label class="mb-1 block text-sm font-semibold text-text-base">Reason</label>
+                    <label class="mb-1 block text-sm font-semibold text-text-base">Reason <span class="text-danger">*</span></label>
                     <Input v-model="reasonForm.reason" type="text" placeholder="Reason for cancellation" required />
                     <p v-if="reasonForm.errors.reason" class="mt-1 text-sm text-danger">{{ reasonForm.errors.reason }}</p>
                 </div>

@@ -1,7 +1,7 @@
 <script setup>
 import { computed, h, ref, watch } from 'vue';
 import { router, usePage } from '@inertiajs/vue3';
-import { ArrowRightCircle, Pencil, Printer, Trash2 } from '@lucide/vue';
+import { ArrowRightCircle, Pencil, Plus, Printer, Trash2 } from '@lucide/vue';
 import AppLayout from '@/layouts/AppLayout.vue';
 import Card from '@/components/ui/Card.vue';
 import Button from '@/components/ui/Button.vue';
@@ -9,6 +9,7 @@ import Badge from '@/components/ui/Badge.vue';
 import DataTable from '@/components/ui/DataTable.vue';
 import Tooltip from '@/components/ui/Tooltip.vue';
 import { useToast } from '@/composables/useToast';
+import { useConfirm } from '@/composables/useConfirm';
 import { navGroups } from '@/lib/nav-items.js';
 import Create from './Create.vue';
 
@@ -20,6 +21,7 @@ const props = defineProps({
 
 const page = usePage();
 const { toast } = useToast();
+const { confirm } = useConfirm();
 
 const isAdmin = computed(() => page.props.auth?.user?.role?.slug === 'admin');
 const navItems = computed(() => navGroups(isAdmin.value));
@@ -70,18 +72,28 @@ function closeForms() {
     editingQuotation.value = null;
 }
 
-function destroy(quotation) {
-    if (!confirm(`Delete quotation #${quotation.id}? This cannot be undone.`)) return;
+async function destroy(quotation) {
+    const confirmed = await confirm({
+        message: `Delete quotation #${quotation.id}? This cannot be undone.`,
+        tone: 'danger',
+        confirmLabel: 'Delete',
+    });
+    if (!confirmed) return;
     router.delete(`/quotations/${quotation.id}`, { preserveScroll: true });
 }
 
-function cancelQuotation(quotation) {
-    if (!confirm(`Cancel quotation #${quotation.id}?`)) return;
+async function cancelQuotation(quotation) {
+    const confirmed = await confirm({ message: `Cancel quotation #${quotation.id}?`, tone: 'danger', confirmLabel: 'Cancel quotation' });
+    if (!confirmed) return;
     router.post(`/quotations/${quotation.id}/cancel`, {}, { preserveScroll: true });
 }
 
-function convertToSale(quotation) {
-    if (!confirm(`Convert quotation #${quotation.id} to a real sale? This posts to the ledger and cannot be undone.`)) return;
+async function convertToSale(quotation) {
+    const confirmed = await confirm({
+        message: `Convert quotation #${quotation.id} to a real sale? This posts to the ledger and cannot be undone.`,
+        confirmLabel: 'Convert',
+    });
+    if (!confirmed) return;
     router.post(`/quotations/${quotation.id}/convert-to-sale`, {}, { preserveScroll: true });
 }
 
@@ -195,7 +207,10 @@ const columns = [
         <template v-else>
             <div class="mb-4 flex items-center justify-between">
                 <h2 class="text-base font-bold text-text-strong">Quotations</h2>
-                <Button variant="primary" tone="purple" @click="showCreateForm = true">New quotation</Button>
+                <Button variant="primary" tone="purple" @click="showCreateForm = true">
+                    <Plus class="size-4" />
+                    New quotation
+                </Button>
             </div>
 
             <Card variant="panel">

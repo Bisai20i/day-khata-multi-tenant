@@ -9,6 +9,7 @@ import Badge from '@/components/ui/Badge.vue';
 import DataTable from '@/components/ui/DataTable.vue';
 import Tooltip from '@/components/ui/Tooltip.vue';
 import { useToast } from '@/composables/useToast';
+import { useConfirm } from '@/composables/useConfirm';
 import { navGroups } from '@/lib/nav-items.js';
 
 defineProps({
@@ -20,6 +21,7 @@ defineProps({
 
 const page = usePage();
 const { toast } = useToast();
+const { confirm } = useConfirm();
 
 const isAdmin = computed(() => page.props.auth?.user?.role?.slug === 'admin');
 const navItems = computed(() => navGroups(isAdmin.value));
@@ -47,8 +49,13 @@ function createBackup() {
     router.post('/backups', {}, { preserveScroll: true });
 }
 
-function destroy(backup) {
-    if (!confirm(`Delete backup "${backup.filename}"? This cannot be undone.`)) return;
+async function destroy(backup) {
+    const confirmed = await confirm({
+        message: `Delete backup "${backup.filename}"? This cannot be undone.`,
+        tone: 'danger',
+        confirmLabel: 'Delete',
+    });
+    if (!confirmed) return;
     router.delete(`/backups/${backup.id}`, { preserveScroll: true });
 }
 

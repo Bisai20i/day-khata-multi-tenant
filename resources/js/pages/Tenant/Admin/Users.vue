@@ -170,25 +170,25 @@ const columns = [
         <Modal :open="modalOpen" :title="editing ? 'Edit employee' : 'New employee'" @update:open="onModalOpenChange">
             <form class="flex flex-col gap-4" @submit.prevent="submit">
                 <div>
-                    <label for="name" class="mb-1 block text-sm font-semibold text-text-base">Name</label>
-                    <Input id="name" v-model="form.name" type="text" required />
+                    <label for="name" class="mb-1 block text-sm font-semibold text-text-base">Name <span class="text-danger">*</span></label>
+                    <Input id="name" v-model="form.name" type="text" placeholder="e.g. Jane Doe" required />
                     <p v-if="form.errors.name" class="mt-1 text-sm text-danger">{{ form.errors.name }}</p>
                 </div>
 
                 <div>
-                    <label for="email" class="mb-1 block text-sm font-semibold text-text-base">Email</label>
-                    <Input id="email" v-model="form.email" type="email" required />
+                    <label for="email" class="mb-1 block text-sm font-semibold text-text-base">Email <span class="text-danger">*</span></label>
+                    <Input id="email" v-model="form.email" type="email" placeholder="you@example.com" required />
                     <p v-if="form.errors.email" class="mt-1 text-sm text-danger">{{ form.errors.email }}</p>
                 </div>
 
                 <div>
-                    <label for="role_id" class="mb-1 block text-sm font-semibold text-text-base">Role</label>
+                    <label for="role_id" class="mb-1 block text-sm font-semibold text-text-base">Role <span class="text-danger">*</span></label>
                     <Select id="role_id" v-model="form.role_id" :options="roleOptions" placeholder="Select role" />
                     <p v-if="form.errors.role_id" class="mt-1 text-sm text-danger">{{ form.errors.role_id }}</p>
                 </div>
 
                 <div v-if="editing">
-                    <label for="is_active" class="mb-1 block text-sm font-semibold text-text-base">Status</label>
+                    <label for="is_active" class="mb-1 block text-sm font-semibold text-text-base">Status <span class="text-danger">*</span></label>
                     <Select id="is_active" v-model="isActiveOption" :options="statusOptions" />
                     <p v-if="form.errors.is_active" class="mt-1 text-sm text-danger">{{ form.errors.is_active }}</p>
                 </div>
@@ -196,17 +196,28 @@ const columns = [
                 <div>
                     <label for="password" class="mb-1 block text-sm font-semibold text-text-base">
                         {{ editing ? 'New password (leave blank to keep current)' : 'Password' }}
+                        <span v-if="!editing" class="text-danger">*</span>
                     </label>
-                    <Input id="password" v-model="form.password" type="password" :required="!editing" />
+                    <Input
+                        id="password"
+                        v-model="form.password"
+                        type="password"
+                        :placeholder="editing ? 'Leave blank to keep current' : 'Enter a password'"
+                        :required="!editing"
+                    />
                     <p v-if="form.errors.password" class="mt-1 text-sm text-danger">{{ form.errors.password }}</p>
                 </div>
 
                 <div>
-                    <label for="password_confirmation" class="mb-1 block text-sm font-semibold text-text-base">Confirm password</label>
+                    <label for="password_confirmation" class="mb-1 block text-sm font-semibold text-text-base">
+                        Confirm password
+                        <span v-if="!editing" class="text-danger">*</span>
+                    </label>
                     <Input
                         id="password_confirmation"
                         v-model="form.password_confirmation"
                         type="password"
+                        :placeholder="editing ? 'Confirm new password' : 'Re-enter the password'"
                         :required="!editing"
                     />
                 </div>

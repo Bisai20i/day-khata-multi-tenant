@@ -11,6 +11,7 @@ import Modal from '@/components/ui/Modal.vue';
 import DataTable from '@/components/ui/DataTable.vue';
 import RowActions from '@/components/ui/RowActions.vue';
 import { useToast } from '@/composables/useToast';
+import { useConfirm } from '@/composables/useConfirm';
 import { navGroups } from '@/lib/nav-items.js';
 
 const props = defineProps({
@@ -30,6 +31,7 @@ const isAdmin = computed(() => page.props.auth?.user?.role?.slug === 'admin');
 const navItems = computed(() => navGroups(isAdmin.value));
 
 const { toast } = useToast();
+const { confirm } = useConfirm();
 
 onMounted(() => {
     if (page.props.flash?.status) {
@@ -95,8 +97,8 @@ function submit() {
     }
 }
 
-function destroy(group) {
-    if (!confirm('Delete this account group?')) return;
+async function destroy(group) {
+    if (!(await confirm({ message: 'Delete this account group?', tone: 'danger', confirmLabel: 'Delete' }))) return;
     router.delete(`/account-groups/${group.id}`, {
         onSuccess: () => toast({ message: 'Account group deleted', variant: 'success' }),
     });
@@ -140,7 +142,7 @@ const columns = [
         <Modal :open="showModal" :title="editing ? 'Edit Account Group' : 'New Account Group'" @update:open="onModalOpenChange">
             <form class="flex flex-col gap-4" @submit.prevent="submit">
                 <div>
-                    <label for="account_head_id" class="mb-1 block text-sm font-semibold text-text-base">Account head</label>
+                    <label for="account_head_id" class="mb-1 block text-sm font-semibold text-text-base">Account head <span class="text-danger">*</span></label>
                     <Select
                         id="account_head_id"
                         v-model="form.account_head_id"
@@ -151,8 +153,8 @@ const columns = [
                 </div>
 
                 <div>
-                    <label for="name" class="mb-1 block text-sm font-semibold text-text-base">Name</label>
-                    <Input id="name" v-model="form.name" type="text" required />
+                    <label for="name" class="mb-1 block text-sm font-semibold text-text-base">Name <span class="text-danger">*</span></label>
+                    <Input id="name" v-model="form.name" type="text" placeholder="e.g. Current Assets" required />
                     <p v-if="form.errors.name" class="mt-1 text-sm text-danger">{{ form.errors.name }}</p>
                 </div>
             </form>

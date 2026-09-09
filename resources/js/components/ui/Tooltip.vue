@@ -1,24 +1,30 @@
 <script setup>
+import { TooltipContent, TooltipPortal, TooltipProvider, TooltipRoot, TooltipTrigger } from 'reka-ui';
+
 defineProps({
     label: { type: String, required: true },
     side: { type: String, default: 'top' },
+    sideOffset: { type: Number, default: 7 },
 });
-
-const sideClasses = {
-    top: 'bottom-full left-1/2 mb-[7px] -translate-x-1/2 translate-y-1',
-    bottom: 'top-full left-1/2 mt-[7px] -translate-x-1/2 -translate-y-1',
-};
 </script>
 
 <template>
-    <span class="group/tooltip relative inline-flex">
-        <slot />
-        <span
-            role="tooltip"
-            class="pointer-events-none absolute z-30 bg-toast-bg px-2 py-1 text-[11px] font-semibold whitespace-nowrap text-white opacity-0 transition-[opacity,transform] duration-150 ease-out group-hover/tooltip:translate-y-0 group-hover/tooltip:opacity-100 group-focus-within/tooltip:translate-y-0 group-focus-within/tooltip:opacity-100"
-            :class="sideClasses[side] ?? sideClasses.top"
-        >
-            {{ label }}
-        </span>
-    </span>
+    <TooltipProvider :delay-duration="200" :disable-hoverable-content="true">
+        <TooltipRoot>
+            <TooltipTrigger as-child>
+                <slot />
+            </TooltipTrigger>
+            <TooltipPortal>
+                <TooltipContent
+                    :side="side"
+                    :side-offset="sideOffset"
+                    :avoid-collisions="true"
+                    :collision-padding="8"
+                    class="pointer-events-none z-50 bg-toast-bg px-2 py-1 text-[11px] font-semibold whitespace-nowrap text-white"
+                >
+                    {{ label }}
+                </TooltipContent>
+            </TooltipPortal>
+        </TooltipRoot>
+    </TooltipProvider>
 </template>

@@ -10,6 +10,7 @@ import Modal from '@/components/ui/Modal.vue';
 import Input from '@/components/ui/Input.vue';
 import RowActions from '@/components/ui/RowActions.vue';
 import { useToast } from '@/composables/useToast';
+import { useConfirm } from '@/composables/useConfirm';
 import { navGroups } from '@/lib/nav-items.js';
 
 defineProps({
@@ -21,6 +22,7 @@ defineProps({
 
 const page = usePage();
 const { toast } = useToast();
+const { confirm } = useConfirm();
 
 // Create/edit/delete all redirect back to this same route/component - Inertia
 // patches the already-mounted instance rather than remounting it, so a plain
@@ -81,8 +83,8 @@ function submit() {
     }
 }
 
-function destroy(category) {
-    if (!confirm('Delete this category?')) return;
+async function destroy(category) {
+    if (!(await confirm({ message: 'Delete this category?', tone: 'danger', confirmLabel: 'Delete' }))) return;
     router.delete(`/item-categories/${category.id}`);
 }
 
@@ -129,8 +131,8 @@ const columns = [
         >
             <form id="item-category-form" class="flex flex-col gap-4" @submit.prevent="submit">
                 <div>
-                    <label for="name" class="mb-1 block text-sm font-semibold text-text-base">Name</label>
-                    <Input id="name" v-model="form.name" type="text" required />
+                    <label for="name" class="mb-1 block text-sm font-semibold text-text-base">Name <span class="text-danger">*</span></label>
+                    <Input id="name" v-model="form.name" type="text" placeholder="e.g. Beverages" required />
                     <p v-if="form.errors.name" class="mt-1 text-sm text-danger">{{ form.errors.name }}</p>
                 </div>
 

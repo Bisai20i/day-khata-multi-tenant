@@ -1,7 +1,7 @@
 <script setup>
 import { computed, h, ref, watch } from 'vue';
 import { useForm, usePage } from '@inertiajs/vue3';
-import { Ban } from '@lucide/vue';
+import { Ban, Plus } from '@lucide/vue';
 import AppLayout from '@/layouts/AppLayout.vue';
 import Card from '@/components/ui/Card.vue';
 import Button from '@/components/ui/Button.vue';
@@ -17,6 +17,7 @@ const props = defineProps({
     stockAdjustments: { type: Array, default: () => [] },
     items: { type: Array, default: () => [] },
     stores: { type: Array, default: () => [] },
+    correctionFiscalYear: { type: Object, default: null },
 });
 
 const page = usePage();
@@ -142,13 +143,22 @@ const columns = [
 <template>
     <AppLayout title="Stock Adjustments" :nav-items="navItems">
         <template v-if="showCreateForm">
-            <Create :items="items" :stores="stores" @cancel="showCreateForm = false" @posted="showCreateForm = false" />
+            <Create
+                :items="items"
+                :stores="stores"
+                :correction-fiscal-year="correctionFiscalYear"
+                @cancel="showCreateForm = false"
+                @posted="showCreateForm = false"
+            />
         </template>
 
         <template v-else>
             <div class="mb-4 flex items-center justify-between">
                 <h2 class="text-base font-bold text-text-strong">Stock Adjustments</h2>
-                <Button variant="primary" tone="purple" @click="showCreateForm = true">New adjustment</Button>
+                <Button variant="primary" tone="purple" @click="showCreateForm = true">
+                    <Plus class="size-4" />
+                    New adjustment
+                </Button>
             </div>
 
             <Card variant="panel">
@@ -162,8 +172,8 @@ const columns = [
                     This reverts the quantity impact of this adjustment. This cannot be undone.
                 </p>
                 <div>
-                    <label class="mb-1 block text-sm font-semibold text-text-base">Reason</label>
-                    <Input v-model="cancelForm.reason" type="text" required />
+                    <label class="mb-1 block text-sm font-semibold text-text-base">Reason <span class="text-danger">*</span></label>
+                    <Input v-model="cancelForm.reason" type="text" placeholder="Reason for cancellation" required />
                     <p v-if="cancelForm.errors.reason" class="mt-1 text-sm text-danger">{{ cancelForm.errors.reason }}</p>
                 </div>
             </form>

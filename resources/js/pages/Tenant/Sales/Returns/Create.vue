@@ -80,11 +80,11 @@ function submit() {
         <form class="flex flex-col gap-4" @submit.prevent="submit">
             <div class="grid grid-cols-2 gap-4">
                 <div>
-                    <label class="mb-1 block text-sm font-semibold text-text-base">Original sale</label>
+                    <label class="mb-1 block text-sm font-semibold text-text-base">Original sale <span class="text-danger">*</span></label>
                     <Combobox :model-value="selectedSaleId" :options="saleOptions" placeholder="Select sale" @update:model-value="onSaleChange" />
                 </div>
                 <div>
-                    <label class="mb-1 block text-sm font-semibold text-text-base">Return date</label>
+                    <label class="mb-1 block text-sm font-semibold text-text-base">Return date <span class="text-danger">*</span></label>
                     <NepaliDateInput v-model="form.date" required />
                     <p v-if="form.errors.date" class="mt-1 text-sm text-danger">{{ form.errors.date }}</p>
                 </div>
@@ -154,7 +154,7 @@ function submit() {
                     type="submit"
                     :disabled="form.processing || !selectedSaleId || !form.date"
                 >
-                    Post return
+                    Create Sales Return
                 </Button>
             </div>
         </form>

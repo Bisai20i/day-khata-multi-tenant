@@ -1,7 +1,7 @@
 <script setup>
 import { computed } from 'vue';
 import { useForm, Link } from '@inertiajs/vue3';
-import { ArrowLeft, Building2, History, LayoutDashboard, Settings as SettingsIcon, ShieldCheck } from '@lucide/vue';
+import { ArrowLeft, Building2, Check, History, LayoutDashboard, Settings as SettingsIcon, ShieldCheck } from '@lucide/vue';
 import AppLayout from '@/layouts/AppLayout.vue';
 import Card from '@/components/ui/Card.vue';
 import Input from '@/components/ui/Input.vue';
@@ -68,25 +68,25 @@ function submit() {
         <Card variant="panel" class="max-w-lg">
             <form class="flex flex-col gap-4" @submit.prevent="submit">
                 <div>
-                    <label for="name" class="mb-1 block text-sm font-semibold text-text-base">Name</label>
-                    <Input id="name" v-model="form.name" type="text" required />
+                    <label for="name" class="mb-1 block text-sm font-semibold text-text-base">Name <span class="text-danger">*</span></label>
+                    <Input id="name" v-model="form.name" type="text" placeholder="e.g. Jane Doe" required />
                     <p v-if="form.errors.name" class="mt-1 text-sm text-danger">{{ form.errors.name }}</p>
                 </div>
 
                 <div>
-                    <label for="email" class="mb-1 block text-sm font-semibold text-text-base">Email</label>
-                    <Input id="email" v-model="form.email" type="email" required />
+                    <label for="email" class="mb-1 block text-sm font-semibold text-text-base">Email <span class="text-danger">*</span></label>
+                    <Input id="email" v-model="form.email" type="email" placeholder="you@example.com" required />
                     <p v-if="form.errors.email" class="mt-1 text-sm text-danger">{{ form.errors.email }}</p>
                 </div>
 
                 <div>
-                    <label for="role" class="mb-1 block text-sm font-semibold text-text-base">Role</label>
+                    <label for="role" class="mb-1 block text-sm font-semibold text-text-base">Role <span class="text-danger">*</span></label>
                     <Select id="role" v-model="form.role" :options="roleOptions" />
                     <p v-if="form.errors.role" class="mt-1 text-sm text-danger">{{ form.errors.role }}</p>
                 </div>
 
                 <div>
-                    <label for="is_active" class="mb-1 block text-sm font-semibold text-text-base">Status</label>
+                    <label for="is_active" class="mb-1 block text-sm font-semibold text-text-base">Status <span class="text-danger">*</span></label>
                     <Select id="is_active" v-model="isActiveOption" :options="statusOptions" />
                     <p v-if="form.errors.is_active" class="mt-1 text-sm text-danger">{{ form.errors.is_active }}</p>
                 </div>
@@ -95,17 +95,18 @@ function submit() {
                     <label for="password" class="mb-1 block text-sm font-semibold text-text-base">
                         New password (leave blank to keep current)
                     </label>
-                    <Input id="password" v-model="form.password" type="password" />
+                    <Input id="password" v-model="form.password" type="password" placeholder="Leave blank to keep current" />
                     <p v-if="form.errors.password" class="mt-1 text-sm text-danger">{{ form.errors.password }}</p>
                 </div>
 
                 <div>
                     <label for="password_confirmation" class="mb-1 block text-sm font-semibold text-text-base">Confirm password</label>
-                    <Input id="password_confirmation" v-model="form.password_confirmation" type="password" />
+                    <Input id="password_confirmation" v-model="form.password_confirmation" type="password" placeholder="Confirm new password" />
                 </div>
 
                 <div class="flex gap-2">
-                    <Button type="submit" variant="primary" tone="purple" :disabled="form.processing" class="flex-1">
+                    <Button type="submit" variant="primary" tone="purple" :loading="form.processing" class="flex-1">
+                        <Check class="size-4" />
                         Save
                     </Button>
                     <Button :as="Link" href="/platform-admins" variant="secondary" tone="purple" class="flex-1 justify-center">

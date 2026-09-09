@@ -10,6 +10,7 @@ import Modal from '@/components/ui/Modal.vue';
 import DataTable from '@/components/ui/DataTable.vue';
 import RowActions from '@/components/ui/RowActions.vue';
 import { useToast } from '@/composables/useToast';
+import { useConfirm } from '@/composables/useConfirm';
 import { navGroups } from '@/lib/nav-items.js';
 
 defineProps({
@@ -21,6 +22,7 @@ defineProps({
 
 const page = usePage();
 const { toast } = useToast();
+const { confirm } = useConfirm();
 
 const isAdmin = computed(() => page.props.auth?.user?.role?.slug === 'admin');
 
@@ -89,8 +91,8 @@ function submit() {
     }
 }
 
-function destroyAgent(agent) {
-    if (!confirm(`Delete ${agent.name}?`)) return;
+async function destroyAgent(agent) {
+    if (!(await confirm({ message: `Delete ${agent.name}?`, tone: 'danger', confirmLabel: 'Delete' }))) return;
     router.delete(`/agents/${agent.id}`);
 }
 
@@ -150,20 +152,20 @@ const columns = [
         <Modal :open="modalOpen" :title="editing ? 'Edit agent' : 'New agent'" @update:open="onModalOpenChange">
             <form id="agent-form" class="flex flex-col gap-4" @submit.prevent="submit">
                 <div>
-                    <label for="name" class="mb-1 block text-sm font-semibold text-text-base">Name</label>
-                    <Input id="name" v-model="form.name" type="text" required />
+                    <label for="name" class="mb-1 block text-sm font-semibold text-text-base">Name <span class="text-danger">*</span></label>
+                    <Input id="name" v-model="form.name" type="text" placeholder="e.g. Jane Doe" required />
                     <p v-if="form.errors.name" class="mt-1 text-sm text-danger">{{ form.errors.name }}</p>
                 </div>
 
                 <div>
                     <label for="mobile_no" class="mb-1 block text-sm font-semibold text-text-base">Mobile No</label>
-                    <Input id="mobile_no" v-model="form.mobile_no" type="text" />
+                    <Input id="mobile_no" v-model="form.mobile_no" type="text" placeholder="98XXXXXXXX" />
                     <p v-if="form.errors.mobile_no" class="mt-1 text-sm text-danger">{{ form.errors.mobile_no }}</p>
                 </div>
 
                 <div>
                     <label for="address" class="mb-1 block text-sm font-semibold text-text-base">Address</label>
-                    <Input id="address" v-model="form.address" type="text" />
+                    <Input id="address" v-model="form.address" type="text" placeholder="e.g. Kathmandu-10" />
                     <p v-if="form.errors.address" class="mt-1 text-sm text-danger">{{ form.errors.address }}</p>
                 </div>
 

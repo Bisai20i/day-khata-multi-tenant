@@ -91,9 +91,9 @@ const acknowledgedRecoveryCodes = ref(false);
                 <form class="flex max-w-xs flex-col gap-3" @submit.prevent="disable">
                     <div>
                         <label for="disable-password" class="mb-1 block text-sm font-semibold text-text-base">
-                            Current password
+                            Current password <span class="text-danger">*</span>
                         </label>
-                        <Input id="disable-password" v-model="disableForm.password" type="password" required />
+                        <Input id="disable-password" v-model="disableForm.password" type="password" placeholder="Enter your password" required />
                         <p v-if="disableForm.errors.password" class="mt-1 text-sm text-danger">
                             {{ disableForm.errors.password }}
                         </p>
@@ -124,9 +124,9 @@ const acknowledgedRecoveryCodes = ref(false);
                 <form class="flex max-w-xs flex-col gap-3" @submit.prevent="confirm">
                     <div>
                         <label for="confirm-code" class="mb-1 block text-sm font-semibold text-text-base">
-                            Code from your app
+                            Code from your app <span class="text-danger">*</span>
                         </label>
-                        <Input id="confirm-code" v-model="confirmForm.code" type="text" autocomplete="one-time-code" required />
+                        <Input id="confirm-code" v-model="confirmForm.code" type="text" placeholder="123456" autocomplete="one-time-code" required />
                         <p v-if="confirmForm.errors.code" class="mt-1 text-sm text-danger">
                             {{ confirmForm.errors.code }}
                         </p>

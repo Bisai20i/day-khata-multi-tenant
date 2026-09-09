@@ -11,6 +11,7 @@ import Input from '@/components/ui/Input.vue';
 import Select from '@/components/ui/Select.vue';
 import RowActions from '@/components/ui/RowActions.vue';
 import { useToast } from '@/composables/useToast';
+import { useConfirm } from '@/composables/useConfirm';
 import { navGroups } from '@/lib/nav-items.js';
 
 const props = defineProps({
@@ -26,6 +27,7 @@ const props = defineProps({
 
 const page = usePage();
 const { toast } = useToast();
+const { confirm } = useConfirm();
 
 // Create/edit/delete all redirect back to this same route/component - Inertia
 // patches the already-mounted instance rather than remounting it, so a plain
@@ -90,8 +92,8 @@ function submit() {
     }
 }
 
-function destroy(subcategory) {
-    if (!confirm('Delete this subcategory?')) return;
+async function destroy(subcategory) {
+    if (!(await confirm({ message: 'Delete this subcategory?', tone: 'danger', confirmLabel: 'Delete' }))) return;
     router.delete(`/item-subcategories/${subcategory.id}`);
 }
 
@@ -144,7 +146,7 @@ const columns = [
         >
             <form id="item-subcategory-form" class="flex flex-col gap-4" @submit.prevent="submit">
                 <div>
-                    <label for="item_category_id" class="mb-1 block text-sm font-semibold text-text-base">Category</label>
+                    <label for="item_category_id" class="mb-1 block text-sm font-semibold text-text-base">Category <span class="text-danger">*</span></label>
                     <Select
                         id="item_category_id"
                         v-model="form.item_category_id"
@@ -155,8 +157,8 @@ const columns = [
                 </div>
 
                 <div>
-                    <label for="name" class="mb-1 block text-sm font-semibold text-text-base">Name</label>
-                    <Input id="name" v-model="form.name" type="text" required />
+                    <label for="name" class="mb-1 block text-sm font-semibold text-text-base">Name <span class="text-danger">*</span></label>
+                    <Input id="name" v-model="form.name" type="text" placeholder="e.g. Soft drinks" required />
                     <p v-if="form.errors.name" class="mt-1 text-sm text-danger">{{ form.errors.name }}</p>
                 </div>
 

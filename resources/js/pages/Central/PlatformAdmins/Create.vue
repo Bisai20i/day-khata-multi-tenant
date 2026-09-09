@@ -1,6 +1,6 @@
 <script setup>
 import { useForm, Link } from '@inertiajs/vue3';
-import { ArrowLeft, Building2, History, LayoutDashboard, Settings as SettingsIcon, ShieldCheck } from '@lucide/vue';
+import { ArrowLeft, Building2, History, LayoutDashboard, Settings as SettingsIcon, ShieldCheck, UserPlus } from '@lucide/vue';
 import AppLayout from '@/layouts/AppLayout.vue';
 import Card from '@/components/ui/Card.vue';
 import Input from '@/components/ui/Input.vue';
@@ -43,35 +43,36 @@ function submit() {
         <Card variant="panel" class="max-w-lg">
             <form class="flex flex-col gap-4" @submit.prevent="submit">
                 <div>
-                    <label for="name" class="mb-1 block text-sm font-semibold text-text-base">Name</label>
-                    <Input id="name" v-model="form.name" type="text" required />
+                    <label for="name" class="mb-1 block text-sm font-semibold text-text-base">Name <span class="text-danger">*</span></label>
+                    <Input id="name" v-model="form.name" type="text" placeholder="e.g. Jane Doe" required />
                     <p v-if="form.errors.name" class="mt-1 text-sm text-danger">{{ form.errors.name }}</p>
                 </div>
 
                 <div>
-                    <label for="email" class="mb-1 block text-sm font-semibold text-text-base">Email</label>
-                    <Input id="email" v-model="form.email" type="email" required />
+                    <label for="email" class="mb-1 block text-sm font-semibold text-text-base">Email <span class="text-danger">*</span></label>
+                    <Input id="email" v-model="form.email" type="email" placeholder="you@example.com" required />
                     <p v-if="form.errors.email" class="mt-1 text-sm text-danger">{{ form.errors.email }}</p>
                 </div>
 
                 <div>
-                    <label for="role" class="mb-1 block text-sm font-semibold text-text-base">Role</label>
+                    <label for="role" class="mb-1 block text-sm font-semibold text-text-base">Role <span class="text-danger">*</span></label>
                     <Select id="role" v-model="form.role" :options="roleOptions" />
                     <p v-if="form.errors.role" class="mt-1 text-sm text-danger">{{ form.errors.role }}</p>
                 </div>
 
                 <div>
-                    <label for="password" class="mb-1 block text-sm font-semibold text-text-base">Password</label>
-                    <Input id="password" v-model="form.password" type="password" required />
+                    <label for="password" class="mb-1 block text-sm font-semibold text-text-base">Password <span class="text-danger">*</span></label>
+                    <Input id="password" v-model="form.password" type="password" placeholder="Enter a password" required />
                     <p v-if="form.errors.password" class="mt-1 text-sm text-danger">{{ form.errors.password }}</p>
                 </div>
 
                 <div>
-                    <label for="password_confirmation" class="mb-1 block text-sm font-semibold text-text-base">Confirm password</label>
-                    <Input id="password_confirmation" v-model="form.password_confirmation" type="password" required />
+                    <label for="password_confirmation" class="mb-1 block text-sm font-semibold text-text-base">Confirm password <span class="text-danger">*</span></label>
+                    <Input id="password_confirmation" v-model="form.password_confirmation" type="password" placeholder="Re-enter the password" required />
                 </div>
 
-                <Button type="submit" variant="primary" tone="purple" :disabled="form.processing" class="w-full">
+                <Button type="submit" variant="primary" tone="purple" :loading="form.processing" class="w-full">
+                    <UserPlus class="size-4" />
                     Create platform admin
                 </Button>
             </form>

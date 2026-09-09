@@ -1,12 +1,13 @@
 <script setup>
 import { computed, h } from 'vue';
 import { Link, usePage } from '@inertiajs/vue3';
-import { Building2, History, LayoutDashboard, Settings as SettingsIcon, ShieldCheck } from '@lucide/vue';
+import { Building2, History, LayoutDashboard, Pencil, Settings as SettingsIcon, ShieldCheck, UserPlus } from '@lucide/vue';
 import AppLayout from '@/layouts/AppLayout.vue';
 import Card from '@/components/ui/Card.vue';
 import Button from '@/components/ui/Button.vue';
 import Badge from '@/components/ui/Badge.vue';
 import DataTable from '@/components/ui/DataTable.vue';
+import Tooltip from '@/components/ui/Tooltip.vue';
 
 defineProps({
     admins: {
@@ -61,10 +62,16 @@ const columns = computed(() => {
             header: '',
             numeric: false,
             cell: ({ row }) =>
-                h(
-                    Link,
-                    { href: `/platform-admins/${row.original.id}/edit`, class: 'text-sm font-semibold text-primary hover:underline' },
-                    () => 'Edit',
+                h(Tooltip, { label: 'Edit platform admin' }, () =>
+                    h(
+                        Link,
+                        {
+                            href: `/platform-admins/${row.original.id}/edit`,
+                            class: 'flex h-8 w-8 items-center justify-center bg-bg-subtle text-text-muted transition-colors duration-150 ease-out hover:bg-primary-tint hover:text-primary',
+                            'aria-label': 'Edit platform admin',
+                        },
+                        () => h(Pencil, { class: 'size-[13px]' }),
+                    ),
                 ),
         },
     ];
@@ -76,6 +83,7 @@ const columns = computed(() => {
         <div class="mb-4 flex items-center justify-between">
             <h2 class="text-base font-bold text-text-strong">Platform Admins</h2>
             <Button v-if="isOwner" :as="Link" href="/platform-admins/create" variant="primary" tone="purple">
+                <UserPlus class="size-4" />
                 New platform admin
             </Button>
         </div>
