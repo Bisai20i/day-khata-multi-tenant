@@ -3,6 +3,70 @@
 Living state doc. Read this before starting work, update it before stopping. See `goal.md` for
 direction/roadmap — this file is "what exists and why," not "what's next."
 
+**2026-09-09 entry (newest — first-cut Stock Transfer module).** Legacy `day_khata` had "Stock Transfer"
+as a read-only reference (`resources/views/stocktransfer.blade.php` + `storeStockTransfer`); this rewrite
+had real per-store stock (`Store`, `store_id` on Sale/Purchase/StockAdjustment/etc., `Item::currentStock
+($storeId)`) but no way to move stock *between* stores. Built a beta-scope first cut, mirroring
+`StockAdjustment` exactly as the structural template:
+
+- **Schema**: `stock_transfers` (date, from_store_id, to_store_id, note, total_value, status,
+  cancelled_by/at/reason, created_by — same shape as `stock_adjustments`, both FKs `restrictOnDelete()`
+  against `stores`) + `stock_transfer_lines` (item_id, quantity, unit_cost_rate, line_value, remarks — same
+  shape as `stock_adjustment_lines` minus the direction/reason_type columns, which a transfer doesn't need
+  since "out of `from_store_id`, into `to_store_id`" is unambiguous).
+- **`App\Models\StockTransfer::post()`** mirrors `StockAdjustment::post()`'s shape: never touches the
+  ledger (no `JournalVoucher::post()` call — relocating a business's own stock between its own stores has
+  no accounting impact, same reasoning `StockAdjustment` already documents). Each line writes **two**
+  `ItemStockMovement` rows via `Item::recordStockMovement()` — a new `StockMovementType::TransferOut`
+  (direction -1) at `from_store_id`, a new `StockMovementType::TransferIn` (direction +1) at
+  `to_store_id` — both same date, both referencing the same `StockTransferLine` via the polymorphic
+  `reference` (so `cancel()` flips both with one query, verbatim copy of `StockAdjustment::cancel()`'s
+  shape). Over-transfer guard is the **same `lockForUpdate()` pattern** `StockAdjustment::post()` uses for
+  its 'out' lines, scoped to `where('store_id', $fromStoreId)` — **deliberately unconditional, not gated by
+  `CompanySetting::allow_negative_stock`** (unlike `Sale::post()`'s negative-stock check): that setting is
+  a sales/overselling business policy, and there's no equivalent reason to let a transfer push a store's
+  stock negative, so this follows `StockAdjustment`'s stricter, always-on precedent instead. Same-store
+  transfer is rejected both at HTTP validation (`different:from_store_id`) and at the model layer (defense
+  in depth, matching `StockAdjustment::post()`'s own zero/negative-quantity model-layer guard).
+- **Deliberately out of scope for this first cut** (flagged, not silently built): no fiscal-year
+  reopened-for-correction posting path (`StockAdjustment` supports one via an optional `fiscal_year_id`
+  param + `ClosedFiscalYearGuard`, but `stock_adjustments` itself has no stored `fiscal_year_id` column
+  either — a transfer needing to move stock into a closed, reopened year is a thin enough edge case to
+  defer). No admin-only gating — same open-to-any-authenticated-tenant-user access level `StockAdjustment`
+  itself has.
+- **Cross-cutting fix so this doesn't silently break an existing report**: `StockMovementRegisterController
+  ::movementTypeLabel()` does an exhaustive `match($type)` with no `default` arm — adding `TransferIn`/
+  `TransferOut` cases to `StockMovementType` without adding them there would throw `UnhandledMatchError`
+  the first time a transfer movement showed up in the Stock Movement Register. Added both labels plus a
+  `StockTransferLine` case to `referenceDescription()` (shows "Stock Transfer #N (From → To)"). Confirmed
+  via grep that `StockValuationReportController`/`InventoryReportController`/`CategoryWiseReportController`
+  only ever call `->direction()` on movement types (never an exhaustive label match), so they pick up
+  transfers automatically once `direction()` itself is extended — no further changes needed there.
+- **Routes**: `routes/tenant-stock-transfers.php` (index/store/cancel, verbatim structural copy of
+  `tenant-stock-adjustments.php`), required from `routes/tenant.php` right after the stock-adjustments
+  line. **Nav**: "Stock Transfers" added to the INVENTORY group in `resources/js/lib/nav-items.js`, right
+  after "Stock Adjustments".
+- **Vue**: `Tenant/Inventory/StockTransfers/{Create,Index}.vue`, structural copy of the StockAdjustments
+  pair (same `Card`/`DataTable`/`Modal`/`Combobox`/`NepaliDateInput` components, same cancel-modal flow,
+  same Inertia-doesn't-remount flash-toast-via-`watch` convention) minus the direction/reason/opening-stock
+  machinery a transfer doesn't need — replaced with a from-store Combobox and a to-store Combobox, with a
+  same-store frontend check mirroring the model-layer guard so the user sees the problem before submitting.
+- **Tests**: `tests/Feature/Tenant/Inventory/StockTransferTest.php` — transfer moves stock correctly
+  between two stores (asserts exactly 2 `ItemStockMovement` rows with correct types/store_ids/dates),
+  same-store transfer rejected, over-transfer rejected (and confirms stock at both stores is unchanged
+  after the rejected attempt, proving the `DB::transaction()` rollback), cancel reverts both stores'
+  stock and rejects double-cancellation, zero/negative quantity rejected at the model layer.
+- **Verification**: `php -l` on every touched/created file (clean), `vendor/bin/pint --test` scoped to just
+  these files (passed, no changes needed) — **deliberately not `--dirty`**: another session was
+  concurrently building an unrelated "Stock Conversion" feature (`StockConversionType` enum, `stock_
+  conversions` migrations, edits to `SaleController`/`Sales/Create.vue`/`composer.json`) directly in this
+  same tree while this work was in progress (confirmed live via `git status` mid-session — both sets of
+  edits to the shared `StockMovementType` enum and `StockMovementRegisterController` landed cleanly
+  side by side with no lost updates, checked by re-reading both files after the fact). `npm run build`/
+  `php artisan test`/`php artisan tenants:migrate` **not run** (per this project's own "no shell commands
+  beyond php -l/Pint from an agent in this repo" standing rule) — flagged for the user's own verification
+  pass, same posture as the Phase A-D invoicing-settings work above.
+
 **2026-09-08 entry (newest — read this first, older entries below are from the prior central-panel work
 and are unrelated to this one).** User asked for a gap analysis of the tenant-side app against the legacy
 `day_khata` predecessor (invoice settings, fiscal year, general settings, Add Sale/Add Purchase UX), then
