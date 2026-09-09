@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Tenant\Sales;
 use App\Http\Controllers\Controller;
 use App\Models\Account;
 use App\Models\CompanySetting;
+use App\Models\Customer;
 use App\Models\Sale;
 use App\Models\SalesReturn;
 use App\Models\Store;
@@ -18,19 +19,43 @@ use InvalidArgumentException;
 
 class SalesReturnController extends Controller
 {
-    public function index(): Response
+    /**
+     * Listing is server-side filtered (date range + customer, the latter
+     * via the parent sale since a return has no customer_id of its own) and
+     * paginated - same `when()`/`paginate()->withQueryString()` shape
+     * Central\Tenants\TenantController::index() established.
+     */
+    public function index(Request $request): Response
     {
+        $from = $request->filled('from') ? $request->string('from')->toString() : null;
+        $to = $request->filled('to') ? $request->string('to')->toString() : null;
+        $customerId = $request->filled('customer_id') ? (int) $request->input('customer_id') : null;
+
+        $returns = SalesReturn::query()
+            ->with(['sale.customer:id,name', 'lines.saleLine.item:id,name,unit'])
+            ->when($from, fn ($query, string $from) => $query->whereDate('date', '>=', $from))
+            ->when($to, fn ($query, string $to) => $query->whereDate('date', '<=', $to))
+            ->when($customerId, fn ($query, int $customerId) => $query->whereHas(
+                'sale', fn ($query) => $query->where('customer_id', $customerId)
+            ))
+            ->orderByDesc('date')
+            ->orderByDesc('id')
+            ->paginate(25)
+            ->withQueryString();
+
         return Inertia::render('Tenant/Sales/Returns/Index', [
-            'returns' => SalesReturn::query()
-                ->with(['sale.customer:id,name', 'lines.saleLine.item:id,name,unit'])
-                ->orderByDesc('date')
-                ->orderByDesc('id')
-                ->get(),
+            'returns' => $returns,
+            'filters' => [
+                'from' => $from,
+                'to' => $to,
+                'customer_id' => $customerId,
+            ],
             'sales' => Sale::query()
                 ->where('status', 'posted')
                 ->with(['customer:id,name', 'lines.item:id,name,unit'])
                 ->orderByDesc('date')
                 ->get(),
+            'customers' => Customer::query()->orderBy('name')->get(['id', 'name']),
             'accounts' => Account::query()->orderBy('name')->get(['id', 'code', 'name']),
             'stores' => Store::where('is_active', true)->orderBy('name')->get(),
         ]);

@@ -1,20 +1,29 @@
 <script setup>
-import { computed, h, ref, watch } from 'vue';
-import { router, usePage } from '@inertiajs/vue3';
-import { ArrowRightCircle, Pencil, Plus, Printer, Trash2 } from '@lucide/vue';
+import { computed, h, reactive, ref, watch } from 'vue';
+import { Link, router, usePage } from '@inertiajs/vue3';
+import { ArrowRightCircle, Pencil, Plus, Printer, Search, Trash2, X } from '@lucide/vue';
 import AppLayout from '@/layouts/AppLayout.vue';
 import Card from '@/components/ui/Card.vue';
 import Button from '@/components/ui/Button.vue';
 import Badge from '@/components/ui/Badge.vue';
 import DataTable from '@/components/ui/DataTable.vue';
 import Tooltip from '@/components/ui/Tooltip.vue';
+import NepaliDateInput from '@/components/ui/NepaliDateInput.vue';
+import Combobox from '@/components/ui/Combobox.vue';
 import { useToast } from '@/composables/useToast';
 import { useConfirm } from '@/composables/useConfirm';
 import { navGroups } from '@/lib/nav-items.js';
 import Create from './Create.vue';
 
 const props = defineProps({
-    quotations: { type: Array, default: () => [] },
+    quotations: {
+        type: Object,
+        default: () => ({ data: [], current_page: 1, last_page: 1, total: 0, from: 0, to: 0, prev_page_url: null, next_page_url: null }),
+    },
+    filters: {
+        type: Object,
+        default: () => ({ from: null, to: null, customer_id: null }),
+    },
     customers: { type: Array, default: () => [] },
     items: { type: Array, default: () => [] },
 });
@@ -22,6 +31,36 @@ const props = defineProps({
 const page = usePage();
 const { toast } = useToast();
 const { confirm } = useConfirm();
+
+const customerOptions = computed(() => props.customers.map((customer) => ({ value: customer.id, label: customer.name })));
+
+const filterState = reactive({
+    from: props.filters.from ?? '',
+    to: props.filters.to ?? '',
+    customer_id: props.filters.customer_id ?? null,
+});
+const filtering = ref(false);
+
+function applyFilters() {
+    router.get(
+        window.location.pathname,
+        { from: filterState.from || undefined, to: filterState.to || undefined, customer_id: filterState.customer_id || undefined },
+        { preserveState: true, preserveScroll: true, onStart: () => (filtering.value = true), onFinish: () => (filtering.value = false) },
+    );
+}
+
+function clearFilters() {
+    filterState.from = '';
+    filterState.to = '';
+    filterState.customer_id = null;
+    router.get(
+        window.location.pathname,
+        {},
+        { preserveState: true, preserveScroll: true, onStart: () => (filtering.value = true), onFinish: () => (filtering.value = false) },
+    );
+}
+
+const hasActiveFilters = computed(() => !!(props.filters.from || props.filters.to || props.filters.customer_id));
 
 const isAdmin = computed(() => page.props.auth?.user?.role?.slug === 'admin');
 const navItems = computed(() => navGroups(isAdmin.value));
@@ -213,8 +252,70 @@ const columns = [
                 </Button>
             </div>
 
+            <Card variant="panel" class="mb-4">
+                <div class="flex flex-wrap items-end gap-3">
+                    <div class="min-w-[160px]">
+                        <label class="mb-1 block text-xs font-semibold text-text-muted">From</label>
+                        <NepaliDateInput v-model="filterState.from" />
+                    </div>
+                    <div class="min-w-[160px]">
+                        <label class="mb-1 block text-xs font-semibold text-text-muted">To</label>
+                        <NepaliDateInput v-model="filterState.to" />
+                    </div>
+                    <div class="min-w-[220px]">
+                        <label class="mb-1 block text-xs font-semibold text-text-muted">Customer</label>
+                        <Combobox v-model="filterState.customer_id" :options="customerOptions" placeholder="All customers" />
+                    </div>
+                    <Button variant="primary" tone="purple" :loading="filtering" @click="applyFilters">
+                        <Search class="size-4" />
+                        Filter
+                    </Button>
+                    <Button v-if="hasActiveFilters" variant="secondary" tone="purple" @click="clearFilters">
+                        <X class="size-4" />
+                        Clear
+                    </Button>
+                </div>
+            </Card>
+
             <Card variant="panel">
-                <DataTable :columns="columns" :data="quotations" :page-size="10" empty-message="No quotations yet" />
+                <DataTable :columns="columns" :data="quotations.data" :page-size="Math.max(quotations.data.length, 1)" empty-message="No quotations yet" />
+
+                <div v-if="quotations.data.length > 0" class="mt-3 flex flex-wrap items-center justify-between gap-3">
+                    <p class="text-xs text-text-muted">Showing {{ quotations.from }}–{{ quotations.to }} of {{ quotations.total }}</p>
+                    <div class="flex items-center gap-2">
+                        <Link
+                            v-if="quotations.prev_page_url"
+                            :href="quotations.prev_page_url"
+                            preserve-state
+                            preserve-scroll
+                            class="inline-flex items-center border-[1.5px] border-border bg-white px-3 py-1.5 text-xs font-semibold text-text-muted transition-colors duration-150 ease-out hover:border-primary hover:text-primary"
+                        >
+                            Previous
+                        </Link>
+                        <span
+                            v-else
+                            class="inline-flex cursor-not-allowed items-center border-[1.5px] border-border bg-white px-3 py-1.5 text-xs font-semibold text-text-faint opacity-40"
+                        >
+                            Previous
+                        </span>
+                        <span class="text-xs text-text-muted">Page {{ quotations.current_page }} of {{ quotations.last_page }}</span>
+                        <Link
+                            v-if="quotations.next_page_url"
+                            :href="quotations.next_page_url"
+                            preserve-state
+                            preserve-scroll
+                            class="inline-flex items-center border-[1.5px] border-border bg-white px-3 py-1.5 text-xs font-semibold text-text-muted transition-colors duration-150 ease-out hover:border-primary hover:text-primary"
+                        >
+                            Next
+                        </Link>
+                        <span
+                            v-else
+                            class="inline-flex cursor-not-allowed items-center border-[1.5px] border-border bg-white px-3 py-1.5 text-xs font-semibold text-text-faint opacity-40"
+                        >
+                            Next
+                        </span>
+                    </div>
+                </div>
             </Card>
         </template>
     </AppLayout>

@@ -18,14 +18,36 @@ use InvalidArgumentException;
 
 class QuotationController extends Controller
 {
-    public function index(): Response
+    /**
+     * Listing is server-side filtered (date range + customer) and paginated
+     * - same `when()`/`paginate()->withQueryString()` shape
+     * Central\Tenants\TenantController::index() established, so it stays
+     * consistent across the app rather than loading every quotation
+     * unfiltered (a real usability problem once quotation history grows).
+     */
+    public function index(Request $request): Response
     {
+        $from = $request->filled('from') ? $request->string('from')->toString() : null;
+        $to = $request->filled('to') ? $request->string('to')->toString() : null;
+        $customerId = $request->filled('customer_id') ? (int) $request->input('customer_id') : null;
+
+        $quotations = Quotation::query()
+            ->with(['customer:id,name', 'lines.item:id,name,unit', 'sale:id,journal_voucher_id'])
+            ->when($from, fn ($query, string $from) => $query->whereDate('date', '>=', $from))
+            ->when($to, fn ($query, string $to) => $query->whereDate('date', '<=', $to))
+            ->when($customerId, fn ($query, int $customerId) => $query->where('customer_id', $customerId))
+            ->orderByDesc('date')
+            ->orderByDesc('id')
+            ->paginate(25)
+            ->withQueryString();
+
         return Inertia::render('Tenant/Quotations/Index', [
-            'quotations' => Quotation::query()
-                ->with(['customer:id,name', 'lines.item:id,name,unit', 'sale:id,journal_voucher_id'])
-                ->orderByDesc('date')
-                ->orderByDesc('id')
-                ->get(),
+            'quotations' => $quotations,
+            'filters' => [
+                'from' => $from,
+                'to' => $to,
+                'customer_id' => $customerId,
+            ],
             'customers' => Customer::query()->orderBy('name')->get(['id', 'name']),
             'items' => Item::query()->where('is_active', true)->orderBy('name')->get(['id', 'name', 'unit', 'is_vatable']),
         ]);

@@ -8,6 +8,7 @@ use App\Models\CompanySetting;
 use App\Models\Purchase;
 use App\Models\PurchaseReturn;
 use App\Models\Store;
+use App\Models\Supplier;
 use Barryvdh\DomPDF\Facade\Pdf;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
@@ -18,19 +19,43 @@ use InvalidArgumentException;
 
 class PurchaseReturnController extends Controller
 {
-    public function index(): Response
+    /**
+     * Listing is server-side filtered (date range + supplier, the latter
+     * via the parent purchase since a return has no supplier_id of its own)
+     * and paginated - same `when()`/`paginate()->withQueryString()` shape
+     * Central\Tenants\TenantController::index() established.
+     */
+    public function index(Request $request): Response
     {
+        $from = $request->filled('from') ? $request->string('from')->toString() : null;
+        $to = $request->filled('to') ? $request->string('to')->toString() : null;
+        $supplierId = $request->filled('supplier_id') ? (int) $request->input('supplier_id') : null;
+
+        $returns = PurchaseReturn::query()
+            ->with(['purchase.supplier:id,name', 'lines.purchaseLine.item:id,name,unit', 'refundAccount:id,code,name'])
+            ->when($from, fn ($query, string $from) => $query->whereDate('date', '>=', $from))
+            ->when($to, fn ($query, string $to) => $query->whereDate('date', '<=', $to))
+            ->when($supplierId, fn ($query, int $supplierId) => $query->whereHas(
+                'purchase', fn ($query) => $query->where('supplier_id', $supplierId)
+            ))
+            ->orderByDesc('date')
+            ->orderByDesc('id')
+            ->paginate(25)
+            ->withQueryString();
+
         return Inertia::render('Tenant/Purchases/Returns/Index', [
-            'returns' => PurchaseReturn::query()
-                ->with(['purchase.supplier:id,name', 'lines.purchaseLine.item:id,name,unit', 'refundAccount:id,code,name'])
-                ->orderByDesc('date')
-                ->orderByDesc('id')
-                ->get(),
+            'returns' => $returns,
+            'filters' => [
+                'from' => $from,
+                'to' => $to,
+                'supplier_id' => $supplierId,
+            ],
             'purchases' => Purchase::query()
                 ->where('status', 'posted')
                 ->with(['supplier:id,name', 'lines.item:id,name,unit'])
                 ->orderByDesc('date')
                 ->get(),
+            'suppliers' => Supplier::query()->orderBy('name')->get(['id', 'name']),
             'accounts' => Account::query()->orderBy('name')->get(['id', 'code', 'name']),
             'stores' => Store::where('is_active', true)->orderBy('name')->get(),
         ]);
