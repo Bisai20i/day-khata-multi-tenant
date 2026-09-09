@@ -6,6 +6,7 @@ import Card from '@/components/ui/Card.vue';
 import NepaliDateInput from '@/components/ui/NepaliDateInput.vue';
 import Select from '@/components/ui/Select.vue';
 import Button from '@/components/ui/Button.vue';
+import { FileSpreadsheet } from '@lucide/vue';
 import { navGroups } from '@/lib/nav-items.js';
 
 const props = defineProps({
@@ -39,6 +40,17 @@ function applyFilter() {
     );
 }
 
+// Built from the currently-applied filters (not just whatever was last
+// submitted via Apply) so exporting always matches what's on screen.
+const exportUrl = computed(() => {
+    const params = new URLSearchParams({ from: from.value, to: to.value });
+    if (storeId.value) {
+        params.set('store_id', storeId.value);
+    }
+
+    return `/reports/vat-summary/export?${params.toString()}`;
+});
+
 function money(value) {
     return Number(value ?? 0).toFixed(2);
 }
@@ -52,6 +64,10 @@ const netVatAmount = computed(() => Math.abs(props.netVatPayable));
     <AppLayout title="VAT Summary" :nav-items="navItems">
         <div class="mb-4 flex items-center justify-between">
             <h2 class="text-base font-bold text-text-strong">VAT Summary</h2>
+            <Button as="a" :href="exportUrl" variant="secondary" tone="purple">
+                <FileSpreadsheet class="h-[14px] w-[14px]" aria-hidden="true" />
+                Export to Excel
+            </Button>
         </div>
 
         <p class="mb-4 text-[12.5px] text-text-muted">

@@ -3,6 +3,8 @@
 namespace App\Http\Controllers\Tenant\Reports;
 
 use App\Enums\FiscalYearStatus;
+use App\Exports\PurchaseVatBookExport;
+use App\Exports\SalesVatBookExport;
 use App\Http\Controllers\Controller;
 use App\Models\Customer;
 use App\Models\FiscalYear;
@@ -12,8 +14,10 @@ use App\Models\Store;
 use App\Models\Supplier;
 use Illuminate\Http\Request;
 use Illuminate\Support\Carbon;
+use Illuminate\Support\Collection;
 use Inertia\Inertia;
 use Inertia\Response;
+use Maatwebsite\Excel\Facades\Excel;
 
 /**
  * Read-only, filterable listings over Sale/Purchase - no new tables. The
@@ -119,6 +123,59 @@ class SalesPurchaseReportController extends Controller
 
     public function salesVatBook(Request $request): Response
     {
+        $data = $this->buildSalesVatBookData($request);
+
+        return Inertia::render('Tenant/Reports/SalesVatBook', [
+            ...$data,
+            'stores' => Store::where('is_active', true)->orderBy('name')->get(['id', 'name']),
+        ]);
+    }
+
+    /**
+     * Same filtered rows/totals as salesVatBook(), streamed as a real
+     * .xlsx via the exact same data-building method so the export can
+     * never drift from what's on screen and always honors whatever
+     * from/to/store_id filters are currently applied.
+     */
+    public function salesVatBookExport(Request $request)
+    {
+        $data = $this->buildSalesVatBookData($request);
+
+        return Excel::download(
+            new SalesVatBookExport($data['rows'], $data['totals']),
+            "sales-vat-book-{$data['from']}-to-{$data['to']}.xlsx",
+        );
+    }
+
+    public function purchaseVatBook(Request $request): Response
+    {
+        $data = $this->buildPurchaseVatBookData($request);
+
+        return Inertia::render('Tenant/Reports/PurchaseVatBook', [
+            ...$data,
+            'stores' => Store::where('is_active', true)->orderBy('name')->get(['id', 'name']),
+        ]);
+    }
+
+    /**
+     * Same filtered rows/totals as purchaseVatBook(), streamed as a real
+     * .xlsx - see salesVatBookExport()'s own docblock for the reasoning.
+     */
+    public function purchaseVatBookExport(Request $request)
+    {
+        $data = $this->buildPurchaseVatBookData($request);
+
+        return Excel::download(
+            new PurchaseVatBookExport($data['rows'], $data['totals']),
+            "purchase-vat-book-{$data['from']}-to-{$data['to']}.xlsx",
+        );
+    }
+
+    /**
+     * @return array{rows: Collection<int, array<string, mixed>>, totals: array{taxable_amount: float, vat_amount: float, nontaxable_amount: float, total: float}, from: string, to: string, storeId: int|null}
+     */
+    private function buildSalesVatBookData(Request $request): array
+    {
         [$from, $to] = $this->resolveDateRange($request);
         $storeId = $request->integer('store_id') ?: null;
 
@@ -131,7 +188,7 @@ class SalesPurchaseReportController extends Controller
             ->orderBy('id')
             ->get();
 
-        return Inertia::render('Tenant/Reports/SalesVatBook', [
+        return [
             'rows' => $sales->values()->map(fn (Sale $sale, int $index) => [
                 'sn' => $index + 1,
                 'date' => $sale->date->toDateString(),
@@ -148,14 +205,16 @@ class SalesPurchaseReportController extends Controller
                 'nontaxable_amount' => (float) $sales->sum('nontaxable_amount'),
                 'total' => (float) $sales->sum('total'),
             ],
-            'stores' => Store::where('is_active', true)->orderBy('name')->get(['id', 'name']),
             'from' => $from,
             'to' => $to,
             'storeId' => $storeId,
-        ]);
+        ];
     }
 
-    public function purchaseVatBook(Request $request): Response
+    /**
+     * @return array{rows: Collection<int, array<string, mixed>>, totals: array{taxable_amount: float, vat_amount: float, nontaxable_amount: float, total: float}, from: string, to: string, storeId: int|null}
+     */
+    private function buildPurchaseVatBookData(Request $request): array
     {
         [$from, $to] = $this->resolveDateRange($request);
         $storeId = $request->integer('store_id') ?: null;
@@ -169,7 +228,7 @@ class SalesPurchaseReportController extends Controller
             ->orderBy('id')
             ->get();
 
-        return Inertia::render('Tenant/Reports/PurchaseVatBook', [
+        return [
             'rows' => $purchases->values()->map(fn (Purchase $purchase, int $index) => [
                 'sn' => $index + 1,
                 'date' => $purchase->date->toDateString(),
@@ -187,11 +246,10 @@ class SalesPurchaseReportController extends Controller
                 'nontaxable_amount' => (float) $purchases->sum('nontaxable_amount'),
                 'total' => (float) $purchases->sum('total'),
             ],
-            'stores' => Store::where('is_active', true)->orderBy('name')->get(['id', 'name']),
             'from' => $from,
             'to' => $to,
             'storeId' => $storeId,
-        ]);
+        ];
     }
 
     /**

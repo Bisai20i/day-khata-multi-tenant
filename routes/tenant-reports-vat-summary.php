@@ -18,4 +18,5 @@ use Illuminate\Support\Facades\Route;
 
 Route::name('tenant.reports.')->prefix('reports')->group(function () {
     Route::get('/vat-summary', [VatSummaryReportController::class, 'index'])->name('vat-summary');
+    Route::get('/vat-summary/export', [VatSummaryReportController::class, 'export'])->name('vat-summary.export');
 });

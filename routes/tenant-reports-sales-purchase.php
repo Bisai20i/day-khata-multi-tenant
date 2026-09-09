@@ -21,7 +21,9 @@ Route::name('tenant.reports.')->prefix('reports')->group(function () {
     Route::get('/sales-register', [SalesPurchaseReportController::class, 'salesRegister'])->name('sales-register');
     Route::get('/purchase-register', [SalesPurchaseReportController::class, 'purchaseRegister'])->name('purchase-register');
     Route::get('/sales-vat-book', [SalesPurchaseReportController::class, 'salesVatBook'])->name('sales-vat-book');
+    Route::get('/sales-vat-book/export', [SalesPurchaseReportController::class, 'salesVatBookExport'])->name('sales-vat-book.export');
     Route::get('/purchase-vat-book', [SalesPurchaseReportController::class, 'purchaseVatBook'])->name('purchase-vat-book');
+    Route::get('/purchase-vat-book/export', [SalesPurchaseReportController::class, 'purchaseVatBookExport'])->name('purchase-vat-book.export');
     Route::get('/aged-receivables', [SalesPurchaseReportController::class, 'agedReceivables'])->name('aged-receivables');
     Route::get('/aged-payables', [SalesPurchaseReportController::class, 'agedPayables'])->name('aged-payables');
 });

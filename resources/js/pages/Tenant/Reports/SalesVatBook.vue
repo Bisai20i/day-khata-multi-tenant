@@ -7,6 +7,7 @@ import NepaliDateInput from '@/components/ui/NepaliDateInput.vue';
 import Select from '@/components/ui/Select.vue';
 import Button from '@/components/ui/Button.vue';
 import DataTable from '@/components/ui/DataTable.vue';
+import { FileSpreadsheet } from '@lucide/vue';
 import { navGroups } from '@/lib/nav-items.js';
 
 const props = defineProps({
@@ -39,6 +40,17 @@ function applyFilter() {
     );
 }
 
+// Built from the currently-applied filters (not just whatever was last
+// submitted via Apply) so exporting always matches what's on screen.
+const exportUrl = computed(() => {
+    const params = new URLSearchParams({ from: from.value, to: to.value });
+    if (storeId.value) {
+        params.set('store_id', storeId.value);
+    }
+
+    return `/reports/sales-vat-book/export?${params.toString()}`;
+});
+
 const columns = [
     { accessorKey: 'sn', header: 'SN', numeric: true },
     { accessorKey: 'date', header: 'Date' },
@@ -55,6 +67,10 @@ const columns = [
     <AppLayout title="Sales VAT Book" :nav-items="navItems">
         <div class="mb-4 flex items-center justify-between">
             <h2 class="text-base font-bold text-text-strong">Sales VAT Book</h2>
+            <Button as="a" :href="exportUrl" variant="secondary" tone="purple">
+                <FileSpreadsheet class="h-[14px] w-[14px]" aria-hidden="true" />
+                Export to Excel
+            </Button>
         </div>
 
         <p class="mb-4 text-[12.5px] text-text-muted">

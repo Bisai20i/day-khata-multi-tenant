@@ -3,6 +3,7 @@
 namespace App\Http\Controllers\Tenant\Reports;
 
 use App\Enums\FiscalYearStatus;
+use App\Exports\VatSummaryExport;
 use App\Http\Controllers\Controller;
 use App\Models\FiscalYear;
 use App\Models\Purchase;
@@ -13,6 +14,7 @@ use App\Models\Store;
 use Illuminate\Http\Request;
 use Inertia\Inertia;
 use Inertia\Response;
+use Maatwebsite\Excel\Facades\Excel;
 
 /**
  * Net VAT payable/refundable for a filing period - the figure a Nepali VAT
@@ -31,6 +33,36 @@ use Inertia\Response;
 class VatSummaryReportController extends Controller
 {
     public function index(Request $request): Response
+    {
+        $summary = $this->computeSummary($request);
+
+        return Inertia::render('Tenant/Reports/VatSummary', [
+            ...$summary,
+            'stores' => Store::where('is_active', true)->orderBy('name')->get(['id', 'name']),
+        ]);
+    }
+
+    /**
+     * Same filtered figures as index(), streamed as a real .xlsx instead of
+     * rendered to the screen - built from the exact same computeSummary()
+     * call so the export can never drift from what's on screen, and so it
+     * always honors whatever from/to/store_id filters are currently applied
+     * rather than dumping an unfiltered report.
+     */
+    public function export(Request $request)
+    {
+        $summary = $this->computeSummary($request);
+
+        return Excel::download(
+            new VatSummaryExport($summary['outputVat'], $summary['inputVat'], $summary['netVatPayable']),
+            "vat-summary-{$summary['from']}-to-{$summary['to']}.xlsx",
+        );
+    }
+
+    /**
+     * @return array{outputVat: array{gross: float, returns: float, net: float}, inputVat: array{gross: float, returns: float, net: float}, netVatPayable: float, from: string, to: string, storeId: int|null}
+     */
+    private function computeSummary(Request $request): array
     {
         [$from, $to] = $this->resolveDateRange($request);
         $storeId = $request->integer('store_id') ?: null;
@@ -63,7 +95,7 @@ class VatSummaryReportController extends Controller
         $inputVatNet = round($inputVatGross - $inputVatReturns, 2);
         $netVatPayable = round($outputVatNet - $inputVatNet, 2);
 
-        return Inertia::render('Tenant/Reports/VatSummary', [
+        return [
             'outputVat' => [
                 'gross' => $outputVatGross,
                 'returns' => $outputVatReturns,
@@ -75,11 +107,10 @@ class VatSummaryReportController extends Controller
                 'net' => $inputVatNet,
             ],
             'netVatPayable' => $netVatPayable,
-            'stores' => Store::where('is_active', true)->orderBy('name')->get(['id', 'name']),
             'from' => $from,
             'to' => $to,
             'storeId' => $storeId,
-        ]);
+        ];
     }
 
     /**
