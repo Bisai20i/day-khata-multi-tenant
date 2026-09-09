@@ -188,7 +188,7 @@ class Sale extends Model
      * stock movement per stockable line.
      *
      * @param  array{customer_id: int, invoice_type: string, chalani_number?: string|null, date: string, payment_mode: string, bank_account_id?: int|null, discount?: float, discount_type?: string, vat_rate?: float, cash_amount?: float|null, bank_amount?: float|null, tds_account_id?: int|null, tds_amount?: float, agent_id?: int|null, commission_amount?: float, narration?: string|null}  $data
-     * @param  array<int, array{item_id: int, quantity: float, rate: float, discount?: float, discount_type?: string}>  $lines
+     * @param  array<int, array{item_id: int, item_unit_id?: int|null, quantity: float, rate: float, discount?: float, discount_type?: string}>  $lines
      */
     public static function post(array $data, array $lines, User $actor): self
     {
@@ -211,7 +211,7 @@ class Sale extends Model
                 throw new InvalidArgumentException('No active store is configured.');
             }
 
-            $items = Item::whereIn('id', collect($lines)->pluck('item_id'))->get()->keyBy('id');
+            $items = Item::with('units')->whereIn('id', collect($lines)->pluck('item_id'))->get()->keyBy('id');
 
             $preparedLines = [];
             $vatableSubtotal = 0.0;
@@ -226,6 +226,14 @@ class Sale extends Model
                 $item = $items[$line['item_id']];
                 $quantity = (float) $line['quantity'];
                 $rate = (float) $line['rate'];
+                [$itemUnitId, $conversionFactor] = static::resolveItemUnit($item, $line['item_unit_id'] ?? null);
+                // The base-unit quantity this line actually moves in/out of
+                // stock - e.g. 2 "Box" at conversion_factor 12 moves 24 base
+                // units. A plain base-unit line (no item_unit_id) always has
+                // conversionFactor 1.0, making this a no-op identical to
+                // pre-unit-conversion behavior. Money math below deliberately
+                // keeps using the as-entered $quantity/$rate, never this.
+                $baseQuantity = round($quantity * $conversionFactor, 4);
                 $lineDiscountType = static::validatedDiscountType($line['discount_type'] ?? 'flat');
                 $lineDiscountRaw = static::validatedDiscountValue((float) ($line['discount'] ?? 0), $lineDiscountType);
                 $lineBase = round($quantity * $rate, 2);
@@ -241,12 +249,15 @@ class Sale extends Model
                 }
 
                 if ($item->is_stockable) {
-                    $requestedQtyByItem[$item->id] = ($requestedQtyByItem[$item->id] ?? 0) + $quantity;
+                    $requestedQtyByItem[$item->id] = ($requestedQtyByItem[$item->id] ?? 0) + $baseQuantity;
                 }
 
                 $preparedLines[] = [
                     'item' => $item,
                     'quantity' => $quantity,
+                    'item_unit_id' => $itemUnitId,
+                    'unit_conversion_factor' => $conversionFactor,
+                    'base_quantity' => $baseQuantity,
                     'rate' => $rate,
                     'discount' => $lineDiscountRaw,
                     'discount_type' => $lineDiscountType,
@@ -270,6 +281,11 @@ class Sale extends Model
                     $item = $items[$itemId];
                     $available = $item->currentStock($storeId);
 
+                    // $requestedQty is already in base units (see the
+                    // baseQuantity conversion above), matching what
+                    // currentStock() returns - so a line entered in an alt
+                    // unit is compared apples-to-apples, not against its
+                    // as-entered (e.g. "Box") quantity.
                     if (round($available - $requestedQty, 4) < 0) {
                         $shortages[] = "{$item->name} (available {$available}, requested {$requestedQty})";
                     }
@@ -405,7 +421,9 @@ class Sale extends Model
             foreach ($preparedLines as $line) {
                 $saleLine = $sale->lines()->create([
                     'item_id' => $line['item']->id,
+                    'item_unit_id' => $line['item_unit_id'],
                     'quantity' => $line['quantity'],
+                    'unit_conversion_factor' => $line['unit_conversion_factor'],
                     'rate' => $line['rate'],
                     'discount' => $line['discount'],
                     'discount_type' => $line['discount_type'],
@@ -416,7 +434,7 @@ class Sale extends Model
                 if ($line['item']->is_stockable) {
                     $line['item']->recordStockMovement(
                         StockMovementType::Sale,
-                        $line['quantity'],
+                        $line['base_quantity'],
                         $data['date'],
                         $storeId,
                         $saleLine,
@@ -457,6 +475,32 @@ class Sale extends Model
         }
 
         return $value;
+    }
+
+    /**
+     * Resolves a line's optional item_unit_id against the item's already-
+     * loaded `units` relation, returning [item_unit_id, conversion_factor].
+     * A null/missing item_unit_id resolves to [null, 1.0] - the item's own
+     * base unit, with a conversion factor that's a pure no-op - so every
+     * existing caller that never sends item_unit_id gets byte-for-byte the
+     * same behavior as before this feature existed. Mirrors Purchase::
+     * resolveItemUnit() exactly.
+     *
+     * @return array{0: int|null, 1: float}
+     */
+    private static function resolveItemUnit(Item $item, mixed $itemUnitId): array
+    {
+        if ($itemUnitId === null || $itemUnitId === '') {
+            return [null, 1.0];
+        }
+
+        $itemUnit = $item->units->firstWhere('id', (int) $itemUnitId);
+
+        if (! $itemUnit) {
+            throw new InvalidArgumentException("Unit [{$itemUnitId}] does not belong to item [{$item->id}].");
+        }
+
+        return [$itemUnit->id, (float) $itemUnit->conversion_factor];
     }
 
     /**

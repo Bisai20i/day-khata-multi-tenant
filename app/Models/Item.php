@@ -91,6 +91,19 @@ class Item extends Model
     }
 
     /**
+     * This item's alternate units of sale/purchase (e.g. "Box" = 12 of the
+     * base `unit`) - see ItemUnit's docblock. An item with none is exactly
+     * as before this relation existed; nothing here implies a base-unit row
+     * must exist.
+     *
+     * @return HasMany<ItemUnit, $this>
+     */
+    public function units(): HasMany
+    {
+        return $this->hasMany(ItemUnit::class);
+    }
+
+    /**
      * Writes one quantity movement for this item. Purely a stock-quantity
      * tracker - never posts a JournalVoucher (see StockMovementType's
      * docblock: legacy day_khata runs periodic, not perpetual, inventory

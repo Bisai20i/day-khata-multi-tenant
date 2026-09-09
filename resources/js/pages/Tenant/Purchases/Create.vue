@@ -70,7 +70,34 @@ const paymentModeOptions = [
 const itemsById = computed(() => new Map(props.items.map((i) => [i.id, i])));
 
 function emptyLine() {
-    return { item_id: null, quantity: '', rate: '', discount: '', discount_type: 'flat' };
+    // item_unit_id '' means "the item's own base unit" - see Sales/
+    // Create.vue's identical emptyLine() for the full rationale.
+    return { item_id: null, item_unit_id: '', quantity: '', rate: '', discount: '', discount_type: 'flat' };
+}
+
+// Mirrors Sales/Create.vue's unitOptionsFor() exactly, adapted for this
+// file's itemsById being a Map rather than a plain object.
+function unitOptionsFor(item) {
+    if (!item) return [];
+
+    return [{ value: '', label: item.unit }, ...(item.units ?? []).map((u) => ({ value: u.id, label: u.name }))];
+}
+
+// Mirrors Sales/Create.vue's selectLineUnit() exactly, except this form
+// auto-fills from a unit's purchase_rate override (not sale_rate).
+function selectLineUnit(line, unitId) {
+    line.item_unit_id = unitId;
+
+    const unit = itemsById.value.get(line.item_id)?.units?.find((u) => u.id === unitId);
+    if (unit?.purchase_rate != null) {
+        line.rate = String(unit.purchase_rate);
+    }
+}
+
+// Mirrors Sales/Create.vue's selectLineItem() exactly.
+function selectLineItem(line, itemId) {
+    line.item_id = itemId;
+    line.item_unit_id = '';
 }
 
 function defaultFormData() {
@@ -204,6 +231,7 @@ function submit(print = false) {
         reason: isCorrectionSelected.value ? data.reason : undefined,
         lines: data.lines.map((line) => ({
             item_id: line.item_id,
+            item_unit_id: line.item_unit_id || null,
             quantity: Number(line.quantity) || 0,
             rate: Number(line.rate) || 0,
             discount: Number(line.discount) || 0,
@@ -406,8 +434,9 @@ onMounted(() => applyPendingSupplier());
             </div>
 
             <div>
-                <div class="mb-2 grid grid-cols-[1fr_100px_100px_90px_40px_90px_28px] gap-2 text-[10px] font-bold tracking-[.8px] text-text-muted uppercase">
+                <div class="mb-2 grid grid-cols-[1fr_90px_100px_100px_90px_40px_90px_28px] gap-2 text-[10px] font-bold tracking-[.8px] text-text-muted uppercase">
                     <span>Item</span>
+                    <span>Unit</span>
                     <span>Qty</span>
                     <span>Rate</span>
                     <span>Discount</span>
@@ -416,17 +445,26 @@ onMounted(() => applyPendingSupplier());
                     <span></span>
                 </div>
 
-                <div v-for="(line, index) in form.lines" :key="index" class="mb-2 grid grid-cols-[1fr_100px_100px_90px_40px_90px_28px] items-start gap-2">
+                <div v-for="(line, index) in form.lines" :key="index" class="mb-2 grid grid-cols-[1fr_90px_100px_100px_90px_40px_90px_28px] items-start gap-2">
                     <div>
                         <Combobox
                             :model-value="line.item_id"
                             :options="itemOptions"
                             placeholder="Select item"
-                            @update:model-value="(v) => (line.item_id = v)"
+                            @update:model-value="(v) => selectLineItem(line, v)"
                         />
                         <p v-if="form.errors[`lines.${index}.item_id`]" class="mt-1 text-xs text-danger">
                             {{ form.errors[`lines.${index}.item_id`] }}
                         </p>
+                    </div>
+                    <div>
+                        <Select
+                            v-if="itemsById.get(line.item_id)?.units?.length"
+                            :model-value="line.item_unit_id"
+                            :options="unitOptionsFor(itemsById.get(line.item_id))"
+                            @update:model-value="(v) => selectLineUnit(line, v)"
+                        />
+                        <span v-else class="block pt-2 text-xs text-text-muted">{{ itemsById.get(line.item_id)?.unit ?? '—' }}</span>
                     </div>
                     <Input v-model="line.quantity" type="number" min="0" step="0.0001" placeholder="0" />
                     <Input v-model="line.rate" type="number" min="0" step="0.01" placeholder="0.00" />

@@ -7,7 +7,7 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\MorphMany;
 
-#[Fillable(['purchase_id', 'item_id', 'quantity', 'rate', 'discount', 'discount_type', 'vatable', 'line_total'])]
+#[Fillable(['purchase_id', 'item_id', 'item_unit_id', 'quantity', 'unit_conversion_factor', 'rate', 'discount', 'discount_type', 'vatable', 'line_total'])]
 class PurchaseLine extends Model
 {
     /**
@@ -17,6 +17,7 @@ class PurchaseLine extends Model
     {
         return [
             'quantity' => 'decimal:4',
+            'unit_conversion_factor' => 'decimal:4',
             'rate' => 'decimal:4',
             'discount' => 'decimal:2',
             'vatable' => 'boolean',
@@ -38,6 +39,17 @@ class PurchaseLine extends Model
     public function item(): BelongsTo
     {
         return $this->belongsTo(Item::class);
+    }
+
+    /**
+     * The alternate unit this line was entered in, if any - see SaleLine::
+     * itemUnit() for the full rationale (mirrors it exactly).
+     *
+     * @return BelongsTo<ItemUnit, $this>
+     */
+    public function itemUnit(): BelongsTo
+    {
+        return $this->belongsTo(ItemUnit::class);
     }
 
     /**

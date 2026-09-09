@@ -21,16 +21,40 @@ use InvalidArgumentException;
 
 class PurchaseController extends Controller
 {
-    public function index(): Response
+    /**
+     * Listing is server-side filtered (date range + supplier) and paginated
+     * - same `when()`/`paginate()->withQueryString()` shape
+     * Central\Tenants\TenantController::index() established, so it stays
+     * consistent across the app rather than loading every purchase
+     * unfiltered (a real usability problem once invoice history grows).
+     */
+    public function index(Request $request): Response
     {
+        $from = $request->filled('from') ? $request->string('from')->toString() : null;
+        $to = $request->filled('to') ? $request->string('to')->toString() : null;
+        $supplierId = $request->filled('supplier_id') ? (int) $request->input('supplier_id') : null;
+
+        $purchases = Purchase::query()
+            ->with(['supplier:id,name', 'lines.item:id,name,unit', 'journalVoucher:id,voucher_number'])
+            ->when($from, fn ($query, string $from) => $query->whereDate('date', '>=', $from))
+            ->when($to, fn ($query, string $to) => $query->whereDate('date', '<=', $to))
+            ->when($supplierId, fn ($query, int $supplierId) => $query->where('supplier_id', $supplierId))
+            ->orderByDesc('date')
+            ->orderByDesc('id')
+            ->paginate(25)
+            ->withQueryString();
+
         return Inertia::render('Tenant/Purchases/Index', [
-            'purchases' => Purchase::query()
-                ->with(['supplier:id,name', 'lines.item:id,name,unit', 'journalVoucher:id,voucher_number'])
-                ->orderByDesc('date')
-                ->orderByDesc('id')
-                ->get(),
+            'purchases' => $purchases,
+            'filters' => [
+                'from' => $from,
+                'to' => $to,
+                'supplier_id' => $supplierId,
+            ],
             'suppliers' => Supplier::query()->orderBy('name')->get(['id', 'name', 'mobile_no']),
-            'items' => Item::query()->orderBy('name')->get(['id', 'name', 'unit', 'is_vatable', 'is_stockable', 'barcode']),
+            'items' => Item::query()->orderBy('name')
+                ->with(['units' => fn ($q) => $q->where('is_active', true)->orderBy('name')])
+                ->get(['id', 'name', 'unit', 'is_vatable', 'is_stockable', 'barcode']),
             'accounts' => Account::query()->orderBy('name')->get(['id', 'code', 'name']),
             'stores' => Store::where('is_active', true)->orderBy('name')->get(['id', 'name']),
             // The one closed year currently reopened for correction, if
@@ -65,6 +89,11 @@ class PurchaseController extends Controller
             'reason' => ['nullable', 'string', 'max:255'],
             'lines' => ['required', 'array', 'min:1'],
             'lines.*.item_id' => ['required', 'exists:items,id'],
+            // Null/omitted means the item's own base unit - see
+            // SaleController::store()'s identical rule for the full
+            // rationale (Purchase::post() owns the cross-item ownership
+            // check).
+            'lines.*.item_unit_id' => ['nullable', 'integer', 'exists:item_units,id'],
             'lines.*.quantity' => ['required', 'numeric', 'min:0.0001'],
             'lines.*.rate' => ['required', 'numeric', 'min:0'],
             'lines.*.discount' => ['nullable', 'numeric', 'min:0'],

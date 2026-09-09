@@ -24,11 +24,23 @@ use InvalidArgumentException;
 
 class SaleController extends Controller
 {
-    public function index(): Response
+    /**
+     * Listing is server-side filtered (date range + customer) and paginated
+     * - same `when()`/`paginate()->withQueryString()` shape
+     * Central\Tenants\TenantController::index() established, so it stays
+     * consistent across the app rather than loading every sale unfiltered
+     * (a real usability problem once invoice history grows).
+     */
+    public function index(Request $request): Response
     {
+        $from = $request->filled('from') ? $request->string('from')->toString() : null;
+        $to = $request->filled('to') ? $request->string('to')->toString() : null;
+        $customerId = $request->filled('customer_id') ? (int) $request->input('customer_id') : null;
+
         $stockByItem = $this->currentStockByItem();
 
         $items = Item::query()->where('is_active', true)->orderBy('name')
+            ->with(['units' => fn ($q) => $q->where('is_active', true)->orderBy('name')])
             ->get(['id', 'name', 'unit', 'is_vatable', 'is_stockable', 'barcode'])
             ->map(function (Item $item) use ($stockByItem) {
                 $item->current_stock = $item->is_stockable ? round($stockByItem->get($item->id, 0.0), 4) : null;
@@ -36,12 +48,23 @@ class SaleController extends Controller
                 return $item;
             });
 
+        $sales = Sale::query()
+            ->with(['customer:id,name', 'agent:id,name', 'lines.item:id,name,unit', 'journalVoucher:id,voucher_type,voucher_number'])
+            ->when($from, fn ($query, string $from) => $query->whereDate('date', '>=', $from))
+            ->when($to, fn ($query, string $to) => $query->whereDate('date', '<=', $to))
+            ->when($customerId, fn ($query, int $customerId) => $query->where('customer_id', $customerId))
+            ->orderByDesc('date')
+            ->orderByDesc('id')
+            ->paginate(25)
+            ->withQueryString();
+
         return Inertia::render('Tenant/Sales/Index', [
-            'sales' => Sale::query()
-                ->with(['customer:id,name', 'agent:id,name', 'lines.item:id,name,unit', 'journalVoucher:id,voucher_type,voucher_number'])
-                ->orderByDesc('date')
-                ->orderByDesc('id')
-                ->get(),
+            'sales' => $sales,
+            'filters' => [
+                'from' => $from,
+                'to' => $to,
+                'customer_id' => $customerId,
+            ],
             'customers' => Customer::query()->orderBy('name')->get(['id', 'name', 'mobile_no']),
             'items' => $items,
             'accounts' => Account::query()->orderBy('name')->get(['id', 'code', 'name']),
@@ -95,6 +118,11 @@ class SaleController extends Controller
             'narration' => ['nullable', 'string', 'max:255'],
             'lines' => ['required', 'array', 'min:1'],
             'lines.*.item_id' => ['required', 'exists:items,id'],
+            // Null/omitted means the item's own base unit - Sale::post()
+            // resolves this against the item's own ItemUnit rows (and
+            // rejects a unit that belongs to a different item), so no
+            // cross-item ownership check is needed here.
+            'lines.*.item_unit_id' => ['nullable', 'integer', 'exists:item_units,id'],
             // Negative allowed on purpose: a negative-quantity line is how
             // this app models an in-bill return/adjustment line (legacy
             // parity) - Sale::post() reduces revenue/VAT by the (negative)

@@ -7,6 +7,7 @@ use App\Http\Controllers\Controller;
 use App\Models\Item;
 use App\Models\ItemCategory;
 use App\Models\ItemSubcategory;
+use App\Models\ItemUnit;
 use Closure;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
@@ -55,7 +56,7 @@ class ItemController extends Controller
         return Inertia::render('Tenant/Inventory/Items/Index', [
             'categories' => ItemCategory::query()->orderBy('name')->get(['id', 'name']),
             'subcategories' => ItemSubcategory::query()->orderBy('name')->get(['id', 'item_category_id', 'name']),
-            'items' => Item::query()->with(['category:id,name', 'subcategory:id,name'])->latest()->get(),
+            'items' => Item::query()->with(['category:id,name', 'subcategory:id,name', 'units' => fn ($q) => $q->orderBy('name')])->latest()->get(),
         ]);
     }
 
@@ -92,6 +93,61 @@ class ItemController extends Controller
         $item->delete();
 
         return redirect()->route('tenant.items.index')->with('status', 'Item deleted.');
+    }
+
+    /**
+     * Nested under an item's own edit screen (Items/Index.vue's "Units"
+     * panel) rather than a separate top-level resource - mirrors how
+     * ItemVarietyController manages ItemVariety, except varieties get their
+     * own flat top-level page while units are simple enough to live inline
+     * on the Items list. See ItemUnit's docblock: an item with zero rows
+     * here is unaffected, so this is purely additive.
+     */
+    public function storeUnit(Request $request, Item $item): RedirectResponse
+    {
+        $item->units()->create($this->validatedUnit($request, $item));
+
+        return redirect()->route('tenant.items.index')->with('status', 'Unit added.');
+    }
+
+    public function updateUnit(Request $request, Item $item, ItemUnit $itemUnit): RedirectResponse
+    {
+        abort_unless($itemUnit->item_id === $item->id, 404);
+
+        $itemUnit->update($this->validatedUnit($request, $item, $itemUnit));
+
+        return redirect()->route('tenant.items.index')->with('status', 'Unit updated.');
+    }
+
+    public function destroyUnit(Item $item, ItemUnit $itemUnit): RedirectResponse
+    {
+        abort_unless($itemUnit->item_id === $item->id, 404);
+
+        $itemUnit->delete();
+
+        return redirect()->route('tenant.items.index')->with('status', 'Unit deleted.');
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function validatedUnit(Request $request, Item $item, ?ItemUnit $itemUnit = null): array
+    {
+        return $request->validate([
+            'name' => [
+                'required', 'string', 'max:100',
+                Rule::unique('item_units', 'name')->where('item_id', $item->id)->ignore($itemUnit?->id),
+            ],
+            // Never zero/negative - Sale::post()/Purchase::post() multiply
+            // the entered quantity by this to get the base-unit stock
+            // movement, so a zero/negative factor would corrupt every stock
+            // movement this unit is ever used on.
+            'conversion_factor' => ['required', 'numeric', 'min:0.0001'],
+            'purchase_rate' => ['nullable', 'numeric', 'min:0'],
+            'sale_rate' => ['nullable', 'numeric', 'min:0'],
+            'mrp' => ['nullable', 'numeric', 'min:0'],
+            'is_active' => ['boolean'],
+        ]);
     }
 
     /**

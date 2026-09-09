@@ -89,4 +89,12 @@ Route::name('tenant.')->group(function () {
         Route::get('/import/template', [ItemController::class, 'importTemplate'])->name('import.template');
         Route::post('/import', [ItemController::class, 'import'])->name('import');
     });
+
+    // Nested under an item rather than its own top-level resource - see
+    // ItemController::storeUnit()'s docblock.
+    Route::prefix('items/{item}/units')->name('items.units.')->group(function () {
+        Route::post('/', [ItemController::class, 'storeUnit'])->name('store');
+        Route::put('/{itemUnit}', [ItemController::class, 'updateUnit'])->name('update');
+        Route::delete('/{itemUnit}', [ItemController::class, 'destroyUnit'])->name('destroy');
+    });
 });

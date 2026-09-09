@@ -59,7 +59,41 @@ const paymentModeOptions = [
 ];
 
 function emptyLine() {
-    return { item_id: null, quantity: '', rate: '', discount: '', discount_type: 'flat' };
+    // item_unit_id '' means "the item's own base unit" (matches this app's
+    // existing '' = None convention for optional Select fields, e.g. Items/
+    // Index.vue's item_subcategory_id) - transformed to null on submit.
+    return { item_id: null, item_unit_id: '', quantity: '', rate: '', discount: '', discount_type: 'flat' };
+}
+
+// Options for a line's unit dropdown: the item's own base unit first
+// (value '' - always present, even for an item with zero alt units), then
+// every active ItemUnit row. Only rendered at all when the item has at
+// least one alt unit (see the template) - an item with none shows nothing
+// here, unchanged from before this feature existed.
+function unitOptionsFor(item) {
+    if (!item) return [];
+
+    return [{ value: '', label: item.unit }, ...(item.units ?? []).map((u) => ({ value: u.id, label: u.name }))];
+}
+
+// Selecting a unit auto-fills the rate from that unit's own sale_rate
+// override, if it has one - still editable afterwards, per the design
+// (Sale::post() only ever uses the entered rate, never the unit's rate).
+function selectLineUnit(line, unitId) {
+    line.item_unit_id = unitId;
+
+    const unit = itemsById.value[line.item_id]?.units?.find((u) => u.id === unitId);
+    if (unit?.sale_rate != null) {
+        line.rate = String(unit.sale_rate);
+    }
+}
+
+// Changing the item invalidates whatever unit was selected for the
+// previous item (a unit id from one item's alt-units list is meaningless
+// for another item), so it's reset back to the base unit.
+function selectLineItem(line, itemId) {
+    line.item_id = itemId;
+    line.item_unit_id = '';
 }
 
 function defaultFormData() {
@@ -205,6 +239,7 @@ function submit(print = false) {
         commission_amount: data.agent_id ? Number(data.commission_amount) || 0 : undefined,
         lines: data.lines.map((line) => ({
             item_id: line.item_id,
+            item_unit_id: line.item_unit_id || null,
             quantity: Number(line.quantity) || 0,
             rate: Number(line.rate) || 0,
             discount: Number(line.discount) || 0,
@@ -352,8 +387,9 @@ onMounted(() => applyPendingCustomer());
             </div>
 
             <div>
-                <div class="mb-2 grid grid-cols-[1fr_100px_100px_90px_40px_28px] gap-2 text-[10px] font-bold tracking-[.8px] text-text-muted uppercase">
+                <div class="mb-2 grid grid-cols-[1fr_90px_100px_100px_90px_40px_28px] gap-2 text-[10px] font-bold tracking-[.8px] text-text-muted uppercase">
                     <span>Item</span>
+                    <span>Unit</span>
                     <span>Quantity</span>
                     <span>Rate</span>
                     <span>Discount</span>
@@ -361,13 +397,13 @@ onMounted(() => applyPendingCustomer());
                     <span></span>
                 </div>
 
-                <div v-for="(line, index) in form.lines" :key="index" class="mb-2 grid grid-cols-[1fr_100px_100px_90px_40px_28px] items-start gap-2">
+                <div v-for="(line, index) in form.lines" :key="index" class="mb-2 grid grid-cols-[1fr_90px_100px_100px_90px_40px_28px] items-start gap-2">
                     <div>
                         <Combobox
                             :model-value="line.item_id"
                             :options="itemOptions"
                             placeholder="Select item"
-                            @update:model-value="(v) => (line.item_id = v)"
+                            @update:model-value="(v) => selectLineItem(line, v)"
                         />
                         <p v-if="itemsById[line.item_id]?.current_stock !== null && itemsById[line.item_id]?.current_stock !== undefined" class="mt-1 text-xs text-text-muted">
                             Stock: {{ itemsById[line.item_id].current_stock }}
@@ -375,6 +411,15 @@ onMounted(() => applyPendingCustomer());
                         <p v-if="form.errors[`lines.${index}.item_id`]" class="mt-1 text-xs text-danger">
                             {{ form.errors[`lines.${index}.item_id`] }}
                         </p>
+                    </div>
+                    <div>
+                        <Select
+                            v-if="itemsById[line.item_id]?.units?.length"
+                            :model-value="line.item_unit_id"
+                            :options="unitOptionsFor(itemsById[line.item_id])"
+                            @update:model-value="(v) => selectLineUnit(line, v)"
+                        />
+                        <span v-else class="block pt-2 text-xs text-text-muted">{{ itemsById[line.item_id]?.unit ?? '—' }}</span>
                     </div>
                     <!-- No min="0": a negative quantity is a valid in-bill
                          return/adjustment line (see SaleController::store()'s

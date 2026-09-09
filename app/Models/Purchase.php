@@ -180,7 +180,7 @@ class Purchase extends Model
      * exactly as before.
      *
      * @param  array{supplier_id: int, bill_number?: string, pan_number?: string, chalani_number?: string|null, date: string, payment_mode: string, bank_account_id?: int, discount?: float, discount_type?: string, vat_rate?: float, cash_amount?: float, bank_amount?: float, tds_account_id?: int, tds_amount?: float, narration?: string, fiscal_year_id?: int, reason?: string|null}  $data
-     * @param  array<int, array{item_id: int, quantity: float, rate: float, discount?: float, discount_type?: string}>  $lines
+     * @param  array<int, array{item_id: int, item_unit_id?: int|null, quantity: float, rate: float, discount?: float, discount_type?: string}>  $lines
      */
     public static function post(array $data, array $lines, User $actor): self
     {
@@ -212,9 +212,15 @@ class Purchase extends Model
             $nonVatableSubtotal = 0.0;
 
             foreach ($lines as $line) {
-                $item = Item::findOrFail($line['item_id']);
+                $item = Item::with('units')->findOrFail($line['item_id']);
                 $quantity = (float) $line['quantity'];
                 $rate = (float) $line['rate'];
+                [$itemUnitId, $conversionFactor] = static::resolveItemUnit($item, $line['item_unit_id'] ?? null);
+                // Base-unit quantity this line actually adds to stock - see
+                // Sale::post()'s identical $baseQuantity for the full
+                // rationale. Money math below keeps using the as-entered
+                // $quantity/$rate, never this.
+                $baseQuantity = round($quantity * $conversionFactor, 4);
                 $lineDiscountType = static::validatedDiscountType($line['discount_type'] ?? 'flat');
                 $lineDiscountRaw = static::validatedDiscountValue(round((float) ($line['discount'] ?? 0), 2), $lineDiscountType);
                 $lineBase = round($quantity * $rate, 2);
@@ -226,6 +232,9 @@ class Purchase extends Model
                 $lineModels[] = [
                     'item' => $item,
                     'quantity' => $quantity,
+                    'item_unit_id' => $itemUnitId,
+                    'unit_conversion_factor' => $conversionFactor,
+                    'base_quantity' => $baseQuantity,
                     'rate' => $rate,
                     'discount' => $lineDiscountRaw,
                     'discount_type' => $lineDiscountType,
@@ -409,7 +418,9 @@ class Purchase extends Model
             foreach ($lineModels as $line) {
                 $purchaseLine = $purchase->lines()->create([
                     'item_id' => $line['item']->id,
+                    'item_unit_id' => $line['item_unit_id'],
                     'quantity' => $line['quantity'],
+                    'unit_conversion_factor' => $line['unit_conversion_factor'],
                     'rate' => $line['rate'],
                     'discount' => $line['discount'],
                     'discount_type' => $line['discount_type'],
@@ -420,7 +431,7 @@ class Purchase extends Model
                 if ($line['item']->is_stockable) {
                     $line['item']->recordStockMovement(
                         StockMovementType::Purchase,
-                        $line['quantity'],
+                        $line['base_quantity'],
                         $data['date'],
                         $storeId,
                         $purchaseLine,
@@ -466,6 +477,29 @@ class Purchase extends Model
         }
 
         return $value;
+    }
+
+    /**
+     * Resolves a line's optional item_unit_id against the item's already-
+     * loaded `units` relation. Mirrors Sale::resolveItemUnit() exactly - see
+     * that method's docblock for the full rationale, including why a null/
+     * missing item_unit_id is a guaranteed behavior-preserving no-op.
+     *
+     * @return array{0: int|null, 1: float}
+     */
+    private static function resolveItemUnit(Item $item, mixed $itemUnitId): array
+    {
+        if ($itemUnitId === null || $itemUnitId === '') {
+            return [null, 1.0];
+        }
+
+        $itemUnit = $item->units->firstWhere('id', (int) $itemUnitId);
+
+        if (! $itemUnit) {
+            throw new InvalidArgumentException("Unit [{$itemUnitId}] does not belong to item [{$item->id}].");
+        }
+
+        return [$itemUnit->id, (float) $itemUnit->conversion_factor];
     }
 
     /**
