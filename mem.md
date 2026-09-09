@@ -3,15 +3,427 @@
 Living state doc. Read this before starting work, update it before stopping. See `goal.md` for
 direction/roadmap — this file is "what exists and why," not "what's next."
 
-**Last updated:** 2026-09-04. **Git status: working tree fully clean (including docs, `84c624e`). Phase D of
-`plans/central-panel-build.md` (tenant lifecycle hardening) is committed as `01561fc` "Add tenant trial
-tracking, provisioning-failure visibility, domain management (Phase D)".** Built directly (no forking, same
-call as A/B/C). Test-verified by the coordinator this time (not just the user) since fixing the bugs below
-required it. **Session paused here by user request — nothing in flight, nothing uncommitted.** **Next
-session: start Phase E (real dashboard + tenant search/pagination) — the last phase in
-`plans/central-panel-build.md`.** Read that doc's Phase E section (items 16-17) before starting: item 16
-also needs to finally add the trial-expiring-this-week dashboard widget Phase D deliberately deferred (see
-that phase's own entry below for why).
+**2026-09-08 entry (newest — read this first, older entries below are from the prior central-panel work
+and are unrelated to this one).** User asked for a gap analysis of the tenant-side app against the legacy
+`day_khata` predecessor (invoice settings, fiscal year, general settings, Add Sale/Add Purchase UX), then
+to execute the resulting plan. Full plan doc: `plans/invoicing-settings-sale-purchase-ux.md` — read it for
+the "why", locked decisions, and non-goals before touching any of this area again.
+
+**All 4 phases built this session, via sequential in-tree subagents (not committed, not migrated to every
+tenant, not pint-formatted, not test-verified — see below):**
+- **Phase A**: `CompanySetting` gained logo upload, `default_vat_rate`, `allow_negative_stock`,
+  `default_store_id`, per-invoice-type prefix/enabled columns (sale full/abbreviated/pan + purchase).
+  Settings page rebuilt into Company Info / Invoicing / Stock & Discount Policy sections.
+- **Phase B**: invoice print prefixes now read from settings instead of hardcoded `match` statements;
+  company logo renders on PDFs (via a local filesystem path, not the `logo_url` accessor — DomPDF has
+  `enable_remote => false`, a real bug that was caught before shipping); a dead hardcoded "10% digital
+  payment VAT rebate" block was removed from `pdf/sale.blade.php`; new thermal 58mm/80mm receipt paper
+  size + `pdf/sale-receipt.blade.php`; POS now also opens the real print route on sale completion
+  (previously only a frontend-only receipt modal).
+- **Phase C**: real percent/flat discount (header + line, server-computed) on `Sales/Create.vue` and
+  `Purchases/Create.vue` (previously flat-only there, percent was POS-only and client-resolved); POS
+  updated to submit the same `discount_type`+raw-value contract instead of pre-resolving to flat
+  client-side; server-side negative-stock enforcement in `Sale::post()` gated by the new
+  `allow_negative_stock` setting (blocking by default — locked decision); `chalani_number` added
+  symmetrically to Sale and Purchase (legacy only ever had it on 3 of 6 sale screens, never on purchase);
+  `barcode` column added to `Item`, wired into POS scan-to-add and the `Combobox` search on both plain
+  forms; "Save & Print" button added to both Create forms; inline "add new customer/supplier" modal
+  ported from POS to both plain Create forms. **A real bug this phase's own agent found and flagged but
+  deliberately did not fix** (correctly, given its scope): `SalesReturn`/`PurchaseReturn` reconstructed
+  the pre-discount subtotal as `taxable_amount + discount`, silently wrong once `discount` can mean "a
+  percentage" — fixed in an immediate same-session follow-up (see below).
+- **Follow-up fix (between C and D)**: `SalesReturn`/`PurchaseReturn` now derive the discount-reversal
+  ratio directly from the stored `discount_type`/`discount` (a percentage discount removes a uniform
+  `discount/100` fraction of every vatable rupee — no reconstruction of the unstored pre-discount subtotal
+  needed at all, a cleaner fix than the original plan envisioned). New `Sale::discountAmount()` /
+  `Purchase::discountAmount()` accessors added so `pdf/sale.blade.php`/`pdf/purchase.blade.php` can print
+  "Discount (20%): -Rs X.XX" instead of the raw percentage number where they used to print a Rs amount.
+  Known edge case, documented not fixed: `discountAmount()` returns 0 at exactly 100% header discount
+  (the pre-discount subtotal isn't stored, only derivable from `taxable_amount` which is itself 0 by then)
+  — display-only, doesn't affect the return-reconstruction fix, which never needs to invert this.
+- **Phase D**: `FiscalYear` gained `reopen()`/`relock()` (admin-only, mandatory reason, audit-logged via
+  the existing tenant `ActivityLog` mechanism) — a closed year can now be reopened for correction, with
+  Purchase/Journal Voucher/Stock Adjustment postable into it (fiscal-year picker + reason field on those
+  three create forms, reused rather than a parallel "post correction" flow) while **Sale stays permanently
+  locked to the current year with no exception**, per the locked decision. New
+  `App\Support\ClosedFiscalYearGuard` centralizes the eligibility check + correction logging.
+  **Real behavior tightening on existing code, not just new capability**: `JournalVoucher` previously had
+  its own ad-hoc "any closed year, if admin+reason" override — replaced with the stricter guard, which now
+  requires the year to actually be in an active reopened-for-correction window, not just closed. 3
+  pre-existing `JournalVoucherPostingTest` cases were updated to call `reopen()` first to match.
+
+**Standing rule that got tightened mid-session, applies going forward**: see the auto-memory feedback note
+(`feedback-no-heavy-commands`, outside this repo) — escalated from "no `php artisan test`/`npm run build`"
+to **no shell commands at all** from subagents in this repo, including `php -l`/`vendor/bin/pint`/
+`composer install`/`tenants:migrate`. Also: **avoid git-worktree isolation for subagents here** — a fresh
+worktree has no `vendor/`, so an agent in one reaches for `composer install`, which is exactly what
+triggered this tightening. Every phase above was built by an agent working directly in the main tree,
+sequentially (not in parallel — the tree isn't isolated, so simultaneous edits from multiple agents risk
+clobbering each other; confirmed necessary the hard way when two `worktree`-isolated agents were launched
+in parallel for Phases B/C and both turned out to be based on `main`, not `development`, silently blind to
+this project's actual current state including Phase A).
+
+**Nothing verified this session — next session (or the user directly) must, before trusting any of the
+above works**: `vendor/bin/pint --dirty --format agent`; `php artisan tenants:migrate` (5+ new tenant
+migrations across all four phases: Phase A's company_settings columns, Phase C's
+chalani_number/discount_type/barcode columns, Phase D's fiscal_years reopen/correction columns — none
+have been applied to any tenant DB yet); `php artisan test --compact` filtered to at minimum
+`CompanySettingTest`, `SalePrintTest`, `PurchasePrintTest`, `SalePostingTest`, `PurchasePostingTest`,
+`ItemTest`, `SalesReturnTest`, `PurchaseReturnTest`, `FiscalYearReopenTest`, `JournalVoucherPostingTest`,
+plus the wider regression sweep Phase C's agent already identified as at-risk (`SaleStoreScopingTest`,
+`SaleControllerTest`, `PosTest`, `SaleCommissionTest`, `SalesReturnStoreScopingTest`, `QuotationTest`,
+`ActivityLogTest`, `CategoryWiseReportTest`); `npm run build`/`npm run dev` (all four phases touched Vue
+pages, none rendered/screenshotted). **Not committed** — same "everything uncommitted until reviewed"
+posture this project has used throughout; see `plans/invoicing-settings-sale-purchase-ux.md` for the
+phase-by-phase breakdown if a partial commit (e.g. just Phase A) is wanted before the rest is verified.
+
+**Last updated:** 2026-09-04 (second sitting, same day — resumed directly on top of the still-uncommitted
+work below rather than after a commit, so this is one continuous unbroken-by-commit stretch, not a fresh
+session boundary in the usual sense). **Git status: working tree has uncommitted changes, NOTHING committed
+across either sitting — confirm `git status`/`git log` still match this claim first before trusting it (see
+the Phase A correction entry far below for why that check matters).** Everything below happened across two
+sittings and stacks in this order:
+
+1. **Phase E of `plans/central-panel-build.md`** (real dashboard + tenant search/pagination) — the last
+   phase of that plan. **All 5 phases (A-E) are now code-complete.**
+2. **A live-reported 404 bug fix**: the central domain's `/` route was rendering the stock, never-customized
+   `resources/views/welcome.blade.php` scaffold, whose hardcoded `/dashboard` link 404'd (that route is
+   tenant-side only). Fixed to redirect based on auth state, matching `routes/tenant.php`'s own root route.
+3. **A full UI/UX pass** (user-reported: no cursor pointer on buttons, no loading spinners, `Tenants/
+   Show.vue` wasting half the screen, missing icons, no real table actions, no way to manage trial expiry or
+   force-resolve a stuck-Provisioning tenant) — see that entry for the owner-only trial-editing/provisioning-
+   override decisions locked in with the user via `AskUserQuestion`.
+4. **A second live-reported crash fix**: `GET /tenants/{id}/users` 500'd with
+   `TenantDatabaseDoesNotExistException` for a real dev tenant whose `status` claimed Active but whose
+   database was never actually finished provisioning. New `Tenant::databaseExists()`, checked before every
+   `$tenant->run()` call site instead of trusting `status`.
+5. **A button color hierarchy fix** (user-reported: Delete wasn't red, positive actions weren't green) —
+   `Button.vue` now supports `tone="danger"`/`tone="success"`, reusing the existing `--color-danger`/
+   `--color-success` tokens `Badge.vue` already used.
+6. **Second sitting opened with an explicit bug-ticket workflow**: the user asked to work through reported
+   bugs one at a time via subagents that (a) verify the bug at the code level before touching anything —
+   never guess from the ticket description alone, (b) fix with production-quality code matching existing
+   conventions, (c) skip writing/running tests but still run `php -l` + `vendor/bin/pint --dirty --format
+   agent` on every touched file. **Adopt this same flow for any further bug tickets next session too** —
+   it's a standing preference, not a one-off for this sitting.
+7. **"Re-provision database" button did nothing — real root cause found via a subagent, not the frontend**:
+   the button/route/eligibility check were all already correct; `retryProvisioning()` fired
+   `event(new TenantCreated($tenant))`, whose listener is `->shouldBeQueued(true)` — with this app's real
+   `QUEUE_CONNECTION=database` (not the test suite's forced `sync`), that only *enqueues* the 4-job
+   provisioning pipeline and does nothing without a worker actively draining it. Confirmed live: 4 real stuck
+   `JobPipeline` rows in the `jobs` table since 2026-09-03, and a real dev tenant (`LLCa ge`) stuck exactly as
+   reported. **Fixed**: for `active`/`suspended` tenants with a missing database (as opposed to still
+   `Provisioning`), `retryProvisioning()` now runs the pipeline synchronously via `dispatch_sync(...)` instead
+   of relying on the queue — no worker required, and a failure now surfaces a real error instead of silently
+   doing nothing. The still-`Provisioning` path is untouched. **This same queue-needs-a-worker gap likely also
+   affects initial tenant creation** (identical event/listener) — flagged, not yet verified as a live problem,
+   worth its own ticket.
+8. **Tenant status filter** (user request, quick add): `TenantController::index()` gained a `status` query
+   param validated via `TenantStatus::tryFrom()`, applied via `->when()` alongside the existing search; a new
+   `statusOptions` prop feeds a `Select` dropdown placed to the right of the search box in `Tenants/
+   Index.vue`, reusing the exact filter-panel pattern `ActivityLog/Index.vue` already established.
+   `applySearch`/`clearSearch` renamed to `applyFilters`/`clearFilters` since they now cover both.
+9. **Real logo + login page redesign** (user request): copied the actual Day Khata logo assets (wordmark +
+   icon mark, both from the sibling `day_khata` repo's `public/`) into `resources/js/assets/brand/` as
+   Vite-bundled imports (not raw `public/` files). Sidebar header (`AppLayout.vue`) now uses the real icon
+   mark instead of a placeholder "DK" box. `AuthLayout.vue` (shared by both Login pages + the 2FA challenge
+   page) rebuilt as a desktop split-screen: a left "ledger panel" ruled like the physical khata day-book this
+   product is named after (thin horizontal rules + a red margin line — deliberately the one bold visual
+   device, grounded in what "khata" literally means, not decoration for its own sake) showing the wordmark
+   and an audience-specific tagline; collapses to just the icon mark + form on mobile. Built via the
+   `frontend-design` skill, staying entirely within the existing token system (same purple/Inter/zero-radius
+   tokens, no new colors or fonts). Verified via `npm run build` only — **no browser/screenshot tool was
+   available this sitting, so the visual result has not actually been seen rendered, only reasoned through
+   from the code; worth an actual look before calling this done.**
+10. **Sidebar scroll bug + collapsible nav groups** (user request, planned via `AskUserQuestion` before
+    building per the user's own ask to confirm judgment calls first): root cause of "whole page scrolls
+    instead of just the sidebar" was `min-h-screen` on `AppLayout.vue`'s root shell (lets the page grow past
+    viewport height) combined with the sidebar `<nav>` never actually hitting a height limit despite its own
+    `overflow-y-auto`. Fixed: root shell `h-screen overflow-hidden`, plus `min-h-0` added to both the sidebar
+    `<nav>` and the main `<main>` (the classic flexbox gotcha — a flex child won't shrink/scroll on its own
+    `overflow-y-auto` unless told it's allowed to shrink below its content size). Tenant nav groups with 2+
+    items (Accounting, Transactions, **Parties**, Inventory, Reports, Admin) are now click-to-expand
+    accordions; single-item groups (Overview) and Central's short flat list are untouched. Per the user's
+    locked-in answers: only the group containing the current page auto-opens by default, groups toggle
+    independently (not mutually exclusive), and open/closed state persists across page navigations via
+    `localStorage` (`day-khata:sidebar-open-groups`) — needed because `AppLayout` re-mounts on every Inertia
+    page visit (it's wrapped per-page, not a persistent Inertia layout), so without persistence a manually
+    opened group would snap shut on the very next navigation. No changes needed to `lib/nav-items.js` — its
+    existing group/items shape already matched what the accordion needed.
+
+**Next session — do this first, in order:**
+1. `git status`/`git log` to confirm nothing has changed since this update (don't trust this doc blindly).
+2. **Two migration files show as modified that this session never touched** — see that entry below. Ask the
+   user about `database/migrations/tenant/2026_09_03_100001_add_store_id_to_item_stock_movements_table.php`
+   and `..._100010_add_store_id_to_sales_table.php` before doing anything that touches them (don't revert,
+   don't commit blindly — their origin is still unknown; still unresolved after two sittings now).
+3. **Actually look at the redesigned login pages + collapsible sidebar in a browser** — item 9's visual
+   result was never actually seen (no browser tool available), and item 10's collapse/scroll behavior was
+   only reasoned through from the code, never clicked. Start the dev server and check both before trusting
+   they work as intended.
+4. Once (2) and (3) are resolved, this whole two-sitting stretch of work (Phase E + all 9 subsequent
+   fixes/features) is ready to commit — nothing has been committed yet across either sitting.
+5. Consider whether the "initial tenant creation may share the same queue-needs-a-worker gap" flag from
+   item 7 is worth its own ticket — not yet verified as a live problem.
+6. No new plan doc exists for whatever comes after `central-panel-build` — check `goal.md`'s roadmap once
+   everything above is committed.
+7. **Keep using the subagent bug-ticket workflow from item 6** for any new bug reports the user brings —
+   verify at the code level first, production-quality fix, no tests but `php -l` + Pint on every touched
+   file.
+
+- **Real dashboard (item 16)**: new `App\Http\Controllers\Central\DashboardController@index` replaces the
+  inline closure that used to live in `routes/central-auth.php` (`Route::get('/admin', function () {...})`)
+  — same route name (`central.dashboard`), same file (no new route file needed; the existing
+  `central-auth.php` already owned this one route, so moving it to a controller was a same-file swap, not a
+  restructure). Metrics: tenant counts by status (`Tenant::query()->toBase()->selectRaw('status,
+  count(*) as count')->groupBy('status')->pluck('count', 'status')` — **`toBase()` is load-bearing**: without
+  it, Eloquent hydrates each row as a model and `->status` comes back as a `TenantStatus` enum instance (the
+  model's own cast), so `pluck('count', 'status')` would key the resulting collection by an enum object, not
+  a string, and every `->get(TenantStatus::Active->value, 0)` lookup afterward would silently return the
+  default instead of the real count. Caught before it shipped, not discovered as a bug.), created this
+  week/month (plain `Tenant::where('created_at', '>=', now()->startOfWeek())->count()`), tenants past grace
+  period (small dataset at platform scale — loads all `suspended_at`-not-null tenants and filters in PHP via
+  the same `isPastGracePeriod()` the tenant list/show pages already use, rather than duplicating its date
+  math in SQL), trials expiring within 7 days (`whereBetween('trial_ends_at', [now(), now()->addDays(7)])` —
+  deliberately excludes already-expired trials, which have their own `trial_expired` badge on the tenant
+  list/show pages already; this widget is specifically the Phase D item 12 deferral — see that phase's own
+  entry below for why it landed here instead), and the 10 most recent `platform_admin_activity_logs` entries
+  (same `->latest('created_at')->latest('id')` tie-break `TenantController::show()`'s `provisioning_error`
+  lookup already established, reused rather than re-derived). `Central/Dashboard.vue` rebuilt from the old
+  "signed in as X + link to Tenants" placeholder into stat-card tiles (mirrors the tenant-side
+  `Tenant/Dashboard.vue`'s own card pattern) plus conditional past-grace-period/trials-expiring panels (only
+  rendered when non-empty) and a recent-activity table linking out to the full activity log page.
+- **Tenant search + pagination (item 17)**: `TenantController::index()` changed from
+  `Tenant::with('domains')->latest()->get()` (loads every tenant, no limit) to a `paginate(25)->withQueryString()`
+  query, searchable by company name, contact email, or domain (`orWhereHas('domains', ...)` for the domain
+  leg, since domain lives on a related table, not a tenant column) — same shape
+  `ActivityLogController::index()` already established (search/filter via `when()`, `->through()` to map each
+  row, `withQueryString()` so pagination links preserve the search term). `Tenants/Index.vue` gained a search
+  box (`Input` with a `Search` icon, submits on Enter or a Search button, a Clear button appears only when a
+  search is active) and the exact same hand-rolled prev/next pagination footer `ActivityLog/Index.vue` uses
+  (`DataTable`'s own `page-size` prop is set to the full page length to disable its client-side paging, since
+  `DataTable` only paginates client-side over whatever array it's handed — real server-side paging needs the
+  hand-rolled links, same reasoning `ActivityLog/Index.vue` already documented).
+- **Breaking-shape ripple, caught before it shipped**: changing `tenants` from a plain array to a paginated
+  object (`{data: [...], total, ...}`) meant every existing Inertia assertion reading `tenants.0.X` needed to
+  become `tenants.data.0.X`. Found and fixed both pre-existing call sites: `GracePeriodTest`'s
+  "the tenant list and show pages flag a tenant past its grace period" and `TrialTrackingTest`'s "the tenant
+  list and show pages surface trial_expired" — both updated in place, not left broken.
+- **Tests**: `tests/Feature/Central/DashboardControllerTest.php` (guest-blocked, status counts, past-grace-
+  period filtering with a within-grace tenant that must NOT show up, trials-expiring-within-7-days excluding
+  an already-expired one, recent-activity reverse-chronological ordering), `tests/Feature/Central/Tenants/
+  TenantIndexTest.php` (guest-blocked, search-by-company-name, search-by-domain, search-by-contact-email, a
+  no-match search returns an empty page rather than erroring, pagination reaches a second page — same
+  30-rows/2-pages shape `ActivityLogControllerTest`'s own pagination test already uses). Both new test files
+  construct tenants directly (`new Tenant([...])->save()` + `Queue::fake()`) rather than through the real
+  provisioning HTTP flow, matching `ProvisioningFailureTest`/`TenantSuspensionTest`'s established convention
+  for tests that only care about a tenant's persisted-state behavior, not provisioning itself — provisioning
+  through HTTP for 30 rows in the pagination test would also have been needlessly slow.
+- **One test-authoring bug caught by the coordinator's own first run (not the user this time)**: the initial
+  `DashboardControllerTest` past-grace-period test set both the "overdue" and "within-grace" tenants'
+  `suspended_at` to the *same* `Carbon::setTestNow()` instant before jumping the clock forward — both ended
+  up equally overdue once the clock moved, so the "within grace" tenant wrongly showed up too (asserted
+  count 1, got 2). Fixed by giving the within-grace tenant a *later* `suspended_at` (moved the fake clock
+  forward a second time before creating it) so it's genuinely still inside the 30-day window when the
+  dashboard is checked at the final fake "now". A reminder that a grace-period/trial boundary test needs two
+  distinct clock-anchored timestamps, not just two tenants sharing one.
+- **Verification**: `php -l` + `vendor/bin/pint --dirty --format agent` (passed) on every touched file,
+  `npm run build` (succeeded). **Test-verified by the coordinator directly this time** (not deferred to the
+  user, same as Phase D) — `php artisan test --compact` on the full Phase-E-relevant scope
+  (`DashboardControllerTest`, `TenantIndexTest`, `GracePeriodTest`, `TrialTrackingTest`): **18/18 passing, 153
+  assertions**. Also ran the full `tests/Feature/Central` suite as a regression check: **87/93 passing** —
+  the exact same 6 pre-existing failures flagged since the end of the Phase B entry below
+  (`ActivityLogControllerTest` x1, `ImpersonationTest` x1, `TenantUserControllerTest` x4), confirmed by test
+  name and, for `TenantUserControllerTest`, by re-running that file alone (4/4 fail there in isolation too,
+  same `Database connection [tenant] not configured` error every time — still not investigated, still out of
+  scope, same as every phase since Phase B first surfaced it). `ActivityLogControllerTest`'s single failure
+  showed a *different* assertion value across two consecutive full-suite runs in this same session (`2
+  is identical to 1` once, `0 is identical to 1` the next) — consistent with a pre-existing test-isolation
+  flake (not this phase's own code, which that test file never touches), but worth a real look before it's
+  trusted again; flagged, not investigated further here, same as it's been flagged since Phase B.
+- **A real, pre-existing bug found and fixed in the same session (not a Phase E regression — this predates
+  the whole `central-panel-build` effort)**: the user reported a 404 opening the central panel at
+  `/dashboard`. Root cause: `routes/central.php`'s `/` route still rendered the **stock, never-customized**
+  `resources/views/welcome.blade.php` Laravel scaffold. That view's `@auth` block hardcodes
+  `href="{{ url('/dashboard') }}"` for its "Dashboard" link — but `/dashboard` only exists on the **tenant**
+  side (`routes/tenant.php:57`, `tenant.dashboard`), actively blocked on the central domain by
+  `PreventAccessFromCentralDomains`. The central dashboard has always lived at `/admin`
+  (`central.dashboard`) — unrelated to and unchanged by this session's Phase E work (which only swapped the
+  `/admin` closure for a controller, same path). **Fixed** by replacing the static `view('welcome')` render
+  with a redirect based on `platform`-guard auth state — `central.dashboard` if authenticated, `login`
+  otherwise — the exact same pattern `routes/tenant.php`'s own root route (`$request->user('web') ? ...
+  tenant.dashboard : tenant.login`) already established; the central side just never got it. New tests in
+  `tests/Feature/ExampleTest.php` (replacing the stock "returns 200" placeholder test, which the redirect
+  now genuinely breaks) assert both branches. **`resources/views/welcome.blade.php` is now dead — nothing
+  references it anymore (confirmed via grep)** — left in place rather than deleted without being asked, but
+  worth removing next time that file is touched for any other reason.
+- **A real, pre-existing bug found and fixed in the same session (not a Phase E regression — this predates
+  the whole `central-panel-build` effort)**: the user reported a 404 opening the central panel at
+  `/dashboard`. Root cause: `routes/central.php`'s `/` route still rendered the **stock, never-customized**
+  `resources/views/welcome.blade.php` Laravel scaffold. That view's `@auth` block hardcodes
+  `href="{{ url('/dashboard') }}"` for its "Dashboard" link — but `/dashboard` only exists on the **tenant**
+  side (`routes/tenant.php:57`, `tenant.dashboard`), actively blocked on the central domain by
+  `PreventAccessFromCentralDomains`. The central dashboard has always lived at `/admin`
+  (`central.dashboard`) — unrelated to and unchanged by this session's Phase E work (which only swapped the
+  `/admin` closure for a controller, same path). **Fixed** by replacing the static `view('welcome')` render
+  with a redirect based on `platform`-guard auth state — `central.dashboard` if authenticated, `login`
+  otherwise — the exact same pattern `routes/tenant.php`'s own root route (`$request->user('web') ? ...
+  tenant.dashboard : tenant.login`) already established; the central side just never got it. New tests in
+  `tests/Feature/ExampleTest.php` (replacing the stock "returns 200" placeholder test, which the redirect
+  now genuinely breaks) assert both branches. **`resources/views/welcome.blade.php` is now dead — nothing
+  references it anymore (confirmed via grep)** — left in place rather than deleted without being asked, but
+  worth removing next time that file is touched for any other reason.
+
+---
+
+**2026-09-04, same-session UI/UX pass (not a plan-doc phase — a direct user-reported polish request on top of
+the now-complete Phase E).** The user tried the finished central panel and reported: buttons lack a pointer
+cursor, "loading" is just a disabled button with no spinner, `Tenants/Show.vue` wastes the right half of the
+screen, buttons lack icons, the tenant table has no real row actions, there's no way to edit a tenant's trial
+expiry, and no way to manually resolve a tenant stuck at Provisioning beyond "retry." Asked the user two
+clarifying questions first (via `AskUserQuestion`, since these touch real authorization/scope decisions, not
+just visual polish): the provisioning override should offer **both** "force to Active" and "cancel
+provisioning" (not just one), and both that override and trial-editing should be **owner-only**, matching
+tenant-delete's existing gating rather than support's routine-operations gating.
+
+- **`Button.vue` (global fix, not Central-only — the whole app inherits this)**: base classes gained
+  `cursor-pointer`, and the disabled state gained an explicit `cursor-not-allowed` (previously only
+  `pointer-events-none opacity-50` — no cursor override at all, which is the literal bug the user saw). New
+  `loading` prop: renders a small `border-current border-t-transparent` spinner (CSS `@keyframes`, respects
+  `prefers-reduced-motion`, same convention `Loader.vue` already established for its own full-page spinner)
+  prepended before the slot content, and forces the same disabled/blocked behavior `disabled` already gave
+  (`isInteractionBlocked = disabled || loading`). Grepped first for any existing loading-spinner-on-button
+  convention (`animate-spin`, `Loader2`, etc.) across the entire `resources/js` tree — **found none**; every
+  existing form across both Central and Tenant sides only ever did `:disabled="form.processing"` with no
+  visual feedback beyond that. This was a real, app-wide gap, not something Central-specific broke.
+- **Every interactive button across all 9 Central pages** (Tenants Index/Create/Edit/Show, PlatformAdmins
+  Index/Create/Edit, Settings/Edit, ActivityLog/Index) now wires `:loading` to either `form.processing`
+  (`useForm()`-based forms) or a local `ref`/`reactive` flag toggled via `router.get/post/delete`'s
+  `onStart`/`onFinish` callbacks (plain `router.*` calls have no built-in processing state the way `useForm`
+  does), and got a leading icon where one was missing (Search/Clear/Apply/Filter/New tenant/New platform
+  admin/Create/Save/Send test email). `Tenants/Index.vue`'s per-row action buttons and
+  `PlatformAdmins/Index.vue`'s per-row Edit link use a `reactive({})` map keyed by row id so only the
+  specific row's button that was actually clicked shows a spinner — confirmed this is safe with `DataTable`'s
+  `FlexRender`-based cell rendering (reads inside a `cell()` closure are tracked the same as any other
+  reactive read during that render pass, verified by reading `DataTable.vue` itself rather than assumed).
+- **`Tenants/Show.vue` layout rebuilt**: was two `max-w-lg`-constrained cards stacked in the left column only
+  (the exact bug reported — everything past ~32rem was empty on any real desktop width). Now a genuine
+  `grid-cols-1 lg:grid-cols-[2fr_1fr]` (same ratio `Tenant/Dashboard.vue`'s own two-column section already
+  uses), left column = Details + primary actions, right column = Domains plus a new conditional
+  "Provisioning controls" card — the right column is real content, not decoration, matching the "visual
+  structure is information" principle over adding a filler panel just to balance whitespace.
+- **Provisioning override (owner-gated per the user's answer above)**: new `TenantController::forceActive()`
+  — only valid while `status === Provisioning`, flips the status flag and nothing else, records
+  `tenant.force_active`. Deliberately documented as a footgun in its own docblock: forcing Active on a
+  tenant whose database/admin user never actually finished creating leaves an Active tenant nobody can log
+  into — this is why it's gated `can:platform-owner` (new `POST /tenants/{tenant}/force-active` route,
+  same gating as tenant delete) rather than available to `support`. "Cancel provisioning" deliberately
+  reuses the **existing** `destroy()` action/route/confirmation-modal rather than adding a new endpoint —
+  a stuck-provisioning tenant is still just a tenant, and Phase D's "type the company name" delete
+  safeguard applies just as much here; the Show.vue UI relabels the same modal/button contextually
+  (`deleteIntent` ref) instead of duplicating the flow. Both new controls only render (owner-gated in the
+  UI too, `isOwner` computed from `page.props.auth.platformAdmin.role`, same pattern
+  `PlatformAdmins/Index.vue` already established) inside a card that itself only shows while
+  `status === 'provisioning'`.
+- **Trial expiry editing is genuinely owner-only, not just UI-hidden**: initially bundled `trial_ends_at`
+  into the existing (non-owner-gated) `edit`/`update` route, then caught that this only *looked* right —
+  the user explicitly asked for owner-only, and that route has no `can:platform-owner` gate (a deliberate
+  Phase A/B decision, since renaming a tenant isn't risky, so gating the whole form would have also blocked
+  `support` from company-name/contact-email edits, which nothing asked for). **Corrected before shipping**:
+  reverted `edit()`/`update()` to company_name/contact_email only (back to their Phase A shape) and gave
+  trial expiry its own action — new `TenantController::updateTrial()`, `PUT /tenants/{tenant}/trial`,
+  gated `can:platform-owner` (same gate as delete/force-active). `Show.vue` gained a `v-if="isOwner"` "Trial
+  expiry" card in the right column (plain HTML `type="date"` input, not `NepaliDateInput` — that component
+  is a tenant-business-data convention for BS-calendar transaction dates; nothing in Central uses it, and
+  this is a platform-admin control) — always available regardless of tenant status, unlike the Provisioning
+  controls card. Clearing the field sets `trial_ends_at` to `null` via Laravel's default
+  `ConvertEmptyStringsToNull` middleware (confirmed present in `bootstrap/app.php`'s default stack, not a
+  special-cased empty-string check).
+- **Tests**: `TrialTrackingTest.php` gained 4 cases for `updateTrial()` (owner succeeds + activity log
+  recorded, clearing sets null, a `support` admin gets 403, guest redirected to login).
+  `ProvisioningFailureTest.php` gained 4 cases for `forceActive()` (owner succeeds + activity log recorded,
+  no-op on a non-Provisioning tenant, a `support` admin gets 403, guest redirected to login) — reused its
+  existing `stuckProvisioningTenant()` helper rather than inventing a new one.
+- **Verification**: `php -l` + `vendor/bin/pint --dirty --format agent` (passed) on every touched file,
+  `npm run build` (succeeded, no Vue compile errors from the new `h()`-based row-action cells or the
+  reworked Show.vue). `php artisan test --compact` on the full Phase-relevant scope (`TrialTrackingTest`,
+  `TenantUpdateTest`, `ProvisioningFailureTest`): **24/24 passing, 96 assertions**. Full
+  `tests/Feature/Central` + `ExampleTest` regression: **97/103 passing** — the same 6 pre-existing failures
+  (unchanged, same test names/errors as flagged since Phase B), plus 8 net new passing tests, zero
+  regressions.
+- **A second real, pre-existing bug found and fixed in the same session (from a live user-reported crash,
+  not a regression from anything above)**: `GET /tenants/{id}/users` 500'd with
+  `Stancl\Tenancy\Exceptions\TenantDatabaseDoesNotExistException` in the browser. Root cause traced to a
+  real tenant in the dev DB (`company_name: "LLCa ge"`, `status: active`) whose `pending_admin` was still
+  populated — only ever cleared by a successful `CreateTenantFirstAdmin` run — meaning its database was
+  never actually finished being provisioned, yet `status` claimed Active. `status` alone was never
+  trustworthy enough to gate a tenant-database connection attempt on. **Fixed**:
+  - New `Tenant::databaseExists(): bool` — delegates to the tenant's own `TenantDatabaseManager`
+    (`$this->database()->manager()->databaseExists(...)`), the same one `DatabaseTenancyBootstrapper` itself
+    uses. Checked explicitly at the top of `TenantController::impersonate()` and
+    `TenantUserController::index()` **before** calling `$tenant->run()`, redirecting with a friendly flash
+    message instead of letting the exception surface as a 500 — checked explicitly rather than caught as an
+    exception, since `TenantDatabaseDoesNotExistException` is only actually thrown by the bootstrapper in
+    `local` environments (confirmed by reading `DatabaseTenancyBootstrapper::bootstrap()`); a production
+    SQLite path would instead have PDO silently auto-create an empty file and fail confusingly later, which
+    the explicit check now catches in both environments.
+  - `TenantController::show()` now exposes `database_missing` (independent of `status`, and not computed
+    while genuinely still `Provisioning` — that state already has its own error-banner/retry flow, and no
+    database yet is expected mid-pipeline, not a fault). `Show.vue` gained a second red banner
+    (`v-else-if`, alongside the existing provisioning-error one) with a "Re-provision database" action.
+  - `TenantController::retryProvisioning()`'s eligibility relaxed from `status === Provisioning` only to
+    `status === Provisioning || ! databaseExists()` — safe because `pending_admin` survives regardless of
+    how stale the status flag is, and it refuses (new message: "This tenant already has a database - nothing
+    to retry.") whenever a real database exists, so it can never truncate a working tenant's data.
+  - **Tests**: `Tenant::databaseExists()` and `show()`'s `database_missing` flag covered directly in
+    `ProvisioningFailureTest.php` (3 new cases), plus one proving `retryProvisioning()` actually recreates
+    the database AND the admin user for a tenant in exactly this broken state (built by provisioning for
+    real, then `deleteDatabase()` + restoring `pending_admin`) — `TenantUserControllerTest`/`ImpersonationTest`
+    each gained a "returns a clean error instead of a crash" case for their own `$tenant->run()` call site.
+  - **A test-authoring bug caught mid-debug, not an app bug**: the first draft of the `retryProvisioning()`
+    test used `$tenant->update(['pending_admin' => [...]])` to restore the broken state — silently a no-op,
+    since `pending_admin` isn't in `Tenant`'s `#[Fillable(...)]` list (mass assignment protection drops it),
+    the exact same trap Phase B's `suspended_at` bug hit. Traced by writing a throwaway debug test that
+    dumped intermediate state (role count, user count) rather than guessing, confirming `pending_admin` was
+    still null when `CreateTenantFirstAdmin` ran. Fixed by using direct property assignment + `save()`,
+    matching how `TenantController::store()` itself sets it. The debug test was deleted once the real fix
+    was confirmed, not left behind. Grepped `app/` afterward to confirm no *application* code path makes the
+    same `update(['pending_admin' => ...])` mistake - confirmed clean, only the test had it.
+- **Button color hierarchy (user-reported: Delete wasn't red, positive actions weren't green)**: `Button.vue`
+  restructured so `tone` now drives styling for `primary` (solid fill) and `icon` variants too, not just
+  `secondary` - previously `primary` always hard-coded brand purple regardless of `tone`, so the "Delete"
+  confirm button in `Tenants/Show.vue`'s modal footer (`variant="primary" tone="purple"`) rendered in the
+  same brand-purple as every normal primary action, with no visual distinction for a real `DROP DATABASE`.
+  New `tone="danger"`/`tone="success"` reuse the **existing** `--color-danger`/`--color-success` tokens
+  `Badge.vue` already uses (`app.css`) - not a new palette, the same semantic colors extended to buttons so
+  "Delete" and "Resume" carry the same red/green meaning as their badges elsewhere. Applied: the delete
+  confirm button (now `tone="danger"`, solid fill - the strongest visual weight, matching how solid-purple
+  signals "the main action" elsewhere), the "Delete"/"Cancel provisioning" trigger buttons (soft red),
+  "Resume"/"Mark active" (soft green, both a positive Active-state transition) on `Show.vue`, and the
+  Resume icon button on `Tenants/Index.vue`'s row actions. Left "Suspend"/"Edit"/"View users"/"Impersonate"
+  neutral (purple/blue) - restraint per the frontend-design skill's own guidance ("spend your boldness in
+  one place"): only genuinely destructive or genuinely positive-state-change actions got a semantic color,
+  not every button. Backward-compatible: `variant="primary"` with no explicit `tone` (or `tone="purple"`,
+  the default) resolves to the exact same classes as before this change - confirmed by re-reading the
+  resulting computed class string, not assumed.
+- **Two migration files show as modified in `git status` that this session never touched**
+  (`database/migrations/tenant/2026_09_03_100001_add_store_id_to_item_stock_movements_table.php` and
+  `..._100010_add_store_id_to_sales_table.php`, both gaining a pre-insert backfill for tenants provisioned
+  before the stores feature existed). **Not this session's work** - flagged to the user rather than
+  reverted, committed, or investigated, since touching unfamiliar in-progress changes without knowing their
+  origin is exactly the kind of destructive-by-accident move this project's own safety conventions warn
+  against.
+- **Not yet committed** — this is genuinely the state as of this update, not a stale claim (see the Phase A
+  correction entry far below for why that distinction matters): the coordinator built, fixed, and verified
+  Phase E, the root-route bug fix, the UI/UX pass, the database-missing crash fix, and the button color
+  hierarchy fix all in one sitting and is updating this file immediately afterward rather than in a separate
+  step, to avoid the exact doc-goes-stale gap that correction entry describes. Full regression after the
+  database-missing fix: `tests/Feature/Central` + `ExampleTest.php`, **102/108 passing** - the same 6
+  pre-existing failures (unchanged since Phase B), zero regressions. The button-color pass was verified via
+  Pint + `npm run build` only (no interactive browser check - Laravel Boost's MCP tools were unavailable
+  this session, flagged rather than silently skipped).
+
+---
 
 - **Schema**: `tenants` gains `trial_ends_at` (nullable timestamp, set at creation from
   `platform_settings.default_trial_days`, same "surface only, never auto-act" posture as `suspended_at`/
