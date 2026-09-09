@@ -13,18 +13,21 @@ use InvalidArgumentException;
 use ValueError;
 
 /**
- * Production ("assemble N raw materials into a finished good") and Refining
+ * Production ("assemble N raw materials into a finished good"), Refining
  * ("convert a raw material into a different, usually smaller-quantity,
- * refined output") are mechanically identical stock movements - each just
- * consumes one or more input items at given quantities and produces one or
- * more output items at given quantities, store-scoped, with no ledger
- * impact at all (same periodic, not perpetual, inventory accounting every
- * other quantity-only document in this app follows - see
+ * refined output"), and Repackaging (an arbitrary N-items-in -> M-items-out
+ * conversion with no other business meaning attached - legacy day_khata's
+ * `/transfer` capability, see StockConversionType's own docblock for why it
+ * isn't called "transfer" here) are mechanically identical stock movements -
+ * each just consumes one or more input items at given quantities and
+ * produces one or more output items at given quantities, store-scoped, with
+ * no ledger impact at all (same periodic, not perpetual, inventory
+ * accounting every other quantity-only document in this app follows - see
  * StockAdjustment/StockTransfer's own docblocks). `type` is purely a
- * narration/reporting label distinguishing the two - exactly like
+ * narration/reporting label distinguishing the three - exactly like
  * CapitalPurchase's own `type in:capital,service` - not a mechanical
- * difference, so both share this one model/table/controller rather than two
- * near-duplicate ones.
+ * difference, so all three share this one model/table/controller rather
+ * than three near-duplicate ones.
  *
  * Legacy day_khata modelled a multi-stage refining chain (raw material ->
  * intermediate -> ground/finished) as several single-input/single-output
@@ -126,7 +129,7 @@ class StockConversion extends Model
             try {
                 $type = StockConversionType::from($data['type']);
             } catch (ValueError) {
-                throw new InvalidArgumentException('Type must be either "production" or "refining".');
+                throw new InvalidArgumentException('Type must be "production", "refining", or "repackaging".');
             }
 
             $storeId = isset($data['store_id']) ? (int) $data['store_id'] : Store::where('is_active', true)->orderBy('id')->value('id');
@@ -218,7 +221,9 @@ class StockConversion extends Model
                     $type === StockConversionType::Production && $line['direction'] === 'in' => StockMovementType::ProductionIn,
                     $type === StockConversionType::Production && $line['direction'] === 'out' => StockMovementType::ProductionOut,
                     $type === StockConversionType::Refining && $line['direction'] === 'in' => StockMovementType::RefiningIn,
-                    default => StockMovementType::RefiningOut,
+                    $type === StockConversionType::Refining && $line['direction'] === 'out' => StockMovementType::RefiningOut,
+                    $type === StockConversionType::Repackaging && $line['direction'] === 'in' => StockMovementType::RepackagingIn,
+                    default => StockMovementType::RepackagingOut,
                 };
 
                 $line['item']->recordStockMovement(

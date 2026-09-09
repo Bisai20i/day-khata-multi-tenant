@@ -116,6 +116,43 @@ test('refining converts an input item into a different output item', function ()
     $tenant->delete();
 });
 
+test('repackaging converts input items into output items with dedicated repackaging movement types', function () {
+    $tenant = provisionStockConversionTestTenant('stock-conversion-repackaging.tenant-test');
+
+    $tenant->run(function () {
+        $actor = stockConversionTestActor();
+        $bulk = Item::factory()->create(['is_stockable' => true, 'name' => 'Bulk Sack (50kg)']);
+        $retail = Item::factory()->create(['is_stockable' => true, 'name' => 'Retail Bag (1kg)']);
+        $store = Store::where('is_active', true)->orderBy('id')->firstOrFail();
+
+        $bulk->recordStockMovement(StockMovementType::Opening, 10, '2026-06-01', $store->id);
+
+        $conversion = StockConversion::post(
+            ['type' => 'repackaging', 'date' => '2026-06-02', 'note' => 'Split bulk sack into retail bags'],
+            [['item_id' => $bulk->id, 'quantity' => 10]],
+            [['item_id' => $retail->id, 'quantity' => 8]],
+            $actor,
+        );
+
+        expect($conversion->type->value)->toBe('repackaging')
+            ->and($bulk->fresh()->currentStock($store->id))->toBe(0.0)
+            ->and($retail->fresh()->currentStock($store->id))->toBe(8.0);
+
+        $movements = ItemStockMovement::query()
+            ->where('reference_type', (new StockConversionLine)->getMorphClass())
+            ->whereIn('reference_id', $conversion->lines()->pluck('id'))
+            ->get();
+
+        $bulkMovement = $movements->firstWhere('item_id', $bulk->id);
+        $retailMovement = $movements->firstWhere('item_id', $retail->id);
+
+        expect($bulkMovement->movement_type)->toBe(StockMovementType::RepackagingOut)
+            ->and($retailMovement->movement_type)->toBe(StockMovementType::RepackagingIn);
+    });
+
+    $tenant->delete();
+});
+
 test('consuming more of an input item than is currently in stock is rejected and nothing is posted', function () {
     $tenant = provisionStockConversionTestTenant('stock-conversion-oversell.tenant-test');
 

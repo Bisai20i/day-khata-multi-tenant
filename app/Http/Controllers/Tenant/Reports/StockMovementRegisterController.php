@@ -92,6 +92,8 @@ class StockMovementRegisterController extends Controller
             StockMovementType::ProductionOut => 'Production Out',
             StockMovementType::RefiningIn => 'Refining In',
             StockMovementType::RefiningOut => 'Refining Out',
+            StockMovementType::RepackagingIn => 'Repackaging In',
+            StockMovementType::RepackagingOut => 'Repackaging Out',
         };
     }
 

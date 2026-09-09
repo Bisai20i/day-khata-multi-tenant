@@ -2,12 +2,16 @@
 
 namespace App\Http\Controllers\Tenant\Inventory;
 
+use App\Enums\StockConversionType;
 use App\Http\Controllers\Controller;
+use App\Models\CompanySetting;
 use App\Models\Item;
 use App\Models\StockConversion;
 use App\Models\Store;
+use Barryvdh\DomPDF\Facade\Pdf;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
+use Illuminate\Http\Response as HttpResponse;
 use Illuminate\Support\Arr;
 use Inertia\Inertia;
 use Inertia\Response;
@@ -31,7 +35,7 @@ class StockConversionController extends Controller
     public function store(Request $request): RedirectResponse
     {
         $data = $request->validate([
-            'type' => ['required', 'in:production,refining'],
+            'type' => ['required', 'in:production,refining,repackaging'],
             'date' => ['required', 'date'],
             'note' => ['nullable', 'string', 'max:255'],
             'store_id' => ['nullable', 'integer', 'exists:stores,id'],
@@ -74,5 +78,41 @@ class StockConversionController extends Controller
         }
 
         return redirect()->route('tenant.stock-conversions.index')->with('status', 'Stock conversion cancelled.');
+    }
+
+    /**
+     * Streams a printable PDF inline (not a forced download), so it opens in
+     * a new browser tab from a plain anchor link on the Index page - same
+     * pattern as SaleController::print()/PurchaseController::print(). A
+     * stock conversion has no invoice-style numbering sequence of its own
+     * (see StockConversion's own docblock - it never touches the ledger), so
+     * the document number is simply its own id, matching
+     * QuotationController::print()'s fallback for a quotation with no
+     * reference_number. Section labels mirror Create.vue's own
+     * sectionLabels map so the printed document reads the same way the
+     * create form did.
+     */
+    public function print(StockConversion $stock_conversion): HttpResponse
+    {
+        $stock_conversion->load(['store', 'lines.item']);
+
+        $sectionLabels = match ($stock_conversion->type) {
+            StockConversionType::Production => ['input' => 'Raw materials consumed', 'output' => 'Finished good produced'],
+            StockConversionType::Refining => ['input' => 'Input material consumed', 'output' => 'Refined output produced'],
+            StockConversionType::Repackaging => ['input' => 'Items consumed', 'output' => 'Items produced'],
+        };
+
+        $pdf = Pdf::loadView('pdf.stock-conversion', [
+            'stockConversion' => $stock_conversion,
+            'inputLines' => $stock_conversion->lines->where('direction', 'out')->values(),
+            'outputLines' => $stock_conversion->lines->where('direction', 'in')->values(),
+            'inputLabel' => $sectionLabels['input'],
+            'outputLabel' => $sectionLabels['output'],
+            'company' => CompanySetting::current(),
+            'documentNumber' => "CNV-{$stock_conversion->id}",
+            'documentDate' => $stock_conversion->date->format('Y-m-d'),
+        ]);
+
+        return $pdf->stream("stock-conversion-{$stock_conversion->id}.pdf");
     }
 }

@@ -4,13 +4,16 @@ namespace App\Http\Controllers\Tenant\Inventory;
 
 use App\Http\Controllers\Concerns\ImportsCsv;
 use App\Http\Controllers\Controller;
+use App\Models\CompanySetting;
 use App\Models\FiscalYear;
 use App\Models\Item;
 use App\Models\StockAdjustment;
 use App\Models\Store;
+use Barryvdh\DomPDF\Facade\Pdf;
 use Illuminate\Auth\Access\AuthorizationException;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
+use Illuminate\Http\Response as HttpResponse;
 use Illuminate\Support\Arr;
 use Illuminate\Support\Facades\Validator;
 use Inertia\Inertia;
@@ -97,6 +100,29 @@ class StockAdjustmentController extends Controller
         }
 
         return redirect()->route('tenant.stock-adjustments.index')->with('status', 'Stock adjustment cancelled.');
+    }
+
+    /**
+     * Streams a printable PDF inline (not a forced download), so it opens in
+     * a new browser tab from a plain anchor link on the Index page - same
+     * pattern as SaleController::print()/PurchaseController::print(). A
+     * stock adjustment has no invoice-style numbering sequence of its own
+     * (see this class's docblock - it never touches the ledger), so the
+     * document number is simply its own id, matching QuotationController::
+     * print()'s fallback for a quotation with no reference_number.
+     */
+    public function print(StockAdjustment $stock_adjustment): HttpResponse
+    {
+        $stock_adjustment->load(['store', 'lines.item']);
+
+        $pdf = Pdf::loadView('pdf.stock-adjustment', [
+            'stockAdjustment' => $stock_adjustment,
+            'company' => CompanySetting::current(),
+            'documentNumber' => "ADJ-{$stock_adjustment->id}",
+            'documentDate' => $stock_adjustment->date->format('Y-m-d'),
+        ]);
+
+        return $pdf->stream("stock-adjustment-{$stock_adjustment->id}.pdf");
     }
 
     /**

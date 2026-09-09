@@ -3,11 +3,14 @@
 namespace App\Http\Controllers\Tenant\Inventory;
 
 use App\Http\Controllers\Controller;
+use App\Models\CompanySetting;
 use App\Models\Item;
 use App\Models\StockTransfer;
 use App\Models\Store;
+use Barryvdh\DomPDF\Facade\Pdf;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
+use Illuminate\Http\Response as HttpResponse;
 use Illuminate\Support\Arr;
 use Inertia\Inertia;
 use Inertia\Response;
@@ -70,5 +73,28 @@ class StockTransferController extends Controller
         }
 
         return redirect()->route('tenant.stock-transfers.index')->with('status', 'Stock transfer cancelled.');
+    }
+
+    /**
+     * Streams a printable PDF inline (not a forced download), so it opens in
+     * a new browser tab from a plain anchor link on the Index page - same
+     * pattern as SaleController::print()/PurchaseController::print(). A
+     * stock transfer has no invoice-style numbering sequence of its own (see
+     * this class's docblock - it never touches the ledger), so the document
+     * number is simply its own id, matching QuotationController::print()'s
+     * fallback for a quotation with no reference_number.
+     */
+    public function print(StockTransfer $stock_transfer): HttpResponse
+    {
+        $stock_transfer->load(['fromStore', 'toStore', 'lines.item']);
+
+        $pdf = Pdf::loadView('pdf.stock-transfer', [
+            'stockTransfer' => $stock_transfer,
+            'company' => CompanySetting::current(),
+            'documentNumber' => "TRF-{$stock_transfer->id}",
+            'documentDate' => $stock_transfer->date->format('Y-m-d'),
+        ]);
+
+        return $pdf->stream("stock-transfer-{$stock_transfer->id}.pdf");
     }
 }

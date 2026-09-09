@@ -22,15 +22,20 @@ const storeOptions = computed(() => props.stores.map((s) => ({ value: s.id, labe
 const typeOptions = [
     { value: 'production', label: 'Production' },
     { value: 'refining', label: 'Refining' },
+    { value: 'repackaging', label: 'Repackaging' },
 ];
 
-// Production and Refining are the same underlying mechanism (see
-// StockConversion's own docblock) - only the section labels change
+// Production, Refining, and Repackaging are the same underlying mechanism
+// (see StockConversion's own docblock) - only the section labels change
 // depending on which one is picked, matching the business language each
-// one's users actually use.
+// one's users actually use. Repackaging is the arbitrary items-in ->
+// items-out conversion legacy day_khata called "Stock Transfer" - renamed
+// here since that label now belongs to the genuinely different store-to-
+// store relocation feature (see StockConversionType's own docblock).
 const sectionLabels = {
     production: { input: 'Raw materials consumed', output: 'Finished good produced' },
     refining: { input: 'Input material consumed', output: 'Refined output produced' },
+    repackaging: { input: 'Items consumed', output: 'Items produced' },
 };
 
 function emptyLine() {
@@ -91,7 +96,7 @@ function submit() {
 <template>
     <Card variant="panel">
         <div class="mb-4 flex items-center justify-between">
-            <h3 class="text-base font-bold text-text-strong">New production / refining entry</h3>
+            <h3 class="text-base font-bold text-text-strong">New conversion entry</h3>
             <Button variant="secondary" tone="purple" type="button" @click="emit('cancel')">Cancel</Button>
         </div>
 

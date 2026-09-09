@@ -1,7 +1,7 @@
 <script setup>
 import { computed, h, ref, watch } from 'vue';
 import { useForm, usePage } from '@inertiajs/vue3';
-import { Ban, Plus } from '@lucide/vue';
+import { Ban, Plus, Printer } from '@lucide/vue';
 import AppLayout from '@/layouts/AppLayout.vue';
 import Card from '@/components/ui/Card.vue';
 import Button from '@/components/ui/Button.vue';
@@ -41,6 +41,7 @@ const showCreateForm = ref(false);
 const typeLabels = {
     production: 'Production',
     refining: 'Refining',
+    repackaging: 'Repackaging',
 };
 
 function linesSummary(conversion, direction) {
@@ -124,20 +125,35 @@ const columns = [
         header: 'Actions',
         numeric: false,
         cell: ({ row }) =>
-            row.original.status === 'cancelled'
-                ? null
-                : h(Tooltip, { label: 'Cancel entry' }, () =>
-                      h(
-                          'button',
-                          {
-                              type: 'button',
-                              class: 'flex h-[26px] w-[26px] items-center justify-center bg-bg-subtle text-text-faint transition-colors duration-150 hover:bg-danger-bg hover:text-danger',
-                              'aria-label': 'Cancel entry',
-                              onClick: () => openCancel(row.original),
-                          },
-                          [h(Ban, { class: 'h-[13px] w-[13px]' })],
+            h('div', { class: 'flex items-center gap-1' }, [
+                h(Tooltip, { label: 'Print' }, () =>
+                    h(
+                        'a',
+                        {
+                            href: `/stock-conversions/${row.original.id}/print`,
+                            target: '_blank',
+                            rel: 'noopener',
+                            class: 'flex h-[26px] w-[26px] items-center justify-center bg-bg-subtle text-text-faint transition-colors duration-150 hover:bg-primary-tint hover:text-primary',
+                            'aria-label': 'Print entry',
+                        },
+                        [h(Printer, { class: 'h-[13px] w-[13px]' })],
+                    ),
+                ),
+                row.original.status === 'cancelled'
+                    ? null
+                    : h(Tooltip, { label: 'Cancel entry' }, () =>
+                          h(
+                              'button',
+                              {
+                                  type: 'button',
+                                  class: 'flex h-[26px] w-[26px] items-center justify-center bg-bg-subtle text-text-faint transition-colors duration-150 hover:bg-danger-bg hover:text-danger',
+                                  'aria-label': 'Cancel entry',
+                                  onClick: () => openCancel(row.original),
+                              },
+                              [h(Ban, { class: 'h-[13px] w-[13px]' })],
+                          ),
                       ),
-                  ),
+            ]),
     },
 ];
 </script>

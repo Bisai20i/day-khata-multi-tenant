@@ -1,0 +1,141 @@
+<script setup>
+import { computed, ref } from 'vue';
+import { router, usePage } from '@inertiajs/vue3';
+import AppLayout from '@/layouts/AppLayout.vue';
+import Card from '@/components/ui/Card.vue';
+import NepaliDateInput from '@/components/ui/NepaliDateInput.vue';
+import Select from '@/components/ui/Select.vue';
+import Button from '@/components/ui/Button.vue';
+import DataTable from '@/components/ui/DataTable.vue';
+import { navGroups } from '@/lib/nav-items.js';
+
+const props = defineProps({
+    lines: { type: Array, default: () => [] },
+    itemWise: { type: Array, default: () => [] },
+    items: { type: Array, default: () => [] },
+    stores: { type: Array, default: () => [] },
+    from: { type: String, required: true },
+    to: { type: String, required: true },
+    storeId: { type: [Number, null], default: null },
+    itemId: { type: [Number, null], default: null },
+    reason: { type: String, default: null },
+});
+
+const page = usePage();
+const isAdmin = computed(() => page.props.auth?.user?.role?.slug === 'admin');
+const navItems = computed(() => navGroups(isAdmin.value));
+
+const from = ref(props.from);
+const to = ref(props.to);
+const storeId = ref(props.storeId);
+const itemId = ref(props.itemId);
+const reason = ref(props.reason);
+
+// Raw list mirrors legacy's damagestock() variant (one row per line);
+// item-wise mirrors legacy's itemwisedamagestock()/
+// SearchItemBetweenDateitemwiseDamage() variant (summed per item) - both
+// come back from the same request, so switching is instant, no round trip.
+const view = ref('list');
+
+const storeOptions = computed(() => [
+    { value: null, label: 'All stores' },
+    ...props.stores.map((store) => ({ value: store.id, label: store.name })),
+]);
+
+const itemOptions = computed(() => [
+    { value: null, label: 'All items' },
+    ...props.items.map((item) => ({ value: item.id, label: item.name })),
+]);
+
+const reasonOptions = [
+    { value: null, label: 'Damage & Lost' },
+    { value: 'damage', label: 'Damage only' },
+    { value: 'lost', label: 'Lost only' },
+];
+
+function applyFilter() {
+    router.get(
+        window.location.pathname,
+        {
+            from: from.value,
+            to: to.value,
+            store_id: storeId.value ?? undefined,
+            item_id: itemId.value ?? undefined,
+            reason: reason.value ?? undefined,
+        },
+        { preserveState: true, preserveScroll: true },
+    );
+}
+
+const reasonLabels = { damage: 'Damage', lost: 'Lost' };
+
+const listColumns = [
+    { accessorKey: 'date', header: 'Date' },
+    { accessorKey: 'itemName', header: 'Item' },
+    { accessorKey: 'unit', header: 'Unit' },
+    { id: 'storeName', header: 'Store', numeric: false, cell: ({ row }) => row.original.storeName ?? '—' },
+    { id: 'reason', header: 'Reason', numeric: false, cell: ({ row }) => reasonLabels[row.original.reason] ?? row.original.reason },
+    { id: 'quantity', header: 'Quantity', numeric: true, cell: ({ row }) => Number(row.original.quantity).toFixed(4) },
+    { id: 'remarks', header: 'Remarks', numeric: false, cell: ({ row }) => row.original.remarks ?? '—' },
+];
+
+const itemWiseColumns = [
+    { accessorKey: 'name', header: 'Item' },
+    { accessorKey: 'unit', header: 'Unit' },
+    { id: 'total_quantity', header: 'Total Quantity', numeric: true, cell: ({ row }) => Number(row.original.total_quantity).toFixed(4) },
+    { accessorKey: 'transaction_count', header: 'Entries', numeric: true },
+];
+
+const totalQuantity = computed(() => props.lines.reduce((sum, line) => sum + Number(line.quantity), 0));
+</script>
+
+<template>
+    <AppLayout title="Damage & Lost Stock" :nav-items="navItems">
+        <div class="mb-4 flex items-center justify-between">
+            <h2 class="text-base font-bold text-text-strong">Damage & Lost Stock</h2>
+        </div>
+
+        <Card variant="panel" class="mb-4">
+            <div class="flex flex-wrap items-end gap-3">
+                <div>
+                    <label class="mb-1 block text-xs font-semibold text-text-muted">From</label>
+                    <NepaliDateInput v-model="from" />
+                </div>
+                <div>
+                    <label class="mb-1 block text-xs font-semibold text-text-muted">To</label>
+                    <NepaliDateInput v-model="to" />
+                </div>
+                <div class="w-56">
+                    <label class="mb-1 block text-xs font-semibold text-text-muted">Item</label>
+                    <Select v-model="itemId" :options="itemOptions" />
+                </div>
+                <div class="w-48">
+                    <label class="mb-1 block text-xs font-semibold text-text-muted">Store</label>
+                    <Select v-model="storeId" :options="storeOptions" />
+                </div>
+                <div class="w-48">
+                    <label class="mb-1 block text-xs font-semibold text-text-muted">Reason</label>
+                    <Select v-model="reason" :options="reasonOptions" />
+                </div>
+                <Button variant="primary" tone="purple" @click="applyFilter">Apply</Button>
+            </div>
+        </Card>
+
+        <div class="mb-3 flex items-center gap-2">
+            <Button :variant="view === 'list' ? 'primary' : 'secondary'" tone="purple" @click="view = 'list'">List</Button>
+            <Button :variant="view === 'item-wise' ? 'primary' : 'secondary'" tone="purple" @click="view = 'item-wise'">Item-wise</Button>
+        </div>
+
+        <Card variant="panel" v-if="view === 'list'">
+            <DataTable :columns="listColumns" :data="lines" :page-size="25" empty-message="No damage or lost stock entries in this range" />
+            <div class="mt-3 border-t-[1.5px] border-border pt-3 text-sm">
+                <span class="text-[10px] font-bold tracking-[.8px] text-text-muted uppercase">Total quantity written off:</span>
+                <span class="ml-2 font-bold text-text-strong">{{ totalQuantity.toFixed(4) }}</span>
+            </div>
+        </Card>
+
+        <Card variant="panel" v-else>
+            <DataTable :columns="itemWiseColumns" :data="itemWise" :page-size="25" empty-message="No damage or lost stock entries in this range" />
+        </Card>
+    </AppLayout>
+</template>

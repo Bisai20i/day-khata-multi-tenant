@@ -21,5 +21,6 @@ Route::name('tenant.')->group(function () {
         Route::get('/', [StockTransferController::class, 'index'])->name('index');
         Route::post('/', [StockTransferController::class, 'store'])->name('store');
         Route::post('/{stock_transfer}/cancel', [StockTransferController::class, 'cancel'])->name('cancel');
+        Route::get('/{stock_transfer}/print', [StockTransferController::class, 'print'])->name('print');
     });
 });
