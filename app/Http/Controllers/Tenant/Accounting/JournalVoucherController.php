@@ -62,4 +62,19 @@ class JournalVoucherController extends Controller
 
         return redirect()->route('tenant.journal-vouchers.index')->with('status', 'Journal voucher posted.');
     }
+
+    public function cancel(Request $request, JournalVoucher $journalVoucher): RedirectResponse
+    {
+        $data = $request->validate([
+            'reason' => ['required', 'string', 'max:255'],
+        ]);
+
+        try {
+            $journalVoucher->cancel($request->user(), $data['reason']);
+        } catch (InvalidArgumentException|AuthorizationException $e) {
+            return back()->withErrors(['reason' => $e->getMessage()]);
+        }
+
+        return redirect()->route('tenant.journal-vouchers.index')->with('status', 'Journal voucher cancelled.');
+    }
 }

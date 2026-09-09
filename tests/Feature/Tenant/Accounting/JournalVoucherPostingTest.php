@@ -5,7 +5,9 @@ use App\Enums\VoucherType;
 use App\Models\Account;
 use App\Models\FiscalYear;
 use App\Models\JournalVoucher;
+use App\Models\Payment;
 use App\Models\Role;
+use App\Models\Supplier;
 use App\Models\Tenant;
 use App\Models\User;
 use Illuminate\Auth\Access\AuthorizationException;
@@ -289,6 +291,228 @@ test('an admin can post a reasoned correction into a reopened fiscal year and it
         $cashId = cashAccount()->id;
         expect((float) $linesByAccount[$cashId]->credit)->toBe(100.0)
             ->and((float) $linesByAccount[$cashId]->debit)->toBe(0.0);
+    });
+
+    $tenant->delete();
+});
+
+test('cancelling a posted journal voucher posts a correctly mirrored reversal and marks the original cancelled', function () {
+    $tenant = provisionVoucherTestTenant('jv-cancel-basic.tenant-test');
+
+    $tenant->run(function () {
+        FiscalYear::create(['name' => 'FY1', 'start_date' => '2026-01-01', 'end_date' => '2026-12-31', 'status' => FiscalYearStatus::Open]);
+        $actor = adminUser();
+
+        $depreciation = Account::where('code', 'EXE20')->firstOrFail();
+        $disposalLoss = Account::where('code', 'EXE21')->firstOrFail();
+        $cash = cashAccount();
+
+        // Three-line balanced voucher: two expense debits, one cash credit.
+        $voucher = JournalVoucher::post(
+            ['date' => '2026-06-01', 'narration' => 'Misc expenses paid in cash'],
+            [
+                ['account_id' => $depreciation->id, 'debit' => 300, 'credit' => 0],
+                ['account_id' => $disposalLoss->id, 'debit' => 200, 'credit' => 0],
+                ['account_id' => $cash->id, 'debit' => 0, 'credit' => 500],
+            ],
+            $actor,
+        );
+
+        expect($voucher->status)->toBe('posted');
+
+        $voucher->cancel($actor, 'Entered against the wrong accounts');
+
+        expect($voucher->fresh()->status)->toBe('cancelled');
+
+        $reversal = JournalVoucher::where('narration', "Cancellation of journal voucher #{$voucher->voucher_number}: Entered against the wrong accounts")
+            ->firstOrFail();
+
+        expect($reversal->voucher_type)->toBe(VoucherType::Journal)
+            ->and($reversal->status)->toBe('posted');
+
+        $linesByAccount = $reversal->lines->keyBy('account_id');
+
+        // Every original debit becomes a credit of the same amount and
+        // vice versa, so the net effect on each account touched is zero.
+        expect((float) $linesByAccount[$depreciation->id]->credit)->toBe(300.0)
+            ->and((float) $linesByAccount[$depreciation->id]->debit)->toBe(0.0)
+            ->and((float) $linesByAccount[$disposalLoss->id]->credit)->toBe(200.0)
+            ->and((float) $linesByAccount[$disposalLoss->id]->debit)->toBe(0.0)
+            ->and((float) $linesByAccount[$cash->id]->debit)->toBe(500.0)
+            ->and((float) $linesByAccount[$cash->id]->credit)->toBe(0.0);
+
+        $totalDebit = round((float) $reversal->lines->sum('debit'), 2);
+        $totalCredit = round((float) $reversal->lines->sum('credit'), 2);
+        expect($totalDebit)->toBe($totalCredit)->and($totalDebit)->toBe(500.0);
+    });
+
+    $tenant->delete();
+});
+
+test('cancelling an already-cancelled journal voucher is rejected', function () {
+    $tenant = provisionVoucherTestTenant('jv-cancel-twice.tenant-test');
+
+    $tenant->run(function () {
+        FiscalYear::create(['name' => 'FY1', 'start_date' => '2026-01-01', 'end_date' => '2026-12-31', 'status' => FiscalYearStatus::Open]);
+        $actor = adminUser();
+
+        $voucher = JournalVoucher::post(
+            ['date' => '2026-06-01', 'narration' => 'Cash sale'],
+            [
+                ['account_id' => cashAccount()->id, 'debit' => 100, 'credit' => 0],
+                ['account_id' => salesAccount()->id, 'debit' => 0, 'credit' => 100],
+            ],
+            $actor,
+        );
+
+        $voucher->cancel($actor, 'First cancellation');
+
+        expect(fn () => $voucher->fresh()->cancel($actor, 'Second attempt'))
+            ->toThrow(InvalidArgumentException::class);
+    });
+
+    $tenant->delete();
+});
+
+test('cancelling a journal voucher that backs a Payment (or any other module) is rejected - cancel the source record instead', function () {
+    $tenant = provisionVoucherTestTenant('jv-cancel-source-guard.tenant-test');
+
+    $tenant->run(function () {
+        FiscalYear::create(['name' => 'FY1', 'start_date' => '2026-01-01', 'end_date' => '2026-12-31', 'status' => FiscalYearStatus::Open]);
+        $actor = adminUser();
+        $supplier = Supplier::factory()->create();
+
+        $payment = Payment::post([
+            'supplier_id' => $supplier->id,
+            'date' => '2026-06-10',
+            'amount' => 200,
+            'payment_mode' => 'cash',
+        ], $actor);
+
+        $backingVoucher = $payment->journalVoucher()->firstOrFail();
+
+        // The generic Journal Vouchers index lists every voucher_type with
+        // no filter, so this guards against cancelling a Payment's (or
+        // Sale's, Purchase's, ...) own voucher from that generic screen,
+        // which would reverse the ledger without ever marking the Payment
+        // itself cancelled.
+        expect(fn () => $backingVoucher->cancel($actor, 'Attempted from the generic screen'))
+            ->toThrow(InvalidArgumentException::class);
+
+        expect($backingVoucher->fresh()->status)->toBe('posted')
+            ->and($payment->fresh()->status)->toBe('posted');
+    });
+
+    $tenant->delete();
+});
+
+test('cancelling a system-generated voucher type (e.g. opening balance) is rejected', function () {
+    $tenant = provisionVoucherTestTenant('jv-cancel-system-type-guard.tenant-test');
+
+    $tenant->run(function () {
+        FiscalYear::create(['name' => 'FY1', 'start_date' => '2026-01-01', 'end_date' => '2026-12-31', 'status' => FiscalYearStatus::Open]);
+        $actor = adminUser();
+
+        $opening = JournalVoucher::post(
+            ['voucher_type' => 'opening_balance', 'date' => '2026-01-01', 'narration' => 'Opening balance'],
+            [
+                ['account_id' => cashAccount()->id, 'debit' => 1000, 'credit' => 0],
+                ['account_id' => salesAccount()->id, 'debit' => 0, 'credit' => 1000],
+            ],
+            $actor,
+        );
+
+        expect(fn () => $opening->cancel($actor, 'Trying to undo the opening balance'))
+            ->toThrow(InvalidArgumentException::class);
+    });
+
+    $tenant->delete();
+});
+
+test('cancelling a journal voucher originally posted in a now-closed fiscal year still succeeds, posting the reversal into the currently open year', function () {
+    // Matches every sibling cancel() (Payment::cancel(), Sale::cancel(),
+    // etc.): none of them re-check the ORIGINAL document's fiscal year at
+    // all - they call post() with no fiscal_year_id, which always resolves
+    // to FiscalYear::current(), so the reversal always lands in whichever
+    // year is open today regardless of which year the original document
+    // lived in. There is deliberately no "original fiscal year must still
+    // be open/reopened" guard anywhere in this app for that reason - only
+    // ClosedFiscalYearGuard's own "closed and never reopened" check inside
+    // post() applies, and it's a no-op here since the reversal always
+    // targets the (already open) current year.
+    $tenant = provisionVoucherTestTenant('jv-cancel-original-year-closed.tenant-test');
+
+    $tenant->run(function () {
+        $fy1 = FiscalYear::create(['name' => 'FY1', 'start_date' => '2026-01-01', 'end_date' => '2026-12-31', 'status' => FiscalYearStatus::Open]);
+        $fy2 = FiscalYear::create(['name' => 'FY2', 'start_date' => '2027-01-01', 'end_date' => '2027-12-31', 'status' => FiscalYearStatus::Closed]);
+        $actor = adminUser();
+
+        $voucher = JournalVoucher::post(
+            ['date' => '2026-06-01', 'narration' => 'Cash sale'],
+            [
+                ['account_id' => cashAccount()->id, 'debit' => 100, 'credit' => 0],
+                ['account_id' => salesAccount()->id, 'debit' => 0, 'credit' => 100],
+            ],
+            $actor,
+        );
+
+        $fy1->close($fy2, $actor);
+
+        expect($fy1->fresh()->status)->toBe(FiscalYearStatus::Closed)
+            ->and($fy2->fresh()->status)->toBe(FiscalYearStatus::Open);
+
+        $voucher->cancel($actor, 'Correcting after year-end close');
+
+        expect($voucher->fresh()->status)->toBe('cancelled');
+
+        $reversal = JournalVoucher::where('narration', "Cancellation of journal voucher #{$voucher->voucher_number}: Correcting after year-end close")
+            ->firstOrFail();
+
+        expect($reversal->fiscal_year_id)->toBe($fy2->id);
+    });
+
+    $tenant->delete();
+});
+
+test('the journal vouchers index page renders and an authenticated user can post and cancel a journal voucher via HTTP', function () {
+    $domain = 'jv-http.tenant-test';
+    $tenant = provisionVoucherTestTenant($domain);
+
+    $cashId = $salesId = null;
+    $tenant->run(function () use (&$cashId, &$salesId) {
+        User::factory()->create(['email' => 'owner@example.com', 'role_id' => Role::where('slug', 'admin')->value('id')]);
+        FiscalYear::create(['name' => 'FY1', 'start_date' => '2026-01-01', 'end_date' => '2026-12-31', 'status' => FiscalYearStatus::Open]);
+        $cashId = cashAccount()->id;
+        $salesId = salesAccount()->id;
+    });
+
+    $this->post("http://{$domain}/login", ['email' => 'owner@example.com', 'password' => 'password']);
+
+    $this->get("http://{$domain}/journal-vouchers")
+        ->assertOk()
+        ->assertInertia(fn ($page) => $page->component('Tenant/Accounting/JournalVouchers/Index'));
+
+    $this->post("http://{$domain}/journal-vouchers", [
+        'date' => '2026-06-01',
+        'narration' => 'Cash sale',
+        'lines' => [
+            ['account_id' => $cashId, 'debit' => 150, 'credit' => 0],
+            ['account_id' => $salesId, 'debit' => 0, 'credit' => 150],
+        ],
+    ])->assertRedirect();
+
+    $voucherId = null;
+    $tenant->run(function () use (&$voucherId) {
+        $voucher = JournalVoucher::where('voucher_type', VoucherType::Journal)->firstOrFail();
+        expect($voucher->status)->toBe('posted');
+        $voucherId = $voucher->id;
+    });
+
+    $this->post("http://{$domain}/journal-vouchers/{$voucherId}/cancel", ['reason' => 'Duplicate entry'])
+        ->assertRedirect();
+
+    $tenant->run(function () use ($voucherId) {
+        expect(JournalVoucher::find($voucherId)->status)->toBe('cancelled');
     });
 
     $tenant->delete();

@@ -36,6 +36,7 @@ Route::name('tenant.')->group(function () {
     Route::prefix('journal-vouchers')->name('journal-vouchers.')->group(function () {
         Route::get('/', [JournalVoucherController::class, 'index'])->name('index');
         Route::post('/', [JournalVoucherController::class, 'store'])->name('store');
+        Route::post('/{journalVoucher}/cancel', [JournalVoucherController::class, 'cancel'])->name('cancel');
     });
 
     Route::get('/accounts/{account}/ledger', [AccountController::class, 'ledger'])->name('accounts.ledger');
