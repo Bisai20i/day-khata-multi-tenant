@@ -1,11 +1,13 @@
 <?php
 
+use App\Enums\TenantStatus;
 use App\Models\PlatformAdmin;
 use App\Models\PlatformAdminActivityLog;
 use App\Models\Tenant;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\Facades\URL;
 use Tests\TestCase;
 
@@ -110,6 +112,26 @@ test('a tampered signed impersonation link is rejected', function () {
     $this->get($tamperedUrl)->assertForbidden();
 
     expect(Auth::guard('web')->check())->toBeFalse();
+});
+
+test('a tenant with a missing database returns a clean error instead of a crash', function () {
+    $admin = PlatformAdmin::factory()->create();
+
+    // Same technique ProvisioningFailureTest's stuckProvisioningTenant()
+    // uses: Queue::fake() stops the real CreateDatabase job from ever
+    // running, so this tenant genuinely has no database file, even though
+    // its status here claims Active - the exact broken state
+    // Tenant::databaseExists() exists to catch independently of `status`.
+    Queue::fake();
+    $tenant = new Tenant(['company_name' => 'No Database Co', 'status' => TenantStatus::Active]);
+    $tenant->save();
+    $tenant->domains()->create(['domain' => 'nodatabaseco.localhost']);
+
+    $response = $this->actingAs($admin, 'platform')
+        ->post(route('central.tenants.impersonate', $tenant));
+
+    $response->assertRedirect(route('central.tenants.show', $tenant));
+    $response->assertSessionHas('status', "This tenant's database doesn't exist yet - use \"Re-provision database\" first.");
 });
 
 test('a tenant with no admin user returns a clean error instead of a crash', function () {

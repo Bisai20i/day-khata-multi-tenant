@@ -1,9 +1,11 @@
 <?php
 
 use App\Models\PlatformAdmin;
+use App\Models\PlatformAdminActivityLog;
 use App\Models\PlatformSetting;
 use App\Models\Tenant;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Auth;
 use Tests\TestCase;
 
 uses(RefreshDatabase::class);
@@ -68,9 +70,60 @@ test('the tenant list and show pages surface trial_expired', function () {
 
     $this->actingAs($admin, 'platform')
         ->get(route('central.tenants.index'))
-        ->assertInertia(fn ($page) => $page->where('tenants.0.trial_expired', true));
+        ->assertInertia(fn ($page) => $page->where('tenants.data.0.trial_expired', true));
 
     $this->actingAs($admin, 'platform')
         ->get(route('central.tenants.show', $tenant))
         ->assertInertia(fn ($page) => $page->where('tenant.trial_expired', true));
+});
+
+test('an owner can update a tenant\'s trial expiry', function () {
+    $owner = PlatformAdmin::factory()->create();
+    $tenant = provisionTrialTestTenant($this, $owner, 'trialupdate');
+
+    $this->actingAs($owner, 'platform')
+        ->put(route('central.tenants.update-trial', $tenant), ['trial_ends_at' => '2026-12-01'])
+        ->assertRedirect(route('central.tenants.show', $tenant));
+
+    expect($tenant->fresh()->trial_ends_at->toDateString())->toBe('2026-12-01');
+
+    expect(PlatformAdminActivityLog::where('tenant_id', $tenant->id)
+        ->where('action', 'tenant.update_trial')
+        ->where('platform_admin_id', $owner->id)
+        ->exists())->toBeTrue();
+});
+
+test('clearing the trial expiry field sets it to null', function () {
+    $owner = PlatformAdmin::factory()->create();
+    $tenant = provisionTrialTestTenant($this, $owner, 'trialclear');
+    $tenant->update(['trial_ends_at' => now()->addDays(14)]);
+
+    $this->actingAs($owner, 'platform')
+        ->put(route('central.tenants.update-trial', $tenant), ['trial_ends_at' => null])
+        ->assertRedirect(route('central.tenants.show', $tenant));
+
+    expect($tenant->fresh()->trial_ends_at)->toBeNull();
+});
+
+test('a support admin cannot update a tenant\'s trial expiry', function () {
+    $owner = PlatformAdmin::factory()->create();
+    $tenant = provisionTrialTestTenant($this, $owner, 'trialsupportblocked');
+    Auth::guard('platform')->logout();
+
+    $support = PlatformAdmin::factory()->support()->create();
+
+    $this->actingAs($support, 'platform')
+        ->put(route('central.tenants.update-trial', $tenant), ['trial_ends_at' => '2026-12-01'])
+        ->assertForbidden();
+
+    expect($tenant->fresh()->trial_ends_at)->not->toBe('2026-12-01');
+});
+
+test('guests cannot update a tenant\'s trial expiry', function () {
+    $owner = PlatformAdmin::factory()->create();
+    $tenant = provisionTrialTestTenant($this, $owner, 'trialguestblocked');
+    Auth::guard('platform')->logout();
+
+    $this->put(route('central.tenants.update-trial', $tenant), ['trial_ends_at' => '2026-12-01'])
+        ->assertRedirect(route('login'));
 });

@@ -1,5 +1,6 @@
 <?php
 
+use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Route;
 
 /*
@@ -14,8 +15,17 @@ use Illuminate\Support\Facades\Route;
 |
 */
 
-Route::get('/', function () {
-    return view('welcome');
+Route::get('/', function (Request $request) {
+    // Same pattern as routes/tenant.php's own root route: explicitly the
+    // "platform" guard, never the ambiguous default. The stock
+    // resources/views/welcome.blade.php this used to render links its
+    // @auth block to the tenant-side /dashboard route (url('/dashboard')),
+    // which 404s on the central domain - PreventAccessFromCentralDomains
+    // blocks it there entirely. Redirecting instead of rendering a static
+    // page sidesteps that stale link rather than patching it in place.
+    return $request->user('platform')
+        ? redirect()->route('central.dashboard')
+        : redirect()->route('login');
 });
 
 require base_path('routes/central-auth.php');

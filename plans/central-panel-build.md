@@ -1,9 +1,10 @@
 # Central panel build plan
 
 **Status as of 2026-09-04**: scope locked with the user; Phase A (`87ebfb6`), Phase B (`c116337`), Phase C
-(`721193e`), and Phase D (`01561fc`) committed. Phase E (real dashboard + tenant search/pagination) is the
-last phase remaining. Read `goal.md` roadmap item 11 and `mem.md` for what's actually landed before
-trusting this doc's "Status" lines — same discipline as `plans/complete-system-build.md`.
+(`721193e`), Phase D (`01561fc`), and Phase E (built, test-verified, not yet committed as of this update —
+see `mem.md`) are done. **All 5 phases of this plan are now complete.** Read `goal.md` roadmap item 11 and
+`mem.md` for what's actually landed before trusting this doc's "Status" lines — same discipline as
+`plans/complete-system-build.md`.
 
 ## Why this exists
 
@@ -209,6 +210,18 @@ unchanged).
     tenant); this is a UX safety upgrade, not a security fix.
 
 ## Phase E — Dashboard & search
+
+**Status: DONE — built, test-verified by the coordinator (2026-09-04), not yet committed.** Items 16-17 are
+done — see `mem.md`'s Phase E entry for the full breakdown. This closes out the entire `central-panel-build`
+effort (Phases A-E). Test command: `php artisan test --compact tests/Feature/Central/DashboardControllerTest.php
+tests/Feature/Central/Tenants/TenantIndexTest.php tests/Feature/Central/Tenants/GracePeriodTest.php
+tests/Feature/Central/Tenants/TrialTrackingTest.php` — **18/18 passing, 153 assertions**. `npm run build`
+succeeded. Full `tests/Feature/Central` regression run: **87/93 passing** — the exact same 6 pre-existing
+failures flagged since Phase B (`ActivityLogControllerTest` x1 — flaky, saw a different assertion value on a
+second run, consistent with a pre-existing isolation issue rather than anything this phase touched;
+`ImpersonationTest` x1 — environment-specific port assertion; `TenantUserControllerTest` x4 — the
+`Database connection [tenant] not configured` bug flagged since Phase B), still not investigated, still out
+of scope.
 
 16. **Real dashboard.** The dashboard is currently an inline closure in `routes/central-auth.php`
     (`Route::get('/admin', function () {...})`) rather than a controller — move it to a proper

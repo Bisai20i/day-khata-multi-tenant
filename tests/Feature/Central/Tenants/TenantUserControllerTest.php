@@ -1,10 +1,12 @@
 <?php
 
+use App\Enums\TenantStatus;
 use App\Models\PlatformAdmin;
 use App\Models\Tenant;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\Queue;
 use Tests\TestCase;
 
 uses(RefreshDatabase::class);
@@ -63,6 +65,23 @@ test('a platform admin can view a tenant\'s users', function () {
         ->where('users.1.email', 'admin@userview.test')
         ->where('users.1.role', 'Admin')
     );
+});
+
+test('viewing users for a tenant with a missing database returns a clean error instead of a crash', function () {
+    $admin = PlatformAdmin::factory()->create();
+
+    // Same technique ImpersonationTest's equivalent case uses: Queue::fake()
+    // stops the real CreateDatabase job from ever running.
+    Queue::fake();
+    $tenant = new Tenant(['company_name' => 'No Database Users Co', 'status' => TenantStatus::Active]);
+    $tenant->save();
+    $tenant->domains()->create(['domain' => 'nodatabaseuserco.localhost']);
+
+    $response = $this->actingAs($admin, 'platform')
+        ->get(route('central.tenants.users', $tenant));
+
+    $response->assertRedirect(route('central.tenants.show', $tenant));
+    $response->assertSessionHas('status', "This tenant's database doesn't exist yet - use \"Re-provision database\" first.");
 });
 
 test('a guest cannot view a tenant\'s users', function () {

@@ -54,6 +54,21 @@ class Tenant extends BaseTenant implements TenantWithDatabase
     }
 
     /**
+     * Whether this tenant's own database actually exists on disk/server,
+     * independent of what the `status` column claims. A tenant can end up
+     * Active with no database behind it (e.g. an interrupted provisioning
+     * run from before this check existed) - status alone isn't trustworthy
+     * enough to gate a database connection attempt on. Delegates to the
+     * driver-specific TenantDatabaseManager (SQLiteDatabaseManager checks
+     * the file exists; MySQL/Postgres managers query the server), the same
+     * one DatabaseTenancyBootstrapper itself uses in local environments.
+     */
+    public function databaseExists(): bool
+    {
+        return $this->database()->manager()->databaseExists($this->database()->getName());
+    }
+
+    /**
      * Columns that live as real columns on the `tenants` table rather than
      * being swept into the `data` JSON column by the VirtualColumn trait.
      *

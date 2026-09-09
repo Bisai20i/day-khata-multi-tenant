@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Central\Tenants;
 use App\Http\Controllers\Controller;
 use App\Models\Tenant;
 use App\Models\User;
+use Illuminate\Http\RedirectResponse;
 use Inertia\Inertia;
 use Inertia\Response;
 
@@ -18,8 +19,16 @@ class TenantUserController extends Controller
      * the database connection for the duration of the closure and switches
      * it back once it returns.
      */
-    public function index(Tenant $tenant): Response
+    public function index(Tenant $tenant): Response|RedirectResponse
     {
+        // See TenantController::impersonate() for why this is checked
+        // explicitly rather than caught as an exception from run() itself.
+        if (! $tenant->databaseExists()) {
+            return redirect()
+                ->route('central.tenants.show', $tenant)
+                ->with('status', "This tenant's database doesn't exist yet - use \"Re-provision database\" first.");
+        }
+
         $users = $tenant->run(fn () => User::with('role')->orderBy('name')->get());
 
         return Inertia::render('Central/Tenants/Users', [

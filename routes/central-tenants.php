@@ -32,6 +32,20 @@ Route::middleware('auth:platform')->prefix('tenants')->name('central.tenants.')-
     Route::post('/{tenant}/domains', [TenantDomainController::class, 'store'])->name('domains.store');
     Route::delete('/{tenant}/domains/{domain}', [TenantDomainController::class, 'destroy'])->name('domains.destroy');
 
+    // Owner-only: a stuck-provisioning tenant being forced Active without its
+    // database/admin user actually existing is a real footgun, not routine
+    // day-to-day support work.
+    Route::post('/{tenant}/force-active', [TenantController::class, 'forceActive'])
+        ->middleware('can:platform-owner')
+        ->name('force-active');
+
+    // Owner-only per explicit sign-off - unlike company_name/contact_email
+    // (plain update(), any admin), trial-expiry management is deliberately
+    // its own gated action.
+    Route::put('/{tenant}/trial', [TenantController::class, 'updateTrial'])
+        ->middleware('can:platform-owner')
+        ->name('update-trial');
+
     // Owner-only: deleting a tenant is a real DROP DATABASE, not a "support"-level action.
     Route::delete('/{tenant}', [TenantController::class, 'destroy'])
         ->middleware('can:platform-owner')

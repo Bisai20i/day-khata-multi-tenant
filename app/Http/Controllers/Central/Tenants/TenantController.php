@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Central\Tenants;
 
 use App\Enums\TenantStatus;
 use App\Http\Controllers\Controller;
+use App\Jobs\CreateTenantFirstAdmin;
 use App\Mail\TenantSuspensionMail;
 use App\Models\PlatformAdminActivityLog;
 use App\Models\PlatformSetting;
@@ -18,31 +19,63 @@ use Illuminate\Support\Facades\Mail;
 use Illuminate\Support\Facades\URL;
 use Inertia\Inertia;
 use Inertia\Response;
+use Stancl\JobPipeline\JobPipeline;
 use Stancl\Tenancy\Database\Models\Domain;
 use Stancl\Tenancy\Events\TenantCreated;
+use Stancl\Tenancy\Jobs\CreateDatabase;
+use Stancl\Tenancy\Jobs\MigrateDatabase;
+use Stancl\Tenancy\Jobs\SeedDatabase;
 use Symfony\Component\HttpFoundation\Response as SymfonyResponse;
 use Throwable;
 
 class TenantController extends Controller
 {
     /**
-     * Display a listing of the tenants, each with its domain.
+     * Display a listing of the tenants, each with its domain. Searchable by
+     * company name, contact email, or domain, and filterable by status;
+     * paginated - fine to load everything unpaginated at today's tenant
+     * count, but that breaks down as it grows.
      */
-    public function index(): Response
+    public function index(Request $request): Response
     {
-        $tenants = Tenant::with('domains')->latest()->get();
+        $search = $request->filled('search') ? trim($request->string('search')->toString()) : null;
+        $status = $request->filled('status') ? TenantStatus::tryFrom($request->string('status')->toString()) : null;
+
+        $tenants = Tenant::query()
+            ->with('domains')
+            ->when($search, function ($query, string $search): void {
+                $query->where(function ($query) use ($search): void {
+                    $query->where('company_name', 'like', "%{$search}%")
+                        ->orWhere('contact_email', 'like', "%{$search}%")
+                        ->orWhereHas('domains', fn ($query) => $query->where('domain', 'like', "%{$search}%"));
+                });
+            })
+            ->when($status, fn ($query, TenantStatus $status) => $query->where('status', $status))
+            ->latest()
+            ->paginate(25)
+            ->withQueryString();
+
         $gracePeriodDays = PlatformSetting::current()->default_grace_period_days;
 
+        $tenants->through(fn (Tenant $tenant): array => [
+            'id' => $tenant->id,
+            'company_name' => $tenant->company_name,
+            'domain' => $tenant->domains->pluck('domain')->join(', '),
+            'status' => $tenant->status->value,
+            'created_at' => $tenant->created_at?->toDateString(),
+            'past_grace_period' => $tenant->isPastGracePeriod($gracePeriodDays),
+            'trial_expired' => $tenant->isTrialExpired(),
+        ]);
+
         return Inertia::render('Central/Tenants/Index', [
-            'tenants' => $tenants->map(fn (Tenant $tenant): array => [
-                'id' => $tenant->id,
-                'company_name' => $tenant->company_name,
-                'domain' => $tenant->domains->pluck('domain')->join(', '),
-                'status' => $tenant->status->value,
-                'created_at' => $tenant->created_at?->toDateString(),
-                'past_grace_period' => $tenant->isPastGracePeriod($gracePeriodDays),
-                'trial_expired' => $tenant->isTrialExpired(),
-            ]),
+            'tenants' => $tenants,
+            'filters' => [
+                'search' => $search,
+                'status' => $status?->value,
+            ],
+            'statusOptions' => collect(TenantStatus::cases())
+                ->map(fn (TenantStatus $status): array => ['value' => $status->value, 'label' => ucfirst($status->value)])
+                ->values(),
         ]);
     }
 
@@ -185,14 +218,22 @@ class TenantController extends Controller
                 'trial_ends_at' => $tenant->trial_ends_at?->toDateString(),
                 'trial_expired' => $tenant->isTrialExpired(),
                 'provisioning_error' => $lastFailure !== null ? ($lastFailure->metadata['error'] ?? null) : null,
+                // Independent of `status` - a tenant can be flagged Active
+                // with no database behind it if an earlier provisioning run
+                // was interrupted before this check existed (see
+                // Tenant::databaseExists()). Not computed while genuinely
+                // still Provisioning - that state already has its own
+                // error banner/retry flow, and a database not existing yet
+                // is completely expected mid-pipeline, not a fault.
+                'database_missing' => $tenant->status !== TenantStatus::Provisioning && ! $tenant->databaseExists(),
             ],
         ]);
     }
 
     /**
      * Show the form for editing a tenant's company name and contact email.
-     * Domain and status are managed through their own dedicated actions, not
-     * this form.
+     * Domain, status, and trial expiry are managed through their own
+     * dedicated actions, not this form.
      */
     public function edit(Tenant $tenant): Response
     {
@@ -273,27 +314,120 @@ class TenantController extends Controller
     }
 
     /**
-     * Re-fire the TenantCreated job pipeline for a tenant stuck in
-     * Provisioning after a failed run (see App\Listeners\
-     * RecordProvisioningFailure). pending_admin is only ever cleared once
-     * CreateTenantFirstAdmin actually succeeds, so it's still present for a
-     * retry to pick up regardless of which pipeline step failed.
+     * Re-run the CreateDatabase/MigrateDatabase/SeedDatabase/
+     * CreateTenantFirstAdmin pipeline for a tenant stuck in Provisioning
+     * after a failed run (see App\Listeners\RecordProvisioningFailure), OR
+     * for a tenant whose `status` says Active/Suspended but whose database
+     * genuinely doesn't exist (see Tenant::databaseExists()) - the same
+     * broken state, just with a stale status flag from before that check
+     * existed. Safe to re-run in both cases: pending_admin is only ever
+     * cleared once CreateTenantFirstAdmin actually succeeds, so it's still
+     * present for a retry to pick up regardless of which pipeline step
+     * failed or how long ago. Refuses on a tenant whose database genuinely
+     * already exists, since CreateDatabase would truncate a real, working
+     * database back to empty.
+     *
+     * Still-Provisioning tenants keep firing the TenantCreated event, whose
+     * listener is registered ->shouldBeQueued(true) (see
+     * TenancyServiceProvider) - fine for that case, since it's the same
+     * fire-and-forget path a fresh signup already goes through. But for an
+     * Active/Suspended tenant with a missing database, an admin has already
+     * landed on this page specifically to fix a broken tenant right now;
+     * silently re-queuing the same pipeline is indistinguishable from doing
+     * nothing unless a queue worker happens to be running to drain it (this
+     * was confirmed live: jobs from earlier provisioning attempts were
+     * sitting unprocessed in the `jobs` table). So that case runs the
+     * pipeline inline instead, and reports a real failure immediately rather
+     * than leaving the admin to guess.
      */
     public function retryProvisioning(Tenant $tenant): RedirectResponse
     {
-        if ($tenant->status !== TenantStatus::Provisioning) {
+        $eligible = $tenant->status === TenantStatus::Provisioning || ! $tenant->databaseExists();
+
+        if (! $eligible) {
             return redirect()
                 ->route('central.tenants.show', $tenant)
-                ->with('status', 'Only a still-provisioning tenant can be retried.');
+                ->with('status', 'This tenant already has a database - nothing to retry.');
         }
 
-        event(new TenantCreated($tenant));
+        if ($tenant->status === TenantStatus::Provisioning) {
+            event(new TenantCreated($tenant));
+        } else {
+            try {
+                dispatch_sync(
+                    JobPipeline::make([
+                        CreateDatabase::class,
+                        MigrateDatabase::class,
+                        SeedDatabase::class,
+                        CreateTenantFirstAdmin::class,
+                    ])->send(fn (): Tenant => $tenant)->executable([$tenant])
+                );
+            } catch (Throwable $e) {
+                PlatformAdminActivityLog::record('provisioning.failed', $tenant, ['error' => $e->getMessage()]);
+
+                return redirect()
+                    ->route('central.tenants.show', $tenant)
+                    ->with('status', "Provisioning failed: {$e->getMessage()}");
+            }
+        }
 
         PlatformAdminActivityLog::record('tenant.retry_provisioning', $tenant);
 
         return redirect()
             ->route('central.tenants.show', $tenant)
             ->with('status', 'Provisioning retried.');
+    }
+
+    /**
+     * Manual escape hatch for a tenant stuck at Provisioning that an admin
+     * has independently confirmed is actually fine (database/first admin
+     * user genuinely exist) - just flips the status flag, nothing else. Not
+     * a substitute for retryProvisioning(): using this on a tenant whose
+     * database or admin user were never actually created leaves an Active
+     * tenant nobody can log into, which is why it's gated platform-owner
+     * (see routes/central-tenants.php) rather than available to support.
+     */
+    public function forceActive(Tenant $tenant): RedirectResponse
+    {
+        if ($tenant->status !== TenantStatus::Provisioning) {
+            return redirect()
+                ->route('central.tenants.show', $tenant)
+                ->with('status', 'Only a still-provisioning tenant can be forced active.');
+        }
+
+        $tenant->update(['status' => TenantStatus::Active]);
+
+        PlatformAdminActivityLog::record('tenant.force_active', $tenant);
+
+        return redirect()
+            ->route('central.tenants.show', $tenant)
+            ->with('status', 'Tenant marked active.');
+    }
+
+    /**
+     * Update a tenant's trial expiry. Deliberately its own action/route
+     * (gated platform-owner, see routes/central-tenants.php) rather than a
+     * field bundled into update() - company_name/contact_email edits are
+     * available to any platform admin, but the user asked specifically for
+     * trial-expiry management to be owner-only, and splitting the action was
+     * the only way to give that its own gate without also restricting the
+     * unrelated fields support already edits today.
+     */
+    public function updateTrial(Request $request, Tenant $tenant): RedirectResponse
+    {
+        $validated = $request->validate([
+            'trial_ends_at' => ['nullable', 'date'],
+        ]);
+
+        $tenant->update(['trial_ends_at' => $validated['trial_ends_at']]);
+
+        PlatformAdminActivityLog::record('tenant.update_trial', $tenant, [
+            'trial_ends_at' => $validated['trial_ends_at'],
+        ]);
+
+        return redirect()
+            ->route('central.tenants.show', $tenant)
+            ->with('status', 'Trial expiry updated.');
     }
 
     /**
@@ -321,6 +455,19 @@ class TenantController extends Controller
             return redirect()
                 ->route('central.tenants.show', $tenant)
                 ->with('status', 'This tenant has no domain configured.');
+        }
+
+        // Checked explicitly (rather than catching the exception the
+        // underlying connection attempt would throw) since
+        // DatabaseTenancyBootstrapper only actually throws
+        // TenantDatabaseDoesNotExistException in local environments - this
+        // check is what makes the same guard work in production too, where
+        // a missing SQLite file would otherwise be silently auto-created
+        // empty by PDO and fail confusingly later instead.
+        if (! $tenant->databaseExists()) {
+            return redirect()
+                ->route('central.tenants.show', $tenant)
+                ->with('status', "This tenant's database doesn't exist yet - use \"Re-provision database\" first.");
         }
 
         $adminUserId = $tenant->run(

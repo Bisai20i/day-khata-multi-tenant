@@ -70,7 +70,7 @@ test('the tenant list and show pages flag a tenant past its grace period', funct
     $this->actingAs($admin, 'platform')
         ->get(route('central.tenants.index'))
         ->assertInertia(fn ($page) => $page
-            ->where('tenants.0.past_grace_period', true));
+            ->where('tenants.data.0.past_grace_period', true));
 
     $this->actingAs($admin, 'platform')
         ->get(route('central.tenants.show', $tenant))

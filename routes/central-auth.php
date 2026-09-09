@@ -3,8 +3,8 @@
 use App\Http\Controllers\Central\Auth\AuthenticatedSessionController;
 use App\Http\Controllers\Central\Auth\TwoFactorAuthenticationController;
 use App\Http\Controllers\Central\Auth\TwoFactorChallengeController;
+use App\Http\Controllers\Central\DashboardController;
 use Illuminate\Support\Facades\Route;
-use Inertia\Inertia;
 
 /*
 |--------------------------------------------------------------------------
@@ -40,9 +40,9 @@ Route::post('/logout', [AuthenticatedSessionController::class, 'destroy'])
     ->middleware('auth:platform')
     ->name('logout');
 
-Route::get('/admin', function () {
-    return Inertia::render('Central/Dashboard');
-})->middleware('auth:platform')->name('central.dashboard');
+Route::get('/admin', [DashboardController::class, 'index'])
+    ->middleware('auth:platform')
+    ->name('central.dashboard');
 
 Route::middleware('auth:platform')->prefix('two-factor')->name('central.two-factor.')->group(function () {
     Route::get('/', [TwoFactorAuthenticationController::class, 'show'])->name('show');
