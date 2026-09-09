@@ -5,6 +5,7 @@ declare(strict_types=1);
 use App\Http\Controllers\Tenant\Accounting\AccountController;
 use App\Http\Controllers\Tenant\Accounting\AccountGroupController;
 use App\Http\Controllers\Tenant\Accounting\AccountSubgroupController;
+use App\Http\Controllers\Tenant\Inventory\BarcodeLabelController;
 use App\Http\Controllers\Tenant\Inventory\BrandController;
 use App\Http\Controllers\Tenant\Inventory\ItemCategoryController;
 use App\Http\Controllers\Tenant\Inventory\ItemController;
@@ -96,6 +97,9 @@ Route::name('tenant.')->group(function () {
         Route::delete('/{item}', [ItemController::class, 'destroy'])->name('destroy');
         Route::get('/import/template', [ItemController::class, 'importTemplate'])->name('import.template');
         Route::post('/import', [ItemController::class, 'import'])->name('import');
+        // See BarcodeLabelController's docblock - not nested under a single
+        // {item} since one print request can cover several items at once.
+        Route::get('/barcode-labels/print', [BarcodeLabelController::class, 'print'])->name('barcode-labels.print');
     });
 
     // Nested under an item rather than its own top-level resource - see
