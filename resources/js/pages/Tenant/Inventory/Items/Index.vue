@@ -9,6 +9,7 @@ import DataTable from '@/components/ui/DataTable.vue';
 import Modal from '@/components/ui/Modal.vue';
 import Input from '@/components/ui/Input.vue';
 import Select from '@/components/ui/Select.vue';
+import Combobox from '@/components/ui/Combobox.vue';
 import NepaliDateInput from '@/components/ui/NepaliDateInput.vue';
 import RowActions from '@/components/ui/RowActions.vue';
 import { useToast } from '@/composables/useToast';
@@ -21,6 +22,10 @@ const props = defineProps({
         default: () => [],
     },
     subcategories: {
+        type: Array,
+        default: () => [],
+    },
+    brands: {
         type: Array,
         default: () => [],
     },
@@ -52,6 +57,11 @@ const isAdmin = computed(() => page.props.auth?.user?.role?.slug === 'admin');
 const navItems = computed(() => navGroups(isAdmin.value));
 
 const categoryOptions = computed(() => props.categories.map((category) => ({ value: category.id, label: category.name })));
+
+const brandOptions = computed(() => [
+    { value: '', label: 'None' },
+    ...props.brands.map((brand) => ({ value: brand.id, label: brand.name })),
+]);
 
 const showModal = ref(false);
 const editing = ref(null);
@@ -102,6 +112,7 @@ function submitImport() {
 const form = useForm({
     item_category_id: '',
     item_subcategory_id: '',
+    brand_id: '',
     name: '',
     description: '',
     unit: '',
@@ -120,6 +131,7 @@ const form = useForm({
 form.transform((data) => ({
     ...data,
     item_subcategory_id: data.item_subcategory_id === '' ? null : data.item_subcategory_id,
+    brand_id: data.brand_id === '' ? null : data.brand_id,
     description: data.description === '' ? null : data.description,
     hs_code: data.hs_code === '' ? null : data.hs_code,
     barcode: data.barcode === '' ? null : data.barcode,
@@ -164,6 +176,7 @@ function openEdit(item) {
     form.clearErrors();
     form.item_category_id = item.item_category_id;
     form.item_subcategory_id = item.item_subcategory_id ?? '';
+    form.brand_id = item.brand_id ?? '';
     form.name = item.name;
     form.description = item.description ?? '';
     form.unit = item.unit;
@@ -342,6 +355,12 @@ const columns = [
     },
     { accessorKey: 'unit', header: 'Unit', numeric: false },
     {
+        id: 'brand',
+        header: 'Brand',
+        numeric: false,
+        cell: ({ row }) => row.original.brand?.name ?? '—',
+    },
+    {
         id: 'purchase_rate',
         header: 'Purchase rate',
         numeric: true,
@@ -484,6 +503,18 @@ const columns = [
                         <label for="barcode" class="mb-1 block text-sm font-semibold text-text-base">Barcode</label>
                         <Input id="barcode" v-model="form.barcode" type="text" placeholder="Scan or type a barcode" />
                         <p v-if="form.errors.barcode" class="mt-1 text-sm text-danger">{{ form.errors.barcode }}</p>
+                    </div>
+
+                    <div>
+                        <label for="brand_id" class="mb-1 block text-sm font-semibold text-text-base">Brand</label>
+                        <Combobox
+                            id="brand_id"
+                            :model-value="form.brand_id"
+                            :options="brandOptions"
+                            placeholder="Select brand"
+                            @update:model-value="(v) => (form.brand_id = v)"
+                        />
+                        <p v-if="form.errors.brand_id" class="mt-1 text-sm text-danger">{{ form.errors.brand_id }}</p>
                     </div>
                 </div>
 

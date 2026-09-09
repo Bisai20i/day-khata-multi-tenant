@@ -5,6 +5,7 @@ declare(strict_types=1);
 use App\Http\Controllers\Tenant\Accounting\AccountController;
 use App\Http\Controllers\Tenant\Accounting\AccountGroupController;
 use App\Http\Controllers\Tenant\Accounting\AccountSubgroupController;
+use App\Http\Controllers\Tenant\Inventory\BrandController;
 use App\Http\Controllers\Tenant\Inventory\ItemCategoryController;
 use App\Http\Controllers\Tenant\Inventory\ItemController;
 use App\Http\Controllers\Tenant\Inventory\ItemSubcategoryController;
@@ -65,6 +66,13 @@ Route::name('tenant.')->group(function () {
         Route::delete('/{supplier}', [SupplierController::class, 'destroy'])->name('destroy');
         Route::get('/import/template', [SupplierController::class, 'importTemplate'])->name('import.template');
         Route::post('/import', [SupplierController::class, 'import'])->name('import');
+    });
+
+    Route::prefix('brands')->name('brands.')->group(function () {
+        Route::get('/', [BrandController::class, 'index'])->name('index');
+        Route::post('/', [BrandController::class, 'store'])->name('store');
+        Route::put('/{brand}', [BrandController::class, 'update'])->name('update');
+        Route::delete('/{brand}', [BrandController::class, 'destroy'])->name('destroy');
     });
 
     Route::prefix('item-categories')->name('item-categories.')->group(function () {

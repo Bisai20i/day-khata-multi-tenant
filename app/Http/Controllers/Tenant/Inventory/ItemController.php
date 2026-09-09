@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Tenant\Inventory;
 
 use App\Http\Controllers\Concerns\ImportsCsv;
 use App\Http\Controllers\Controller;
+use App\Models\Brand;
 use App\Models\Item;
 use App\Models\ItemCategory;
 use App\Models\ItemSubcategory;
@@ -56,7 +57,8 @@ class ItemController extends Controller
         return Inertia::render('Tenant/Inventory/Items/Index', [
             'categories' => ItemCategory::query()->orderBy('name')->get(['id', 'name']),
             'subcategories' => ItemSubcategory::query()->orderBy('name')->get(['id', 'item_category_id', 'name']),
-            'items' => Item::query()->with(['category:id,name', 'subcategory:id,name', 'units' => fn ($q) => $q->orderBy('name')])->latest()->get(),
+            'brands' => Brand::query()->orderBy('name')->get(['id', 'name']),
+            'items' => Item::query()->with(['category:id,name', 'subcategory:id,name', 'brand:id,name', 'units' => fn ($q) => $q->orderBy('name')])->latest()->get(),
         ]);
     }
 
@@ -333,6 +335,7 @@ class ItemController extends Controller
                     }
                 },
             ],
+            'brand_id' => ['nullable', 'exists:brands,id'],
             'account_id' => ['nullable', 'exists:accounts,id'],
             'name' => ['required', 'string', 'max:255'],
             'description' => ['nullable', 'string'],

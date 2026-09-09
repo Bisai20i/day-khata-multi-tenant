@@ -13,6 +13,7 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
 #[Fillable([
     'item_category_id',
     'item_subcategory_id',
+    'brand_id',
     'account_id',
     'name',
     'description',
@@ -62,6 +63,18 @@ class Item extends Model
     public function subcategory(): BelongsTo
     {
         return $this->belongsTo(ItemSubcategory::class, 'item_subcategory_id');
+    }
+
+    /**
+     * Optional brand/manufacturer tag - see Brand's docblock. Unlike
+     * category(), this may be null; an item with no brand_id is unaffected
+     * by anything reading this relation.
+     *
+     * @return BelongsTo<Brand, $this>
+     */
+    public function brand(): BelongsTo
+    {
+        return $this->belongsTo(Brand::class);
     }
 
     /**

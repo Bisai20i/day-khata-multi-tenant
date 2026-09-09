@@ -21,6 +21,7 @@ class ItemFactory extends Factory
         return [
             'item_category_id' => ItemCategory::factory(),
             'item_subcategory_id' => null,
+            'brand_id' => null,
             'account_id' => null,
             'name' => fake()->unique()->words(3, true),
             'description' => fake()->sentence(),
