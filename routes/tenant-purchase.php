@@ -2,6 +2,7 @@
 
 declare(strict_types=1);
 
+use App\Http\Controllers\Tenant\Purchases\CapitalPurchaseController;
 use App\Http\Controllers\Tenant\Purchases\PurchaseController;
 use Illuminate\Support\Facades\Route;
 
@@ -22,5 +23,11 @@ Route::name('tenant.')->group(function () {
         Route::post('/', [PurchaseController::class, 'store'])->name('store');
         Route::post('/{purchase}/cancel', [PurchaseController::class, 'cancel'])->name('cancel');
         Route::get('/{purchase}/print', [PurchaseController::class, 'print'])->name('print');
+    });
+
+    Route::prefix('capital-purchases')->name('capital-purchases.')->group(function () {
+        Route::get('/', [CapitalPurchaseController::class, 'index'])->name('index');
+        Route::post('/', [CapitalPurchaseController::class, 'store'])->name('store');
+        Route::post('/{capitalPurchase}/cancel', [CapitalPurchaseController::class, 'cancel'])->name('cancel');
     });
 });

@@ -2,6 +2,7 @@
 
 declare(strict_types=1);
 
+use App\Http\Controllers\Tenant\Sales\CapitalSaleController;
 use App\Http\Controllers\Tenant\Sales\SaleController;
 use Illuminate\Support\Facades\Route;
 
@@ -22,5 +23,11 @@ Route::name('tenant.')->group(function () {
         Route::post('/', [SaleController::class, 'store'])->name('store');
         Route::post('/{sale}/cancel', [SaleController::class, 'cancel'])->name('cancel');
         Route::get('/{sale}/print', [SaleController::class, 'print'])->name('print');
+    });
+
+    Route::prefix('capital-sales')->name('capital-sales.')->group(function () {
+        Route::get('/', [CapitalSaleController::class, 'index'])->name('index');
+        Route::post('/', [CapitalSaleController::class, 'store'])->name('store');
+        Route::post('/{capitalSale}/cancel', [CapitalSaleController::class, 'cancel'])->name('cancel');
     });
 });
