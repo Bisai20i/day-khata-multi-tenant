@@ -517,8 +517,12 @@ class Sale extends Model
             throw new InvalidArgumentException('This sale has already been cancelled.');
         }
 
+        // A 'rejected' return request never posted anything real, so it must
+        // not block cancellation (same reasoning as excluding 'cancelled');
+        // a 'pending' one deliberately still blocks - it represents a live
+        // decision someone still has to make against this exact sale.
         if (SaleReturnLine::whereIn('sale_line_id', $this->lines()->pluck('id'))
-            ->whereHas('salesReturn', fn ($query) => $query->where('status', '!=', 'cancelled'))
+            ->whereHas('salesReturn', fn ($query) => $query->whereNotIn('status', ['cancelled', 'rejected']))
             ->exists()) {
             throw new InvalidArgumentException('Cannot cancel a sale that has partial returns against it.');
         }

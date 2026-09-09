@@ -3,7 +3,105 @@
 Living state doc. Read this before starting work, update it before stopping. See `goal.md` for
 direction/roadmap — this file is "what exists and why," not "what's next."
 
-**2026-09-09 entry (newest — first-cut Stock Transfer module).** Legacy `day_khata` had "Stock Transfer"
+**2026-09-09 entry (newest — server-side list filtering + Sales Return request/approval workflow, two-part
+task, both committed).** Ran alongside other concurrent sessions in this same unisolated tree (confirmed
+live: `SaleController`/`PurchaseController` picked up an `item_units` conversion feature from another
+session mid-edit, and a `git add`-broad commit from that session (`33a937d`) ended up including this
+session's own in-progress pagination edits to those two files — harmless (the changes were correct and
+already committed), but flagged here as a real gotcha: a concurrent session's broad `git add` can sweep up
+another session's uncommitted edits into its own commit).
+
+- **Part 1 — restored server-side filtering** on Sales/Purchases/Sales Returns/Purchase Returns/Quotations
+  `index()`: all five were loading the entire unfiltered table via `->get()`, paginating only client-side in
+  `DataTable`. Mirrors `Central\Tenants\TenantController::index()`'s established shape exactly: `from`/`to`
+  date-range + `customer_id`/`supplier_id` applied via `->when()`, `paginate(25)->withQueryString()`, a
+  `filters` prop echoed back for the frontend to re-hydrate its filter bar. Sales/Purchase Returns filter by
+  party through the parent sale/purchase (`whereHas`) since a return has no `customer_id`/`supplier_id` of
+  its own. Each of the 5 Vue Index pages gained a filter bar (two `NepaliDateInput`s + a customer/supplier
+  `Combobox`) and the exact hand-rolled prev/next pagination footer `Tenants/Index.vue` already established
+  (`DataTable`'s own `page-size` set to the full page length to disable client paging). Pest coverage:
+  `SaleListFilterTest`/`PurchaseListFilterTest` (date-range and party filters narrow correctly, no-filter
+  returns everything). Committed as `79a973c`.
+- **Part 2 — Sales Return request/approval workflow.** Read legacy's actual flow first
+  (`StockOutController::approveReturnRequest`/`updateCancelResoanForSalesReturnRequest`,
+  `reportsController::listreturnoutstockrequest`, `sales_return_requests` table): a request is a thin,
+  single-item/quantity/reason intake row (no real line-item structure), `approveReturnRequest` is a **bare
+  `is_request_accepted=1` flag flip with zero posting logic** (a real legacy gap, not a "post normally on
+  approval" design as one might assume), and rejection just stores `reson_for_not_accept` + flag `2`.
+  **Design decision: bolted a status state machine onto the existing `SalesReturn` model** (`'pending'` →
+  `'posted'`/`'rejected'`) rather than a new parallel model/table — chosen over a `SalesReturnRequest` model
+  because (a) `SalesReturn`/`SaleReturnLine` already have real per-line structure legacy's own request table
+  lacks, so a separate table would just reintroduce legacy's own thinness; (b) `Quotation`'s own
+  draft-that-becomes-real lifecycle (`QuotationStatus::Draft` → `Converted`/`Cancelled`, `convertToSale()`
+  handing off to `Sale::post()`) is this app's own established precedent for exactly this shape, not a new
+  pattern; (c) it gets the existing generic `ActivityLogObserver` (already attached to `SalesReturn`) for
+  free — every `approve()`/`reject()` write is auto-logged with no extra code. `status` stayed a **plain
+  string**, not a backed enum like `QuotationStatus` — existing `SalesReturnTest` assertions already compare
+  it as a raw string (`->toBe('cancelled')`), and switching the cast would break them for no behavioural
+  gain.
+  - **Migration** (`2026_09_09_200000_add_pending_workflow_to_sales_returns_table`): `journal_voucher_id`
+    made nullable (a `'pending'` row has no voucher yet — same `->nullable()->change()` pattern already
+    proven on `platform_admin_activity_logs.platform_admin_id`), plus a new `rejection_reason` text column.
+  - **`SalesReturn` model**: `post()`'s inline validation/pricing logic extracted into two private static
+    helpers — `prepareLines()` (discount-ratio reconstruction + per-line validation/pricing, unchanged
+    logic, pure code motion) and `computeTotals()` (vat/total) — so the new `request()` can reuse the exact
+    same math without duplicating it. New `request()` (persists a `'pending'` row + real `SaleReturnLine`
+    rows, but posts **no** journal voucher and records **no** stock movement). New `approve(User $actor)`
+    instance method: posts exactly what `post()` does in one step (voucher + one `ItemStockMovement` per
+    stockable line + optional refund voucher), using the row's own already-computed amounts/persisted lines,
+    dated against the return's own requested `date` (not "today"). New `reject(string $reason)`: records the
+    reason, flips to `'rejected'`, posts nothing — a dead end (never approvable or cancellable afterward).
+    `prepareLines()`'s "remaining returnable quantity" check now excludes both `'cancelled'` AND `'rejected'`
+    prior returns (a rejected request must free up its claimed quantity), while still counting a `'pending'`
+    one (two simultaneous pending requests can't jointly over-claim a line). `cancel()`'s guard changed from
+    `!== 'cancelled'` to `!== 'posted'` with a clear per-status message, so calling it on a `'pending'`/
+    `'rejected'` row gives a real error instead of a confusing `ModelNotFoundException` from
+    `journalVoucher()->firstOrFail()`.
+  - **`Sale::cancel()`'s existing partial-return guard** updated in the same spirit: excludes `'rejected'`
+    returns (never posted, must not block) alongside the existing `'cancelled'` exclusion, but still
+    deliberately blocks on a `'pending'` one (a live decision still pending against this exact sale).
+  - **Routes** (`routes/tenant-sales-returns.php`, already its own file — no `routes/tenant.php` edit
+    needed): `POST /sales-returns/request`, `POST /sales-returns/{salesReturn}/approve`,
+    `POST /sales-returns/{salesReturn}/reject`, alongside the existing routes.
+  - **Controller**: `SalesReturnController::index()` now returns two props — `returns` (status
+    posted/cancelled, paginated, unaffected by this feature) and `pendingRequests` (status pending/rejected,
+    plain unpaginated collection — a small actionable queue, not a growing log; mirrors legacy's own
+    `listreturnoutstock` vs `listreturnoutstockrequest` split). New `requestReturn()`/`approve()`/`reject()`
+    actions, `store()`'s validation extracted into a shared `validatedReturn()` helper reused by
+    `requestReturn()`. No new authorization gate — open to any authenticated tenant user, matching legacy's
+    own open-to-anyone model and this app's existing day-to-day-transaction-entry posture; a real
+    maker/checker RBAC split is flagged as a bigger, separate decision this task didn't attempt.
+  - **Vue**: `Sales/Returns/Create.vue` gained a `mode` prop (`'post'` default, or `'request'`) controlling
+    its submit URL/heading/button label — same form either way, just posts to `/sales-returns/request`
+    instead of `/sales-returns` in request mode. `Sales/Returns/Index.vue` gained a "Request return" button
+    alongside "New return", a "Pending requests" `Card`/`DataTable` section (only rendered when non-empty)
+    with Approve (`useConfirm`, same pattern `Quotations/Index.vue` already established for its own
+    convert-to-sale confirmation) and Reject (a `Modal`+`Input` reason flow, copy-pasted structurally from
+    the existing cancel-return modal already on this same page) actions per pending row, and a Rejected
+    badge + inline reason text for already-declined rows.
+  - **Tests** (`SalesReturnWorkflowTest.php`): requesting posts no voucher/stock movement (model-level +
+    amounts computed correctly), approving posts the voucher+stock movement dated to the request's own date
+    and cannot be approved twice, rejecting records the reason/posts nothing/frees the claimed quantity and
+    cannot itself be approved or cancelled afterward, a pending request blocks the sale from being cancelled
+    but a rejected one doesn't, plus one full HTTP round-trip through the real `request`/`reject`/`approve`
+    routes.
+  - Committed as a separate commit right after Part 1's `79a973c` (see the repo's own git log for the exact
+    hash — this doc isn't re-edited after every commit to keep the hash current).
+- **Verification this session**: `php -l` on every touched/created PHP file (clean), `vendor/bin/pint`
+  scoped to just those files (passed, one file needed `concat_space`/import-ordering fixes, applied). Manual
+  end-to-end trace of both the filtered-list query path and the request→approve→post path done by re-reading
+  every changed file in full (not run — `php artisan test`/`tenants:migrate`/`npm run build` all
+  **deliberately not run**, per this repo's own "no heavy shell commands from an agent" standing rule) —
+  flagged for the user's own verification pass, including running the new `2026_09_09_200000_...` tenant
+  migration before trusting the pending-request flow against any real tenant database.
+- **`nav-items.js`/`routes/tenant.php`**: no changes needed for either part — Sales/Purchases/Returns/
+  Quotations were all already linked from the sidebar, and `routes/tenant-sales-returns.php` already had its
+  own `require` line in `routes/tenant.php` from an earlier pass, so the 3 new routes just slotted into that
+  same already-required file.
+
+---
+
+**2026-09-09 entry (first-cut Stock Transfer module).** Legacy `day_khata` had "Stock Transfer"
 as a read-only reference (`resources/views/stocktransfer.blade.php` + `storeStockTransfer`); this rewrite
 had real per-store stock (`Store`, `store_id` on Sale/Purchase/StockAdjustment/etc., `Item::currentStock
 ($storeId)`) but no way to move stock *between* stores. Built a beta-scope first cut, mirroring

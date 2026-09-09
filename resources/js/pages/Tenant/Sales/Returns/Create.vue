@@ -11,6 +11,11 @@ const props = defineProps({
     sales: { type: Array, default: () => [] },
     accounts: { type: Array, default: () => [] },
     stores: { type: Array, default: () => [] },
+    // 'post' posts a return immediately (the original one-step flow); 'request'
+    // submits it as a pending request instead - nothing posts until a second
+    // person approves it from the Pending Requests section on the Index page
+    // (see SalesReturn::request()'s docblock).
+    mode: { type: String, default: 'post' },
 });
 
 const emit = defineEmits(['cancel', 'posted']);
@@ -45,6 +50,10 @@ const form = useForm({
     lines: [],
 });
 
+const submitUrl = computed(() => (props.mode === 'request' ? '/sales-returns/request' : '/sales-returns'));
+const heading = computed(() => (props.mode === 'request' ? 'Request sales return' : 'New sales return'));
+const submitLabel = computed(() => (props.mode === 'request' ? 'Submit for approval' : 'Create Sales Return'));
+
 function submit() {
     const lines = Object.entries(returnQuantities.value)
         .filter(([, quantity]) => Number(quantity) > 0)
@@ -59,7 +68,7 @@ function submit() {
             store_id: data.store_id || null,
             lines,
         }))
-        .post('/sales-returns', {
+        .post(submitUrl.value, {
             preserveScroll: true,
             onSuccess: () => emit('posted'),
         });
@@ -69,7 +78,7 @@ function submit() {
 <template>
     <Card variant="panel">
         <div class="mb-4 flex items-center justify-between">
-            <h3 class="text-base font-bold text-text-strong">New sales return</h3>
+            <h3 class="text-base font-bold text-text-strong">{{ heading }}</h3>
             <Button variant="secondary" tone="purple" type="button" @click="emit('cancel')">Cancel</Button>
         </div>
 
@@ -154,7 +163,7 @@ function submit() {
                     type="submit"
                     :disabled="form.processing || !selectedSaleId || !form.date"
                 >
-                    Create Sales Return
+                    {{ submitLabel }}
                 </Button>
             </div>
         </form>

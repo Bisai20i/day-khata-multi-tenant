@@ -1,10 +1,11 @@
 <script setup>
 import { computed, h, reactive, ref, watch } from 'vue';
 import { Link, router, useForm, usePage } from '@inertiajs/vue3';
-import { Ban, Plus, Printer, Search, X } from '@lucide/vue';
+import { Ban, Check, Plus, Printer, Search, X } from '@lucide/vue';
 import AppLayout from '@/layouts/AppLayout.vue';
 import Card from '@/components/ui/Card.vue';
 import Button from '@/components/ui/Button.vue';
+import Badge from '@/components/ui/Badge.vue';
 import Input from '@/components/ui/Input.vue';
 import Modal from '@/components/ui/Modal.vue';
 import DataTable from '@/components/ui/DataTable.vue';
@@ -12,6 +13,7 @@ import Tooltip from '@/components/ui/Tooltip.vue';
 import NepaliDateInput from '@/components/ui/NepaliDateInput.vue';
 import Combobox from '@/components/ui/Combobox.vue';
 import { useToast } from '@/composables/useToast';
+import { useConfirm } from '@/composables/useConfirm';
 import { navGroups } from '@/lib/nav-items.js';
 import Create from './Create.vue';
 
@@ -20,6 +22,7 @@ const props = defineProps({
         type: Object,
         default: () => ({ data: [], current_page: 1, last_page: 1, total: 0, from: 0, to: 0, prev_page_url: null, next_page_url: null }),
     },
+    pendingRequests: { type: Array, default: () => [] },
     filters: {
         type: Object,
         default: () => ({ from: null, to: null, customer_id: null }),
@@ -62,6 +65,7 @@ const hasActiveFilters = computed(() => !!(props.filters.from || props.filters.t
 
 const page = usePage();
 const { toast } = useToast();
+const { confirm } = useConfirm();
 
 const isAdmin = computed(() => page.props.auth?.user?.role?.slug === 'admin');
 const navItems = computed(() => navGroups(isAdmin.value));
@@ -74,7 +78,11 @@ watch(
     { immediate: true },
 );
 
-const showCreateForm = ref(false);
+// null hides the Create form; otherwise 'post' (direct one-step return) or
+// 'request' (submits pending, needs approval - see Create.vue's own `mode`
+// prop and SalesReturn::request()'s docblock).
+const createMode = ref(null);
+const showCreateForm = computed(() => createMode.value !== null);
 
 const cancelling = ref(null);
 const cancelForm = useForm({ reason: '' });
@@ -97,6 +105,133 @@ function submitCancel() {
         },
     });
 }
+
+// Keyed by request id -> true while that row's Approve button is in flight,
+// so only the clicked row shows a spinner.
+const approving = reactive({});
+
+async function approveRequest(request) {
+    const confirmed = await confirm({
+        message: `Approve this return request against sale #${request.sale_id}? This posts the credit note (and any refund) immediately and cannot be undone.`,
+        confirmLabel: 'Approve',
+    });
+    if (!confirmed) return;
+
+    approving[request.id] = true;
+    router.post(
+        `/sales-returns/${request.id}/approve`,
+        {},
+        { preserveScroll: true, onFinish: () => (approving[request.id] = false) },
+    );
+}
+
+const rejecting = ref(null);
+const rejectForm = useForm({ reason: '' });
+
+function openReject(request) {
+    rejecting.value = request;
+    rejectForm.reset();
+    rejectForm.clearErrors();
+}
+
+function onRejectOpenChange(value) {
+    if (!value) rejecting.value = null;
+}
+
+function submitReject() {
+    rejectForm.post(`/sales-returns/${rejecting.value.id}/reject`, {
+        preserveScroll: true,
+        onSuccess: () => {
+            rejecting.value = null;
+        },
+    });
+}
+
+const requestColumns = [
+    { accessorKey: 'date', header: 'Date' },
+    {
+        id: 'sale',
+        header: 'Original sale #',
+        numeric: false,
+        cell: ({ row }) => row.original.sale_id,
+    },
+    {
+        id: 'customer',
+        header: 'Customer',
+        numeric: false,
+        cell: ({ row }) => row.original.sale?.customer?.name ?? '—',
+    },
+    {
+        id: 'requested_by',
+        header: 'Requested by',
+        numeric: false,
+        cell: ({ row }) => row.original.creator?.name ?? '—',
+    },
+    {
+        id: 'reason',
+        header: 'Reason',
+        numeric: false,
+        cell: ({ row }) => row.original.reason ?? '—',
+    },
+    {
+        id: 'total',
+        header: 'Total',
+        numeric: true,
+        cell: ({ row }) => Number(row.original.total).toFixed(2),
+    },
+    {
+        id: 'status',
+        header: 'Status',
+        numeric: false,
+        cell: ({ row }) =>
+            row.original.status === 'rejected'
+                ? h('div', { class: 'flex flex-col gap-0.5' }, [
+                      h(Badge, { variant: 'danger', pill: true }, () => 'Rejected'),
+                      row.original.rejection_reason
+                          ? h('span', { class: 'text-[11px] text-text-faint' }, row.original.rejection_reason)
+                          : null,
+                  ])
+                : h(Badge, { variant: 'warning', pill: true }, () => 'Pending'),
+    },
+    {
+        id: 'actions',
+        header: 'Actions',
+        numeric: false,
+        cell: ({ row }) => {
+            if (row.original.status !== 'pending') {
+                return null;
+            }
+
+            return h('div', { class: 'flex items-center gap-1' }, [
+                h(Tooltip, { label: 'Approve' }, () =>
+                    h(
+                        Button,
+                        {
+                            variant: 'icon',
+                            tone: 'success',
+                            loading: !!approving[row.original.id],
+                            'aria-label': 'Approve return request',
+                            onClick: () => approveRequest(row.original),
+                        },
+                        () => h(Check, { class: 'size-[13px]' }),
+                    ),
+                ),
+                h(Tooltip, { label: 'Reject' }, () =>
+                    h(
+                        Button,
+                        {
+                            variant: 'icon',
+                            tone: 'danger',
+                            'aria-label': 'Reject return request',
+                            onClick: () => openReject(row.original),
+                        },
+                        () => h(X, { class: 'size-[13px]' }),
+                    ),
+                ),
+            ]);
+        },
+    },
+];
 
 const columns = [
     { accessorKey: 'date', header: 'Date' },
@@ -181,17 +316,40 @@ const columns = [
 <template>
     <AppLayout title="Sales Returns" :nav-items="navItems">
         <template v-if="showCreateForm">
-            <Create :sales="sales" :accounts="accounts" :stores="stores" @cancel="showCreateForm = false" @posted="showCreateForm = false" />
+            <Create
+                :sales="sales"
+                :accounts="accounts"
+                :stores="stores"
+                :mode="createMode"
+                @cancel="createMode = null"
+                @posted="createMode = null"
+            />
         </template>
 
         <template v-else>
             <div class="mb-4 flex items-center justify-between">
                 <h2 class="text-base font-bold text-text-strong">Sales Returns</h2>
-                <Button variant="primary" tone="purple" @click="showCreateForm = true">
-                    <Plus class="size-4" />
-                    New return
-                </Button>
+                <div class="flex items-center gap-2">
+                    <Button variant="secondary" tone="purple" @click="createMode = 'request'">
+                        <Plus class="size-4" />
+                        Request return
+                    </Button>
+                    <Button variant="primary" tone="purple" @click="createMode = 'post'">
+                        <Plus class="size-4" />
+                        New return
+                    </Button>
+                </div>
             </div>
+
+            <Card v-if="pendingRequests.length > 0" variant="panel" class="mb-4">
+                <h3 class="mb-3 text-sm font-bold text-text-strong">Pending requests</h3>
+                <DataTable
+                    :columns="requestColumns"
+                    :data="pendingRequests"
+                    :page-size="Math.max(pendingRequests.length, 1)"
+                    empty-message="No pending return requests"
+                />
+            </Card>
 
             <Card variant="panel" class="mb-4">
                 <div class="flex flex-wrap items-end gap-3">
@@ -276,6 +434,26 @@ const columns = [
                 <Button variant="secondary" tone="purple" type="button" @click="cancelling = null">Back</Button>
                 <Button variant="primary" tone="purple" type="button" :disabled="cancelForm.processing" @click="submitCancel">
                     Confirm cancellation
+                </Button>
+            </template>
+        </Modal>
+
+        <Modal :open="!!rejecting" title="Reject return request" size="compact" @update:open="onRejectOpenChange">
+            <form class="flex flex-col gap-4" @submit.prevent="submitReject">
+                <p class="text-sm text-text-muted">
+                    Nothing was posted for this request, so rejecting it has no ledger/stock effect - it just records why.
+                </p>
+                <div>
+                    <label class="mb-1 block text-sm font-semibold text-text-base">Reason <span class="text-danger">*</span></label>
+                    <Input v-model="rejectForm.reason" type="text" placeholder="Reason for rejection" required />
+                    <p v-if="rejectForm.errors.reason" class="mt-1 text-sm text-danger">{{ rejectForm.errors.reason }}</p>
+                </div>
+            </form>
+
+            <template #footer>
+                <Button variant="secondary" tone="purple" type="button" @click="rejecting = null">Back</Button>
+                <Button variant="primary" tone="danger" type="button" :disabled="rejectForm.processing" @click="submitReject">
+                    Confirm rejection
                 </Button>
             </template>
         </Modal>

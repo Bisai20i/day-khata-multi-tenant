@@ -24,6 +24,17 @@ class SalesReturnController extends Controller
      * via the parent sale since a return has no customer_id of its own) and
      * paginated - same `when()`/`paginate()->withQueryString()` shape
      * Central\Tenants\TenantController::index() established.
+     *
+     * Split into two props: `returns` (status posted/cancelled - real,
+     * already-effective return documents, the historical list this page has
+     * always shown) and `pendingRequests` (status pending/rejected - the
+     * request/approval queue from SalesReturn::request()/approve()/
+     * reject()). Mirrors legacy day_khata's own separation between
+     * `listreturnoutstock` (real returns) and `listreturnoutstockrequest`
+     * (the request queue, which itself lists both still-pending and
+     * already-declined requests together - see that view's "Return Status"
+     * column). `pendingRequests` isn't paginated - it's a small, actionable
+     * queue, not a growing historical log.
      */
     public function index(Request $request): Response
     {
@@ -32,6 +43,7 @@ class SalesReturnController extends Controller
         $customerId = $request->filled('customer_id') ? (int) $request->input('customer_id') : null;
 
         $returns = SalesReturn::query()
+            ->whereIn('status', ['posted', 'cancelled'])
             ->with(['sale.customer:id,name', 'lines.saleLine.item:id,name,unit'])
             ->when($from, fn ($query, string $from) => $query->whereDate('date', '>=', $from))
             ->when($to, fn ($query, string $to) => $query->whereDate('date', '<=', $to))
@@ -43,8 +55,16 @@ class SalesReturnController extends Controller
             ->paginate(25)
             ->withQueryString();
 
+        $pendingRequests = SalesReturn::query()
+            ->whereIn('status', ['pending', 'rejected'])
+            ->with(['sale.customer:id,name', 'lines.saleLine.item:id,name,unit', 'creator:id,name'])
+            ->orderByDesc('date')
+            ->orderByDesc('id')
+            ->get();
+
         return Inertia::render('Tenant/Sales/Returns/Index', [
             'returns' => $returns,
+            'pendingRequests' => $pendingRequests,
             'filters' => [
                 'from' => $from,
                 'to' => $to,
@@ -63,16 +83,7 @@ class SalesReturnController extends Controller
 
     public function store(Request $request): RedirectResponse
     {
-        $data = $request->validate([
-            'sale_id' => ['required', 'exists:sales,id'],
-            'date' => ['required', 'date'],
-            'reason' => ['nullable', 'string', 'max:255'],
-            'refund_account_id' => ['nullable', 'exists:accounts,id'],
-            'store_id' => ['nullable', 'integer', 'exists:stores,id'],
-            'lines' => ['required', 'array', 'min:1'],
-            'lines.*.sale_line_id' => ['required', 'exists:sale_lines,id'],
-            'lines.*.quantity' => ['required', 'numeric', 'min:0.0001'],
-        ]);
+        $data = $this->validatedReturn($request);
 
         try {
             SalesReturn::post(
@@ -93,6 +104,65 @@ class SalesReturnController extends Controller
         return redirect()->route('tenant.sales-returns.index')->with('status', 'Sales return posted.');
     }
 
+    /**
+     * Requests a return WITHOUT posting anything yet - see
+     * SalesReturn::request()'s own docblock. Anyone who can reach this
+     * screen can request one (no separate role for "requester" exists in
+     * this app, matching legacy's own open-to-any-logged-in-user model);
+     * approve()/reject() are likewise open to any authenticated tenant user
+     * for the same reason this app doesn't otherwise gate day-to-day
+     * transaction entry - a real maker/checker role split is a bigger,
+     * separate RBAC decision this task doesn't attempt.
+     */
+    public function requestReturn(Request $request): RedirectResponse
+    {
+        $data = $this->validatedReturn($request);
+
+        try {
+            SalesReturn::request(
+                [
+                    'sale_id' => $data['sale_id'],
+                    'date' => $data['date'],
+                    'reason' => $data['reason'] ?? null,
+                    'refund_account_id' => $data['refund_account_id'] ?? null,
+                    'store_id' => $data['store_id'] ?? null,
+                ],
+                $data['lines'],
+                $request->user(),
+            );
+        } catch (InvalidArgumentException $e) {
+            return back()->withErrors(['lines' => $e->getMessage()])->withInput();
+        }
+
+        return redirect()->route('tenant.sales-returns.index')->with('status', 'Return request submitted for approval.');
+    }
+
+    public function approve(Request $request, SalesReturn $salesReturn): RedirectResponse
+    {
+        try {
+            $salesReturn->approve($request->user());
+        } catch (InvalidArgumentException $e) {
+            return back()->withErrors(['salesReturn' => $e->getMessage()]);
+        }
+
+        return redirect()->route('tenant.sales-returns.index')->with('status', 'Return request approved and posted.');
+    }
+
+    public function reject(Request $request, SalesReturn $salesReturn): RedirectResponse
+    {
+        $data = $request->validate([
+            'reason' => ['required', 'string', 'max:255'],
+        ]);
+
+        try {
+            $salesReturn->reject($data['reason']);
+        } catch (InvalidArgumentException $e) {
+            return back()->withErrors(['reason' => $e->getMessage()]);
+        }
+
+        return redirect()->route('tenant.sales-returns.index')->with('status', 'Return request rejected.');
+    }
+
     public function cancel(Request $request, SalesReturn $salesReturn): RedirectResponse
     {
         $data = $request->validate([
@@ -106,6 +176,27 @@ class SalesReturnController extends Controller
         }
 
         return redirect()->route('tenant.sales-returns.index')->with('status', 'Sales return cancelled.');
+    }
+
+    /**
+     * Shared validation for both a direct post() (store()) and a deferred
+     * request() (requestReturn()) - same shape either way, only what
+     * happens with the validated data afterward differs.
+     *
+     * @return array{sale_id: int, date: string, reason: ?string, refund_account_id: ?int, store_id: ?int, lines: array<int, array{sale_line_id: int, quantity: float}>}
+     */
+    private function validatedReturn(Request $request): array
+    {
+        return $request->validate([
+            'sale_id' => ['required', 'exists:sales,id'],
+            'date' => ['required', 'date'],
+            'reason' => ['nullable', 'string', 'max:255'],
+            'refund_account_id' => ['nullable', 'exists:accounts,id'],
+            'store_id' => ['nullable', 'integer', 'exists:stores,id'],
+            'lines' => ['required', 'array', 'min:1'],
+            'lines.*.sale_line_id' => ['required', 'exists:sale_lines,id'],
+            'lines.*.quantity' => ['required', 'numeric', 'min:0.0001'],
+        ]);
     }
 
     /**
