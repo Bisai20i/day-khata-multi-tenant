@@ -84,6 +84,10 @@ class StockMovementRegisterController extends Controller
             StockMovementType::Opening => 'Opening',
             StockMovementType::AdjustmentIn => 'Adjustment In',
             StockMovementType::AdjustmentOut => 'Adjustment Out',
+            StockMovementType::ProductionIn => 'Production In',
+            StockMovementType::ProductionOut => 'Production Out',
+            StockMovementType::RefiningIn => 'Refining In',
+            StockMovementType::RefiningOut => 'Refining Out',
         };
     }
 

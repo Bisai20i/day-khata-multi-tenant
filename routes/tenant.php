@@ -64,6 +64,7 @@ Route::middleware([
         require base_path('routes/tenant-sales-returns.php');
         require base_path('routes/tenant-purchase-returns.php');
         require base_path('routes/tenant-stock-adjustments.php');
+        require base_path('routes/tenant-stock-conversions.php');
         require base_path('routes/tenant-reports-accounting.php');
         require base_path('routes/tenant-reports-sales-purchase.php');
         require base_path('routes/tenant-reports-inventory.php');

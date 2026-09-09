@@ -19,12 +19,18 @@ enum StockMovementType: string
     case Opening = 'opening';
     case AdjustmentIn = 'adjustment_in';
     case AdjustmentOut = 'adjustment_out';
+    case ProductionIn = 'production_in';
+    case ProductionOut = 'production_out';
+    case RefiningIn = 'refining_in';
+    case RefiningOut = 'refining_out';
 
     public function direction(): int
     {
         return match ($this) {
-            self::Purchase, self::SaleReturn, self::Opening, self::AdjustmentIn => 1,
-            self::Sale, self::PurchaseReturn, self::AdjustmentOut => -1,
+            self::Purchase, self::SaleReturn, self::Opening, self::AdjustmentIn,
+            self::ProductionIn, self::RefiningIn => 1,
+            self::Sale, self::PurchaseReturn, self::AdjustmentOut,
+            self::ProductionOut, self::RefiningOut => -1,
         };
     }
 }
