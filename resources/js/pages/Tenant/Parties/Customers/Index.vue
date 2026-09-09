@@ -9,6 +9,7 @@ import Modal from '@/components/ui/Modal.vue';
 import DataTable from '@/components/ui/DataTable.vue';
 import RowActions from '@/components/ui/RowActions.vue';
 import { useToast } from '@/composables/useToast';
+import { useConfirm } from '@/composables/useConfirm';
 import { navGroups } from '@/lib/nav-items.js';
 
 defineProps({
@@ -20,6 +21,7 @@ defineProps({
 
 const page = usePage();
 const { toast } = useToast();
+const { confirm } = useConfirm();
 
 const isAdmin = computed(() => page.props.auth?.user?.role?.slug === 'admin');
 
@@ -38,6 +40,49 @@ watch(
 
 const modalOpen = ref(false);
 const editing = ref(null);
+
+const importModalOpen = ref(false);
+const importForm = useForm({ file: null });
+const importResult = ref(null);
+
+// Same flash-watch reasoning as flash.status above: the import submit
+// redirects back to this same route + component instead of navigating away.
+watch(
+    () => page.props.flash?.importResult,
+    (result) => {
+        if (result) importResult.value = result;
+    },
+);
+
+function openImport() {
+    importForm.reset();
+    importForm.clearErrors();
+    importResult.value = null;
+    importModalOpen.value = true;
+}
+
+function closeImportModal() {
+    importModalOpen.value = false;
+    importForm.reset();
+    importForm.clearErrors();
+    importResult.value = null;
+}
+
+function onImportModalOpenChange(value) {
+    if (value) {
+        importModalOpen.value = true;
+    } else {
+        closeImportModal();
+    }
+}
+
+function onImportFileChange(event) {
+    importForm.file = event.target.files[0] ?? null;
+}
+
+function submitImport() {
+    importForm.post('/customers/import', { forceFormData: true });
+}
 
 const form = useForm({
     name: '',
@@ -90,8 +135,8 @@ function submit() {
     }
 }
 
-function destroyCustomer(customer) {
-    if (!confirm(`Delete ${customer.name}?`)) return;
+async function destroyCustomer(customer) {
+    if (!(await confirm({ message: `Delete ${customer.name}?`, tone: 'danger', confirmLabel: 'Delete' }))) return;
     router.delete(`/customers/${customer.id}`);
 }
 
@@ -138,7 +183,10 @@ const columns = [
     <AppLayout title="Customers" :nav-items="navItems">
         <div class="mb-4 flex items-center justify-between">
             <h2 class="text-base font-bold text-text-strong">Customers</h2>
-            <Button variant="primary" tone="purple" @click="openCreate">New customer</Button>
+            <div class="flex items-center gap-2">
+                <Button variant="secondary" tone="purple" @click="openImport">Bulk import</Button>
+                <Button variant="primary" tone="purple" @click="openCreate">New customer</Button>
+            </div>
         </div>
 
         <Card variant="panel">
@@ -148,38 +196,38 @@ const columns = [
         <Modal :open="modalOpen" :title="editing ? 'Edit customer' : 'New customer'" @update:open="onModalOpenChange">
             <form class="flex flex-col gap-4" @submit.prevent="submit">
                 <div>
-                    <label for="name" class="mb-1 block text-sm font-semibold text-text-base">Name</label>
-                    <Input id="name" v-model="form.name" type="text" required />
+                    <label for="name" class="mb-1 block text-sm font-semibold text-text-base">Name <span class="text-danger">*</span></label>
+                    <Input id="name" v-model="form.name" type="text" placeholder="e.g. Ram Sharma" required />
                     <p v-if="form.errors.name" class="mt-1 text-sm text-danger">{{ form.errors.name }}</p>
                 </div>
 
                 <div>
                     <label for="address" class="mb-1 block text-sm font-semibold text-text-base">Address</label>
-                    <Input id="address" v-model="form.address" type="text" />
+                    <Input id="address" v-model="form.address" type="text" placeholder="e.g. Kathmandu-10" />
                     <p v-if="form.errors.address" class="mt-1 text-sm text-danger">{{ form.errors.address }}</p>
                 </div>
 
                 <div>
                     <label for="mobile_no" class="mb-1 block text-sm font-semibold text-text-base">Mobile No</label>
-                    <Input id="mobile_no" v-model="form.mobile_no" type="text" />
+                    <Input id="mobile_no" v-model="form.mobile_no" type="text" placeholder="98XXXXXXXX" />
                     <p v-if="form.errors.mobile_no" class="mt-1 text-sm text-danger">{{ form.errors.mobile_no }}</p>
                 </div>
 
                 <div>
                     <label for="email" class="mb-1 block text-sm font-semibold text-text-base">Email</label>
-                    <Input id="email" v-model="form.email" type="email" />
+                    <Input id="email" v-model="form.email" type="email" placeholder="name@example.com" />
                     <p v-if="form.errors.email" class="mt-1 text-sm text-danger">{{ form.errors.email }}</p>
                 </div>
 
                 <div>
                     <label for="tpin" class="mb-1 block text-sm font-semibold text-text-base">TPIN</label>
-                    <Input id="tpin" v-model="form.tpin" type="text" />
+                    <Input id="tpin" v-model="form.tpin" type="text" placeholder="e.g. 123456789" />
                     <p v-if="form.errors.tpin" class="mt-1 text-sm text-danger">{{ form.errors.tpin }}</p>
                 </div>
 
                 <div>
                     <label for="citizenship" class="mb-1 block text-sm font-semibold text-text-base">Citizenship</label>
-                    <Input id="citizenship" v-model="form.citizenship" type="text" />
+                    <Input id="citizenship" v-model="form.citizenship" type="text" placeholder="Citizenship number" />
                     <p v-if="form.errors.citizenship" class="mt-1 text-sm text-danger">{{ form.errors.citizenship }}</p>
                 </div>
             </form>
@@ -189,6 +237,78 @@ const columns = [
                 <Button variant="primary" tone="purple" type="button" :disabled="form.processing" @click="submit">
                     {{ editing ? 'Save changes' : 'Create customer' }}
                 </Button>
+            </template>
+        </Modal>
+
+        <Modal :open="importModalOpen" title="Bulk import customers" @update:open="onImportModalOpenChange">
+            <div v-if="!importResult" class="flex flex-col gap-4">
+                <p class="text-[13px] text-text-muted">
+                    Download the template, fill in one customer per row, then upload the completed CSV file. Rows
+                    with a missing name, an invalid email, or a mobile number already in use (or repeated in the
+                    file) are skipped and reported after import.
+                </p>
+                <a
+                    href="/customers/import/template"
+                    class="inline-flex w-fit items-center gap-1.5 text-[13px] font-bold text-primary hover:underline"
+                >
+                    Download CSV template
+                </a>
+                <div>
+                    <label for="customer-import-file" class="mb-1 block text-sm font-semibold text-text-base">
+                        CSV file <span class="text-danger">*</span>
+                    </label>
+                    <input
+                        id="customer-import-file"
+                        type="file"
+                        accept=".csv,text/csv"
+                        class="w-full border-[1.5px] border-border bg-bg-subtle px-3 py-2 text-[13px] text-text-base outline-none file:mr-3 file:cursor-pointer file:border-0 file:bg-primary-tint file:px-3 file:py-1.5 file:text-[12px] file:font-bold file:text-primary"
+                        @change="onImportFileChange"
+                    />
+                    <p v-if="importForm.errors.file" class="mt-1 text-sm text-danger">{{ importForm.errors.file }}</p>
+                </div>
+            </div>
+
+            <div v-else class="flex flex-col gap-4">
+                <p class="text-[13px] font-semibold text-text-base">
+                    Imported {{ importResult.imported }} of {{ importResult.imported + importResult.skipped.length }} row(s).
+                </p>
+                <div v-if="importResult.skipped.length" class="max-h-64 overflow-auto border-[1.5px] border-border">
+                    <table class="w-full text-left text-[12px]">
+                        <thead class="bg-bg-subtle">
+                            <tr>
+                                <th class="px-2 py-1.5">Row</th>
+                                <th class="px-2 py-1.5">Name</th>
+                                <th class="px-2 py-1.5">Reason</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <tr v-for="item in importResult.skipped" :key="item.row" class="border-t border-border">
+                                <td class="px-2 py-1.5">{{ item.row }}</td>
+                                <td class="px-2 py-1.5">{{ item.name || '—' }}</td>
+                                <td class="px-2 py-1.5">{{ item.reason }}</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+            <template #footer>
+                <template v-if="!importResult">
+                    <Button variant="secondary" tone="purple" type="button" @click="closeImportModal">Cancel</Button>
+                    <Button
+                        variant="primary"
+                        tone="purple"
+                        type="button"
+                        :loading="importForm.processing"
+                        :disabled="importForm.processing || !importForm.file"
+                        @click="submitImport"
+                    >
+                        Import
+                    </Button>
+                </template>
+                <template v-else>
+                    <Button variant="primary" tone="purple" type="button" @click="closeImportModal">Done</Button>
+                </template>
             </template>
         </Modal>
     </AppLayout>

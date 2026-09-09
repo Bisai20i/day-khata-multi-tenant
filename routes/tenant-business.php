@@ -52,6 +52,8 @@ Route::name('tenant.')->group(function () {
         Route::post('/', [CustomerController::class, 'store'])->name('store');
         Route::put('/{customer}', [CustomerController::class, 'update'])->name('update');
         Route::delete('/{customer}', [CustomerController::class, 'destroy'])->name('destroy');
+        Route::get('/import/template', [CustomerController::class, 'importTemplate'])->name('import.template');
+        Route::post('/import', [CustomerController::class, 'import'])->name('import');
     });
 
     Route::prefix('suppliers')->name('suppliers.')->group(function () {
@@ -59,6 +61,8 @@ Route::name('tenant.')->group(function () {
         Route::post('/', [SupplierController::class, 'store'])->name('store');
         Route::put('/{supplier}', [SupplierController::class, 'update'])->name('update');
         Route::delete('/{supplier}', [SupplierController::class, 'destroy'])->name('destroy');
+        Route::get('/import/template', [SupplierController::class, 'importTemplate'])->name('import.template');
+        Route::post('/import', [SupplierController::class, 'import'])->name('import');
     });
 
     Route::prefix('item-categories')->name('item-categories.')->group(function () {
