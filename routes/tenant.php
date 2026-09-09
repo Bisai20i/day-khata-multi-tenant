@@ -75,6 +75,7 @@ Route::middleware([
         require base_path('routes/tenant-reports-vat-summary.php');
         require base_path('routes/tenant-reports-stock-movement-register.php');
         require base_path('routes/tenant-employees.php');
+        require base_path('routes/tenant-profile.php');
         require base_path('routes/tenant-fixed-assets.php');
         require base_path('routes/tenant-quotations.php');
         require base_path('routes/tenant-receipts.php');
