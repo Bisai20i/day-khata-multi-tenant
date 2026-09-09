@@ -123,6 +123,7 @@ export function navGroups(isAdmin) {
                 { label: 'Sales Register', href: '/reports/sales-register', icon: FileBarChart },
                 { label: 'Item-wise Sales', href: '/reports/item-wise-sales', icon: FileBarChart },
                 { label: 'Sales by Category', href: '/reports/sales-by-category', icon: FileBarChart },
+                { label: 'Sales With Note', href: '/reports/sales-with-note', icon: FileBarChart },
             ],
         },
         {
@@ -140,6 +141,7 @@ export function navGroups(isAdmin) {
                 { label: 'Stock Valuation', href: '/reports/stock-valuation', icon: FileBarChart },
                 { label: 'Stock by Category', href: '/reports/stock-by-category', icon: FileBarChart },
                 { label: 'Stock Movement Register', href: '/reports/stock-movement-register', icon: FileBarChart },
+                { label: 'Damage & Lost Stock', href: '/reports/damage-lost-stock', icon: FileBarChart },
             ],
         },
     ];
