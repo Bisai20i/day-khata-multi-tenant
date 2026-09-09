@@ -2,6 +2,7 @@
 
 use Illuminate\Database\Migrations\Migration;
 use Illuminate\Database\Schema\Blueprint;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
 
 return new class extends Migration
@@ -11,8 +12,19 @@ return new class extends Migration
      */
     public function up(): void
     {
-        Schema::table('purchases', function (Blueprint $table) {
-            $table->foreignId('store_id')->after('supplier_id')->constrained()->restrictOnDelete();
+        // Tenants provisioned before the stores feature already have
+        // purchases rows, so the new NOT NULL column needs a concrete
+        // default (SQLite rejects NOT NULL + NULL default on a non-empty
+        // table). Backfill existing rows into a default store.
+        $storeId = DB::table('stores')->value('id') ?? DB::table('stores')->insertGetId([
+            'name' => 'Main Store',
+            'is_active' => true,
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+
+        Schema::table('purchases', function (Blueprint $table) use ($storeId) {
+            $table->foreignId('store_id')->after('supplier_id')->default($storeId)->constrained()->restrictOnDelete();
         });
     }
 
