@@ -54,6 +54,15 @@ test('posting a purchase return with an explicit store_id records the return mov
         );
         $purchaseLine = $purchase->lines()->firstOrFail();
 
+        // The goods being sent back have to actually be in the store the return
+        // names, or the CONTRACTS C6 stock guard refuses it - so the second
+        // store is stocked first.
+        Purchase::post(
+            ['supplier_id' => $supplier->id, 'date' => '2026-06-02', 'payment_mode' => 'credit', 'store_id' => $secondStore->id],
+            [['item_id' => $item->id, 'quantity' => 10, 'rate' => 100]],
+            $actor,
+        );
+
         $return = PurchaseReturn::post(
             ['purchase_id' => $purchase->id, 'date' => '2026-06-05', 'reason' => 'Damaged goods', 'store_id' => $secondStore->id],
             [['purchase_line_id' => $purchaseLine->id, 'quantity' => 4]],
@@ -71,7 +80,7 @@ test('posting a purchase return with an explicit store_id records the return mov
     $tenant->delete();
 });
 
-test('omitting store_id on a purchase return falls back to the default active store', function () {
+test('omitting store_id on a purchase return falls back to the store the purchase went into', function () {
     $tenant = provisionPurchaseReturnStoreScopingTenant('purchase-return-store-fallback.tenant-test');
 
     $tenant->run(function () {
@@ -80,11 +89,13 @@ test('omitting store_id on a purchase return falls back to the default active st
         $supplier = Supplier::factory()->create();
         $item = Item::factory()->create(['is_vatable' => false, 'is_stockable' => true]);
 
-        Store::factory()->create(['is_active' => true]);
-        $defaultStoreId = Store::where('is_active', true)->orderBy('id')->value('id');
+        // A second store exists and is NOT the oldest one, so "fell back to the
+        // purchase's store" and "fell back to the first active store" cannot be
+        // confused with each other.
+        $secondStore = Store::factory()->create(['is_active' => true]);
 
         $purchase = Purchase::post(
-            ['supplier_id' => $supplier->id, 'date' => '2026-06-01', 'payment_mode' => 'credit'],
+            ['supplier_id' => $supplier->id, 'date' => '2026-06-01', 'payment_mode' => 'credit', 'store_id' => $secondStore->id],
             [['item_id' => $item->id, 'quantity' => 5, 'rate' => 10]],
             $actor,
         );
@@ -96,7 +107,7 @@ test('omitting store_id on a purchase return falls back to the default active st
             $actor,
         );
 
-        expect($return->store_id)->toBe($defaultStoreId);
+        expect($return->store_id)->toBe($secondStore->id);
     });
 
     $tenant->delete();

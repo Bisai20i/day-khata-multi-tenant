@@ -7,20 +7,23 @@ import Input from '@/components/ui/Input.vue';
 import Select from '@/components/ui/Select.vue';
 import Combobox from '@/components/ui/Combobox.vue';
 import NepaliDateInput from '@/components/ui/NepaliDateInput.vue';
+import { compareMoney, formatMoney, parseMoney, sumMoney } from '@/lib/money';
+import { formatBsDate, todayInKathmandu } from '@/lib/format';
 
 const props = defineProps({
     suppliers: { type: Array, default: () => [] },
-    accounts: { type: Array, default: () => [] },
+    // Only accounts money can actually leave through, filtered server-side.
+    bankAccounts: { type: Array, default: () => [] },
     outstandingPurchases: { type: Array, default: () => [] },
 });
 
 const emit = defineEmits(['cancel', 'posted']);
 
 const supplierOptions = computed(() => props.suppliers.map((s) => ({ value: s.id, label: s.name })));
-const accountOptions = computed(() =>
-    props.accounts.map((account) => ({
+const bankAccountOptions = computed(() =>
+    props.bankAccounts.map((account) => ({
         value: account.id,
-        label: account.code ? `${account.code} — ${account.name}` : account.name,
+        label: account.code ? `${account.code} - ${account.name}` : account.name,
     })),
 );
 
@@ -31,7 +34,10 @@ const paymentModeOptions = [
 
 const form = useForm({
     supplier_id: null,
-    date: new Date().toISOString().slice(0, 10),
+    // todayInKathmandu(), never new Date().toISOString(): between midnight and
+    // 05:45 Nepal time the UTC day is still yesterday, which dated every early
+    // morning payment a day early.
+    date: todayInKathmandu(),
     amount: '',
     payment_mode: 'cash',
     bank_account_id: null,
@@ -57,19 +63,37 @@ const supplierPurchases = computed(() =>
     props.outstandingPurchases.filter((purchase) => purchase.supplier_id === form.supplier_id),
 );
 
-const totalAllocated = computed(() =>
-    Object.values(allocationAmounts).reduce((sum, value) => sum + (Number(value) || 0), 0),
+/**
+ * The allocation rows the user has actually filled in, as validated 2dp
+ * strings. Anything half-typed is simply ignored until it parses, so the
+ * running total never shows a number the server would refuse.
+ */
+const validAllocations = computed(() =>
+    Object.entries(allocationAmounts)
+        .map(([purchaseId, amount]) => ({ purchaseId: Number(purchaseId), parsed: parseMoney(amount) }))
+        .filter((row) => row.parsed.ok && compareMoney(row.parsed.value, '0.00') > 0)
+        .map((row) => ({ purchase_id: row.purchaseId, amount: row.parsed.value })),
 );
 
-function submit() {
-    const allocations = Object.entries(allocationAmounts)
-        .filter(([, amount]) => Number(amount) > 0)
-        .map(([purchase_id, amount]) => ({ purchase_id: Number(purchase_id), amount: Number(amount) }));
+const totalAllocated = computed(() => sumMoney(validAllocations.value.map((row) => row.amount)));
 
+const paymentAmount = computed(() => {
+    const parsed = parseMoney(form.amount);
+
+    return parsed.ok ? parsed.value : '0.00';
+});
+
+// Exact, no tolerance: the old form let an over-allocation through and the
+// server used to accept anything within a paisa of the amount (audit P0-4).
+const overAllocated = computed(() => compareMoney(totalAllocated.value, paymentAmount.value) > 0);
+
+function submit() {
     form.transform((data) => ({
         ...data,
-        amount: Number(data.amount) || 0,
-        allocations,
+        // The typed string, not Number(): the server's decimal rules reject
+        // over-precise input rather than letting MySQL round it away.
+        amount: data.amount,
+        allocations: validAllocations.value,
     })).post('/payments', {
         preserveScroll: true,
         onSuccess: () => emit('posted'),
@@ -115,10 +139,10 @@ function submit() {
                     />
                 </div>
                 <div v-if="showBankAccount">
-                    <label class="mb-1 block text-sm font-semibold text-text-base">Bank Account</label>
+                    <label class="mb-1 block text-sm font-semibold text-text-base">Bank Account <span class="text-danger">*</span></label>
                     <Combobox
                         :model-value="form.bank_account_id"
-                        :options="accountOptions"
+                        :options="bankAccountOptions"
                         placeholder="Select bank account"
                         @update:model-value="(v) => (form.bank_account_id = v)"
                     />
@@ -126,11 +150,11 @@ function submit() {
                 </div>
                 <div>
                     <label class="mb-1 block text-sm font-semibold text-text-base">Reference #</label>
-                    <Input v-model="form.reference_number" type="text" placeholder="Optional" />
+                    <Input v-model="form.reference_number" type="text" maxlength="255" placeholder="Optional" />
                 </div>
                 <div class="col-span-3">
                     <label class="mb-1 block text-sm font-semibold text-text-base">Narration</label>
-                    <Input v-model="form.narration" type="text" placeholder="Optional" />
+                    <Input v-model="form.narration" type="text" maxlength="255" placeholder="Optional" />
                 </div>
             </div>
 
@@ -139,8 +163,8 @@ function submit() {
                 <p v-if="supplierPurchases.length === 0" class="text-sm text-text-muted">No outstanding bills for this supplier.</p>
 
                 <div v-else class="flex flex-col gap-2">
-                    <div class="grid grid-cols-[100px_1fr_110px_110px_130px] gap-2 text-[10px] font-bold tracking-[.8px] text-text-muted uppercase">
-                        <span>Date</span>
+                    <div class="grid grid-cols-[120px_1fr_110px_110px_130px] gap-2 text-[10px] font-bold tracking-[.8px] text-text-muted uppercase">
+                        <span>Date (BS)</span>
                         <span>Bill #</span>
                         <span>Total</span>
                         <span>Outstanding</span>
@@ -149,12 +173,14 @@ function submit() {
                     <div
                         v-for="purchase in supplierPurchases"
                         :key="purchase.id"
-                        class="grid grid-cols-[100px_1fr_110px_110px_130px] items-center gap-2"
+                        class="grid grid-cols-[120px_1fr_110px_110px_130px] items-center gap-2"
                     >
-                        <span class="text-sm text-text-base">{{ purchase.date }}</span>
-                        <span class="text-sm text-text-base">Purchase #{{ purchase.id }}</span>
-                        <span class="text-sm text-text-base">{{ purchase.total.toFixed(2) }}</span>
-                        <span class="text-sm text-text-base">{{ purchase.outstanding.toFixed(2) }}</span>
+                        <span class="text-sm text-text-base">{{ formatBsDate(purchase.date) }}</span>
+                        <span class="text-sm text-text-base">
+                            {{ purchase.bill_number ? purchase.bill_number : `Purchase #${purchase.id}` }}
+                        </span>
+                        <span class="text-sm text-text-base">{{ formatMoney(purchase.total) }}</span>
+                        <span class="text-sm text-text-base">{{ formatMoney(purchase.outstanding) }}</span>
                         <Input
                             v-model="allocationAmounts[purchase.id]"
                             type="number"
@@ -167,15 +193,23 @@ function submit() {
                 </div>
 
                 <p v-if="form.errors.allocations" class="mt-2 text-sm text-danger">{{ form.errors.allocations }}</p>
+                <p v-if="overAllocated" class="mt-2 text-sm text-danger">
+                    Allocated {{ formatMoney(totalAllocated) }} is more than the payment of {{ formatMoney(paymentAmount) }}.
+                </p>
                 <p class="mt-2 text-xs text-text-muted">
-                    Allocated so far: {{ totalAllocated.toFixed(2) }} of {{ (Number(form.amount) || 0).toFixed(2) }}. Any
+                    Allocated so far: {{ formatMoney(totalAllocated) }} of {{ formatMoney(paymentAmount) }}. Any
                     unallocated amount is recorded on account and won't reduce a specific bill's outstanding balance.
                 </p>
             </div>
 
             <div class="flex items-center justify-end gap-2">
                 <Button variant="secondary" tone="purple" type="button" @click="emit('cancel')">Cancel</Button>
-                <Button variant="primary" tone="purple" type="submit" :disabled="form.processing || !form.supplier_id">
+                <Button
+                    variant="primary"
+                    tone="purple"
+                    type="submit"
+                    :disabled="form.processing || !form.supplier_id || overAllocated"
+                >
                     Record payment
                 </Button>
             </div>

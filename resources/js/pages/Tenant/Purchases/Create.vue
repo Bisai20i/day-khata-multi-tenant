@@ -10,12 +10,21 @@ import Combobox from '@/components/ui/Combobox.vue';
 import Modal from '@/components/ui/Modal.vue';
 import NepaliDateInput from '@/components/ui/NepaliDateInput.vue';
 import { useToast } from '@/composables/useToast';
+import { addMoney, calculateDocument, formatMoney, moneyEquals, parseMoney } from '@/lib/money';
+import { todayInKathmandu } from '@/lib/format';
 
 const props = defineProps({
     suppliers: { type: Array, default: () => [] },
     items: { type: Array, default: () => [] },
-    accounts: { type: Array, default: () => [] },
+    // Two narrow pickers instead of the whole chart of accounts: money can only
+    // leave through an asset account, and TDS can only be withheld into a
+    // liability, so the server sends each list already filtered.
+    bankAccounts: { type: Array, default: () => [] },
+    tdsAccounts: { type: Array, default: () => [] },
     stores: { type: Array, default: () => [] },
+    // default_vat_rate and default_store_id, so the form opens on the tenant's
+    // own settings instead of a hardcoded 13 and "no store".
+    settings: { type: Object, default: () => ({}) },
     // The one closed fiscal year currently reopened for correction, or
     // null - this create form only ever offers this single alternate to
     // the currently open year (never any other closed year), per the
@@ -53,12 +62,15 @@ const itemOptions = computed(() =>
         searchValue: i.barcode ? `${i.name} ${i.barcode}` : i.name,
     })),
 );
-const accountOptions = computed(() =>
-    props.accounts.map((account) => ({
+function accountOptions(accounts) {
+    return accounts.map((account) => ({
         value: account.id,
         label: account.code ? `${account.code} — ${account.name}` : account.name,
-    })),
-);
+    }));
+}
+
+const bankAccountOptions = computed(() => accountOptions(props.bankAccounts));
+const tdsAccountOptions = computed(() => accountOptions(props.tdsAccounts));
 
 const paymentModeOptions = [
     { value: 'cash', label: 'Cash' },
@@ -84,14 +96,38 @@ function unitOptionsFor(item) {
 }
 
 // Mirrors Sales/Create.vue's selectLineUnit() exactly, except this form
-// auto-fills from a unit's purchase_rate override (not sale_rate).
+// auto-fills from a unit's purchase_rate override (not sale_rate). Switching
+// BACK to the base unit restores the item's own purchase rate, which the old
+// version left showing the alternate unit's rate against a base quantity.
 function selectLineUnit(line, unitId) {
     line.item_unit_id = unitId;
 
-    const unit = itemsById.value.get(line.item_id)?.units?.find((u) => u.id === unitId);
+    const item = itemsById.value.get(line.item_id);
+
+    if (unitId === '' || unitId === null) {
+        if (item?.purchase_rate != null) {
+            line.rate = String(item.purchase_rate);
+        }
+
+        return;
+    }
+
+    const unit = item?.units?.find((u) => u.id === unitId);
     if (unit?.purchase_rate != null) {
         line.rate = String(unit.purchase_rate);
     }
+}
+
+// The stored conversion factor for the unit this line is entered in, as the
+// decimal string the money module expects. '1' means the item's base unit.
+function conversionFactorFor(line) {
+    if (line.item_unit_id === '' || line.item_unit_id === null) {
+        return '1';
+    }
+
+    const unit = itemsById.value.get(line.item_id)?.units?.find((u) => u.id === line.item_unit_id);
+
+    return unit?.conversion_factor != null ? String(unit.conversion_factor) : '1';
 }
 
 // Mirrors Sales/Create.vue's selectLineItem() exactly.
@@ -103,16 +139,19 @@ function selectLineItem(line, itemId) {
 function defaultFormData() {
     return {
         supplier_id: null,
-        store_id: null,
+        store_id: props.settings.default_store_id ?? null,
         bill_number: '',
         pan_number: '',
         chalani_number: '',
-        date: '',
+        // todayInKathmandu(), never new Date().toISOString(): between 00:00 and
+        // 05:44 Nepal time the UTC day is still yesterday, which dated every
+        // bill entered early in the morning a day early.
+        date: todayInKathmandu(),
         payment_mode: 'credit',
         bank_account_id: null,
         discount: '',
         discount_type: 'flat',
-        vat_rate: '13',
+        vat_rate: String(props.settings.default_vat_rate ?? '13'),
         cash_amount: '',
         bank_amount: '',
         tds_account_id: null,
@@ -138,111 +177,147 @@ function removeLine(index) {
     form.lines.splice(index, 1);
 }
 
-// Mirrors Sales/Create.vue's / Pos.vue's %/Rs discount toggle exactly - see
-// Sales/Create.vue's lineDiscountAmount() for the full rationale. The raw
-// value + its type are what's submitted; Purchase::post() computes the
-// actual Rs amount itself now.
-function lineDiscountAmount(line) {
-    const qty = Number(line.quantity) || 0;
-    const rate = Number(line.rate) || 0;
-    const raw = Number(line.discount) || 0;
-
-    if (line.discount_type === 'percentage') {
-        return Math.round(qty * rate * (Math.min(100, Math.max(0, raw)) / 100) * 100) / 100;
-    }
-
-    return Math.max(0, raw);
+function isVatable(line) {
+    return itemsById.value.get(line.item_id)?.is_vatable ?? false;
 }
 
+// The ONE source of truth for what this bill adds up to, step for step
+// identical to App\Support\Billing\DocumentCalculator on the server. The old
+// preview summed unrounded floats and never rounded the VAT at all, so a single
+// line of 1,001.50 previewed VAT 130.19 while the server booked 130.20
+// (audit P0-8). Nothing here parses money through Number().
+const preview = computed(() =>
+    calculateDocument(
+        form.lines.map((line) => ({
+            quantity: line.quantity === '' ? '0' : line.quantity,
+            rate: line.rate === '' ? '0' : line.rate,
+            discount: line.discount === '' ? '0' : line.discount,
+            discount_type: line.discount_type,
+            vatable: isVatable(line),
+            conversion_factor: conversionFactorFor(line),
+        })),
+        {
+            vat_rate: form.vat_rate === '' ? '0' : form.vat_rate,
+            discount: form.discount === '' ? '0' : form.discount,
+            discount_type: form.discount_type,
+            tds_amount: form.tds_amount === '' ? '0' : form.tds_amount,
+        },
+    ),
+);
+
+const totals = computed(() => (preview.value.ok ? preview.value.totals : null));
+// An incomplete bill (no lines filled in yet) is not an error worth shouting
+// about; anything else the calculator refuses is shown to the user as typed.
+const previewError = computed(() =>
+    preview.value.ok || preview.value.reason === 'subtotal_not_positive' ? null : preview.value.message,
+);
+
+function money(value) {
+    return value == null ? '-' : formatMoney(value);
+}
+
+function lineTotalText(index) {
+    return totals.value ? money(totals.value.lines[index].line_total) : '-';
+}
+
+// %/Rs toggle. Percentage to flat keeps the exact rupee amount the calculator
+// already worked out, so nothing is recomputed in the browser. Flat to
+// percentage clears the field instead of dividing: a rupee amount has no exact
+// percentage, and inventing one here is how the preview and the bill drift
+// apart. The raw value plus its type is what is submitted either way.
 function toggleLineDiscountType(index) {
     const line = form.lines[index];
-    const qty = Number(line.quantity) || 0;
-    const rate = Number(line.rate) || 0;
-    const base = qty * rate;
-    const currentAmount = lineDiscountAmount(line);
 
     if (line.discount_type === 'percentage') {
-        line.discount = currentAmount ? String(currentAmount) : '';
+        line.discount = totals.value ? totals.value.lines[index].discount_amount : '';
         line.discount_type = 'flat';
     } else {
-        const pct = base > 0 ? Math.round((currentAmount / base) * 10000) / 100 : 0;
-        line.discount = pct ? String(pct) : '';
+        line.discount = '';
         line.discount_type = 'percentage';
     }
 }
 
 function toggleHeaderDiscountType() {
-    const currentAmount = headerDiscountAmount.value;
-
     if (form.discount_type === 'percentage') {
-        form.discount = currentAmount ? String(currentAmount) : '';
+        form.discount = totals.value ? totals.value.header_discount : '';
         form.discount_type = 'flat';
     } else {
-        const pct = vatableSubtotal.value > 0 ? Math.round((currentAmount / vatableSubtotal.value) * 10000) / 100 : 0;
-        form.discount = pct ? String(pct) : '';
+        form.discount = '';
         form.discount_type = 'percentage';
     }
 }
 
-function lineTotal(line) {
-    const qty = Number(line.quantity) || 0;
-    const rate = Number(line.rate) || 0;
-    return qty * rate - lineDiscountAmount(line);
-}
-
-function isVatable(line) {
-    return itemsById.value.get(line.item_id)?.is_vatable ?? false;
-}
-
-const vatableSubtotal = computed(() =>
-    form.lines.filter(isVatable).reduce((sum, line) => sum + lineTotal(line), 0),
-);
-const nonVatableSubtotal = computed(() =>
-    form.lines.filter((line) => !isVatable(line)).reduce((sum, line) => sum + lineTotal(line), 0),
-);
-const headerDiscountAmount = computed(() => {
-    const raw = Number(form.discount) || 0;
-
-    if (form.discount_type === 'percentage') {
-        return Math.round(vatableSubtotal.value * (Math.min(100, Math.max(0, raw)) / 100) * 100) / 100;
-    }
-
-    return Math.max(0, raw);
-});
-const taxableAmount = computed(() => vatableSubtotal.value - headerDiscountAmount.value);
-const vatAmount = computed(() => (taxableAmount.value * (Number(form.vat_rate) || 0)) / 100);
-const grandTotal = computed(() => taxableAmount.value + nonVatableSubtotal.value + vatAmount.value);
-const tdsAmountNumber = computed(() => Number(form.tds_amount) || 0);
-const settlementDue = computed(() => grandTotal.value - tdsAmountNumber.value);
-
 const showBankAccount = computed(() => form.payment_mode === 'bank' || form.payment_mode === 'partial');
 const showPartialSplit = computed(() => form.payment_mode === 'partial');
-const canSubmit = computed(() => !isCorrectionSelected.value || form.reason.trim().length > 0);
 
+// A partial settlement has to land EXACTLY on the amount due (the grand total
+// less any TDS withheld). The server refuses anything else outright
+// (DocumentCalculator::assertExactSplit), so the form says so up front rather
+// than bouncing the user back from a 422. Exact string comparison, never a
+// float subtraction inside a 0.01 tolerance (audit P0-4).
+const partialSplitError = computed(() => {
+    if (form.payment_mode !== 'partial' || !totals.value) {
+        return null;
+    }
+
+    const cash = parseMoney(form.cash_amount === '' ? '0' : form.cash_amount);
+    const bank = parseMoney(form.bank_amount === '' ? '0' : form.bank_amount);
+
+    if (!cash.ok || !bank.ok) {
+        return 'Enter the cash and bank amounts as plain rupee figures.';
+    }
+
+    const split = addMoney(cash.value, bank.value);
+
+    return moneyEquals(split, totals.value.settlement_due)
+        ? null
+        : `Cash plus bank is ${formatMoney(split)}, but ${formatMoney(totals.value.settlement_due)} is due.`;
+});
+
+const canSubmit = computed(
+    () => preview.value.ok
+        && partialSplitError.value === null
+        && (!isCorrectionSelected.value || form.reason.trim().length > 0),
+);
+
+// Every numeric field is submitted as the string the user typed. Number()
+// would turn "1.005" into a float that no longer round-trips, and the server's
+// decimal:0,N rules exist precisely to reject over-precise input rather than
+// let MySQL round it away (audit P0-5).
 function submit(print = false) {
+    if (!canSubmit.value) {
+        return;
+    }
+
     form.transform((data) => ({
         ...data,
-        discount: Number(data.discount) || 0,
-        vat_rate: Number(data.vat_rate) || 0,
-        cash_amount: data.payment_mode === 'partial' ? Number(data.cash_amount) || 0 : undefined,
-        bank_amount: data.payment_mode === 'partial' ? Number(data.bank_amount) || 0 : undefined,
-        tds_amount: Number(data.tds_amount) || 0,
+        discount: data.discount === '' ? '0' : data.discount,
+        vat_rate: data.vat_rate === '' ? '0' : data.vat_rate,
+        cash_amount: data.payment_mode === 'partial' ? (data.cash_amount === '' ? '0' : data.cash_amount) : undefined,
+        bank_amount: data.payment_mode === 'partial' ? (data.bank_amount === '' ? '0' : data.bank_amount) : undefined,
+        tds_amount: data.tds_amount === '' ? '0' : data.tds_amount,
+        // The total the user is looking at. The server recomputes and refuses
+        // the save if it lands anywhere else (CONTRACTS C8).
+        expected_total: preview.value.totals.total,
         fiscal_year_id: data.fiscal_year_id || undefined,
         reason: isCorrectionSelected.value ? data.reason : undefined,
         lines: data.lines.map((line) => ({
             item_id: line.item_id,
             item_unit_id: line.item_unit_id || null,
-            quantity: Number(line.quantity) || 0,
-            rate: Number(line.rate) || 0,
-            discount: Number(line.discount) || 0,
+            quantity: line.quantity,
+            rate: line.rate,
+            discount: line.discount === '' ? '0' : line.discount,
             discount_type: line.discount_type,
         })),
     })).post('/purchases', {
         preserveScroll: true,
         onSuccess: (page) => {
-            if (print) {
-                const newestPurchaseId = (page.props.purchases ?? []).reduce((maxId, p) => Math.max(maxId, p.id), 0);
-                if (newestPurchaseId) window.open(`/purchases/${newestPurchaseId}/print`, '_blank');
+            // The server flashes the bill it just posted (CONTRACTS C11).
+            // Guessing "highest id on page 1" printed the wrong bill for a
+            // back-dated entry or a second till (audit P0-6).
+            const printUrl = page.props.flash?.created?.print_url;
+            if (print && printUrl) {
+                window.open(printUrl, '_blank');
             }
             emit('posted');
         },
@@ -326,6 +401,14 @@ onMounted(() => applyPendingSupplier());
             {{ form.errors.lines }}
         </p>
 
+        <p v-if="form.errors.expected_total" class="mb-4 border-[1.5px] border-danger bg-danger-bg px-3 py-2 text-sm text-danger">
+            {{ form.errors.expected_total }}
+        </p>
+
+        <p v-if="previewError" class="mb-4 border-[1.5px] border-warning-text bg-warning-bg px-3 py-2 text-sm text-warning-text">
+            {{ previewError }}
+        </p>
+
         <form class="flex flex-col gap-4" @submit.prevent="submit(false)">
             <div v-if="isAdmin && correctionFiscalYear">
                 <label for="purchase-fiscal-year" class="mb-1 block text-sm font-semibold text-text-base">Fiscal year</label>
@@ -382,6 +465,7 @@ onMounted(() => applyPendingSupplier());
                 <div>
                     <label class="mb-1 block text-sm font-semibold text-text-base">Bill Number</label>
                     <Input v-model="form.bill_number" type="text" placeholder="Supplier's bill no." />
+                    <p v-if="form.errors.bill_number" class="mt-1 text-sm text-danger">{{ form.errors.bill_number }}</p>
                 </div>
                 <div>
                     <label class="mb-1 block text-sm font-semibold text-text-base">PAN Number</label>
@@ -414,7 +498,7 @@ onMounted(() => applyPendingSupplier());
                     <label class="mb-1 block text-sm font-semibold text-text-base">Bank Account</label>
                     <Combobox
                         :model-value="form.bank_account_id"
-                        :options="accountOptions"
+                        :options="bankAccountOptions"
                         placeholder="Select bank account"
                         @update:model-value="(v) => (form.bank_account_id = v)"
                     />
@@ -431,6 +515,7 @@ onMounted(() => applyPendingSupplier());
                     <label class="mb-1 block text-sm font-semibold text-text-base">Bank Amount</label>
                     <Input v-model="form.bank_amount" type="number" min="0" step="0.01" placeholder="0.00" />
                 </div>
+                <p v-if="partialSplitError" class="col-span-2 text-sm text-danger">{{ partialSplitError }}</p>
             </div>
 
             <div>
@@ -466,8 +551,8 @@ onMounted(() => applyPendingSupplier());
                         />
                         <span v-else class="block pt-2 text-xs text-text-muted">{{ itemsById.get(line.item_id)?.unit ?? '—' }}</span>
                     </div>
-                    <Input v-model="line.quantity" type="number" min="0" step="0.0001" placeholder="0" />
-                    <Input v-model="line.rate" type="number" min="0" step="0.01" placeholder="0.00" />
+                    <Input v-model="line.quantity" type="number" min="0" step="0.0001" placeholder="0" required />
+                    <Input v-model="line.rate" type="number" min="0" step="0.0001" placeholder="0.0000" required />
                     <Input
                         v-model="line.discount"
                         type="number"
@@ -483,7 +568,7 @@ onMounted(() => applyPendingSupplier());
                     >
                         {{ line.discount_type === 'percentage' ? '%' : 'Rs' }}
                     </button>
-                    <span class="pt-2 text-right text-sm font-semibold text-text-strong">{{ lineTotal(line).toFixed(2) }}</span>
+                    <span class="pt-2 text-right text-sm font-semibold text-text-strong">{{ lineTotalText(index) }}</span>
                     <button
                         v-if="form.lines.length > 1"
                         type="button"
@@ -533,7 +618,7 @@ onMounted(() => applyPendingSupplier());
                     <label class="mb-1 block text-sm font-semibold text-text-base">TDS Account</label>
                     <Combobox
                         :model-value="form.tds_account_id"
-                        :options="accountOptions"
+                        :options="tdsAccountOptions"
                         placeholder="Optional"
                         @update:model-value="(v) => (form.tds_account_id = v)"
                     />
@@ -545,17 +630,21 @@ onMounted(() => applyPendingSupplier());
             </div>
 
             <div class="grid grid-cols-2 gap-2 border-t-[1.5px] border-border pt-3 text-sm">
+                <template v-if="totals && totals.header_discount !== '0.00'">
+                    <span class="text-text-muted">Header Discount</span>
+                    <span class="text-right font-semibold text-text-strong">-{{ money(totals.header_discount) }}</span>
+                </template>
                 <span class="text-text-muted">Taxable Amount</span>
-                <span class="text-right font-semibold text-text-strong">{{ taxableAmount.toFixed(2) }}</span>
+                <span class="text-right font-semibold text-text-strong">{{ money(totals?.taxable_amount) }}</span>
                 <span class="text-text-muted">Non-Taxable Amount</span>
-                <span class="text-right font-semibold text-text-strong">{{ nonVatableSubtotal.toFixed(2) }}</span>
+                <span class="text-right font-semibold text-text-strong">{{ money(totals?.nontaxable_amount) }}</span>
                 <span class="text-text-muted">VAT</span>
-                <span class="text-right font-semibold text-text-strong">{{ vatAmount.toFixed(2) }}</span>
+                <span class="text-right font-semibold text-text-strong">{{ money(totals?.vat_amount) }}</span>
                 <span class="font-bold text-text-strong">Grand Total</span>
-                <span class="text-right font-bold text-text-strong">{{ grandTotal.toFixed(2) }}</span>
-                <template v-if="tdsAmountNumber > 0">
+                <span class="text-right font-bold text-text-strong">{{ money(totals?.total) }}</span>
+                <template v-if="totals && totals.tds_amount !== '0.00'">
                     <span class="text-text-muted">Amount Due (after TDS)</span>
-                    <span class="text-right font-semibold text-text-strong">{{ settlementDue.toFixed(2) }}</span>
+                    <span class="text-right font-semibold text-text-strong">{{ money(totals.settlement_due) }}</span>
                 </template>
             </div>
 

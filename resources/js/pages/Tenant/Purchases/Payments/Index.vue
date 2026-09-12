@@ -11,12 +11,14 @@ import Modal from '@/components/ui/Modal.vue';
 import DataTable from '@/components/ui/DataTable.vue';
 import { useToast } from '@/composables/useToast';
 import { navGroups } from '@/lib/nav-items.js';
+import { formatMoney, sumMoney } from '@/lib/money';
+import { formatBsDate } from '@/lib/format';
 import Create from './Create.vue';
 
 const props = defineProps({
     payments: { type: Array, default: () => [] },
     suppliers: { type: Array, default: () => [] },
-    accounts: { type: Array, default: () => [] },
+    bankAccounts: { type: Array, default: () => [] },
     outstandingPurchases: { type: Array, default: () => [] },
 });
 
@@ -72,7 +74,12 @@ function submitCancel() {
 }
 
 const columns = [
-    { accessorKey: 'date', header: 'Date' },
+    {
+        id: 'date',
+        header: 'Date (BS)',
+        numeric: false,
+        cell: ({ row }) => `${formatBsDate(row.original.date)} (${String(row.original.date).slice(0, 10)})`,
+    },
     {
         id: 'supplier',
         header: 'Supplier',
@@ -83,7 +90,7 @@ const columns = [
         id: 'amount',
         header: 'Amount',
         numeric: true,
-        cell: ({ row }) => Number(row.original.amount).toFixed(2),
+        cell: ({ row }) => formatMoney(row.original.amount),
     },
     {
         id: 'payment_mode',
@@ -95,7 +102,8 @@ const columns = [
         id: 'allocated',
         header: 'Allocated',
         numeric: true,
-        cell: ({ row }) => row.original.allocations.reduce((sum, a) => sum + Number(a.amount), 0).toFixed(2),
+        // Exact addition of the stored 2dp strings, not a float reduce.
+        cell: ({ row }) => formatMoney(sumMoney(row.original.allocations.map((a) => a.amount))),
     },
     {
         id: 'status',
@@ -126,7 +134,7 @@ const columns = [
         <template v-if="showCreateForm">
             <Create
                 :suppliers="suppliers"
-                :accounts="accounts"
+                :bank-accounts="bankAccounts"
                 :outstanding-purchases="outstandingPurchases"
                 @cancel="showCreateForm = false"
                 @posted="showCreateForm = false"
@@ -154,7 +162,7 @@ const columns = [
                 </p>
                 <div>
                     <label class="mb-1 block text-sm font-semibold text-text-base">Reason <span class="text-danger">*</span></label>
-                    <Input v-model="cancelForm.reason" type="text" placeholder="e.g. Entered wrong amount" required />
+                    <Input v-model="cancelForm.reason" type="text" maxlength="500" placeholder="e.g. Entered wrong amount" required />
                     <p v-if="cancelForm.errors.reason" class="mt-1 text-sm text-danger">{{ cancelForm.errors.reason }}</p>
                 </div>
             </form>

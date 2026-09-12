@@ -4,6 +4,7 @@ use App\Enums\FiscalYearStatus;
 use App\Models\FiscalYear;
 use App\Models\Item;
 use App\Models\Purchase;
+use App\Models\Role;
 use App\Models\Supplier;
 use App\Models\Tenant;
 use App\Models\User;
@@ -116,7 +117,9 @@ test('an authenticated user can cancel a posted purchase through the cancel rout
 
     $purchaseId = null;
     $tenant->run(function () use (&$purchaseId) {
-        $actor = User::factory()->create(['email' => 'owner@example.com']);
+        // Cancelling is admin only now (CONTRACTS C5), so the logged-in user
+        // for these two tests carries the admin role.
+        $actor = User::factory()->create(['email' => 'owner@example.com', 'role_id' => Role::where('slug', 'admin')->value('id')]);
         FiscalYear::create(['name' => 'FY1', 'start_date' => '2026-01-01', 'end_date' => '2026-12-31', 'status' => FiscalYearStatus::Open]);
         $supplier = Supplier::factory()->create();
         $item = Item::factory()->create(['is_vatable' => false]);
@@ -148,7 +151,9 @@ test('cancelling a purchase without a reason fails validation', function () {
 
     $purchaseId = null;
     $tenant->run(function () use (&$purchaseId) {
-        $actor = User::factory()->create(['email' => 'owner@example.com']);
+        // Cancelling is admin only now (CONTRACTS C5), so the logged-in user
+        // for these two tests carries the admin role.
+        $actor = User::factory()->create(['email' => 'owner@example.com', 'role_id' => Role::where('slug', 'admin')->value('id')]);
         FiscalYear::create(['name' => 'FY1', 'start_date' => '2026-01-01', 'end_date' => '2026-12-31', 'status' => FiscalYearStatus::Open]);
         $supplier = Supplier::factory()->create();
         $item = Item::factory()->create(['is_vatable' => false]);
@@ -168,6 +173,51 @@ test('cancelling a purchase without a reason fails validation', function () {
 
     $tenant->run(function () use ($purchaseId) {
         expect(Purchase::query()->findOrFail($purchaseId)->status)->toBe('posted');
+    });
+
+    $tenant->delete();
+});
+
+test('the store route rejects a supplier bill number that is already on a live purchase', function () {
+    $domain = 'purchases-duplicate-bill-http.tenant-test';
+    $tenant = provisionPurchaseControllerTestTenant($domain);
+
+    $supplierId = null;
+    $itemId = null;
+    $tenant->run(function () use (&$supplierId, &$itemId) {
+        User::factory()->create(['email' => 'owner@example.com', 'role_id' => Role::where('slug', 'admin')->value('id')]);
+        FiscalYear::create(['name' => 'FY1', 'start_date' => '2026-01-01', 'end_date' => '2026-12-31', 'status' => FiscalYearStatus::Open]);
+        $supplierId = Supplier::factory()->create()->id;
+        $itemId = Item::factory()->create(['is_vatable' => false, 'is_stockable' => false])->id;
+    });
+
+    loginPurchaseControllerTestUser($domain);
+
+    $payload = [
+        'supplier_id' => $supplierId,
+        'bill_number' => 'INV-4410',
+        'date' => '2026-06-01',
+        'payment_mode' => 'credit',
+        'lines' => [['item_id' => $itemId, 'quantity' => '1', 'rate' => '100']],
+    ];
+
+    $this->post("http://{$domain}/purchases", $payload)->assertRedirect();
+
+    // The message belongs on the Bill Number field, not buried in a line error.
+    $this->post("http://{$domain}/purchases", $payload)->assertSessionHasErrors('bill_number');
+
+    $purchaseId = null;
+    $tenant->run(function () use (&$purchaseId) {
+        expect(Purchase::count())->toBe(1);
+        $purchaseId = Purchase::firstOrFail()->id;
+    });
+
+    // Cancelling the first one frees the number for a replacement entry.
+    $this->post("http://{$domain}/purchases/{$purchaseId}/cancel", ['reason' => 'Wrong supplier'])->assertRedirect();
+    $this->post("http://{$domain}/purchases", $payload)->assertSessionHasNoErrors();
+
+    $tenant->run(function () {
+        expect(Purchase::where('status', 'posted')->count())->toBe(1);
     });
 
     $tenant->delete();

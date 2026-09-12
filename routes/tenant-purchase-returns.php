@@ -21,7 +21,11 @@ Route::name('tenant.')->group(function () {
     Route::prefix('purchase-returns')->name('purchase-returns.')->group(function () {
         Route::get('/', [PurchaseReturnController::class, 'index'])->name('index');
         Route::post('/', [PurchaseReturnController::class, 'store'])->name('store');
-        Route::post('/{purchaseReturn}/cancel', [PurchaseReturnController::class, 'cancel'])->name('cancel');
+        // Admin only: cancelling a debit note reverses its voucher and puts
+        // the returned stock back (CONTRACTS C5).
+        Route::post('/{purchaseReturn}/cancel', [PurchaseReturnController::class, 'cancel'])
+            ->middleware('role:admin')
+            ->name('cancel');
         Route::get('/{purchaseReturn}/print', [PurchaseReturnController::class, 'print'])->name('print');
     });
 });

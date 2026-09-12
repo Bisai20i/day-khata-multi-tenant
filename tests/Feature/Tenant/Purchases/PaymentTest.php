@@ -7,6 +7,7 @@ use App\Models\Item;
 use App\Models\JournalVoucher;
 use App\Models\Payment;
 use App\Models\Purchase;
+use App\Models\Role;
 use App\Models\Supplier;
 use App\Models\Tenant;
 use App\Models\User;
@@ -94,7 +95,7 @@ test('a payment allocated fully against a credit purchase zeroes out its outstan
         $supplier = Supplier::factory()->create();
         $purchase = creditPurchase($supplier, $actor, 100, 5); // total 500
 
-        expect($purchase->outstandingAmount())->toBe(500.0);
+        expect($purchase->outstandingAmount()->toString())->toBe('500.00');
 
         Payment::post([
             'supplier_id' => $supplier->id,
@@ -104,7 +105,7 @@ test('a payment allocated fully against a credit purchase zeroes out its outstan
             'allocations' => [['purchase_id' => $purchase->id, 'amount' => 500]],
         ], $actor);
 
-        expect($purchase->fresh()->outstandingAmount())->toBe(0.0);
+        expect($purchase->fresh()->outstandingAmount()->toString())->toBe('0.00');
     });
 
     $tenant->delete();
@@ -127,7 +128,7 @@ test('a payment allocated partially against a purchase reduces its outstanding a
             'allocations' => [['purchase_id' => $purchase->id, 'amount' => 200]],
         ], $actor);
 
-        expect($purchase->fresh()->outstandingAmount())->toBe(300.0);
+        expect($purchase->fresh()->outstandingAmount()->toString())->toBe('300.00');
     });
 
     $tenant->delete();
@@ -228,12 +229,12 @@ test('cancelling a payment reverses the voucher and restores outstanding amount'
             'allocations' => [['purchase_id' => $purchase->id, 'amount' => 500]],
         ], $actor);
 
-        expect($purchase->fresh()->outstandingAmount())->toBe(0.0);
+        expect($purchase->fresh()->outstandingAmount()->toString())->toBe('0.00');
 
         $payment->cancel($actor, 'Supplier disputed the payment');
 
         expect($payment->fresh()->status)->toBe('cancelled')
-            ->and($purchase->fresh()->outstandingAmount())->toBe(500.0);
+            ->and($purchase->fresh()->outstandingAmount()->toString())->toBe('500.00');
 
         $reversalVoucher = JournalVoucher::where('narration', "Cancellation of payment #{$payment->id}: Supplier disputed the payment")->firstOrFail();
         $totalDebit = round((float) $reversalVoucher->lines->sum('debit'), 2);
@@ -295,7 +296,8 @@ test('the payments index page renders and an authenticated user can post and can
 
     $supplierId = null;
     $tenant->run(function () use (&$supplierId) {
-        User::factory()->create(['email' => 'owner@example.com']);
+        // The cancel route is admin only (CONTRACTS C5).
+        User::factory()->create(['email' => 'owner@example.com', 'role_id' => Role::where('slug', 'admin')->value('id')]);
         paymentOpenFiscalYear();
         $supplier = Supplier::factory()->create();
         $supplierId = $supplier->id;

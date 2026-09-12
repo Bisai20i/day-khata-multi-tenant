@@ -100,7 +100,7 @@ test('a partial return credits the correct item account, credits VAT receivable 
         $supplierDebit = $voucher->lines->where('account_id', $supplier->account_id)->sum('debit');
         expect((float) $supplierDebit)->toBe(452.0);
 
-        expect($stockItem->fresh()->currentStock())->toBe(6.0);
+        expect($stockItem->fresh()->currentStock()->toString())->toBe('6.0000');
 
         $movement = $stockItem->stockMovements()->where('movement_type', StockMovementType::PurchaseReturn)->firstOrFail();
         expect((float) $movement->quantity)->toBe(4.0);
@@ -265,12 +265,12 @@ test('cancelling a return posts a reversing voucher, frees up the returned quant
             $actor,
         );
 
-        expect($item->fresh()->currentStock())->toBe(0.0);
+        expect($item->fresh()->currentStock()->toString())->toBe('0.0000');
 
         $return->cancel($actor, 'entered by mistake');
 
         expect($return->fresh()->status)->toBe('cancelled')
-            ->and($item->fresh()->currentStock())->toBe(5.0);
+            ->and($item->fresh()->currentStock()->toString())->toBe('5.0000');
 
         // journalVoucher() still points at the ORIGINAL return voucher -
         // find the reversal by its distinctive narration instead.

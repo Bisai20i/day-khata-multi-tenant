@@ -8,6 +8,7 @@ use App\Models\AccountGroup;
 use App\Models\FiscalYear;
 use App\Models\Item;
 use App\Models\ItemStockMovement;
+use App\Models\JournalVoucher;
 use App\Models\Purchase;
 use App\Models\PurchaseLine;
 use App\Models\Supplier;
@@ -75,7 +76,7 @@ test('a cash purchase posts a balanced voucher and records a stock movement', fu
             ->and($movement->reference_id)->toBe($line->id)
             ->and($movement->reference_type)->toBe(PurchaseLine::class);
 
-        expect($item->fresh()->currentStock())->toBe(10.0);
+        expect($item->fresh()->currentStock()->toString())->toBe('10.0000');
     });
 
     $tenant->delete();
@@ -415,14 +416,14 @@ test('cancelling a purchase posts a mirrored reversal and flags stock movements 
 
         expect($purchase->fresh()->status)->toBe('cancelled');
 
-        $reversal = \App\Models\JournalVoucher::where('voucher_type', VoucherType::PurchaseReturn)->firstOrFail();
+        $reversal = JournalVoucher::where('voucher_type', VoucherType::PurchaseReturn)->firstOrFail();
         $reversedLines = $reversal->lines()->get()->map(fn ($l) => [$l->account_id, (float) $l->credit, (float) $l->debit])->all();
 
         sort($originalLines);
         sort($reversedLines);
         expect($reversedLines)->toEqual($originalLines);
 
-        expect($item->fresh()->currentStock())->toBe(0.0);
+        expect($item->fresh()->currentStock()->toString())->toBe('0.0000');
         expect(ItemStockMovement::query()->where('item_id', $item->id)->first()->cancelled)->toBeTrue();
 
         expect(fn () => $purchase->cancel($actor, 'Again'))->toThrow(InvalidArgumentException::class);

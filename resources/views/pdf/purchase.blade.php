@@ -5,7 +5,7 @@
 @section('doc-meta-extra')
     <div><strong>Payment:</strong> {{ ucfirst($purchase->payment_mode) }}</div>
     @if($purchase->bill_number)
-        <div>Supplier Bill #: {{ $purchase->bill_number }}</div>
+        <div><strong>Supplier Bill #:</strong> {{ $purchase->bill_number }}</div>
     @endif
     @if($purchase->status === 'cancelled')
         <div style="margin-top: 4px;"><span class="status-badge">Cancelled</span></div>
@@ -39,11 +39,18 @@
         </tr>
     </table>
 
+    {{--
+        Every figure below is the value stored on the row, formatted by the money
+        value objects. Nothing is recomputed here and nothing is cast to float:
+        a PDF that does its own arithmetic is how a bill ends up disagreeing with
+        the ledger by a paisa (audit P0-1, P0-8).
+    --}}
     <table class="items-table">
         <thead>
             <tr>
                 <th style="width: 5%;">S.N.</th>
                 <th>Item</th>
+                <th style="width: 10%;">Unit</th>
                 <th class="text-right" style="width: 10%;">Qty</th>
                 <th class="text-right" style="width: 12%;">Rate</th>
                 <th class="text-right" style="width: 12%;">Discount</th>
@@ -54,63 +61,65 @@
             @foreach($purchase->lines as $index => $line)
                 <tr>
                     <td class="text-center">{{ $index + 1 }}</td>
-                    <td>
-                        {{ $line->item->name }}
-                        @if($line->item->unit)
-                            <span style="color: #888;">({{ $line->item->unit }})</span>
-                        @endif
-                    </td>
-                    <td class="text-right">{{ number_format((float) $line->quantity, 2) }}</td>
-                    <td class="text-right">{{ number_format((float) $line->rate, 2) }}</td>
+                    <td>{{ $line->item->name }}</td>
+                    <td>{{ $line->unitName() ?? '-' }}</td>
+                    <td class="text-right">{{ \App\Support\Money\Quantity::of($line->quantity)->formatQuantity() }}</td>
+                    <td class="text-right">{{ \App\Support\Money\Quantity::of($line->rate)->formatRate() }}</td>
                     <td class="text-right">
-                        @if($line->discount_type === 'percentage' && (float) $line->discount > 0)
-                            {{ number_format((float) $line->discount, 2) }}% (Rs {{ number_format(($line->quantity * $line->rate) - $line->line_total, 2) }})
+                        @if($line->discount_type === 'percentage')
+                            {{ \App\Support\Money\Money::of($line->discount)->toString() }}%
+                            (Rs {{ $line->discountAmount()->format() }})
                         @else
-                            {{ number_format((float) $line->discount, 2) }}
+                            {{ $line->discountAmount()->format() }}
                         @endif
                     </td>
-                    <td class="text-right">{{ number_format((float) $line->line_total, 2) }}</td>
+                    <td class="text-right">{{ \App\Support\Money\Money::of($line->line_total)->format() }}</td>
                 </tr>
             @endforeach
         </tbody>
     </table>
 
     <table class="totals-table">
-        <tr>
-            <td>Taxable Amount</td>
-            <td class="text-right">{{ number_format((float) $purchase->taxable_amount, 2) }}</td>
-        </tr>
-        @if((float) $purchase->nontaxable_amount > 0)
-            <tr>
-                <td>Non-taxable Amount</td>
-                <td class="text-right">{{ number_format((float) $purchase->nontaxable_amount, 2) }}</td>
-            </tr>
-        @endif
-        @if((float) $purchase->discount > 0)
+        @php($headerDiscount = $purchase->discountAmount())
+        @if($headerDiscount->isPositive())
             <tr>
                 <td>
                     Discount
                     @if($purchase->discount_type === 'percentage')
-                        ({{ number_format((float) $purchase->discount, 2) }}%)
+                        ({{ \App\Support\Money\Money::of($purchase->discount)->toString() }}%)
                     @endif
                 </td>
-                <td class="text-right">-{{ number_format($purchase->discountAmount(), 2) }}</td>
+                <td class="text-right">-{{ $headerDiscount->format() }}</td>
             </tr>
         @endif
         <tr>
-            <td>VAT ({{ number_format((float) $purchase->vat_rate, 2) }}%)</td>
-            <td class="text-right">{{ number_format((float) $purchase->vat_amount, 2) }}</td>
+            <td>Taxable Amount</td>
+            <td class="text-right">{{ \App\Support\Money\Money::of($purchase->taxable_amount)->format() }}</td>
         </tr>
-        @if((float) $purchase->tds_amount > 0)
+        @if(\App\Support\Money\Money::of($purchase->nontaxable_amount)->isPositive())
             <tr>
-                <td>TDS Withheld</td>
-                <td class="text-right">-{{ number_format((float) $purchase->tds_amount, 2) }}</td>
+                <td>Non-taxable Amount</td>
+                <td class="text-right">{{ \App\Support\Money\Money::of($purchase->nontaxable_amount)->format() }}</td>
             </tr>
         @endif
+        <tr>
+            <td>VAT ({{ \App\Support\Money\Money::of($purchase->vat_rate)->toString() }}%)</td>
+            <td class="text-right">{{ \App\Support\Money\Money::of($purchase->vat_amount)->format() }}</td>
+        </tr>
         <tr class="grand-total">
             <td>Grand Total</td>
-            <td class="text-right">{{ number_format((float) $purchase->total, 2) }}</td>
+            <td class="text-right">{{ \App\Support\Money\Money::of($purchase->total)->format() }}</td>
         </tr>
+        @if(\App\Support\Money\Money::of($purchase->tds_amount)->isPositive())
+            <tr>
+                <td>TDS Withheld</td>
+                <td class="text-right">-{{ \App\Support\Money\Money::of($purchase->tds_amount)->format() }}</td>
+            </tr>
+            <tr>
+                <td>Amount Payable</td>
+                <td class="text-right">{{ \App\Support\Money\Money::of($purchase->total)->minus(\App\Support\Money\Money::of($purchase->tds_amount))->format() }}</td>
+            </tr>
+        @endif
     </table>
     <div class="clearfix"></div>
 

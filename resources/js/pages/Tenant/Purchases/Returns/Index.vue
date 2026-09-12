@@ -12,6 +12,8 @@ import NepaliDateInput from '@/components/ui/NepaliDateInput.vue';
 import Combobox from '@/components/ui/Combobox.vue';
 import { useToast } from '@/composables/useToast';
 import { navGroups } from '@/lib/nav-items.js';
+import { formatMoney } from '@/lib/money';
+import { formatBsDate } from '@/lib/format';
 import Create from './Create.vue';
 
 const props = defineProps({
@@ -23,9 +25,15 @@ const props = defineProps({
         type: Object,
         default: () => ({ from: null, to: null, supplier_id: null }),
     },
-    purchases: { type: Array, default: () => [] },
+    // One searched, paginated page of returnable purchases - the form used to
+    // receive every posted purchase in the tenant with all of their lines.
+    searchablePurchases: {
+        type: Object,
+        default: () => ({ data: [], current_page: 1, last_page: 1, total: 0, prev_page_url: null, next_page_url: null }),
+    },
+    purchaseSearch: { type: String, default: null },
     suppliers: { type: Array, default: () => [] },
-    accounts: { type: Array, default: () => [] },
+    refundAccounts: { type: Array, default: () => [] },
     stores: { type: Array, default: () => [] },
 });
 
@@ -105,7 +113,18 @@ function submitCancel() {
 }
 
 const columns = [
-    { accessorKey: 'date', header: 'Date' },
+    {
+        id: 'date',
+        header: 'Date (BS)',
+        numeric: false,
+        cell: ({ row }) => `${formatBsDate(row.original.date)} (${String(row.original.date).slice(0, 10)})`,
+    },
+    {
+        id: 'debit_note_number',
+        header: 'Debit Note #',
+        numeric: false,
+        cell: ({ row }) => row.original.debit_note_number ?? '-',
+    },
     {
         id: 'purchase',
         header: 'Purchase',
@@ -134,7 +153,7 @@ const columns = [
         id: 'total',
         header: 'Total',
         numeric: true,
-        cell: ({ row }) => Number(row.original.total).toFixed(2),
+        cell: ({ row }) => formatMoney(row.original.total),
     },
     {
         id: 'status',
@@ -180,7 +199,14 @@ const columns = [
 <template>
     <AppLayout title="Purchase Returns" :nav-items="navItems">
         <template v-if="showCreateForm">
-            <Create :purchases="purchases" :accounts="accounts" :stores="stores" @cancel="showCreateForm = false" @posted="showCreateForm = false" />
+            <Create
+                :searchable-purchases="searchablePurchases"
+                :purchase-search="purchaseSearch"
+                :refund-accounts="refundAccounts"
+                :stores="stores"
+                @cancel="showCreateForm = false"
+                @posted="showCreateForm = false"
+            />
         </template>
 
         <template v-else>
@@ -268,11 +294,11 @@ const columns = [
             <div v-if="cancelling" class="flex flex-col gap-4">
                 <p class="text-sm text-text-muted">
                     This posts a reversing voucher for the return against purchase #{{ cancelling.purchase?.id }}
-                    ({{ Number(cancelling.total).toFixed(2) }}). This cannot be undone.
+                    ({{ formatMoney(cancelling.total) }}). This cannot be undone.
                 </p>
                 <div>
                     <label class="mb-1 block text-sm font-semibold text-text-base">Reason <span class="text-danger">*</span></label>
-                    <Input v-model="reasonForm.reason" type="text" placeholder="Reason for cancellation" required />
+                    <Input v-model="reasonForm.reason" type="text" maxlength="500" placeholder="Reason for cancellation" required />
                     <p v-if="reasonForm.errors.reason" class="mt-1 text-sm text-danger">{{ reasonForm.errors.reason }}</p>
                 </div>
             </div>

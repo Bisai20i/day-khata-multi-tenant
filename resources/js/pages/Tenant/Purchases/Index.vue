@@ -12,6 +12,8 @@ import NepaliDateInput from '@/components/ui/NepaliDateInput.vue';
 import Combobox from '@/components/ui/Combobox.vue';
 import { useToast } from '@/composables/useToast';
 import { navGroups } from '@/lib/nav-items.js';
+import { formatMoney } from '@/lib/money';
+import { formatBsDate } from '@/lib/format';
 import Create from './Create.vue';
 
 const props = defineProps({
@@ -25,8 +27,10 @@ const props = defineProps({
     },
     suppliers: { type: Array, default: () => [] },
     items: { type: Array, default: () => [] },
-    accounts: { type: Array, default: () => [] },
+    bankAccounts: { type: Array, default: () => [] },
+    tdsAccounts: { type: Array, default: () => [] },
     stores: { type: Array, default: () => [] },
+    settings: { type: Object, default: () => ({}) },
     correctionFiscalYear: { type: Object, default: null },
 });
 
@@ -149,8 +153,17 @@ function itemSummary(purchase) {
     return purchase.lines.map((line) => line.item?.name).filter(Boolean).join(', ');
 }
 
+// Dates are shown in Bikram Sambat with the AD date beside them, the way every
+// printed document in this app reads. Amounts are the stored server values run
+// through the shared Indian-grouping formatter, never a client recomputation
+// (CONTRACTS C8).
 const columns = [
-    { accessorKey: 'date', header: 'Date' },
+    {
+        id: 'date',
+        header: 'Date (BS)',
+        numeric: false,
+        cell: ({ row }) => `${formatBsDate(row.original.date)} (${String(row.original.date).slice(0, 10)})`,
+    },
     {
         id: 'supplier',
         header: 'Supplier',
@@ -179,7 +192,7 @@ const columns = [
         id: 'total',
         header: 'Total',
         numeric: true,
-        cell: ({ row }) => Number(row.original.total).toFixed(2),
+        cell: ({ row }) => formatMoney(row.original.total),
     },
     {
         id: 'status',
@@ -227,8 +240,10 @@ const columns = [
             <Create
                 :suppliers="suppliers"
                 :items="items"
-                :accounts="accounts"
+                :bank-accounts="bankAccounts"
+                :tds-accounts="tdsAccounts"
                 :stores="stores"
+                :settings="settings"
                 :correction-fiscal-year="correctionFiscalYear"
                 :initial-draft="initialDraft"
                 @cancel="closeCreateForm"
@@ -320,11 +335,12 @@ const columns = [
         >
             <div v-if="cancelling" class="flex flex-col gap-4">
                 <p class="text-sm text-text-muted">
-                    This posts a reversing voucher for purchase from {{ cancelling.supplier?.name }} ({{ Number(cancelling.total).toFixed(2) }}). This cannot be undone.
+                    This posts a reversing voucher for the purchase from {{ cancelling.supplier?.name }}
+                    ({{ formatMoney(cancelling.total) }}). This cannot be undone.
                 </p>
                 <div>
                     <label class="mb-1 block text-sm font-semibold text-text-base">Reason <span class="text-danger">*</span></label>
-                    <Input v-model="reasonForm.reason" type="text" placeholder="Reason for cancellation" required />
+                    <Input v-model="reasonForm.reason" type="text" maxlength="500" placeholder="Reason for cancellation" required />
                     <p v-if="reasonForm.errors.reason" class="mt-1 text-sm text-danger">{{ reasonForm.errors.reason }}</p>
                 </div>
             </div>

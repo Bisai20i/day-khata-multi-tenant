@@ -21,6 +21,10 @@ Route::name('tenant.')->group(function () {
     Route::prefix('payments')->name('payments.')->group(function () {
         Route::get('/', [PaymentController::class, 'index'])->name('index');
         Route::post('/', [PaymentController::class, 'store'])->name('store');
-        Route::post('/{payment}/cancel', [PaymentController::class, 'cancel'])->name('cancel');
+        // Admin only: cancelling a payment reverses money already paid out
+        // (CONTRACTS C5).
+        Route::post('/{payment}/cancel', [PaymentController::class, 'cancel'])
+            ->middleware('role:admin')
+            ->name('cancel');
     });
 });
