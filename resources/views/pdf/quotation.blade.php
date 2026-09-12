@@ -12,6 +12,12 @@
 @endsection
 
 @section('content')
+    {{-- Every amount below is a Money or Quantity value object formatted by
+         itself (Indian grouping for money, trimmed decimals for quantities).
+         The old view ran number_format() over raw floats and applied VAT to
+         the whole discounted line total regardless of whether the item was
+         vatable, which is why a printed quote never matched the sale it
+         became (audit P0-1, P0-9). --}}
     <table class="party-table">
         <tr>
             <td>
@@ -51,33 +57,43 @@
                             <span style="color: #888;">({{ $line['item']->unit }})</span>
                         @endif
                     </td>
-                    <td class="text-right">{{ number_format($line['quantity'], 2) }}</td>
-                    <td class="text-right">{{ number_format($line['rate'], 2) }}</td>
-                    <td class="text-right">{{ number_format($line['discount'], 2) }}</td>
-                    <td class="text-right">{{ number_format($line['line_total'], 2) }}</td>
+                    <td class="text-right">{{ $line['quantity']->formatQuantity() }}</td>
+                    <td class="text-right">{{ $line['rate']->formatRate() }}</td>
+                    <td class="text-right">{{ $line['discount']->format() }}</td>
+                    <td class="text-right">{{ $line['line_total']->format() }}</td>
                 </tr>
             @endforeach
         </tbody>
     </table>
 
     <table class="totals-table">
-        @if((float) $quotation->discount > 0)
-            <tr>
-                <td>Subtotal</td>
-                <td class="text-right">{{ number_format($lineSum, 2) }}</td>
-            </tr>
+        <tr>
+            <td>Subtotal</td>
+            <td class="text-right">{{ $subtotal->format() }}</td>
+        </tr>
+        @if(! $subtotal->minus($taxable)->minus($nontaxable)->isZero())
             <tr>
                 <td>Discount</td>
-                <td class="text-right">-{{ number_format((float) $quotation->discount, 2) }}</td>
+                <td class="text-right">-{{ $subtotal->minus($taxable)->minus($nontaxable)->format() }}</td>
             </tr>
         @endif
         <tr>
-            <td>VAT ({{ number_format((float) $quotation->vat_rate, 2) }}%)</td>
-            <td class="text-right">{{ number_format($vat, 2) }}</td>
+            <td>Taxable Amount</td>
+            <td class="text-right">{{ $taxable->format() }}</td>
+        </tr>
+        @if($nontaxable->isPositive())
+            <tr>
+                <td>Non-taxable Amount</td>
+                <td class="text-right">{{ $nontaxable->format() }}</td>
+            </tr>
+        @endif
+        <tr>
+            <td>VAT ({{ $quotation->vat_rate }}%)</td>
+            <td class="text-right">{{ $vat->format() }}</td>
         </tr>
         <tr class="grand-total">
             <td>Grand Total</td>
-            <td class="text-right">{{ number_format($total, 2) }}</td>
+            <td class="text-right">{{ $total->format() }}</td>
         </tr>
     </table>
     <div class="clearfix"></div>

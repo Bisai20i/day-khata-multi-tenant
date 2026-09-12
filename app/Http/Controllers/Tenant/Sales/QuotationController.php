@@ -6,12 +6,19 @@ use App\Enums\QuotationStatus;
 use App\Http\Controllers\Controller;
 use App\Models\CompanySetting;
 use App\Models\Customer;
+use App\Models\FiscalYear;
 use App\Models\Item;
+use App\Models\PrintLog;
 use App\Models\Quotation;
+use App\Support\Billing\BillingException;
+use App\Support\Billing\DocumentTotals;
+use App\Support\Money\Money;
+use App\Support\NepaliCalendar;
 use Barryvdh\DomPDF\Facade\Pdf;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\Response as HttpResponse;
+use Illuminate\Validation\ValidationException;
 use Inertia\Inertia;
 use Inertia\Response;
 use InvalidArgumentException;
@@ -24,6 +31,10 @@ class QuotationController extends Controller
      * Central\Tenants\TenantController::index() established, so it stays
      * consistent across the app rather than loading every quotation
      * unfiltered (a real usability problem once quotation history grows).
+     *
+     * The list renders the totals stored on the row. It used to add each
+     * quotation up in the browser with its own formula, which is one of the
+     * three disagreeing calculations the audit found (P0-9).
      */
     public function index(Request $request): Response
     {
@@ -56,9 +67,11 @@ class QuotationController extends Controller
     public function store(Request $request): RedirectResponse
     {
         $data = $this->validated($request);
+        $totals = $this->calculate($data);
 
         $quotation = Quotation::create([
-            ...collect($data)->except('lines')->all(),
+            ...collect($data)->except(['lines', 'expected_total'])->all(),
+            ...Quotation::storedTotals($totals),
             'status' => QuotationStatus::Draft,
             'created_by' => $request->user()->id,
         ]);
@@ -67,7 +80,13 @@ class QuotationController extends Controller
             $quotation->lines()->create($line);
         }
 
-        return redirect()->route('tenant.quotations.index')->with('status', 'Quotation saved.');
+        return redirect()->route('tenant.quotations.index')
+            ->with('status', 'Quotation saved.')
+            ->with('created', [
+                'type' => 'quotation',
+                'id' => $quotation->id,
+                'print_url' => route('tenant.quotations.print', $quotation),
+            ]);
     }
 
     public function update(Request $request, Quotation $quotation): RedirectResponse
@@ -77,8 +96,12 @@ class QuotationController extends Controller
         }
 
         $data = $this->validated($request);
+        $totals = $this->calculate($data);
 
-        $quotation->update(collect($data)->except('lines')->all());
+        $quotation->update([
+            ...collect($data)->except(['lines', 'expected_total'])->all(),
+            ...Quotation::storedTotals($totals),
+        ]);
         $quotation->lines()->delete();
 
         foreach ($data['lines'] as $line) {
@@ -113,91 +136,147 @@ class QuotationController extends Controller
     public function convertToSale(Request $request, Quotation $quotation): RedirectResponse
     {
         try {
-            $quotation->convertToSale($request->user());
+            $sale = $quotation->convertToSale($request->user());
         } catch (InvalidArgumentException $e) {
             return back()->withErrors(['quotation' => $e->getMessage()]);
         }
 
-        return redirect()->route('tenant.quotations.index')->with('status', 'Quotation converted to sale.');
+        return redirect()->route('tenant.quotations.index')
+            ->with('status', 'Quotation converted to sale.')
+            ->with('created', [
+                'type' => 'sale',
+                'id' => $sale->id,
+                'print_url' => route('tenant.sales.print', $sale),
+            ]);
     }
 
     /**
      * Streams a printable PDF quotation inline (not a forced download), so it
      * opens in a new browser tab from a plain anchor link on the Index page.
      *
-     * A quotation stores no totals of its own (no line_total on QuotationLine,
-     * no taxable_amount/vat_amount/total on Quotation) and never posts to the
-     * ledger, so every figure below is computed here from the raw quantity/
-     * rate/discount/vat_rate columns using the exact same formula as the
-     * Index page's own quotationTotal() - it applies VAT to the whole
-     * discounted line total, unlike Sale/Purchase's taxable/nontaxable split.
+     * The header figures are the ones stored on the row; only the per-line
+     * amounts are recalculated, and they come from DocumentCalculator - the
+     * same calculator that wrote those stored columns. The PDF used to do its
+     * own float arithmetic and applied VAT to every line whether the item was
+     * vatable or not, so a printed quote could not match either the list or
+     * the sale it became (audit P0-1, P0-9).
      */
-    public function print(Quotation $quotation): HttpResponse
+    public function print(Request $request, Quotation $quotation): HttpResponse
     {
         $quotation->load(['customer', 'lines.item']);
 
-        $lines = $quotation->lines->map(function ($line) {
-            $lineTotal = round((float) $line->quantity * (float) $line->rate - (float) $line->discount, 2);
+        $totals = $quotation->totals();
 
-            return [
-                'item' => $line->item,
-                'quantity' => (float) $line->quantity,
-                'rate' => (float) $line->rate,
-                'discount' => (float) $line->discount,
-                'line_total' => $lineTotal,
-            ];
-        });
-
-        $lineSum = round((float) $lines->sum('line_total'), 2);
-        $taxable = round($lineSum - (float) $quotation->discount, 2);
-        $vat = round($taxable * ((float) $quotation->vat_rate / 100), 2);
-        $total = round($taxable + $vat, 2);
+        $lines = $quotation->lines->values()->map(fn ($line, int $index): array => [
+            'item' => $line->item,
+            'quantity' => $totals->lines[$index]->quantity,
+            'rate' => $totals->lines[$index]->rate,
+            'discount' => $totals->lines[$index]->discountAmount,
+            'line_total' => $totals->lines[$index]->lineTotal,
+        ]);
 
         $documentNumber = $quotation->reference_number ?: "QUO-{$quotation->id}";
+        $documentDate = $quotation->date->format('Y-m-d');
 
         return Pdf::loadView('pdf.quotation', [
             'quotation' => $quotation,
             'lines' => $lines,
-            'lineSum' => $lineSum,
-            'taxable' => $taxable,
-            'vat' => $vat,
-            'total' => $total,
+            'subtotal' => $totals->subtotal(),
+            'taxable' => Money::of($quotation->taxable_amount),
+            'nontaxable' => Money::of($quotation->nontaxable_amount),
+            'vat' => Money::of($quotation->vat_amount),
+            'total' => Money::of($quotation->total),
             'company' => CompanySetting::current(),
             'documentNumber' => $documentNumber,
-            'documentDate' => $quotation->date->format('Y-m-d'),
+            'documentDate' => $documentDate,
+            'copyNumber' => PrintLog::record($quotation, $request->user()),
+            'dateAd' => $documentDate,
+            'dateBs' => NepaliCalendar::formatBs($documentDate),
+            'fiscalYearName' => $this->fiscalYearNameFor($documentDate),
         ])->stream("quotation-{$quotation->id}.pdf");
     }
 
     /**
-     * @return array{customer_id: int, date: string, discount: float, vat_rate: float, reference_number: ?string, narration: ?string, lines: array<int, array{item_id: int, quantity: float, rate: float, discount: float}>}
+     * A quotation is not a posted document, so it has no fiscal year of its
+     * own; the one printed is simply the year its date falls in, or nothing
+     * when no year covers it.
+     */
+    private function fiscalYearNameFor(string $date): ?string
+    {
+        return FiscalYear::query()
+            ->whereDate('start_date', '<=', $date)
+            ->whereDate('end_date', '>=', $date)
+            ->value('name');
+    }
+
+    /**
+     * The one calculation a quotation goes through on the way in.
+     *
+     * `expected_total` is the total the browser previewed with `money.js`; a
+     * difference means the bill on screen was not the bill being saved, so the
+     * save is refused rather than quietly storing a different number (C8).
+     *
+     * @param  array{lines: array<int, array<string, mixed>>, discount: mixed, vat_rate: mixed, expected_total?: string|null}  $data
+     */
+    private function calculate(array $data): DocumentTotals
+    {
+        try {
+            return Quotation::calculateTotals($data['lines'], [
+                'discount' => $data['discount'],
+                'vat_rate' => $data['vat_rate'],
+                'expected_total' => $data['expected_total'] ?? null,
+            ]);
+        } catch (BillingException $e) {
+            throw ValidationException::withMessages(
+                $e->reason === BillingException::REASON_TOTAL_MISMATCH
+                    ? ['expected_total' => 'The bill total changed. Please review it before saving.']
+                    : ['lines' => $e->getMessage()]
+            );
+        }
+    }
+
+    /**
+     * @return array{customer_id: int, date: string, discount: string, vat_rate: string, reference_number: ?string, narration: ?string, expected_total: ?string, lines: array<int, array{item_id: int, quantity: string, rate: string, discount: string}>}
      */
     private function validated(Request $request): array
     {
         $data = $request->validate([
             'customer_id' => ['required', 'exists:customers,id'],
             'date' => ['required', 'date'],
-            'discount' => ['nullable', 'numeric', 'min:0'],
-            'vat_rate' => ['nullable', 'numeric', 'min:0'],
+            'discount' => ['nullable', 'numeric', 'min:0', 'decimal:0,2'],
+            'vat_rate' => ['nullable', 'numeric', 'min:0', 'max:100', 'decimal:0,2'],
             'reference_number' => ['nullable', 'string', 'max:255'],
             'narration' => ['nullable', 'string', 'max:255'],
+            'expected_total' => ['nullable', 'string'],
             'lines' => ['required', 'array', 'min:1'],
             'lines.*.item_id' => ['required', 'exists:items,id'],
-            'lines.*.quantity' => ['required', 'numeric', 'min:0.0001'],
-            'lines.*.rate' => ['required', 'numeric', 'min:0'],
-            'lines.*.discount' => ['nullable', 'numeric', 'min:0'],
+            'lines.*.quantity' => ['required', 'numeric', 'min:0.0001', 'decimal:0,4'],
+            'lines.*.rate' => ['required', 'numeric', 'min:0', 'decimal:0,4'],
+            'lines.*.discount' => ['nullable', 'numeric', 'min:0', 'decimal:0,2'],
         ]);
 
         // discount/vat_rate/line-discount columns are not nullable (they
-        // default to 0/13.00 at the schema level) - coerce here rather than
-        // letting a null through to Eloquent, matching Sale::post()'s own
-        // (float) ($data['x'] ?? 0) coercion for the same fields.
-        $data['discount'] = (float) ($data['discount'] ?? 0);
-        $data['vat_rate'] = (float) ($data['vat_rate'] ?? 13.00);
+        // default to 0/13.00 at the schema level), so a null is coerced here
+        // rather than passed through to Eloquent. The values stay strings all
+        // the way to DocumentCalculator: casting them to float first is
+        // exactly the rounding bug this whole pass exists to remove.
+        $data['discount'] = $this->decimalString($data['discount'] ?? null, '0');
+        $data['vat_rate'] = $this->decimalString($data['vat_rate'] ?? null, '13');
         $data['lines'] = array_map(
-            fn (array $line) => [...$line, 'discount' => (float) ($line['discount'] ?? 0)],
+            fn (array $line): array => [
+                'item_id' => $line['item_id'],
+                'quantity' => (string) $line['quantity'],
+                'rate' => (string) $line['rate'],
+                'discount' => $this->decimalString($line['discount'] ?? null, '0'),
+            ],
             $data['lines'],
         );
 
         return $data;
+    }
+
+    private function decimalString(mixed $value, string $default): string
+    {
+        return ($value === null || $value === '') ? $default : (string) $value;
     }
 }

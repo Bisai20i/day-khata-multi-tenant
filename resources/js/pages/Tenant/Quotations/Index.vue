@@ -13,6 +13,8 @@ import Combobox from '@/components/ui/Combobox.vue';
 import { useToast } from '@/composables/useToast';
 import { useConfirm } from '@/composables/useConfirm';
 import { navGroups } from '@/lib/nav-items.js';
+import { formatMoney } from '@/lib/money';
+import { formatBsDate } from '@/lib/format';
 import Create from './Create.vue';
 
 const props = defineProps({
@@ -76,19 +78,20 @@ watch(
     { immediate: true },
 );
 
+// C11: the controller flashes the document it just created, so the quotation
+// opens for that exact row instead of the page guessing the newest id.
+watch(
+    () => page.props.flash?.created,
+    (created) => {
+        if (created?.print_url && (created.type === 'quotation' || created.type === 'sale')) {
+            window.open(created.print_url, '_blank', 'noopener');
+        }
+    },
+    { immediate: true },
+);
+
 const showCreateForm = ref(false);
 const editingQuotation = ref(null);
-
-function lineTotal(line) {
-    return Number(line.quantity) * Number(line.rate) - Number(line.discount);
-}
-
-function quotationTotal(quotation) {
-    const lineSum = quotation.lines.reduce((sum, line) => sum + lineTotal(line), 0);
-    const taxable = lineSum - Number(quotation.discount);
-    const vat = taxable * (Number(quotation.vat_rate) / 100);
-    return taxable + vat;
-}
 
 const statusVariants = {
     draft: 'neutral',
@@ -127,17 +130,35 @@ async function cancelQuotation(quotation) {
     router.post(`/quotations/${quotation.id}/cancel`, {}, { preserveScroll: true });
 }
 
+// Converting posts a real sale, so a second click while the first request is
+// still in flight used to post a second one (audit P0-16). The server locks the
+// row and refuses the duplicate; this keeps the button from asking for it.
+const converting = ref(null);
+
 async function convertToSale(quotation) {
+    if (converting.value !== null) return;
+
     const confirmed = await confirm({
         message: `Convert quotation #${quotation.id} to a real sale? This posts to the ledger and cannot be undone.`,
         confirmLabel: 'Convert',
     });
     if (!confirmed) return;
-    router.post(`/quotations/${quotation.id}/convert-to-sale`, {}, { preserveScroll: true });
+
+    converting.value = quotation.id;
+    router.post(
+        `/quotations/${quotation.id}/convert-to-sale`,
+        {},
+        { preserveScroll: true, onFinish: () => (converting.value = null) },
+    );
 }
 
 const columns = [
-    { accessorKey: 'date', header: 'Date' },
+    {
+        id: 'date',
+        header: 'Date (BS)',
+        numeric: false,
+        cell: ({ row }) => formatBsDate(row.original.date),
+    },
     {
         id: 'reference_number',
         header: 'Reference #',
@@ -154,7 +175,10 @@ const columns = [
         id: 'total',
         header: 'Total',
         numeric: true,
-        cell: ({ row }) => quotationTotal(row.original).toFixed(2),
+        // The stored total, written by the server's one calculator. This cell
+        // used to add the quotation up again in the browser with a third
+        // formula that matched neither the PDF nor the sale (audit P0-9).
+        cell: ({ row }) => formatMoney(row.original.total),
     },
     {
         id: 'status',
@@ -193,8 +217,9 @@ const columns = [
                     'button',
                     {
                         type: 'button',
-                        class: 'flex h-[26px] w-[26px] items-center justify-center bg-primary-tint text-primary transition-colors duration-150',
+                        class: 'flex h-[26px] w-[26px] items-center justify-center bg-primary-tint text-primary transition-colors duration-150 disabled:cursor-not-allowed disabled:opacity-40',
                         'aria-label': 'Convert to sale',
+                        disabled: converting.value !== null,
                         onClick: () => convertToSale(quotation),
                     },
                     [h(ArrowRightCircle, { class: 'h-[13px] w-[13px]' })],

@@ -10,6 +10,8 @@ import Modal from '@/components/ui/Modal.vue';
 import DataTable from '@/components/ui/DataTable.vue';
 import { useToast } from '@/composables/useToast';
 import { navGroups } from '@/lib/nav-items.js';
+import { formatMoney } from '@/lib/money';
+import { formatBsDate } from '@/lib/format';
 import Create from './Create.vue';
 
 defineProps({
@@ -17,6 +19,7 @@ defineProps({
     suppliers: { type: Array, default: () => [] },
     accounts: { type: Array, default: () => [] },
     stores: { type: Array, default: () => [] },
+    defaultVatRate: { type: String, default: '13.00' },
 });
 
 const page = usePage();
@@ -77,7 +80,18 @@ function lineSummary(capitalPurchase) {
 }
 
 const columns = [
-    { accessorKey: 'date', header: 'Date' },
+    {
+        id: 'date',
+        header: 'Date (BS)',
+        numeric: false,
+        cell: ({ row }) => formatBsDate(row.original.date),
+    },
+    {
+        id: 'bill_number',
+        header: 'Bill #',
+        numeric: false,
+        cell: ({ row }) => row.original.bill_number ?? '—',
+    },
     {
         id: 'type',
         header: 'Type',
@@ -106,7 +120,8 @@ const columns = [
         id: 'total',
         header: 'Total',
         numeric: true,
-        cell: ({ row }) => Number(row.original.total).toFixed(2),
+        // The stored total, written once by the server's calculator.
+        cell: ({ row }) => formatMoney(row.original.total),
     },
     {
         id: 'status',
@@ -134,7 +149,14 @@ const columns = [
 <template>
     <AppLayout title="Capital Purchases" :nav-items="navItems">
         <template v-if="showCreateForm">
-            <Create :suppliers="suppliers" :accounts="accounts" :stores="stores" @cancel="showCreateForm = false" @posted="showCreateForm = false" />
+            <Create
+                :suppliers="suppliers"
+                :accounts="accounts"
+                :stores="stores"
+                :default-vat-rate="defaultVatRate"
+                @cancel="showCreateForm = false"
+                @posted="showCreateForm = false"
+            />
         </template>
 
         <template v-else>
@@ -159,11 +181,11 @@ const columns = [
         >
             <div v-if="cancelling" class="flex flex-col gap-4">
                 <p class="text-sm text-text-muted">
-                    This posts a reversing voucher for the capital purchase of {{ Number(cancelling.total).toFixed(2) }}. This cannot be undone.
+                    This posts a reversing voucher for the capital purchase of {{ formatMoney(cancelling.total) }}. This cannot be undone.
                 </p>
                 <div>
                     <label class="mb-1 block text-sm font-semibold text-text-base">Reason <span class="text-danger">*</span></label>
-                    <Input v-model="reasonForm.reason" type="text" placeholder="Reason for cancellation" required />
+                    <Input v-model="reasonForm.reason" type="text" maxlength="500" placeholder="Reason for cancellation" required />
                     <p v-if="reasonForm.errors.reason" class="mt-1 text-sm text-danger">{{ reasonForm.errors.reason }}</p>
                 </div>
             </div>

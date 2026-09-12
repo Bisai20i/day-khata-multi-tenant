@@ -1,15 +1,18 @@
 <script setup>
 import { computed, h, ref, watch } from 'vue';
 import { useForm, usePage } from '@inertiajs/vue3';
-import { Plus } from '@lucide/vue';
+import { Plus, Printer } from '@lucide/vue';
 import AppLayout from '@/layouts/AppLayout.vue';
 import Card from '@/components/ui/Card.vue';
 import Button from '@/components/ui/Button.vue';
 import Input from '@/components/ui/Input.vue';
 import Modal from '@/components/ui/Modal.vue';
 import DataTable from '@/components/ui/DataTable.vue';
+import Tooltip from '@/components/ui/Tooltip.vue';
 import { useToast } from '@/composables/useToast';
 import { navGroups } from '@/lib/nav-items.js';
+import { formatMoney } from '@/lib/money';
+import { formatBsDate } from '@/lib/format';
 import Create from './Create.vue';
 
 defineProps({
@@ -17,6 +20,7 @@ defineProps({
     customers: { type: Array, default: () => [] },
     accounts: { type: Array, default: () => [] },
     stores: { type: Array, default: () => [] },
+    defaultVatRate: { type: String, default: '13.00' },
 });
 
 const page = usePage();
@@ -32,6 +36,19 @@ watch(
     () => page.props.flash?.status,
     (status) => {
         if (status) toast({ message: status, variant: 'success' });
+    },
+    { immediate: true },
+);
+
+// C11: the controller flashes the document it just created, so the invoice
+// opens for that exact capital sale instead of the page guessing the newest
+// id out of the list.
+watch(
+    () => page.props.flash?.created,
+    (created) => {
+        if (created?.type === 'capital-sale' && created.print_url) {
+            window.open(created.print_url, '_blank', 'noopener');
+        }
     },
     { immediate: true },
 );
@@ -72,7 +89,18 @@ function lineSummary(capitalSale) {
 }
 
 const columns = [
-    { accessorKey: 'date', header: 'Date' },
+    {
+        id: 'date',
+        header: 'Date (BS)',
+        numeric: false,
+        cell: ({ row }) => formatBsDate(row.original.date),
+    },
+    {
+        id: 'invoice_number',
+        header: 'Invoice #',
+        numeric: false,
+        cell: ({ row }) => row.original.invoice_number ?? '—',
+    },
     {
         id: 'customer',
         header: 'Customer',
@@ -95,7 +123,8 @@ const columns = [
         id: 'total',
         header: 'Total',
         numeric: true,
-        cell: ({ row }) => Number(row.original.total).toFixed(2),
+        // The stored total, written once by the server's calculator.
+        cell: ({ row }) => formatMoney(row.original.total),
     },
     {
         id: 'status',
@@ -107,15 +136,37 @@ const columns = [
         id: 'actions',
         header: 'Actions',
         numeric: false,
-        cell: ({ row }) =>
-            row.original.status === 'posted'
-                ? h(Button, {
-                      variant: 'secondary',
-                      tone: 'purple',
-                      type: 'button',
-                      onClick: () => openCancel(row.original),
-                  }, () => 'Cancel')
-                : null,
+        cell: ({ row }) => {
+            const capitalSale = row.original;
+
+            const printBtn = h(Tooltip, { label: 'Print invoice' }, () =>
+                h(
+                    'a',
+                    {
+                        href: `/capital-sales/${capitalSale.id}/print`,
+                        target: '_blank',
+                        rel: 'noopener',
+                        class: 'flex h-[26px] w-[26px] items-center justify-center bg-bg-subtle text-text-faint transition-colors duration-150 hover:bg-primary-tint hover:text-primary',
+                        'aria-label': 'Print capital sale invoice',
+                    },
+                    [h(Printer, { class: 'h-[13px] w-[13px]' })],
+                ),
+            );
+
+            if (capitalSale.status !== 'posted') {
+                return h('div', { class: 'flex items-center gap-1' }, [printBtn]);
+            }
+
+            return h('div', { class: 'flex items-center gap-1' }, [
+                printBtn,
+                h(Button, {
+                    variant: 'secondary',
+                    tone: 'purple',
+                    type: 'button',
+                    onClick: () => openCancel(capitalSale),
+                }, () => 'Cancel'),
+            ]);
+        },
     },
 ];
 </script>
@@ -123,7 +174,14 @@ const columns = [
 <template>
     <AppLayout title="Capital Sales" :nav-items="navItems">
         <template v-if="showCreateForm">
-            <Create :customers="customers" :accounts="accounts" :stores="stores" @cancel="showCreateForm = false" @posted="showCreateForm = false" />
+            <Create
+                :customers="customers"
+                :accounts="accounts"
+                :stores="stores"
+                :default-vat-rate="defaultVatRate"
+                @cancel="showCreateForm = false"
+                @posted="showCreateForm = false"
+            />
         </template>
 
         <template v-else>
@@ -148,11 +206,11 @@ const columns = [
         >
             <div v-if="cancelling" class="flex flex-col gap-4">
                 <p class="text-sm text-text-muted">
-                    This posts a reversing voucher for the capital sale of {{ Number(cancelling.total).toFixed(2) }}. This cannot be undone.
+                    This posts a reversing voucher for the capital sale of {{ formatMoney(cancelling.total) }}. This cannot be undone.
                 </p>
                 <div>
                     <label class="mb-1 block text-sm font-semibold text-text-base">Reason <span class="text-danger">*</span></label>
-                    <Input v-model="reasonForm.reason" type="text" placeholder="Reason for cancellation" required />
+                    <Input v-model="reasonForm.reason" type="text" maxlength="500" placeholder="Reason for cancellation" required />
                     <p v-if="reasonForm.errors.reason" class="mt-1 text-sm text-danger">{{ reasonForm.errors.reason }}</p>
                 </div>
             </div>

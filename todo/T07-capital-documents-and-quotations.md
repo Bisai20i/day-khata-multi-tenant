@@ -23,27 +23,29 @@ tests. Migrations with prefix `2026_09_12_07`.
 
 ## Tasks
 
-- [ ] 1. Quotations: one calculation everywhere via `DocumentCalculator` (create preview through `money.js`,
+- [x] 1. Quotations: one calculation everywhere via `DocumentCalculator` (create preview through `money.js`,
   list, print, and `convertToSale()` via `Sale::post()`), so the quote always equals the resulting bill.
   Store computed totals on the quotation (migration: `taxable_amount`, `nontaxable_amount`, `vat_amount`,
   `total`, backfilled) and display stored values. `convertToSale()`: lock the quotation, re-check status
   inside the transaction; the Convert button gets a processing guard.
-- [ ] 2. Capital sale and purchase: VAT computed, never typed: migration adds `taxable_amount`,
+- [x] 2. Capital sale and purchase: VAT computed, never typed: migration adds `taxable_amount`,
   `nontaxable_amount`, `vat_rate` (backfilled from existing `vat_amount`); lines carry a `vatable` flag; totals
   via `DocumentCalculator` (no stock lines, so conversion factor 1). Exact partial split via
   `assertExactSplit()`. Casts to `Decimal`.
-- [ ] 3. Capital purchase fields needed by the Purchase VAT book (T10 consumes): `bill_number`, `supplier_pan`
+- [x] 3. Capital purchase fields needed by the Purchase VAT book (T10 consumes): `bill_number`, `supplier_pan`
   snapshot (defaulted from `supplier.tpin`), duplicate bill protection like T06.
-- [ ] 4. Capital sale tax invoice: `fiscal_year_id` + `invoice_number` (stored, own prefix setting read from
+- [x] 4. Capital sale tax invoice: `fiscal_year_id` + `invoice_number` (stored, own prefix setting read from
   `CompanySetting` if one exists, else `CS`; send a cross-file request to T03's settings if a new prefix
   setting is needed), buyer snapshot, and a printable PDF `capital-sale.blade.php` with C9 variables.
-- [ ] 5. `cancel()` on both capital models per C5 (lock, `JournalVoucher::reverse()`, cancel columns,
+- [x] 5. `cancel()` on both capital models per C5 (lock, `JournalVoucher::reverse()`, cancel columns,
   admin-only route). Quotation cancel/expire transitions also lock.
-- [ ] 6. Activity log: attach the existing `ActivityLogObserver` to the capital and quotation models the same
-  way other models do (check how Sale registers it).
-- [ ] 7. Pages: create forms via `money.js`, `expected_total`, C11 flash, default date `todayInKathmandu()`;
+- [x] 6. Activity log: attach the existing `ActivityLogObserver` to the capital and quotation models the same
+  way other models do (check how Sale registers it). Quotation is already registered; the two capital models
+  need two lines in `AppServiceProvider::boot()` plus `ActivityLogController::subjectTypeOptions()`, neither
+  of which T07 owns - raised as a cross-file request.
+- [x] 7. Pages: create forms via `money.js`, `expected_total`, C11 flash, default date `todayInKathmandu()`;
   lists show stored values, stored numbers, BS dates, `formatMoney`.
-- [ ] 8. Tests (write, do not run): quote total equals the converted sale total for a mixed VAT/exempt quote
+- [x] 8. Tests (write, do not run): quote total equals the converted sale total for a mixed VAT/exempt quote
   with a header discount; double convert rejected; capital VAT computed from taxable; capital partial split
   exact; capital purchase duplicate bill rejected; capital cancel uses the Reversal series; capital sale print
   shows the invoice number and amount in words.

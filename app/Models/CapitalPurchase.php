@@ -2,7 +2,12 @@
 
 namespace App\Models;
 
+use App\Casts\Decimal;
 use App\Enums\VoucherType;
+use App\Support\Billing\BillingException;
+use App\Support\Billing\DocumentCalculator;
+use App\Support\Billing\DocumentTotals;
+use App\Support\Money\Money;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
@@ -12,12 +17,18 @@ use InvalidArgumentException;
 
 /**
  * A lightweight, non-inventory ledger-posting purchase: the user picks one
- * or more existing ledger accounts directly (no items), types an amount per
- * line, optionally adds a VAT amount, and settles via cash/bank/partial/
- * credit. "capital" vs "service" is purely a narration/type label -
+ * or more existing ledger accounts directly (no items), marks each line
+ * vatable or exempt, types an amount per line, and settles via cash/bank/
+ * partial/credit. "capital" vs "service" is purely a narration/type label -
  * mechanically identical, with no depreciation tracking and no
  * auto-created asset account (unlike the Fixed Asset module, which this is
  * deliberately not part of).
+ *
+ * It still claims input VAT on ASA23, so it belongs in the Purchase VAT book
+ * and carries what that book needs: the supplier's bill number and PAN, and a
+ * computed taxable / non-taxable / rate breakdown instead of the free-typed
+ * VAT amount the audit found (P0-20). The bill number is protected against
+ * being entered twice for the same supplier while the purchase is live.
  *
  * supplier_id is only required for the credit and partial payment modes,
  * which route the transaction's liability through the supplier's ledger
@@ -27,9 +38,12 @@ use InvalidArgumentException;
  * left outstanding to book.
  */
 #[Fillable([
-    'supplier_id', 'store_id', 'journal_voucher_id', 'type', 'date', 'narration',
-    'payment_mode', 'bank_account_id', 'cash_amount', 'bank_amount', 'vat_amount',
+    'supplier_id', 'supplier_pan', 'store_id', 'journal_voucher_id', 'type',
+    'bill_number', 'bill_number_guard', 'date', 'narration',
+    'payment_mode', 'bank_account_id', 'cash_amount', 'bank_amount',
+    'taxable_amount', 'nontaxable_amount', 'vat_rate', 'vat_amount',
     'total', 'status', 'created_by',
+    'cancelled_at', 'cancelled_by', 'cancel_reason', 'reversal_journal_voucher_id',
 ])]
 class CapitalPurchase extends Model
 {
@@ -40,10 +54,14 @@ class CapitalPurchase extends Model
     {
         return [
             'date' => 'date',
-            'cash_amount' => 'decimal:2',
-            'bank_amount' => 'decimal:2',
-            'vat_amount' => 'decimal:2',
-            'total' => 'decimal:2',
+            'cancelled_at' => 'datetime',
+            'cash_amount' => Decimal::class.':2',
+            'bank_amount' => Decimal::class.':2',
+            'taxable_amount' => Decimal::class.':2',
+            'nontaxable_amount' => Decimal::class.':2',
+            'vat_rate' => Decimal::class.':2',
+            'vat_amount' => Decimal::class.':2',
+            'total' => Decimal::class.':2',
         ];
     }
 
@@ -72,6 +90,14 @@ class CapitalPurchase extends Model
     }
 
     /**
+     * @return BelongsTo<JournalVoucher, $this>
+     */
+    public function reversalJournalVoucher(): BelongsTo
+    {
+        return $this->belongsTo(JournalVoucher::class, 'reversal_journal_voucher_id');
+    }
+
+    /**
      * @return BelongsTo<Account, $this>
      */
     public function bankAccount(): BelongsTo
@@ -88,6 +114,14 @@ class CapitalPurchase extends Model
     }
 
     /**
+     * @return BelongsTo<User, $this>
+     */
+    public function canceller(): BelongsTo
+    {
+        return $this->belongsTo(User::class, 'cancelled_by');
+    }
+
+    /**
      * @return HasMany<CapitalPurchaseLine, $this>
      */
     public function lines(): HasMany
@@ -96,11 +130,37 @@ class CapitalPurchase extends Model
     }
 
     /**
+     * The value written into the unique `bill_number_guard` column while a
+     * purchase is live, or null when there is nothing to protect.
+     *
+     * See the migration for why the duplicate rule is enforced by a nullable
+     * unique column rather than a partial index: SQLite supports
+     * `unique ... where status <> 'cancelled'` and MySQL does not, but both
+     * ignore NULLs in an ordinary unique index, so clearing the guard on
+     * cancellation gives the same rule portably.
+     */
+    public static function billNumberGuard(?int $supplierId, ?string $billNumber): ?string
+    {
+        $billNumber = $billNumber === null ? null : trim($billNumber);
+
+        if ($supplierId === null || $billNumber === null || $billNumber === '') {
+            return null;
+        }
+
+        return $supplierId.'|'.$billNumber;
+    }
+
+    /**
      * Builds and posts the capital purchase's JournalVoucher, then creates
      * the CapitalPurchase + CapitalPurchaseLine rows.
      *
-     * @param  array{supplier_id?: int|null, type: string, date: string, narration?: string|null, payment_mode: string, bank_account_id?: int|null, cash_amount?: float|null, bank_amount?: float|null, vat_amount?: float, store_id?: int}  $data
-     * @param  array<int, array{account_id: int, amount: float, narration?: string}>  $lines
+     * Every figure comes from DocumentCalculator, which is why each line is
+     * handed over as quantity 1 at a rate of the line amount: a capital
+     * purchase carries no items and no units, so quantity and conversion
+     * factor are both fixed at 1 and the line's gross is the amount itself.
+     *
+     * @param  array{supplier_id?: int|null, type: string, bill_number?: string|null, date: string, narration?: string|null, payment_mode: string, bank_account_id?: int|null, cash_amount?: mixed, bank_amount?: mixed, vat_rate?: mixed, expected_total?: mixed, store_id?: int}  $data
+     * @param  array<int, array{account_id: int, amount: mixed, narration?: string|null, vatable?: bool}>  $lines
      */
     public static function post(array $data, array $lines, User $actor): self
     {
@@ -122,40 +182,56 @@ class CapitalPurchase extends Model
             $supplierId = $data['supplier_id'] ?? null;
             $supplier = $supplierId ? Supplier::findOrFail($supplierId) : null;
 
-            $subtotal = 0.0;
+            $billNumber = isset($data['bill_number']) ? trim((string) $data['bill_number']) : '';
+            $billNumber = $billNumber === '' ? null : $billNumber;
+            $guard = static::billNumberGuard($supplier?->id, $billNumber);
+
+            // The unique index is what actually prevents the duplicate under a
+            // race; this lookup exists to give the user a sentence instead of a
+            // constraint violation. It is locked and read inside the same
+            // transaction so it cannot be stale by the time the row is written.
+            if ($guard !== null) {
+                $existing = static::query()->where('bill_number_guard', $guard)->lockForUpdate()->first();
+
+                if ($existing !== null) {
+                    throw new InvalidArgumentException(
+                        "Bill number {$billNumber} has already been entered for {$supplier->name} (capital purchase #{$existing->id})."
+                    );
+                }
+            }
+
+            $totals = static::calculateTotals($data, $lines);
+            $total = $totals->total;
+
+            $voucherLines = [];
             $preparedLines = [];
 
-            foreach ($lines as $line) {
-                $amount = round((float) $line['amount'], 2);
-                if ($amount <= 0) {
-                    throw new InvalidArgumentException('Each line amount must be greater than zero.');
-                }
+            foreach (array_values($lines) as $index => $line) {
+                $lineTotal = $totals->lines[$index]->lineTotal;
 
                 $preparedLines[] = [
                     'account_id' => $line['account_id'],
                     'narration' => $line['narration'] ?? null,
-                    'amount' => $amount,
+                    'amount' => $lineTotal->toString(),
+                    'vatable' => $totals->lines[$index]->vatable,
                 ];
 
-                $subtotal = round($subtotal + $amount, 2);
-            }
-
-            $vatAmount = round((float) ($data['vat_amount'] ?? 0), 2);
-            $total = round($subtotal + $vatAmount, 2);
-
-            $voucherLines = [];
-            foreach ($preparedLines as $line) {
                 $voucherLines[] = [
                     'account_id' => $line['account_id'],
-                    'debit' => $line['amount'],
-                    'credit' => 0,
-                    'narration' => $line['narration'],
+                    'debit' => $lineTotal->toString(),
+                    'credit' => '0.00',
+                    'narration' => $line['narration'] ?? null,
                 ];
             }
 
-            if ($vatAmount > 0) {
+            if ($totals->vatAmount->isPositive()) {
                 $asa23 = Account::where('code', 'ASA23')->firstOrFail();
-                $voucherLines[] = ['account_id' => $asa23->id, 'debit' => $vatAmount, 'credit' => 0, 'narration' => 'Input VAT'];
+                $voucherLines[] = [
+                    'account_id' => $asa23->id,
+                    'debit' => $totals->vatAmount->toString(),
+                    'credit' => '0.00',
+                    'narration' => 'Input VAT',
+                ];
             }
 
             $paymentMode = $data['payment_mode'];
@@ -167,50 +243,51 @@ class CapitalPurchase extends Model
                     throw new InvalidArgumentException('A supplier is required for a credit payment.');
                 }
 
-                $voucherLines[] = ['account_id' => $supplier->account_id, 'debit' => 0, 'credit' => $total];
+                $voucherLines[] = ['account_id' => $supplier->account_id, 'debit' => '0.00', 'credit' => $total->toString()];
             } elseif ($paymentMode === 'partial') {
                 if (! $supplier) {
                     throw new InvalidArgumentException('A supplier is required for a partial payment.');
                 }
 
-                $cashAmount = round((float) ($data['cash_amount'] ?? 0), 2);
-                $bankAmount = round((float) ($data['bank_amount'] ?? 0), 2);
+                $cashAmount = Money::of($data['cash_amount'] ?? 0);
+                $bankAmount = Money::of($data['bank_amount'] ?? 0);
 
-                if ($bankAmount > 0 && empty($data['bank_account_id'])) {
+                if ($bankAmount->isPositive() && empty($data['bank_account_id'])) {
                     throw new InvalidArgumentException('A bank account is required for a partial payment with a bank portion.');
                 }
 
-                if (abs(($cashAmount + $bankAmount) - $total) > 0.01) {
-                    throw new InvalidArgumentException('Cash and bank amounts must add up to the amount due.');
-                }
+                // Exact to the paisa. The old `abs(diff) > 0.01` guard accepted
+                // a one-paisa mismatch and left it on the supplier's ledger
+                // forever (audit P0-4).
+                DocumentCalculator::assertExactSplit($total, $cashAmount, $bankAmount);
 
-                $voucherLines[] = ['account_id' => $supplier->account_id, 'debit' => 0, 'credit' => $total];
+                $voucherLines[] = ['account_id' => $supplier->account_id, 'debit' => '0.00', 'credit' => $total->toString()];
 
                 $settlementLines = [];
-                if ($cashAmount > 0) {
+                if ($cashAmount->isPositive()) {
                     $cashAccount = Account::where('code', 'AS1')->firstOrFail();
-                    $settlementLines[] = ['account_id' => $cashAccount->id, 'debit' => 0, 'credit' => $cashAmount];
+                    $settlementLines[] = ['account_id' => $cashAccount->id, 'debit' => '0.00', 'credit' => $cashAmount->toString()];
                 }
-                if ($bankAmount > 0) {
-                    $settlementLines[] = ['account_id' => $data['bank_account_id'], 'debit' => 0, 'credit' => $bankAmount];
+                if ($bankAmount->isPositive()) {
+                    $settlementLines[] = ['account_id' => $data['bank_account_id'], 'debit' => '0.00', 'credit' => $bankAmount->toString()];
                 }
 
                 if ($settlementLines) {
-                    $settledTotal = round((float) array_sum(array_column($settlementLines, 'credit')), 2);
-                    $voucherLines = [...$voucherLines, ...$settlementLines, ['account_id' => $supplier->account_id, 'debit' => $settledTotal, 'credit' => 0]];
+                    $voucherLines = [
+                        ...$voucherLines,
+                        ...$settlementLines,
+                        ['account_id' => $supplier->account_id, 'debit' => $total->toString(), 'credit' => '0.00'],
+                    ];
                 }
             } elseif ($paymentMode === 'cash') {
-                if ($total > 0) {
-                    $cashAccount = Account::where('code', 'AS1')->firstOrFail();
-                    $voucherLines[] = ['account_id' => $cashAccount->id, 'debit' => 0, 'credit' => $total];
-                }
+                $cashAccount = Account::where('code', 'AS1')->firstOrFail();
+                $voucherLines[] = ['account_id' => $cashAccount->id, 'debit' => '0.00', 'credit' => $total->toString()];
             } elseif ($paymentMode === 'bank') {
                 if (empty($data['bank_account_id'])) {
                     throw new InvalidArgumentException('A bank account is required for a bank payment.');
                 }
-                if ($total > 0) {
-                    $voucherLines[] = ['account_id' => $data['bank_account_id'], 'debit' => 0, 'credit' => $total];
-                }
+
+                $voucherLines[] = ['account_id' => $data['bank_account_id'], 'debit' => '0.00', 'credit' => $total->toString()];
             } else {
                 throw new InvalidArgumentException("Unknown payment mode: {$paymentMode}");
             }
@@ -229,17 +306,26 @@ class CapitalPurchase extends Model
 
             $capitalPurchase = static::create([
                 'supplier_id' => $supplier?->id,
+                // Snapshotted at posting: the Purchase VAT book must keep
+                // printing the PAN the bill was claimed against even if the
+                // supplier record is corrected later.
+                'supplier_pan' => $data['supplier_pan'] ?? $supplier?->tpin,
                 'store_id' => $storeId,
                 'journal_voucher_id' => $voucher->id,
                 'type' => $type,
+                'bill_number' => $billNumber,
+                'bill_number_guard' => $guard,
                 'date' => $data['date'],
                 'narration' => $data['narration'] ?? null,
                 'payment_mode' => $paymentMode,
                 'bank_account_id' => $data['bank_account_id'] ?? null,
-                'cash_amount' => $paymentMode === 'partial' ? $cashAmount : null,
-                'bank_amount' => $paymentMode === 'partial' ? $bankAmount : null,
-                'vat_amount' => $vatAmount,
-                'total' => $total,
+                'cash_amount' => $paymentMode === 'partial' ? $cashAmount?->toString() : null,
+                'bank_amount' => $paymentMode === 'partial' ? $bankAmount?->toString() : null,
+                'taxable_amount' => $totals->taxableAmount->toString(),
+                'nontaxable_amount' => $totals->nontaxableAmount->toString(),
+                'vat_rate' => $totals->vatRate,
+                'vat_amount' => $totals->vatAmount->toString(),
+                'total' => $total->toString(),
                 'status' => 'posted',
                 'created_by' => $actor->id,
             ]);
@@ -253,38 +339,85 @@ class CapitalPurchase extends Model
     }
 
     /**
-     * Cancels this capital purchase: posts a NEW voucher that exactly
-     * mirrors the original voucher's lines (every debit becomes a credit
-     * and vice versa - JournalVoucher rows are immutable everywhere in
-     * this app, so this is a real reversal, not a flag flip).
+     * Runs the document through DocumentCalculator.
+     *
+     * Exposed so the controller can validate a payload (and honour the
+     * browser's `expected_total`) with the identical calculation the posting
+     * path uses.
+     *
+     * @param  array{vat_rate?: mixed, expected_total?: mixed}  $data
+     * @param  array<int, array{amount: mixed, vatable?: bool}>  $lines
+     *
+     * @throws BillingException
+     */
+    public static function calculateTotals(array $data, array $lines): DocumentTotals
+    {
+        return DocumentCalculator::calculate(
+            array_map(static fn (array $line): array => [
+                'quantity' => '1',
+                'rate' => $line['amount'],
+                'discount' => '0',
+                'discount_type' => 'flat',
+                'vatable' => (bool) ($line['vatable'] ?? false),
+                'conversion_factor' => '1',
+            ], array_values($lines)),
+            [
+                'vat_rate' => $data['vat_rate'] ?? CompanySetting::current()->default_vat_rate ?? '13.00',
+                'discount' => '0',
+                'discount_type' => 'flat',
+                'expected_total' => $data['expected_total'] ?? null,
+            ],
+        );
+    }
+
+    /**
+     * Cancels this capital purchase (contract C5).
+     *
+     * The row is re-read with lockForUpdate() and re-checked inside the
+     * transaction, so two simultaneous cancels cannot both post a reversal
+     * (audit P0-16). The mirroring itself is JournalVoucher::reverse()'s job:
+     * it posts the reversal in the dedicated Reversal series, dated today, and
+     * refuses outright once the document's fiscal year has been closed.
+     *
+     * The bill number guard is released at the same time, so the supplier's
+     * bill can legitimately be re-entered once the wrong entry is cancelled.
      */
     public function cancel(User $actor, string $reason): void
     {
-        if ($this->status === 'cancelled') {
-            throw new InvalidArgumentException('This capital purchase has already been cancelled.');
-        }
+        DB::transaction(function () use ($actor, $reason): void {
+            /** @var self $capitalPurchase */
+            $capitalPurchase = static::query()->whereKey($this->getKey())->lockForUpdate()->firstOrFail();
 
-        DB::transaction(function () use ($actor, $reason) {
-            $original = $this->journalVoucher()->with('lines')->firstOrFail();
+            if ($capitalPurchase->status === 'cancelled') {
+                throw new InvalidArgumentException('This capital purchase has already been cancelled.');
+            }
 
-            $mirroredLines = $original->lines->map(fn (JournalVoucherLine $line) => [
-                'account_id' => $line->account_id,
-                'debit' => (float) $line->credit,
-                'credit' => (float) $line->debit,
-                'narration' => $line->narration,
-            ])->all();
+            $reason = trim($reason);
 
-            JournalVoucher::post(
-                [
-                    'voucher_type' => VoucherType::CapitalPurchase->value,
-                    'date' => now()->toDateString(),
-                    'narration' => "Cancellation of capital purchase #{$this->id}: {$reason}",
-                ],
-                $mirroredLines,
+            if ($reason === '') {
+                throw new InvalidArgumentException('A reason is required to cancel a capital purchase.');
+            }
+
+            if (mb_strlen($reason) > 500) {
+                throw new InvalidArgumentException('The cancellation reason cannot be longer than 500 characters.');
+            }
+
+            $reversal = JournalVoucher::reverse(
+                $capitalPurchase->journalVoucher()->firstOrFail(),
                 $actor,
+                "Cancellation of capital purchase #{$capitalPurchase->id}: {$reason}",
             );
 
-            $this->update(['status' => 'cancelled']);
+            $capitalPurchase->update([
+                'status' => 'cancelled',
+                'bill_number_guard' => null,
+                'cancelled_at' => now(),
+                'cancelled_by' => $actor->id,
+                'cancel_reason' => $reason,
+                'reversal_journal_voucher_id' => $reversal->id,
+            ]);
+
+            $this->setRawAttributes($capitalPurchase->getAttributes(), true);
         });
     }
 }
