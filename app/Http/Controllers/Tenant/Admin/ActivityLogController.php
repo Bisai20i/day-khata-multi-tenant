@@ -4,6 +4,8 @@ namespace App\Http\Controllers\Tenant\Admin;
 
 use App\Http\Controllers\Controller;
 use App\Models\ActivityLog;
+use App\Models\CapitalPurchase;
+use App\Models\CapitalSale;
 use App\Models\FiscalYear;
 use App\Models\FixedAsset;
 use App\Models\JournalVoucher;
@@ -48,6 +50,8 @@ class ActivityLogController extends Controller
             JournalVoucher::class,
             FixedAsset::class,
             Quotation::class,
+            CapitalSale::class,
+            CapitalPurchase::class,
             User::class,
             FiscalYear::class,
         ];

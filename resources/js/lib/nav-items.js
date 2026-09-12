@@ -23,6 +23,7 @@ import {
     Store,
     Settings,
     History,
+    Printer,
     Database,
     Megaphone,
     Shapes,
@@ -157,6 +158,7 @@ export function navGroups(isAdmin) {
                 { label: 'Settings', href: '/settings', icon: Settings },
                 { label: 'Notices', href: '/notices', icon: Megaphone },
                 { label: 'Activity Log', href: '/activity-log', icon: History },
+                { label: 'Print Log', href: '/reports/print-log', icon: Printer },
                 { label: 'Backups', href: '/backups', icon: Database },
             ],
         });

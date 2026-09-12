@@ -79,6 +79,7 @@ Route::middleware([
         require base_path('routes/tenant-reports-sales-with-note.php');
         require base_path('routes/tenant-reports-damage-lost-stock.php');
         require base_path('routes/tenant-reports-brand-wise.php');
+        require base_path('routes/tenant-reports-print-log.php');
         require base_path('routes/tenant-employees.php');
         require base_path('routes/tenant-profile.php');
         require base_path('routes/tenant-fixed-assets.php');
