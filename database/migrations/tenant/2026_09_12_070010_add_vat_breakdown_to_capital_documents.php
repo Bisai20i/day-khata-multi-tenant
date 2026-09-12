@@ -84,8 +84,12 @@ return new class extends Migration
     private function backfill(string $table, string $lineTable, string $foreignKey): void
     {
         foreach (DB::table($table)->lazyById() as $document) {
-            $total = Money::of($document->total);
-            $vat = Money::of($document->vat_amount);
+            // Money::round()/Quantity::round(), not of(), on every raw column read:
+            // SQLite hands back a REAL for a decimal column, and a row written by
+            // the old float code round-trips as e.g. 404984.71000000002, which the
+            // strict parser refuses. That would abort the upgrade mid-table.
+            $total = Money::round($document->total);
+            $vat = Money::round($document->vat_amount);
 
             $isVatable = $vat->isPositive();
             $taxable = $isVatable ? $total->minus($vat) : Money::zero();

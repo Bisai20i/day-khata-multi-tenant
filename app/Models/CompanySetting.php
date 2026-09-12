@@ -36,6 +36,12 @@ class CompanySetting extends Model
     {
         return [
             'default_vat_rate' => Decimal::class.':2',
+            // SQLite hands these back as 0 and 1, MySQL as a tinyint. Casting
+            // here means a caller can trust the value without its own (bool).
+            'allow_negative_stock' => 'boolean',
+            'sale_full_enabled' => 'boolean',
+            'sale_abbreviated_enabled' => 'boolean',
+            'sale_pan_enabled' => 'boolean',
         ];
     }
 

@@ -73,12 +73,17 @@ return new class extends Migration
             $vatableSubtotal = Money::zero();
             $nonVatableSubtotal = Money::zero();
 
+            // Money::round()/Quantity::round(), not of(), on every raw column read:
+            // SQLite hands back a REAL for a decimal column, and a row written by
+            // the old float code round-trips as e.g. 404984.71000000002, which the
+            // strict parser refuses. That would abort the upgrade mid-table.
+
             foreach ($lines as $line) {
                 $gross = Money::round(
-                    Quantity::of($line->quantity)->toBigDecimal()->multipliedBy(Quantity::of($line->rate)->toBigDecimal())
+                    Quantity::round($line->quantity)->toBigDecimal()->multipliedBy(Quantity::round($line->rate)->toBigDecimal())
                 );
 
-                $discount = Money::of($line->discount);
+                $discount = Money::round($line->discount);
                 if ($discount->isNegative()) {
                     $discount = Money::zero();
                 }
@@ -97,7 +102,7 @@ return new class extends Migration
 
             $subtotal = $vatableSubtotal->plus($nonVatableSubtotal);
 
-            $headerDiscount = Money::of($quotation->discount);
+            $headerDiscount = Money::round($quotation->discount);
             if ($headerDiscount->isNegative()) {
                 $headerDiscount = Money::zero();
             }
@@ -122,7 +127,7 @@ return new class extends Migration
             $taxableAmount = $vatableSubtotal->minus($headerDiscountVatable);
             $nontaxableAmount = $nonVatableSubtotal->minus($headerDiscountNonVatable);
 
-            $vatRate = Money::of($quotation->vat_rate);
+            $vatRate = Money::round($quotation->vat_rate);
             if ($vatRate->isNegative()) {
                 $vatRate = Money::zero();
             }
