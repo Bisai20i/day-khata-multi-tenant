@@ -17,15 +17,15 @@ Modify: `composer.json`, `composer.lock` (only via composer), `.github/workflows
 
 ## Tasks
 
-- [ ] 1. `Money` and `Quantity` exactly per C1 (shared internals in a private trait or abstract base are fine).
+- [x] 1. `Money` and `Quantity` exactly per C1 (shared internals in a private trait or abstract base are fine).
   Float input via `var_export($v, true)`; reject `NAN`/`INF`. `toString()` never returns `-0.00`.
-- [ ] 2. `Money::allocate()` per C1 (largest remainder, ties to lowest index, sum always exact, negative
+- [x] 2. `Money::allocate()` per C1 (largest remainder, ties to lowest index, sum always exact, negative
   amounts, zero-weight error).
-- [ ] 3. `App\Casts\Decimal` per C2, reading the scale from the cast parameter (`Decimal::class.':2'`).
+- [x] 3. `App\Casts\Decimal` per C2, reading the scale from the cast parameter (`Decimal::class.':2'`).
   Include the attribute key in the exception message.
-- [ ] 4. `DocumentCalculator`, `DocumentTotals`, `LineTotals`, `BillingException` exactly per C3, including
+- [x] 4. `DocumentCalculator`, `DocumentTotals`, `LineTotals`, `BillingException` exactly per C3, including
   `assertExactSplit()` and the `split_mismatch` reason. Pure PHP, no Laravel facades, no DB.
-- [ ] 5. Golden vectors `tests/fixtures/billing-vectors.json`. Compute every `expected` value with an
+- [x] 5. Golden vectors `tests/fixtures/billing-vectors.json`. Compute every `expected` value with an
   **independent** path (a throwaway `php -r` script using `bcmath` directly, not `DocumentCalculator`), then
   confirm the calculator agrees via a pure-PHP smoke check (`require 'vendor/autoload.php'` only). Include at
   least these cases (expected values in brackets, already hand-checked):
@@ -53,14 +53,14 @@ Modify: `composer.json`, `composer.lock` (only via composer), `.github/workflows
       TDS 2000 on base 1000 (`tds_exceeds_base`); vatable 1 x 10 and -1 x 20 plus exempt 100 with a header
       discount (`negative_group_total`); 100% header discount (`total_not_positive`); `expected_total`
       56.49 on case 1 (`total_mismatch`)
-- [ ] 6. Unit tests (write, do not run): `MoneyTest` (parsing, strictness, float round-trip `0.1`, `1.5`,
+- [x] 6. Unit tests (write, do not run): `MoneyTest` (parsing, strictness, float round-trip `0.1`, `1.5`,
   rejection of `0.30000000000000004`, every rounding proof from audit P0-1, allocate properties incl. sum
   invariant over many random splits, formatting `12,34,567.50`, `-0.00` never appears), `QuantityTest`,
   `DecimalCastTest` (get shape, set strictness, throws on `999.999` for scale 2), `DocumentCalculatorTest`
   (runs every golden vector; asserts `expected` or `expected_error` reason).
-- [ ] 7. `composer require "brick/math:^0.18" --no-interaction` so the dependency is direct, not transitive.
+- [x] 7. `composer require "brick/math:^0.18" --no-interaction` so the dependency is direct, not transitive.
   If it needs the network and fails, leave `composer.json` untouched and say so in the report.
-- [ ] 8. `.github/workflows/ci.yml`: add a separate MySQL 8 job (`continue-on-error: true`) that runs the Pest
+- [x] 8. `.github/workflows/ci.yml`: add a separate MySQL 8 job (`continue-on-error: true`) that runs the Pest
   suite with `DB_CONNECTION=mysql`, so DECIMAL rounding and locking behaviour get real signal without
   blocking CI. Also run `node --test tests/js` in the existing job. Do not change the existing job's steps
   otherwise.

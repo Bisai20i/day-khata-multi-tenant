@@ -1,0 +1,1522 @@
+[
+    {
+        "name": "1.5 x 33.33 vatable at 13 percent VAT",
+        "lines": [
+            {
+                "quantity": "1.5",
+                "rate": "33.33",
+                "vatable": true
+            }
+        ],
+        "header": {
+            "vat_rate": "13"
+        },
+        "expected": {
+            "lines": [
+                {
+                    "quantity": "1.5000",
+                    "rate": "33.3300",
+                    "conversion_factor": "1.0000",
+                    "base_quantity": "1.5000",
+                    "gross": "50.00",
+                    "discount_type": "flat",
+                    "discount_value": "0.00",
+                    "discount_amount": "0.00",
+                    "line_total": "50.00",
+                    "vatable": true
+                }
+            ],
+            "vatable_subtotal": "50.00",
+            "non_vatable_subtotal": "0.00",
+            "header_discount": "0.00",
+            "header_discount_vatable": "0.00",
+            "header_discount_non_vatable": "0.00",
+            "taxable_amount": "50.00",
+            "nontaxable_amount": "0.00",
+            "vat_rate": "13.00",
+            "vat_amount": "6.50",
+            "total": "56.50",
+            "tds_amount": "0.00",
+            "settlement_due": "56.50"
+        }
+    },
+    {
+        "name": "ten lines of 1.5 x 33.33",
+        "lines": [
+            {
+                "quantity": "1.5",
+                "rate": "33.33",
+                "vatable": true
+            },
+            {
+                "quantity": "1.5",
+                "rate": "33.33",
+                "vatable": true
+            },
+            {
+                "quantity": "1.5",
+                "rate": "33.33",
+                "vatable": true
+            },
+            {
+                "quantity": "1.5",
+                "rate": "33.33",
+                "vatable": true
+            },
+            {
+                "quantity": "1.5",
+                "rate": "33.33",
+                "vatable": true
+            },
+            {
+                "quantity": "1.5",
+                "rate": "33.33",
+                "vatable": true
+            },
+            {
+                "quantity": "1.5",
+                "rate": "33.33",
+                "vatable": true
+            },
+            {
+                "quantity": "1.5",
+                "rate": "33.33",
+                "vatable": true
+            },
+            {
+                "quantity": "1.5",
+                "rate": "33.33",
+                "vatable": true
+            },
+            {
+                "quantity": "1.5",
+                "rate": "33.33",
+                "vatable": true
+            }
+        ],
+        "header": {
+            "vat_rate": "13"
+        },
+        "expected": {
+            "lines": [
+                {
+                    "quantity": "1.5000",
+                    "rate": "33.3300",
+                    "conversion_factor": "1.0000",
+                    "base_quantity": "1.5000",
+                    "gross": "50.00",
+                    "discount_type": "flat",
+                    "discount_value": "0.00",
+                    "discount_amount": "0.00",
+                    "line_total": "50.00",
+                    "vatable": true
+                },
+                {
+                    "quantity": "1.5000",
+                    "rate": "33.3300",
+                    "conversion_factor": "1.0000",
+                    "base_quantity": "1.5000",
+                    "gross": "50.00",
+                    "discount_type": "flat",
+                    "discount_value": "0.00",
+                    "discount_amount": "0.00",
+                    "line_total": "50.00",
+                    "vatable": true
+                },
+                {
+                    "quantity": "1.5000",
+                    "rate": "33.3300",
+                    "conversion_factor": "1.0000",
+                    "base_quantity": "1.5000",
+                    "gross": "50.00",
+                    "discount_type": "flat",
+                    "discount_value": "0.00",
+                    "discount_amount": "0.00",
+                    "line_total": "50.00",
+                    "vatable": true
+                },
+                {
+                    "quantity": "1.5000",
+                    "rate": "33.3300",
+                    "conversion_factor": "1.0000",
+                    "base_quantity": "1.5000",
+                    "gross": "50.00",
+                    "discount_type": "flat",
+                    "discount_value": "0.00",
+                    "discount_amount": "0.00",
+                    "line_total": "50.00",
+                    "vatable": true
+                },
+                {
+                    "quantity": "1.5000",
+                    "rate": "33.3300",
+                    "conversion_factor": "1.0000",
+                    "base_quantity": "1.5000",
+                    "gross": "50.00",
+                    "discount_type": "flat",
+                    "discount_value": "0.00",
+                    "discount_amount": "0.00",
+                    "line_total": "50.00",
+                    "vatable": true
+                },
+                {
+                    "quantity": "1.5000",
+                    "rate": "33.3300",
+                    "conversion_factor": "1.0000",
+                    "base_quantity": "1.5000",
+                    "gross": "50.00",
+                    "discount_type": "flat",
+                    "discount_value": "0.00",
+                    "discount_amount": "0.00",
+                    "line_total": "50.00",
+                    "vatable": true
+                },
+                {
+                    "quantity": "1.5000",
+                    "rate": "33.3300",
+                    "conversion_factor": "1.0000",
+                    "base_quantity": "1.5000",
+                    "gross": "50.00",
+                    "discount_type": "flat",
+                    "discount_value": "0.00",
+                    "discount_amount": "0.00",
+                    "line_total": "50.00",
+                    "vatable": true
+                },
+                {
+                    "quantity": "1.5000",
+                    "rate": "33.3300",
+                    "conversion_factor": "1.0000",
+                    "base_quantity": "1.5000",
+                    "gross": "50.00",
+                    "discount_type": "flat",
+                    "discount_value": "0.00",
+                    "discount_amount": "0.00",
+                    "line_total": "50.00",
+                    "vatable": true
+                },
+                {
+                    "quantity": "1.5000",
+                    "rate": "33.3300",
+                    "conversion_factor": "1.0000",
+                    "base_quantity": "1.5000",
+                    "gross": "50.00",
+                    "discount_type": "flat",
+                    "discount_value": "0.00",
+                    "discount_amount": "0.00",
+                    "line_total": "50.00",
+                    "vatable": true
+                },
+                {
+                    "quantity": "1.5000",
+                    "rate": "33.3300",
+                    "conversion_factor": "1.0000",
+                    "base_quantity": "1.5000",
+                    "gross": "50.00",
+                    "discount_type": "flat",
+                    "discount_value": "0.00",
+                    "discount_amount": "0.00",
+                    "line_total": "50.00",
+                    "vatable": true
+                }
+            ],
+            "vatable_subtotal": "500.00",
+            "non_vatable_subtotal": "0.00",
+            "header_discount": "0.00",
+            "header_discount_vatable": "0.00",
+            "header_discount_non_vatable": "0.00",
+            "taxable_amount": "500.00",
+            "nontaxable_amount": "0.00",
+            "vat_rate": "13.00",
+            "vat_amount": "65.00",
+            "total": "565.00",
+            "tds_amount": "0.00",
+            "settlement_due": "565.00"
+        }
+    },
+    {
+        "name": "1 x 1001.50 vatable",
+        "lines": [
+            {
+                "quantity": "1",
+                "rate": "1001.50",
+                "vatable": true
+            }
+        ],
+        "header": {
+            "vat_rate": "13"
+        },
+        "expected": {
+            "lines": [
+                {
+                    "quantity": "1.0000",
+                    "rate": "1001.5000",
+                    "conversion_factor": "1.0000",
+                    "base_quantity": "1.0000",
+                    "gross": "1001.50",
+                    "discount_type": "flat",
+                    "discount_value": "0.00",
+                    "discount_amount": "0.00",
+                    "line_total": "1001.50",
+                    "vatable": true
+                }
+            ],
+            "vatable_subtotal": "1001.50",
+            "non_vatable_subtotal": "0.00",
+            "header_discount": "0.00",
+            "header_discount_vatable": "0.00",
+            "header_discount_non_vatable": "0.00",
+            "taxable_amount": "1001.50",
+            "nontaxable_amount": "0.00",
+            "vat_rate": "13.00",
+            "vat_amount": "130.20",
+            "total": "1131.70",
+            "tds_amount": "0.00",
+            "settlement_due": "1131.70"
+        }
+    },
+    {
+        "name": "2 x 10.00 with a negative 1 x 4.50 line",
+        "lines": [
+            {
+                "quantity": "2",
+                "rate": "10.00",
+                "vatable": true
+            },
+            {
+                "quantity": "-1",
+                "rate": "4.50",
+                "vatable": true
+            }
+        ],
+        "header": {
+            "vat_rate": "13"
+        },
+        "expected": {
+            "lines": [
+                {
+                    "quantity": "2.0000",
+                    "rate": "10.0000",
+                    "conversion_factor": "1.0000",
+                    "base_quantity": "2.0000",
+                    "gross": "20.00",
+                    "discount_type": "flat",
+                    "discount_value": "0.00",
+                    "discount_amount": "0.00",
+                    "line_total": "20.00",
+                    "vatable": true
+                },
+                {
+                    "quantity": "-1.0000",
+                    "rate": "4.5000",
+                    "conversion_factor": "1.0000",
+                    "base_quantity": "-1.0000",
+                    "gross": "-4.50",
+                    "discount_type": "flat",
+                    "discount_value": "0.00",
+                    "discount_amount": "0.00",
+                    "line_total": "-4.50",
+                    "vatable": true
+                }
+            ],
+            "vatable_subtotal": "15.50",
+            "non_vatable_subtotal": "0.00",
+            "header_discount": "0.00",
+            "header_discount_vatable": "0.00",
+            "header_discount_non_vatable": "0.00",
+            "taxable_amount": "15.50",
+            "nontaxable_amount": "0.00",
+            "vat_rate": "13.00",
+            "vat_amount": "2.02",
+            "total": "17.52",
+            "tds_amount": "0.00",
+            "settlement_due": "17.52"
+        }
+    },
+    {
+        "name": "28.5 x 14209.99",
+        "lines": [
+            {
+                "quantity": "28.5",
+                "rate": "14209.99",
+                "vatable": true
+            }
+        ],
+        "header": {
+            "vat_rate": "13"
+        },
+        "expected": {
+            "lines": [
+                {
+                    "quantity": "28.5000",
+                    "rate": "14209.9900",
+                    "conversion_factor": "1.0000",
+                    "base_quantity": "28.5000",
+                    "gross": "404984.72",
+                    "discount_type": "flat",
+                    "discount_value": "0.00",
+                    "discount_amount": "0.00",
+                    "line_total": "404984.72",
+                    "vatable": true
+                }
+            ],
+            "vatable_subtotal": "404984.72",
+            "non_vatable_subtotal": "0.00",
+            "header_discount": "0.00",
+            "header_discount_vatable": "0.00",
+            "header_discount_non_vatable": "0.00",
+            "taxable_amount": "404984.72",
+            "nontaxable_amount": "0.00",
+            "vat_rate": "13.00",
+            "vat_amount": "52648.01",
+            "total": "457632.73",
+            "tds_amount": "0.00",
+            "settlement_due": "457632.73"
+        }
+    },
+    {
+        "name": "1632.5 x 78.13",
+        "lines": [
+            {
+                "quantity": "1632.5",
+                "rate": "78.13",
+                "vatable": true
+            }
+        ],
+        "header": {
+            "vat_rate": "13"
+        },
+        "expected": {
+            "lines": [
+                {
+                    "quantity": "1632.5000",
+                    "rate": "78.1300",
+                    "conversion_factor": "1.0000",
+                    "base_quantity": "1632.5000",
+                    "gross": "127547.23",
+                    "discount_type": "flat",
+                    "discount_value": "0.00",
+                    "discount_amount": "0.00",
+                    "line_total": "127547.23",
+                    "vatable": true
+                }
+            ],
+            "vatable_subtotal": "127547.23",
+            "non_vatable_subtotal": "0.00",
+            "header_discount": "0.00",
+            "header_discount_vatable": "0.00",
+            "header_discount_non_vatable": "0.00",
+            "taxable_amount": "127547.23",
+            "nontaxable_amount": "0.00",
+            "vat_rate": "13.00",
+            "vat_amount": "16581.14",
+            "total": "144128.37",
+            "tds_amount": "0.00",
+            "settlement_due": "144128.37"
+        }
+    },
+    {
+        "name": "1 x 4.10 with a 15 percent line discount",
+        "lines": [
+            {
+                "quantity": "1",
+                "rate": "4.10",
+                "discount": "15",
+                "discount_type": "percentage",
+                "vatable": true
+            }
+        ],
+        "header": {
+            "vat_rate": "13"
+        },
+        "expected": {
+            "lines": [
+                {
+                    "quantity": "1.0000",
+                    "rate": "4.1000",
+                    "conversion_factor": "1.0000",
+                    "base_quantity": "1.0000",
+                    "gross": "4.10",
+                    "discount_type": "percentage",
+                    "discount_value": "15.00",
+                    "discount_amount": "0.62",
+                    "line_total": "3.48",
+                    "vatable": true
+                }
+            ],
+            "vatable_subtotal": "3.48",
+            "non_vatable_subtotal": "0.00",
+            "header_discount": "0.00",
+            "header_discount_vatable": "0.00",
+            "header_discount_non_vatable": "0.00",
+            "taxable_amount": "3.48",
+            "nontaxable_amount": "0.00",
+            "vat_rate": "13.00",
+            "vat_amount": "0.45",
+            "total": "3.93",
+            "tds_amount": "0.00",
+            "settlement_due": "3.93"
+        }
+    },
+    {
+        "name": "1 x 69350.00 with a 6.27 percent line discount",
+        "lines": [
+            {
+                "quantity": "1",
+                "rate": "69350.00",
+                "discount": "6.27",
+                "discount_type": "percentage",
+                "vatable": true
+            }
+        ],
+        "header": {
+            "vat_rate": "13"
+        },
+        "expected": {
+            "lines": [
+                {
+                    "quantity": "1.0000",
+                    "rate": "69350.0000",
+                    "conversion_factor": "1.0000",
+                    "base_quantity": "1.0000",
+                    "gross": "69350.00",
+                    "discount_type": "percentage",
+                    "discount_value": "6.27",
+                    "discount_amount": "4348.25",
+                    "line_total": "65001.75",
+                    "vatable": true
+                }
+            ],
+            "vatable_subtotal": "65001.75",
+            "non_vatable_subtotal": "0.00",
+            "header_discount": "0.00",
+            "header_discount_vatable": "0.00",
+            "header_discount_non_vatable": "0.00",
+            "taxable_amount": "65001.75",
+            "nontaxable_amount": "0.00",
+            "vat_rate": "13.00",
+            "vat_amount": "8450.23",
+            "total": "73451.98",
+            "tds_amount": "0.00",
+            "settlement_due": "73451.98"
+        }
+    },
+    {
+        "name": "VAT 1000 plus exempt 500 with a flat header discount of 100",
+        "lines": [
+            {
+                "quantity": "1",
+                "rate": "1000.00",
+                "vatable": true
+            },
+            {
+                "quantity": "1",
+                "rate": "500.00",
+                "vatable": false
+            }
+        ],
+        "header": {
+            "vat_rate": "13",
+            "discount": "100",
+            "discount_type": "flat"
+        },
+        "expected": {
+            "lines": [
+                {
+                    "quantity": "1.0000",
+                    "rate": "1000.0000",
+                    "conversion_factor": "1.0000",
+                    "base_quantity": "1.0000",
+                    "gross": "1000.00",
+                    "discount_type": "flat",
+                    "discount_value": "0.00",
+                    "discount_amount": "0.00",
+                    "line_total": "1000.00",
+                    "vatable": true
+                },
+                {
+                    "quantity": "1.0000",
+                    "rate": "500.0000",
+                    "conversion_factor": "1.0000",
+                    "base_quantity": "1.0000",
+                    "gross": "500.00",
+                    "discount_type": "flat",
+                    "discount_value": "0.00",
+                    "discount_amount": "0.00",
+                    "line_total": "500.00",
+                    "vatable": false
+                }
+            ],
+            "vatable_subtotal": "1000.00",
+            "non_vatable_subtotal": "500.00",
+            "header_discount": "100.00",
+            "header_discount_vatable": "66.67",
+            "header_discount_non_vatable": "33.33",
+            "taxable_amount": "933.33",
+            "nontaxable_amount": "466.67",
+            "vat_rate": "13.00",
+            "vat_amount": "121.33",
+            "total": "1521.33",
+            "tds_amount": "0.00",
+            "settlement_due": "1521.33"
+        }
+    },
+    {
+        "name": "VAT 1000 plus exempt 500 with a 10 percent header discount",
+        "lines": [
+            {
+                "quantity": "1",
+                "rate": "1000.00",
+                "vatable": true
+            },
+            {
+                "quantity": "1",
+                "rate": "500.00",
+                "vatable": false
+            }
+        ],
+        "header": {
+            "vat_rate": "13",
+            "discount": "10",
+            "discount_type": "percentage"
+        },
+        "expected": {
+            "lines": [
+                {
+                    "quantity": "1.0000",
+                    "rate": "1000.0000",
+                    "conversion_factor": "1.0000",
+                    "base_quantity": "1.0000",
+                    "gross": "1000.00",
+                    "discount_type": "flat",
+                    "discount_value": "0.00",
+                    "discount_amount": "0.00",
+                    "line_total": "1000.00",
+                    "vatable": true
+                },
+                {
+                    "quantity": "1.0000",
+                    "rate": "500.0000",
+                    "conversion_factor": "1.0000",
+                    "base_quantity": "1.0000",
+                    "gross": "500.00",
+                    "discount_type": "flat",
+                    "discount_value": "0.00",
+                    "discount_amount": "0.00",
+                    "line_total": "500.00",
+                    "vatable": false
+                }
+            ],
+            "vatable_subtotal": "1000.00",
+            "non_vatable_subtotal": "500.00",
+            "header_discount": "150.00",
+            "header_discount_vatable": "100.00",
+            "header_discount_non_vatable": "50.00",
+            "taxable_amount": "900.00",
+            "nontaxable_amount": "450.00",
+            "vat_rate": "13.00",
+            "vat_amount": "117.00",
+            "total": "1467.00",
+            "tds_amount": "0.00",
+            "settlement_due": "1467.00"
+        }
+    },
+    {
+        "name": "exempt only 500 with a flat header discount of 50",
+        "lines": [
+            {
+                "quantity": "1",
+                "rate": "500.00",
+                "vatable": false
+            }
+        ],
+        "header": {
+            "vat_rate": "13",
+            "discount": "50",
+            "discount_type": "flat"
+        },
+        "expected": {
+            "lines": [
+                {
+                    "quantity": "1.0000",
+                    "rate": "500.0000",
+                    "conversion_factor": "1.0000",
+                    "base_quantity": "1.0000",
+                    "gross": "500.00",
+                    "discount_type": "flat",
+                    "discount_value": "0.00",
+                    "discount_amount": "0.00",
+                    "line_total": "500.00",
+                    "vatable": false
+                }
+            ],
+            "vatable_subtotal": "0.00",
+            "non_vatable_subtotal": "500.00",
+            "header_discount": "50.00",
+            "header_discount_vatable": "0.00",
+            "header_discount_non_vatable": "50.00",
+            "taxable_amount": "0.00",
+            "nontaxable_amount": "450.00",
+            "vat_rate": "13.00",
+            "vat_amount": "0.00",
+            "total": "450.00",
+            "tds_amount": "0.00",
+            "settlement_due": "450.00"
+        }
+    },
+    {
+        "name": "vatable 1000 forced non taxable for a PAN invoice",
+        "lines": [
+            {
+                "quantity": "1",
+                "rate": "1000.00",
+                "vatable": true
+            }
+        ],
+        "header": {
+            "vat_rate": "13",
+            "force_non_taxable": true
+        },
+        "expected": {
+            "lines": [
+                {
+                    "quantity": "1.0000",
+                    "rate": "1000.0000",
+                    "conversion_factor": "1.0000",
+                    "base_quantity": "1.0000",
+                    "gross": "1000.00",
+                    "discount_type": "flat",
+                    "discount_value": "0.00",
+                    "discount_amount": "0.00",
+                    "line_total": "1000.00",
+                    "vatable": false
+                }
+            ],
+            "vatable_subtotal": "0.00",
+            "non_vatable_subtotal": "1000.00",
+            "header_discount": "0.00",
+            "header_discount_vatable": "0.00",
+            "header_discount_non_vatable": "0.00",
+            "taxable_amount": "0.00",
+            "nontaxable_amount": "1000.00",
+            "vat_rate": "0.00",
+            "vat_amount": "0.00",
+            "total": "1000.00",
+            "tds_amount": "0.00",
+            "settlement_due": "1000.00"
+        }
+    },
+    {
+        "name": "vatable 1000 with TDS of 15",
+        "lines": [
+            {
+                "quantity": "1",
+                "rate": "1000.00",
+                "vatable": true
+            }
+        ],
+        "header": {
+            "vat_rate": "13",
+            "tds_amount": "15"
+        },
+        "expected": {
+            "lines": [
+                {
+                    "quantity": "1.0000",
+                    "rate": "1000.0000",
+                    "conversion_factor": "1.0000",
+                    "base_quantity": "1.0000",
+                    "gross": "1000.00",
+                    "discount_type": "flat",
+                    "discount_value": "0.00",
+                    "discount_amount": "0.00",
+                    "line_total": "1000.00",
+                    "vatable": true
+                }
+            ],
+            "vatable_subtotal": "1000.00",
+            "non_vatable_subtotal": "0.00",
+            "header_discount": "0.00",
+            "header_discount_vatable": "0.00",
+            "header_discount_non_vatable": "0.00",
+            "taxable_amount": "1000.00",
+            "nontaxable_amount": "0.00",
+            "vat_rate": "13.00",
+            "vat_amount": "130.00",
+            "total": "1130.00",
+            "tds_amount": "15.00",
+            "settlement_due": "1115.00"
+        }
+    },
+    {
+        "name": "2 x 1200.00 in boxes of 12",
+        "lines": [
+            {
+                "quantity": "2",
+                "rate": "1200.00",
+                "conversion_factor": "12",
+                "vatable": true
+            }
+        ],
+        "header": {
+            "vat_rate": "13"
+        },
+        "expected": {
+            "lines": [
+                {
+                    "quantity": "2.0000",
+                    "rate": "1200.0000",
+                    "conversion_factor": "12.0000",
+                    "base_quantity": "24.0000",
+                    "gross": "2400.00",
+                    "discount_type": "flat",
+                    "discount_value": "0.00",
+                    "discount_amount": "0.00",
+                    "line_total": "2400.00",
+                    "vatable": true
+                }
+            ],
+            "vatable_subtotal": "2400.00",
+            "non_vatable_subtotal": "0.00",
+            "header_discount": "0.00",
+            "header_discount_vatable": "0.00",
+            "header_discount_non_vatable": "0.00",
+            "taxable_amount": "2400.00",
+            "nontaxable_amount": "0.00",
+            "vat_rate": "13.00",
+            "vat_amount": "312.00",
+            "total": "2712.00",
+            "tds_amount": "0.00",
+            "settlement_due": "2712.00"
+        }
+    },
+    {
+        "name": "two lines of 0.125 x 1.00",
+        "lines": [
+            {
+                "quantity": "0.125",
+                "rate": "1.00",
+                "vatable": true
+            },
+            {
+                "quantity": "0.125",
+                "rate": "1.00",
+                "vatable": true
+            }
+        ],
+        "header": {
+            "vat_rate": "13"
+        },
+        "expected": {
+            "lines": [
+                {
+                    "quantity": "0.1250",
+                    "rate": "1.0000",
+                    "conversion_factor": "1.0000",
+                    "base_quantity": "0.1250",
+                    "gross": "0.13",
+                    "discount_type": "flat",
+                    "discount_value": "0.00",
+                    "discount_amount": "0.00",
+                    "line_total": "0.13",
+                    "vatable": true
+                },
+                {
+                    "quantity": "0.1250",
+                    "rate": "1.0000",
+                    "conversion_factor": "1.0000",
+                    "base_quantity": "0.1250",
+                    "gross": "0.13",
+                    "discount_type": "flat",
+                    "discount_value": "0.00",
+                    "discount_amount": "0.00",
+                    "line_total": "0.13",
+                    "vatable": true
+                }
+            ],
+            "vatable_subtotal": "0.26",
+            "non_vatable_subtotal": "0.00",
+            "header_discount": "0.00",
+            "header_discount_vatable": "0.00",
+            "header_discount_non_vatable": "0.00",
+            "taxable_amount": "0.26",
+            "nontaxable_amount": "0.00",
+            "vat_rate": "13.00",
+            "vat_amount": "0.03",
+            "total": "0.29",
+            "tds_amount": "0.00",
+            "settlement_due": "0.29"
+        }
+    },
+    {
+        "name": "negative 2 x 100 at 10 percent discount plus 1 x 500",
+        "lines": [
+            {
+                "quantity": "-2",
+                "rate": "100.00",
+                "discount": "10",
+                "discount_type": "percentage",
+                "vatable": true
+            },
+            {
+                "quantity": "1",
+                "rate": "500.00",
+                "vatable": true
+            }
+        ],
+        "header": {
+            "vat_rate": "13"
+        },
+        "expected": {
+            "lines": [
+                {
+                    "quantity": "-2.0000",
+                    "rate": "100.0000",
+                    "conversion_factor": "1.0000",
+                    "base_quantity": "-2.0000",
+                    "gross": "-200.00",
+                    "discount_type": "percentage",
+                    "discount_value": "10.00",
+                    "discount_amount": "-20.00",
+                    "line_total": "-180.00",
+                    "vatable": true
+                },
+                {
+                    "quantity": "1.0000",
+                    "rate": "500.0000",
+                    "conversion_factor": "1.0000",
+                    "base_quantity": "1.0000",
+                    "gross": "500.00",
+                    "discount_type": "flat",
+                    "discount_value": "0.00",
+                    "discount_amount": "0.00",
+                    "line_total": "500.00",
+                    "vatable": true
+                }
+            ],
+            "vatable_subtotal": "320.00",
+            "non_vatable_subtotal": "0.00",
+            "header_discount": "0.00",
+            "header_discount_vatable": "0.00",
+            "header_discount_non_vatable": "0.00",
+            "taxable_amount": "320.00",
+            "nontaxable_amount": "0.00",
+            "vat_rate": "13.00",
+            "vat_amount": "41.60",
+            "total": "361.60",
+            "tds_amount": "0.00",
+            "settlement_due": "361.60"
+        }
+    },
+    {
+        "name": "negative 2 x 100 at a flat 20 discount plus 1 x 500",
+        "lines": [
+            {
+                "quantity": "-2",
+                "rate": "100.00",
+                "discount": "20",
+                "discount_type": "flat",
+                "vatable": true
+            },
+            {
+                "quantity": "1",
+                "rate": "500.00",
+                "vatable": true
+            }
+        ],
+        "header": {
+            "vat_rate": "13"
+        },
+        "expected": {
+            "lines": [
+                {
+                    "quantity": "-2.0000",
+                    "rate": "100.0000",
+                    "conversion_factor": "1.0000",
+                    "base_quantity": "-2.0000",
+                    "gross": "-200.00",
+                    "discount_type": "flat",
+                    "discount_value": "20.00",
+                    "discount_amount": "-20.00",
+                    "line_total": "-180.00",
+                    "vatable": true
+                },
+                {
+                    "quantity": "1.0000",
+                    "rate": "500.0000",
+                    "conversion_factor": "1.0000",
+                    "base_quantity": "1.0000",
+                    "gross": "500.00",
+                    "discount_type": "flat",
+                    "discount_value": "0.00",
+                    "discount_amount": "0.00",
+                    "line_total": "500.00",
+                    "vatable": true
+                }
+            ],
+            "vatable_subtotal": "320.00",
+            "non_vatable_subtotal": "0.00",
+            "header_discount": "0.00",
+            "header_discount_vatable": "0.00",
+            "header_discount_non_vatable": "0.00",
+            "taxable_amount": "320.00",
+            "nontaxable_amount": "0.00",
+            "vat_rate": "13.00",
+            "vat_amount": "41.60",
+            "total": "361.60",
+            "tds_amount": "0.00",
+            "settlement_due": "361.60"
+        }
+    },
+    {
+        "name": "header discount split with an uneven remainder",
+        "lines": [
+            {
+                "quantity": "3",
+                "rate": "33.33",
+                "vatable": true
+            },
+            {
+                "quantity": "1",
+                "rate": "33.34",
+                "vatable": false
+            }
+        ],
+        "header": {
+            "vat_rate": "13",
+            "discount": "10.01",
+            "discount_type": "flat"
+        },
+        "expected": {
+            "lines": [
+                {
+                    "quantity": "3.0000",
+                    "rate": "33.3300",
+                    "conversion_factor": "1.0000",
+                    "base_quantity": "3.0000",
+                    "gross": "99.99",
+                    "discount_type": "flat",
+                    "discount_value": "0.00",
+                    "discount_amount": "0.00",
+                    "line_total": "99.99",
+                    "vatable": true
+                },
+                {
+                    "quantity": "1.0000",
+                    "rate": "33.3400",
+                    "conversion_factor": "1.0000",
+                    "base_quantity": "1.0000",
+                    "gross": "33.34",
+                    "discount_type": "flat",
+                    "discount_value": "0.00",
+                    "discount_amount": "0.00",
+                    "line_total": "33.34",
+                    "vatable": false
+                }
+            ],
+            "vatable_subtotal": "99.99",
+            "non_vatable_subtotal": "33.34",
+            "header_discount": "10.01",
+            "header_discount_vatable": "7.51",
+            "header_discount_non_vatable": "2.50",
+            "taxable_amount": "92.48",
+            "nontaxable_amount": "30.84",
+            "vat_rate": "13.00",
+            "vat_amount": "12.02",
+            "total": "135.34",
+            "tds_amount": "0.00",
+            "settlement_due": "135.34"
+        }
+    },
+    {
+        "name": "rate with four decimals",
+        "lines": [
+            {
+                "quantity": "7",
+                "rate": "12.3456",
+                "vatable": true
+            }
+        ],
+        "header": {
+            "vat_rate": "13"
+        },
+        "expected": {
+            "lines": [
+                {
+                    "quantity": "7.0000",
+                    "rate": "12.3456",
+                    "conversion_factor": "1.0000",
+                    "base_quantity": "7.0000",
+                    "gross": "86.42",
+                    "discount_type": "flat",
+                    "discount_value": "0.00",
+                    "discount_amount": "0.00",
+                    "line_total": "86.42",
+                    "vatable": true
+                }
+            ],
+            "vatable_subtotal": "86.42",
+            "non_vatable_subtotal": "0.00",
+            "header_discount": "0.00",
+            "header_discount_vatable": "0.00",
+            "header_discount_non_vatable": "0.00",
+            "taxable_amount": "86.42",
+            "nontaxable_amount": "0.00",
+            "vat_rate": "13.00",
+            "vat_amount": "11.23",
+            "total": "97.65",
+            "tds_amount": "0.00",
+            "settlement_due": "97.65"
+        }
+    },
+    {
+        "name": "fractional quantity in boxes of 12",
+        "lines": [
+            {
+                "quantity": "1.5",
+                "rate": "99.99",
+                "conversion_factor": "12",
+                "vatable": true
+            }
+        ],
+        "header": {
+            "vat_rate": "13"
+        },
+        "expected": {
+            "lines": [
+                {
+                    "quantity": "1.5000",
+                    "rate": "99.9900",
+                    "conversion_factor": "12.0000",
+                    "base_quantity": "18.0000",
+                    "gross": "149.99",
+                    "discount_type": "flat",
+                    "discount_value": "0.00",
+                    "discount_amount": "0.00",
+                    "line_total": "149.99",
+                    "vatable": true
+                }
+            ],
+            "vatable_subtotal": "149.99",
+            "non_vatable_subtotal": "0.00",
+            "header_discount": "0.00",
+            "header_discount_vatable": "0.00",
+            "header_discount_non_vatable": "0.00",
+            "taxable_amount": "149.99",
+            "nontaxable_amount": "0.00",
+            "vat_rate": "13.00",
+            "vat_amount": "19.50",
+            "total": "169.49",
+            "tds_amount": "0.00",
+            "settlement_due": "169.49"
+        }
+    },
+    {
+        "name": "zero VAT rate on a vatable line",
+        "lines": [
+            {
+                "quantity": "4",
+                "rate": "25.25",
+                "vatable": true
+            }
+        ],
+        "header": {
+            "vat_rate": "0"
+        },
+        "expected": {
+            "lines": [
+                {
+                    "quantity": "4.0000",
+                    "rate": "25.2500",
+                    "conversion_factor": "1.0000",
+                    "base_quantity": "4.0000",
+                    "gross": "101.00",
+                    "discount_type": "flat",
+                    "discount_value": "0.00",
+                    "discount_amount": "0.00",
+                    "line_total": "101.00",
+                    "vatable": true
+                }
+            ],
+            "vatable_subtotal": "101.00",
+            "non_vatable_subtotal": "0.00",
+            "header_discount": "0.00",
+            "header_discount_vatable": "0.00",
+            "header_discount_non_vatable": "0.00",
+            "taxable_amount": "101.00",
+            "nontaxable_amount": "0.00",
+            "vat_rate": "0.00",
+            "vat_amount": "0.00",
+            "total": "101.00",
+            "tds_amount": "0.00",
+            "settlement_due": "101.00"
+        }
+    },
+    {
+        "name": "expected total matching the calculated total",
+        "lines": [
+            {
+                "quantity": "1.5",
+                "rate": "33.33",
+                "vatable": true
+            }
+        ],
+        "header": {
+            "vat_rate": "13",
+            "expected_total": "56.50"
+        },
+        "expected": {
+            "lines": [
+                {
+                    "quantity": "1.5000",
+                    "rate": "33.3300",
+                    "conversion_factor": "1.0000",
+                    "base_quantity": "1.5000",
+                    "gross": "50.00",
+                    "discount_type": "flat",
+                    "discount_value": "0.00",
+                    "discount_amount": "0.00",
+                    "line_total": "50.00",
+                    "vatable": true
+                }
+            ],
+            "vatable_subtotal": "50.00",
+            "non_vatable_subtotal": "0.00",
+            "header_discount": "0.00",
+            "header_discount_vatable": "0.00",
+            "header_discount_non_vatable": "0.00",
+            "taxable_amount": "50.00",
+            "nontaxable_amount": "0.00",
+            "vat_rate": "13.00",
+            "vat_amount": "6.50",
+            "total": "56.50",
+            "tds_amount": "0.00",
+            "settlement_due": "56.50"
+        }
+    },
+    {
+        "name": "error flat line discount of 20 on a 10.00 line",
+        "lines": [
+            {
+                "quantity": "1",
+                "rate": "10.00",
+                "discount": "20",
+                "discount_type": "flat",
+                "vatable": true
+            }
+        ],
+        "header": {
+            "vat_rate": "13"
+        },
+        "expected_error": "line_discount_exceeds_line"
+    },
+    {
+        "name": "error single negative line",
+        "lines": [
+            {
+                "quantity": "-1",
+                "rate": "10.00",
+                "vatable": true
+            }
+        ],
+        "header": {
+            "vat_rate": "13"
+        },
+        "expected_error": "subtotal_not_positive"
+    },
+    {
+        "name": "error quantity with five decimals",
+        "lines": [
+            {
+                "quantity": "0.00004",
+                "rate": "1000000.00",
+                "vatable": true
+            }
+        ],
+        "header": {
+            "vat_rate": "13"
+        },
+        "expected_error": "too_many_decimals"
+    },
+    {
+        "name": "error line discount of 101 percent",
+        "lines": [
+            {
+                "quantity": "1",
+                "rate": "10.00",
+                "discount": "101",
+                "discount_type": "percentage",
+                "vatable": true
+            }
+        ],
+        "header": {
+            "vat_rate": "13"
+        },
+        "expected_error": "percentage_out_of_range"
+    },
+    {
+        "name": "error flat header discount of 2000 on a subtotal of 1500",
+        "lines": [
+            {
+                "quantity": "1",
+                "rate": "1500.00",
+                "vatable": true
+            }
+        ],
+        "header": {
+            "vat_rate": "13",
+            "discount": "2000",
+            "discount_type": "flat"
+        },
+        "expected_error": "header_discount_exceeds_subtotal"
+    },
+    {
+        "name": "error TDS of 2000 on a base of 1000",
+        "lines": [
+            {
+                "quantity": "1",
+                "rate": "1000.00",
+                "vatable": true
+            }
+        ],
+        "header": {
+            "vat_rate": "13",
+            "tds_amount": "2000"
+        },
+        "expected_error": "tds_exceeds_base"
+    },
+    {
+        "name": "error negative vatable group with a header discount",
+        "lines": [
+            {
+                "quantity": "1",
+                "rate": "10.00",
+                "vatable": true
+            },
+            {
+                "quantity": "-1",
+                "rate": "20.00",
+                "vatable": true
+            },
+            {
+                "quantity": "1",
+                "rate": "100.00",
+                "vatable": false
+            }
+        ],
+        "header": {
+            "vat_rate": "13",
+            "discount": "10",
+            "discount_type": "flat"
+        },
+        "expected_error": "negative_group_total"
+    },
+    {
+        "name": "error 100 percent header discount",
+        "lines": [
+            {
+                "quantity": "1",
+                "rate": "1000.00",
+                "vatable": true
+            }
+        ],
+        "header": {
+            "vat_rate": "13",
+            "discount": "100",
+            "discount_type": "percentage"
+        },
+        "expected_error": "total_not_positive"
+    },
+    {
+        "name": "error expected total of 56.49 on a 56.50 bill",
+        "lines": [
+            {
+                "quantity": "1.5",
+                "rate": "33.33",
+                "vatable": true
+            }
+        ],
+        "header": {
+            "vat_rate": "13",
+            "expected_total": "56.49"
+        },
+        "expected_error": "total_mismatch"
+    },
+    {
+        "name": "error rate below zero",
+        "lines": [
+            {
+                "quantity": "1",
+                "rate": "-10.00",
+                "vatable": true
+            }
+        ],
+        "header": {
+            "vat_rate": "13"
+        },
+        "expected_error": "negative_rate"
+    },
+    {
+        "name": "error conversion factor of zero",
+        "lines": [
+            {
+                "quantity": "1",
+                "rate": "10.00",
+                "conversion_factor": "0",
+                "vatable": true
+            }
+        ],
+        "header": {
+            "vat_rate": "13"
+        },
+        "expected_error": "invalid_conversion_factor"
+    },
+    {
+        "name": "error negative line discount",
+        "lines": [
+            {
+                "quantity": "1",
+                "rate": "10.00",
+                "discount": "-1",
+                "discount_type": "flat",
+                "vatable": true
+            }
+        ],
+        "header": {
+            "vat_rate": "13"
+        },
+        "expected_error": "negative_discount"
+    },
+    {
+        "name": "error negative line discount percentage",
+        "lines": [
+            {
+                "quantity": "1",
+                "rate": "10.00",
+                "discount": "-5",
+                "discount_type": "percentage",
+                "vatable": true
+            }
+        ],
+        "header": {
+            "vat_rate": "13"
+        },
+        "expected_error": "negative_discount"
+    },
+    {
+        "name": "error rate with five decimals",
+        "lines": [
+            {
+                "quantity": "1",
+                "rate": "1.23456",
+                "vatable": true
+            }
+        ],
+        "header": {
+            "vat_rate": "13"
+        },
+        "expected_error": "too_many_decimals"
+    },
+    {
+        "name": "error negative VAT rate",
+        "lines": [
+            {
+                "quantity": "1",
+                "rate": "10.00",
+                "vatable": true
+            }
+        ],
+        "header": {
+            "vat_rate": "-1"
+        },
+        "expected_error": "percentage_out_of_range"
+    },
+    {
+        "name": "error VAT rate above a hundred",
+        "lines": [
+            {
+                "quantity": "1",
+                "rate": "10.00",
+                "vatable": true
+            }
+        ],
+        "header": {
+            "vat_rate": "101"
+        },
+        "expected_error": "percentage_out_of_range"
+    },
+    {
+        "name": "error VAT rate with three decimals",
+        "lines": [
+            {
+                "quantity": "1",
+                "rate": "10.00",
+                "vatable": true
+            }
+        ],
+        "header": {
+            "vat_rate": "13.005"
+        },
+        "expected_error": "too_many_decimals"
+    },
+    {
+        "name": "error negative header discount percentage",
+        "lines": [
+            {
+                "quantity": "1",
+                "rate": "100.00",
+                "vatable": true
+            }
+        ],
+        "header": {
+            "vat_rate": "13",
+            "discount": "-5",
+            "discount_type": "percentage"
+        },
+        "expected_error": "negative_discount"
+    },
+    {
+        "name": "error negative flat header discount",
+        "lines": [
+            {
+                "quantity": "1",
+                "rate": "100.00",
+                "vatable": true
+            }
+        ],
+        "header": {
+            "vat_rate": "13",
+            "discount": "-5",
+            "discount_type": "flat"
+        },
+        "expected_error": "negative_discount"
+    },
+    {
+        "name": "error unknown line discount type",
+        "lines": [
+            {
+                "quantity": "1",
+                "rate": "100.00",
+                "discount": "5",
+                "discount_type": "fixed",
+                "vatable": true
+            }
+        ],
+        "header": {
+            "vat_rate": "13"
+        },
+        "expected_error": "invalid_number"
+    },
+    {
+        "name": "error missing VAT rate",
+        "lines": [
+            {
+                "quantity": "1",
+                "rate": "10.00",
+                "vatable": true
+            }
+        ],
+        "header": [],
+        "expected_error": "invalid_number"
+    }
+]
