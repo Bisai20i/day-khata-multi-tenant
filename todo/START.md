@@ -148,8 +148,8 @@ isolation. Agent prompt template:
 
 | Task | Title | Phase | Status | Commit(s) |
 |---|---|---|---|---|
-| T01 | Backend money foundation | 1 | pending | |
-| T02 | Frontend money foundation | 1 | pending | |
+| T01 | Backend money foundation | 1 | done, tests not run | 91c68d3 |
+| T02 | Frontend money foundation | 1 | done, tests not run | 3a317f3 |
 | T03 | Ledger core, numbering, settings | 2 | pending | |
 | T04 | Sales and POS | 2 | pending | |
 | T05 | Sales returns and receipts | 2 | pending | |
@@ -163,4 +163,27 @@ isolation. Agent prompt template:
 | T13 | Purchase and inventory parity features | 4 | pending | |
 | T14 | Accounting parity features | 4 | pending | |
 
-Gate notes / open questions: none yet.
+Gate notes / open questions:
+
+**Phase 1 gate, 2026-09-12.** Preflight commit `333eaa9`. T01 `91c68d3`, T02 `3a317f3`, gate `1601b68`.
+Ownership clean, `php -l` clean, Pint passed, no banned float op outside the sanctioned `Money::round()`.
+
+- Cross-engine check: all **43 golden vectors** replayed through both `DocumentCalculator` (PHP) and
+  `calculateDocument` (JS) by the coordinator: 43/43 match on both sides.
+- One real divergence was caught and fixed: a negative **percentage** discount gave `negative_discount` on
+  the server and `percentage_out_of_range` in the browser, at line level and header level. JS was aligned to
+  the server and a vector was added for the line case, which nothing had covered. See the C3 addendum in
+  `CONTRACTS.md`.
+- **Awaiting the user:** `php artisan test tests/Unit/Support` and `node --test tests/js` (or `npm run test:js`).
+  No agent has run any test yet.
+
+Carry into Phase 2 (from T02's report):
+
+1. Replace the six UTC `new Date().toISOString().slice(0, 10)` date defaults with `todayInKathmandu()` from
+   `@/lib/format`: `Sales/Pos.vue:95`, `Sales/Receipts/Create.vue:34`, `Purchases/Payments/Create.vue:34`,
+   `Assets/FixedAssets/Index.vue:69`, `Inventory/Items/Index.vue:356,361`. Each is a day early between
+   00:00 and 05:44 Kathmandu time. Owned by T04, T06, T08, T13.
+2. `required` on `<Input>` is now actually enforced by the browser (71 usages). Whoever touches a form in
+   Phase 2 gives its required fields one pass.
+3. Every document form submits `expected_total` and handles the C8 422 (already in C8; T03/T04 own the first
+   implementations).
