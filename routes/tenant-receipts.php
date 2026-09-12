@@ -21,6 +21,10 @@ Route::name('tenant.')->group(function () {
     Route::prefix('receipts')->name('receipts.')->group(function () {
         Route::get('/', [ReceiptController::class, 'index'])->name('index');
         Route::post('/', [ReceiptController::class, 'store'])->name('store');
-        Route::post('/{receipt}/cancel', [ReceiptController::class, 'cancel'])->name('cancel');
+        // Cancelling a receipt reverses money already collected, so it is
+        // admin-only (CONTRACTS C5).
+        Route::post('/{receipt}/cancel', [ReceiptController::class, 'cancel'])
+            ->middleware('role:admin')
+            ->name('cancel');
     });
 });

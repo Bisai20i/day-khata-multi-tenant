@@ -29,7 +29,12 @@ Route::name('tenant.')->group(function () {
         Route::post('/request', [SalesReturnController::class, 'requestReturn'])->name('request');
         Route::post('/{salesReturn}/approve', [SalesReturnController::class, 'approve'])->name('approve');
         Route::post('/{salesReturn}/reject', [SalesReturnController::class, 'reject'])->name('reject');
-        Route::post('/{salesReturn}/cancel', [SalesReturnController::class, 'cancel'])->name('cancel');
+        // Cancelling a posted credit note reverses real money, so it is
+        // admin-only (CONTRACTS C5) - unlike request/approve/reject, which
+        // every tenant user may drive.
+        Route::post('/{salesReturn}/cancel', [SalesReturnController::class, 'cancel'])
+            ->middleware('role:admin')
+            ->name('cancel');
         Route::get('/{salesReturn}/print', [SalesReturnController::class, 'print'])->name('print');
     });
 });

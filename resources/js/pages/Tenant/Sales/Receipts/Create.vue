@@ -7,6 +7,8 @@ import Input from '@/components/ui/Input.vue';
 import Select from '@/components/ui/Select.vue';
 import Combobox from '@/components/ui/Combobox.vue';
 import NepaliDateInput from '@/components/ui/NepaliDateInput.vue';
+import { addMoney, compareMoney, formatMoney, isZeroMoney, parseMoney } from '@/lib/money';
+import { todayInKathmandu, formatBsDate } from '@/lib/format';
 
 const props = defineProps({
     customers: { type: Array, default: () => [] },
@@ -20,7 +22,7 @@ const customerOptions = computed(() => props.customers.map((c) => ({ value: c.id
 const accountOptions = computed(() =>
     props.accounts.map((account) => ({
         value: account.id,
-        label: account.code ? `${account.code} — ${account.name}` : account.name,
+        label: account.code ? `${account.code} - ${account.name}` : account.name,
     })),
 );
 
@@ -31,7 +33,9 @@ const paymentModeOptions = [
 
 const form = useForm({
     customer_id: null,
-    date: new Date().toISOString().slice(0, 10),
+    // Kathmandu's today, not the browser's UTC today: between midnight and
+    // 05:45 Nepal time a UTC default dates the receipt a day early.
+    date: todayInKathmandu(),
     amount: '',
     payment_mode: 'cash',
     bank_account_id: null,
@@ -61,19 +65,70 @@ watch(
     },
 );
 
-const totalAllocated = computed(() =>
-    customerSales.value.reduce((sum, sale) => sum + (Number(allocationAmounts[sale.id]) || 0), 0),
+/**
+ * The allocations as the server will read them: a valid, positive amount per
+ * invoice. Everything is an exact 2dp string end to end - a 0.01 allocation
+ * is as real as any other, and one paisa over an invoice's outstanding
+ * balance is refused rather than absorbed by a tolerance (audit P0-4).
+ */
+const allocations = computed(() =>
+    customerSales.value
+        .map((sale) => ({ sale, parsed: parseMoney(allocationAmounts[sale.id] ?? '') }))
+        .filter(({ parsed }) => parsed.ok && !isZeroMoney(parsed.value))
+        .map(({ sale, parsed }) => ({ sale_id: sale.id, amount: parsed.value })),
+);
+
+const allocationErrors = computed(() =>
+    customerSales.value
+        .filter((sale) => {
+            const raw = allocationAmounts[sale.id];
+
+            if (raw === undefined || raw === null || String(raw).trim() === '') {
+                return false;
+            }
+
+            const parsed = parseMoney(raw);
+
+            return !parsed.ok || compareMoney(parsed.value, sale.outstanding) > 0 || compareMoney(parsed.value, '0.00') < 0;
+        })
+        .map((sale) => sale.id),
+);
+
+const totalAllocated = computed(() => {
+    let total = '0.00';
+
+    for (const allocation of allocations.value) {
+        total = addMoney(total, allocation.amount);
+    }
+
+    return total;
+});
+
+const receiptAmount = computed(() => {
+    const parsed = parseMoney(form.amount === '' ? '0' : form.amount);
+
+    return parsed.ok ? parsed.value : null;
+});
+
+const overAllocated = computed(
+    () => receiptAmount.value !== null && compareMoney(totalAllocated.value, receiptAmount.value) > 0,
+);
+
+const canSubmit = computed(
+    () =>
+        !form.processing
+        && !!form.customer_id
+        && receiptAmount.value !== null
+        && compareMoney(receiptAmount.value, '0.00') > 0
+        && allocationErrors.value.length === 0
+        && !overAllocated.value,
 );
 
 function submit() {
-    const allocations = customerSales.value
-        .filter((sale) => Number(allocationAmounts[sale.id]) > 0)
-        .map((sale) => ({ sale_id: sale.id, amount: Number(allocationAmounts[sale.id]) }));
-
     form.transform((data) => ({
         ...data,
-        amount: Number(data.amount) || 0,
-        allocations,
+        amount: receiptAmount.value,
+        allocations: allocations.value,
     })).post('/receipts', {
         preserveScroll: true,
         onSuccess: () => emit('posted'),
@@ -107,7 +162,10 @@ function submit() {
                 </div>
                 <div>
                     <label class="mb-1 block text-sm font-semibold text-text-base">Amount <span class="text-danger">*</span></label>
-                    <Input v-model="form.amount" type="number" min="0.01" step="0.01" placeholder="0.00" required />
+                    <Input v-model="form.amount" type="text" inputmode="decimal" placeholder="0.00" required />
+                    <p v-if="form.amount !== '' && receiptAmount === null" class="mt-1 text-sm text-danger">
+                        Enter an amount with at most 2 decimals.
+                    </p>
                     <p v-if="form.errors.amount" class="mt-1 text-sm text-danger">{{ form.errors.amount }}</p>
                 </div>
                 <div>
@@ -119,7 +177,7 @@ function submit() {
                     />
                 </div>
                 <div v-if="showBankAccount">
-                    <label class="mb-1 block text-sm font-semibold text-text-base">Bank Account</label>
+                    <label class="mb-1 block text-sm font-semibold text-text-base">Bank Account <span class="text-danger">*</span></label>
                     <Combobox
                         :model-value="form.bank_account_id"
                         :options="accountOptions"
@@ -140,40 +198,52 @@ function submit() {
 
             <div v-if="form.customer_id">
                 <p class="mb-2 text-sm font-semibold text-text-base">Allocate against outstanding invoices (optional)</p>
-                <p v-if="!customerSales.length" class="text-sm text-text-muted">This customer has no outstanding credit sales.</p>
+                <p v-if="!customerSales.length" class="text-sm text-text-muted">This customer has no outstanding invoices.</p>
 
                 <div v-else class="flex flex-col gap-2">
-                    <div class="grid grid-cols-[100px_1fr_110px_110px_130px] gap-2 text-[10px] font-bold tracking-[.8px] text-text-muted uppercase">
+                    <div class="grid grid-cols-[110px_1fr_110px_110px_130px] gap-2 text-[10px] font-bold tracking-[.8px] text-text-muted uppercase">
                         <span>Date</span>
-                        <span>Sale</span>
-                        <span>Total</span>
-                        <span>Outstanding</span>
+                        <span>Invoice</span>
+                        <span class="text-right">Total</span>
+                        <span class="text-right">Outstanding</span>
                         <span>Allocate</span>
                     </div>
-                    <div v-for="sale in customerSales" :key="sale.id" class="grid grid-cols-[100px_1fr_110px_110px_130px] items-center gap-2">
-                        <span class="text-sm text-text-base">{{ sale.date }}</span>
-                        <span class="text-sm text-text-base">Sale #{{ sale.id }}</span>
-                        <span class="text-sm text-text-base">{{ Number(sale.total).toFixed(2) }}</span>
-                        <span class="text-sm text-text-base">{{ Number(sale.outstanding).toFixed(2) }}</span>
-                        <Input v-model="allocationAmounts[sale.id]" type="number" min="0" step="0.01" placeholder="0.00" />
+                    <div v-for="sale in customerSales" :key="sale.id" class="grid grid-cols-[110px_1fr_110px_110px_130px] items-center gap-2">
+                        <span class="text-sm text-text-base">{{ formatBsDate(sale.date) }}</span>
+                        <span class="text-sm text-text-base">{{ sale.invoice_number ?? `Sale #${sale.id}` }}</span>
+                        <span class="text-right text-sm text-text-base">{{ formatMoney(sale.total) }}</span>
+                        <span class="text-right text-sm text-text-base">{{ formatMoney(sale.outstanding) }}</span>
+                        <Input
+                            :model-value="allocationAmounts[sale.id] ?? ''"
+                            type="text"
+                            inputmode="decimal"
+                            placeholder="0.00"
+                            @update:model-value="(v) => (allocationAmounts[sale.id] = v)"
+                        />
                     </div>
                 </div>
 
+                <p v-if="allocationErrors.length" class="mt-2 text-sm text-danger">
+                    An allocation is not a valid amount, or is more than that invoice still owes.
+                </p>
+                <p v-if="overAllocated" class="mt-2 text-sm text-danger">Allocations add up to more than the receipt amount.</p>
                 <p v-if="form.errors.allocations" class="mt-2 text-sm text-danger">{{ form.errors.allocations }}</p>
             </div>
 
-            <div class="grid grid-cols-1 gap-2 border-t-[1.5px] border-border pt-3 text-sm">
+            <div class="grid grid-cols-2 gap-2 border-t-[1.5px] border-border pt-3 text-sm">
                 <div>
                     <p class="text-[10px] font-bold tracking-[.8px] text-text-muted uppercase">Allocated total</p>
-                    <p class="font-bold text-text-strong">{{ totalAllocated.toFixed(2) }}</p>
+                    <p class="font-bold text-text-strong">{{ formatMoney(totalAllocated) }}</p>
+                </div>
+                <div>
+                    <p class="text-[10px] font-bold tracking-[.8px] text-text-muted uppercase">Receipt amount</p>
+                    <p class="font-bold text-text-strong">{{ receiptAmount === null ? '-' : formatMoney(receiptAmount) }}</p>
                 </div>
             </div>
 
             <div class="flex items-center justify-end gap-2">
                 <Button variant="secondary" tone="purple" type="button" @click="emit('cancel')">Cancel</Button>
-                <Button variant="primary" tone="purple" type="submit" :disabled="form.processing || !form.customer_id">
-                    Save receipt
-                </Button>
+                <Button variant="primary" tone="purple" type="submit" :disabled="!canSubmit">Save receipt</Button>
             </div>
         </form>
     </Card>

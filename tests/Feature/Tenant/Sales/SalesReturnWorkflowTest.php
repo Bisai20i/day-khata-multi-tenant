@@ -12,6 +12,8 @@ use App\Models\Sale;
 use App\Models\SalesReturn;
 use App\Models\Tenant;
 use App\Models\User;
+use App\Support\Money\Money;
+use App\Support\Money\Quantity;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 
 /**
@@ -71,9 +73,11 @@ test('requesting a return posts no journal voucher and no stock movement', funct
 
         expect($return->status)->toBe('pending')
             ->and($return->journal_voucher_id)->toBeNull()
-            ->and((float) $return->taxable_amount)->toBe(400.0)
-            ->and((float) $return->vat_amount)->toBe(52.0)
-            ->and((float) $return->total)->toBe(452.0)
+            // A request is never a credit note, so it carries no number (C7).
+            ->and($return->credit_note_number)->toBeNull()
+            ->and((string) $return->taxable_amount)->toBe('400.00')
+            ->and((string) $return->vat_amount)->toBe('52.00')
+            ->and((string) $return->total)->toBe('452.00')
             ->and(JournalVoucher::count())->toBe($voucherCountBefore)
             ->and(ItemStockMovement::count())->toBe($movementCountBefore)
             ->and($return->lines)->toHaveCount(1);
@@ -118,16 +122,20 @@ test('approving a pending request posts the voucher and stock movement, and cann
             ->and($posted->journal_voucher_id)->not->toBeNull();
 
         $voucher = $posted->journalVoucher;
-        expect((float) $voucher->lines->sum('debit'))->toBe((float) $voucher->lines->sum('credit'))
-            // Posted using the return's own requested date, not "today".
-            ->and($voucher->date->format('Y-m-d'))->toBe('2026-06-05');
+        expect(Money::sum($voucher->lines->pluck('debit'))->toString())
+            ->toBe(Money::sum($voucher->lines->pluck('credit'))->toString());
+        // Posted using the return's own requested date, not "today", and
+        // numbered only now that it is a real credit note (C7).
+        expect($voucher->date->format('Y-m-d'))->toBe('2026-06-05')
+            ->and($posted->credit_note_number)->toBe('SR-1')
+            ->and($posted->fiscal_year_id)->toBe($voucher->fiscal_year_id);
 
-        expect((float) $item->fresh()->currentStock())->toBe(-6.0);
+        expect($item->fresh()->currentStock()->toString())->toBe('-6.0000');
 
         $movement = ItemStockMovement::where('item_id', $item->id)
             ->where('movement_type', StockMovementType::SaleReturn)
             ->firstOrFail();
-        expect((float) $movement->quantity)->toBe(4.0);
+        expect(Quantity::of($movement->quantity)->toString())->toBe('4.0000');
 
         expect(fn () => $posted->approve($approver))->toThrow(InvalidArgumentException::class);
     });
@@ -172,7 +180,7 @@ test('rejecting a pending request records the reason, posts nothing, and frees t
             [['sale_line_id' => $saleLine->id, 'quantity' => 5]],
             $admin,
         );
-        expect((float) $newReturn->total)->toBeGreaterThan(0);
+        expect(Money::of($newReturn->total)->isPositive())->toBeTrue();
 
         // A rejected request cannot be approved or cancelled.
         expect(fn () => $rejected->approve($admin))->toThrow(InvalidArgumentException::class);

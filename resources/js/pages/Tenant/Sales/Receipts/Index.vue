@@ -1,6 +1,6 @@
 <script setup>
 import { computed, h, ref, watch } from 'vue';
-import { useForm, usePage } from '@inertiajs/vue3';
+import { Link, useForm, usePage } from '@inertiajs/vue3';
 import { Plus } from '@lucide/vue';
 import AppLayout from '@/layouts/AppLayout.vue';
 import Card from '@/components/ui/Card.vue';
@@ -10,10 +10,15 @@ import Modal from '@/components/ui/Modal.vue';
 import DataTable from '@/components/ui/DataTable.vue';
 import { useToast } from '@/composables/useToast';
 import { navGroups } from '@/lib/nav-items.js';
+import { formatMoney, sumMoney } from '@/lib/money';
+import { formatBsDate } from '@/lib/format';
 import Create from './Create.vue';
 
 const props = defineProps({
-    receipts: { type: Array, default: () => [] },
+    receipts: {
+        type: Object,
+        default: () => ({ data: [], current_page: 1, last_page: 1, total: 0, from: 0, to: 0, prev_page_url: null, next_page_url: null }),
+    },
     customers: { type: Array, default: () => [] },
     accounts: { type: Array, default: () => [] },
     outstandingSales: { type: Array, default: () => [] },
@@ -22,8 +27,7 @@ const props = defineProps({
 const page = usePage();
 const { toast } = useToast();
 
-const isAdmin = computed(() => page.props.auth?.user?.role?.slug === 'admin');
-const navItems = computed(() => navGroups(isAdmin.value));
+const navItems = computed(() => navGroups(page.props.auth?.user?.role?.slug === 'admin'));
 
 // Store/cancel both redirect back to this same route + component, which
 // Inertia re-renders in place without an onMounted re-run - watch flash
@@ -60,8 +64,15 @@ function submitCancel() {
     });
 }
 
+const isAdmin = computed(() => page.props.auth?.user?.role?.slug === 'admin');
+
 const columns = [
-    { accessorKey: 'date', header: 'Date' },
+    {
+        id: 'date',
+        header: 'Date',
+        numeric: false,
+        cell: ({ row }) => formatBsDate(row.original.date),
+    },
     {
         id: 'customer',
         header: 'Customer',
@@ -72,7 +83,7 @@ const columns = [
         id: 'amount',
         header: 'Amount',
         numeric: true,
-        cell: ({ row }) => Number(row.original.amount).toFixed(2),
+        cell: ({ row }) => formatMoney(row.original.amount),
     },
     {
         id: 'mode',
@@ -84,7 +95,7 @@ const columns = [
         id: 'allocated',
         header: 'Allocated',
         numeric: true,
-        cell: ({ row }) => (row.original.allocations ?? []).reduce((sum, a) => sum + Number(a.amount), 0).toFixed(2),
+        cell: ({ row }) => formatMoney(sumMoney((row.original.allocations ?? []).map((allocation) => allocation.amount))),
     },
     {
         id: 'status',
@@ -97,7 +108,9 @@ const columns = [
         header: 'Actions',
         numeric: false,
         cell: ({ row }) =>
-            row.original.status === 'posted'
+            // Cancelling reverses money already collected, so the route is
+            // admin-only (C5) - do not offer a button that would 403.
+            row.original.status === 'posted' && isAdmin.value
                 ? h(Button, {
                       variant: 'secondary',
                       tone: 'purple',
@@ -131,7 +144,37 @@ const columns = [
             </div>
 
             <Card variant="panel">
-                <DataTable :columns="columns" :data="receipts" :page-size="10" empty-message="No receipts yet" />
+                <DataTable
+                    :columns="columns"
+                    :data="receipts.data"
+                    :page-size="Math.max(receipts.data.length, 1)"
+                    empty-message="No receipts yet"
+                />
+
+                <div v-if="receipts.data.length > 0" class="mt-3 flex flex-wrap items-center justify-between gap-3">
+                    <p class="text-xs text-text-muted">Showing {{ receipts.from }}-{{ receipts.to }} of {{ receipts.total }}</p>
+                    <div class="flex items-center gap-2">
+                        <Link
+                            v-if="receipts.prev_page_url"
+                            :href="receipts.prev_page_url"
+                            preserve-state
+                            preserve-scroll
+                            class="inline-flex items-center border-[1.5px] border-border bg-white px-3 py-1.5 text-xs font-semibold text-text-muted transition-colors duration-150 ease-out hover:border-primary hover:text-primary"
+                        >
+                            Previous
+                        </Link>
+                        <span class="text-xs text-text-muted">Page {{ receipts.current_page }} of {{ receipts.last_page }}</span>
+                        <Link
+                            v-if="receipts.next_page_url"
+                            :href="receipts.next_page_url"
+                            preserve-state
+                            preserve-scroll
+                            class="inline-flex items-center border-[1.5px] border-border bg-white px-3 py-1.5 text-xs font-semibold text-text-muted transition-colors duration-150 ease-out hover:border-primary hover:text-primary"
+                        >
+                            Next
+                        </Link>
+                    </div>
+                </div>
             </Card>
         </template>
 
@@ -142,7 +185,7 @@ const columns = [
                 </p>
                 <div>
                     <label class="mb-1 block text-sm font-semibold text-text-base">Reason <span class="text-danger">*</span></label>
-                    <Input v-model="cancelForm.reason" type="text" placeholder="e.g. Entered wrong amount" required />
+                    <Input v-model="cancelForm.reason" type="text" placeholder="e.g. Entered wrong amount" maxlength="500" required />
                     <p v-if="cancelForm.errors.reason" class="mt-1 text-sm text-danger">{{ cancelForm.errors.reason }}</p>
                 </div>
             </form>

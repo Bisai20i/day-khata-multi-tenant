@@ -10,10 +10,13 @@ use App\Models\Item;
 use App\Models\ItemStockMovement;
 use App\Models\JournalVoucher;
 use App\Models\JournalVoucherLine;
+use App\Models\Role;
 use App\Models\Sale;
 use App\Models\SalesReturn;
 use App\Models\Tenant;
 use App\Models\User;
+use App\Support\Money\Money;
+use App\Support\Money\Quantity;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 
 uses(RefreshDatabase::class);
@@ -62,7 +65,7 @@ test('returning part of one line posts a balanced voucher and increases stock', 
             $admin,
         );
 
-        expect($itemA->fresh()->currentStock())->toBe(-10.0);
+        expect($itemA->fresh()->currentStock()->toString())->toBe('-10.0000');
 
         $saleLineA = $sale->lines()->where('item_id', $itemA->id)->firstOrFail();
 
@@ -73,19 +76,20 @@ test('returning part of one line posts a balanced voucher and increases stock', 
         );
 
         // 4 of 10 units @ effective unit price 100 = 400 taxable, 13% VAT = 52.
-        expect((float) $return->taxable_amount)->toBe(400.0)
-            ->and((float) $return->vat_amount)->toBe(52.0)
-            ->and((float) $return->total)->toBe(452.0);
+        expect((string) $return->taxable_amount)->toBe('400.00')
+            ->and((string) $return->vat_amount)->toBe('52.00')
+            ->and((string) $return->total)->toBe('452.00');
 
         $voucher = $return->journalVoucher;
-        expect((float) $voucher->lines->sum('debit'))->toBe((float) $voucher->lines->sum('credit'));
+        expect(Money::sum($voucher->lines->pluck('debit'))->toString())
+            ->toBe(Money::sum($voucher->lines->pluck('credit'))->toString());
 
-        expect($itemA->fresh()->currentStock())->toBe(-6.0);
+        expect($itemA->fresh()->currentStock()->toString())->toBe('-6.0000');
 
         $movement = ItemStockMovement::where('item_id', $itemA->id)
             ->where('movement_type', StockMovementType::SaleReturn)
             ->firstOrFail();
-        expect((float) $movement->quantity)->toBe(4.0);
+        expect(Quantity::of($movement->quantity)->toString())->toBe('4.0000');
     });
 
     $tenant->delete();
@@ -202,15 +206,16 @@ test('cancelling a sales return reverses its voucher, frees the returned quantit
             [['sale_line_id' => $saleLine->id, 'quantity' => 4]],
             $admin,
         );
-        expect($item->fresh()->currentStock())->toBe(-6.0);
+        expect($item->fresh()->currentStock()->toString())->toBe('-6.0000');
 
         $return->cancel($admin, 'Entered in error');
 
         expect($return->fresh()->status)->toBe('cancelled')
-            ->and($item->fresh()->currentStock())->toBe(-10.0);
+            ->and($item->fresh()->currentStock()->toString())->toBe('-10.0000');
 
         $cancelVoucher = JournalVoucher::latest('id')->firstOrFail();
-        expect((float) $cancelVoucher->lines->sum('debit'))->toBe((float) $cancelVoucher->lines->sum('credit'));
+        expect(Money::sum($cancelVoucher->lines->pluck('debit'))->toString())
+            ->toBe(Money::sum($cancelVoucher->lines->pluck('credit'))->toString());
 
         expect(fn () => $return->cancel($admin, 'Again'))->toThrow(InvalidArgumentException::class);
 
@@ -221,7 +226,7 @@ test('cancelling a sales return reverses its voucher, frees the returned quantit
             [['sale_line_id' => $saleLine->id, 'quantity' => 10]],
             $admin,
         );
-        expect((float) $newReturn->total)->toBeGreaterThan(0);
+        expect(Money::of($newReturn->total)->isPositive())->toBeTrue();
     });
 
     $tenant->delete();
@@ -283,8 +288,8 @@ test('a return proportionally reverses the header discount and TDS withheld on t
             [['item_id' => $item->id, 'quantity' => 10, 'rate' => 100, 'discount' => 0]],
             $admin,
         );
-        expect((float) $sale->taxable_amount)->toBe(900.0)
-            ->and((float) $sale->total)->toBe(1017.0);
+        expect((string) $sale->taxable_amount)->toBe('900.00')
+            ->and((string) $sale->total)->toBe('1017.00');
 
         $saleLine = $sale->lines()->firstOrFail();
 
@@ -297,21 +302,24 @@ test('a return proportionally reverses the header discount and TDS withheld on t
         // 4 of 10 units of a 1000 vatable subtotal = 400 gross; the 100
         // header discount is shared proportionally (400/1000 = 40% -> 40),
         // so only 360 counts as taxable; VAT at 13% = 46.8; total = 406.8.
-        expect((float) $return->taxable_amount)->toBe(360.0)
-            ->and((float) $return->vat_amount)->toBe(46.8)
-            ->and((float) $return->total)->toBe(406.8);
+        expect((string) $return->taxable_amount)->toBe('360.00')
+            ->and((string) $return->vat_amount)->toBe('46.80')
+            ->and((string) $return->total)->toBe('406.80');
 
         $voucher = $return->journalVoucher;
-        expect((float) $voucher->lines->sum('debit'))->toBe((float) $voucher->lines->sum('credit'));
+        expect(Money::sum($voucher->lines->pluck('debit'))->toString())
+            ->toBe(Money::sum($voucher->lines->pluck('credit'))->toString());
 
-        // TDS share: 50 * (406.8 / 1017) = 20 exactly. The customer is
-        // credited total-minus-tdsShare (386.8), and the TDS account is
-        // credited the 20 being clawed back.
+        // TDS share: this line carries the whole invoice's 50, of which the
+        // return takes 4 of 10 units = 20.00 exactly - a share of the line's
+        // own component, not of the document total (C6). The customer is
+        // credited total-minus-tdsShare (386.80), the TDS account the 20
+        // being clawed back.
         $tdsLine = $voucher->lines()->where('account_id', $tdsAccount->id)->firstOrFail();
-        expect((float) $tdsLine->credit)->toBe(20.0);
+        expect(Money::of($tdsLine->credit)->toString())->toBe('20.00');
 
         $customerLine = $voucher->lines()->where('account_id', $customer->account_id)->firstOrFail();
-        expect((float) $customerLine->credit)->toBe(386.8);
+        expect(Money::of($customerLine->credit)->toString())->toBe('386.80');
     });
 
     $tenant->delete();
@@ -345,9 +353,9 @@ test('a return proportionally reverses a percentage header discount identically 
             [['item_id' => $item->id, 'quantity' => 10, 'rate' => 100, 'discount' => 0]],
             $admin,
         );
-        expect((float) $sale->discount)->toBe(10.0)
-            ->and((float) $sale->taxable_amount)->toBe(900.0)
-            ->and((float) $sale->total)->toBe(1017.0);
+        expect((string) $sale->discount)->toBe('10.00')
+            ->and((string) $sale->taxable_amount)->toBe('900.00')
+            ->and((string) $sale->total)->toBe('1017.00');
 
         $saleLine = $sale->lines()->firstOrFail();
 
@@ -360,18 +368,19 @@ test('a return proportionally reverses a percentage header discount identically 
         // 4 of 10 units = 400 gross; 10% of that (40, not 400) is the
         // proportional discount reversal, so 360 counts as taxable; VAT at
         // 13% = 46.8; total = 406.8 - identical to the flat-discount case.
-        expect((float) $return->taxable_amount)->toBe(360.0)
-            ->and((float) $return->vat_amount)->toBe(46.8)
-            ->and((float) $return->total)->toBe(406.8);
+        expect((string) $return->taxable_amount)->toBe('360.00')
+            ->and((string) $return->vat_amount)->toBe('46.80')
+            ->and((string) $return->total)->toBe('406.80');
 
         $voucher = $return->journalVoucher;
-        expect((float) $voucher->lines->sum('debit'))->toBe((float) $voucher->lines->sum('credit'));
+        expect(Money::sum($voucher->lines->pluck('debit'))->toString())
+            ->toBe(Money::sum($voucher->lines->pluck('credit'))->toString());
 
         $tdsLine = $voucher->lines()->where('account_id', $tdsAccount->id)->firstOrFail();
-        expect((float) $tdsLine->credit)->toBe(20.0);
+        expect(Money::of($tdsLine->credit)->toString())->toBe('20.00');
 
         $customerLine = $voucher->lines()->where('account_id', $customer->account_id)->firstOrFail();
-        expect((float) $customerLine->credit)->toBe(386.8);
+        expect(Money::of($customerLine->credit)->toString())->toBe('386.80');
     });
 
     $tenant->delete();
@@ -431,21 +440,22 @@ test('a return with a refund account posts a refund settlement voucher and nets 
             $admin,
         );
 
-        expect((float) $return->total)->toBe(282.5)
+        expect((string) $return->total)->toBe('282.50')
             ->and($return->refund_journal_voucher_id)->not->toBeNull();
 
         $refundVoucher = $return->refundJournalVoucher;
-        expect((float) $refundVoucher->lines->sum('debit'))->toBe((float) $refundVoucher->lines->sum('credit'));
+        expect(Money::sum($refundVoucher->lines->pluck('debit'))->toString())
+            ->toBe(Money::sum($refundVoucher->lines->pluck('credit'))->toString());
 
         $customerDebit = $refundVoucher->lines()->where('account_id', $customer->account_id)->firstOrFail();
-        expect((float) $customerDebit->debit)->toBe(282.5);
+        expect(Money::of($customerDebit->debit)->toString())->toBe('282.50');
 
         $bankCredit = $refundVoucher->lines()->where('account_id', $bankAccount->id)->firstOrFail();
-        expect((float) $bankCredit->credit)->toBe(282.5);
+        expect(Money::of($bankCredit->credit)->toString())->toBe('282.50');
 
-        $netBalance = (float) JournalVoucherLine::where('account_id', $customer->account_id)->sum('debit')
-            - (float) JournalVoucherLine::where('account_id', $customer->account_id)->sum('credit');
-        expect($netBalance)->toBe(0.0);
+        $customerLines = JournalVoucherLine::where('account_id', $customer->account_id)->get();
+        $netBalance = Money::sum($customerLines->pluck('debit'))->minus(Money::sum($customerLines->pluck('credit')));
+        expect($netBalance->toString())->toBe('0.00');
     });
 
     $tenant->delete();
@@ -497,6 +507,64 @@ test('the sales returns index page renders and a return can be posted through th
 
     $tenant->run(function () {
         expect(SalesReturn::query()->count())->toBe(1);
+    });
+
+    $tenant->delete();
+});
+
+test('cancelling a credit note over HTTP is admin only', function () {
+    $domain = 'sales-return-cancel-role.tenant-test';
+    $tenant = provisionSalesReturnTestTenant($domain);
+
+    $returnId = null;
+    $tenant->run(function () use (&$returnId) {
+        // A plain tenant user, with no role: they may record a return but not
+        // reverse a posted credit note (CONTRACTS C5).
+        User::factory()->create(['email' => 'clerk@example.com']);
+        salesReturnTestOpenFiscalYear();
+        $admin = salesReturnTestAdmin();
+        $customer = Customer::factory()->create();
+        $item = Item::factory()->create(['is_vatable' => false, 'is_stockable' => false]);
+
+        $sale = Sale::post(
+            ['customer_id' => $customer->id, 'invoice_type' => 'full', 'date' => '2026-06-01', 'payment_mode' => 'credit'],
+            [['item_id' => $item->id, 'quantity' => 5, 'rate' => 10, 'discount' => 0]],
+            $admin,
+        );
+
+        $returnId = SalesReturn::post(
+            ['sale_id' => $sale->id, 'date' => '2026-06-02', 'reason' => null],
+            [['sale_line_id' => $sale->lines()->firstOrFail()->id, 'quantity' => 2]],
+            $admin,
+        )->id;
+    });
+
+    $this->post("http://{$domain}/login", ['email' => 'clerk@example.com', 'password' => 'password']);
+
+    $this->post("http://{$domain}/sales-returns/{$returnId}/cancel", ['reason' => 'Not my call'])
+        ->assertForbidden();
+
+    $tenant->run(function () use ($returnId) {
+        expect(SalesReturn::findOrFail($returnId)->status)->toBe('posted');
+
+        User::factory()->create([
+            'email' => 'boss@example.com',
+            'role_id' => Role::where('slug', 'admin')->value('id'),
+        ]);
+    });
+
+    $this->post("http://{$domain}/login", ['email' => 'boss@example.com', 'password' => 'password']);
+
+    $this->post("http://{$domain}/sales-returns/{$returnId}/cancel", ['reason' => 'Entered in error'])
+        ->assertRedirect("http://{$domain}/sales-returns");
+
+    $tenant->run(function () use ($returnId) {
+        $cancelled = SalesReturn::findOrFail($returnId);
+
+        expect($cancelled->status)->toBe('cancelled')
+            ->and($cancelled->cancel_reason)->toBe('Entered in error')
+            // Cancelling never releases or rewrites the note's own number.
+            ->and($cancelled->credit_note_number)->toBe('SR-1');
     });
 
     $tenant->delete();

@@ -15,6 +15,8 @@ import Combobox from '@/components/ui/Combobox.vue';
 import { useToast } from '@/composables/useToast';
 import { useConfirm } from '@/composables/useConfirm';
 import { navGroups } from '@/lib/nav-items.js';
+import { formatMoney } from '@/lib/money';
+import { formatBsDate } from '@/lib/format';
 import Create from './Create.vue';
 
 const props = defineProps({
@@ -27,9 +29,16 @@ const props = defineProps({
         type: Object,
         default: () => ({ from: null, to: null, customer_id: null }),
     },
-    sales: { type: Array, default: () => [] },
+    // Server-searched, paginated picker for the "which invoice?" step of
+    // the create form (it used to ship every posted sale to the browser).
+    sales: {
+        type: Object,
+        default: () => ({ data: [], current_page: 1, last_page: 1, total: 0, prev_page_url: null, next_page_url: null }),
+    },
+    selectedSale: { type: Object, default: null },
+    saleSearch: { type: String, default: '' },
     customers: { type: Array, default: () => [] },
-    accounts: { type: Array, default: () => [] },
+    refundAccounts: { type: Array, default: () => [] },
     stores: { type: Array, default: () => [] },
 });
 
@@ -148,12 +157,24 @@ function submitReject() {
 }
 
 const requestColumns = [
-    { accessorKey: 'date', header: 'Date' },
+    {
+        id: 'date',
+        header: 'Date',
+        numeric: false,
+        cell: ({ row }) => formatBsDate(row.original.date),
+    },
+    {
+        id: 'request',
+        header: 'Request',
+        numeric: false,
+        // A pending or rejected request is never a numbered credit note (C7).
+        cell: ({ row }) => `Return request #${row.original.id}`,
+    },
     {
         id: 'sale',
-        header: 'Original sale #',
+        header: 'Against invoice',
         numeric: false,
-        cell: ({ row }) => row.original.sale_id,
+        cell: ({ row }) => row.original.sale?.invoice_number ?? `#${row.original.sale_id}`,
     },
     {
         id: 'customer',
@@ -177,7 +198,7 @@ const requestColumns = [
         id: 'total',
         header: 'Total',
         numeric: true,
-        cell: ({ row }) => Number(row.original.total).toFixed(2),
+        cell: ({ row }) => formatMoney(row.original.total),
     },
     {
         id: 'status',
@@ -234,12 +255,24 @@ const requestColumns = [
 ];
 
 const columns = [
-    { accessorKey: 'date', header: 'Date' },
+    {
+        id: 'date',
+        header: 'Date',
+        numeric: false,
+        cell: ({ row }) => formatBsDate(row.original.date),
+    },
+    {
+        id: 'credit_note',
+        header: 'Credit note #',
+        numeric: false,
+        // The stored number, never re-derived from settings at display time (C7).
+        cell: ({ row }) => row.original.credit_note_number ?? '-',
+    },
     {
         id: 'sale',
-        header: 'Original sale #',
+        header: 'Against invoice',
         numeric: false,
-        cell: ({ row }) => row.original.sale_id,
+        cell: ({ row }) => row.original.sale?.invoice_number ?? `#${row.original.sale_id}`,
     },
     {
         id: 'customer',
@@ -257,7 +290,7 @@ const columns = [
         id: 'total',
         header: 'Total',
         numeric: true,
-        cell: ({ row }) => Number(row.original.total).toFixed(2),
+        cell: ({ row }) => formatMoney(row.original.total),
     },
     {
         id: 'status',
@@ -294,7 +327,9 @@ const columns = [
                         [h(Printer, { class: 'h-[13px] w-[13px]' })],
                     ),
                 ),
-                row.original.status === 'cancelled'
+                // Cancelling reverses real money, so the route is admin-only
+                // (C5) - do not offer a button that would 403.
+                row.original.status === 'cancelled' || !isAdmin.value
                     ? null
                     : h(Tooltip, { label: 'Cancel return' }, () =>
                           h(
@@ -318,7 +353,9 @@ const columns = [
         <template v-if="showCreateForm">
             <Create
                 :sales="sales"
-                :accounts="accounts"
+                :selected-sale="selectedSale"
+                :sale-search="saleSearch"
+                :refund-accounts="refundAccounts"
                 :stores="stores"
                 :mode="createMode"
                 @cancel="createMode = null"
@@ -425,7 +462,7 @@ const columns = [
                 </p>
                 <div>
                     <label class="mb-1 block text-sm font-semibold text-text-base">Reason <span class="text-danger">*</span></label>
-                    <Input v-model="cancelForm.reason" type="text" placeholder="Reason for cancellation" required />
+                    <Input v-model="cancelForm.reason" type="text" placeholder="Reason for cancellation" maxlength="500" required />
                     <p v-if="cancelForm.errors.reason" class="mt-1 text-sm text-danger">{{ cancelForm.errors.reason }}</p>
                 </div>
             </form>
@@ -445,7 +482,7 @@ const columns = [
                 </p>
                 <div>
                     <label class="mb-1 block text-sm font-semibold text-text-base">Reason <span class="text-danger">*</span></label>
-                    <Input v-model="rejectForm.reason" type="text" placeholder="Reason for rejection" required />
+                    <Input v-model="rejectForm.reason" type="text" placeholder="Reason for rejection" maxlength="500" required />
                     <p v-if="rejectForm.errors.reason" class="mt-1 text-sm text-danger">{{ rejectForm.errors.reason }}</p>
                 </div>
             </form>

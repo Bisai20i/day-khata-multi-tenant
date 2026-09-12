@@ -75,7 +75,7 @@ test('posting a sales return with an explicit store_id records the return moveme
     $tenant->delete();
 });
 
-test('omitting store_id on a sales return falls back to the default active store', function () {
+test('omitting store_id on a sales return falls back to the store the invoice went out of', function () {
     $tenant = provisionSalesReturnStoreScopingTenant('sales-return-store-fallback.tenant-test');
 
     $tenant->run(function () {
@@ -87,11 +87,14 @@ test('omitting store_id on a sales return falls back to the default active store
         $customer = Customer::factory()->create();
         $item = Item::factory()->create(['is_vatable' => false, 'is_stockable' => true]);
 
-        Store::factory()->create(['is_active' => true]);
-        $defaultStoreId = Store::where('is_active', true)->orderBy('id')->value('id');
+        // A second branch exists, so "the first active store" and "the sale's
+        // store" are only the same answer by luck: the sale below is posted
+        // into the second one deliberately (CONTRACTS C6 - goods go back
+        // where they left from).
+        $branch = Store::factory()->create(['is_active' => true]);
 
         $sale = Sale::post(
-            ['customer_id' => $customer->id, 'invoice_type' => 'full', 'date' => '2026-06-01', 'payment_mode' => 'credit'],
+            ['customer_id' => $customer->id, 'invoice_type' => 'full', 'date' => '2026-06-01', 'payment_mode' => 'credit', 'store_id' => $branch->id],
             [['item_id' => $item->id, 'quantity' => 5, 'rate' => 10, 'discount' => 0]],
             $admin,
         );
@@ -103,7 +106,9 @@ test('omitting store_id on a sales return falls back to the default active store
             $admin,
         );
 
-        expect($return->store_id)->toBe($defaultStoreId);
+        expect($return->store_id)->toBe($sale->store_id)
+            ->and($return->store_id)->toBe($branch->id)
+            ->and($return->store_id)->not->toBe(Store::where('is_active', true)->orderBy('id')->value('id'));
     });
 
     $tenant->delete();
