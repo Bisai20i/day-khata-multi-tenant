@@ -4,15 +4,18 @@ namespace App\Http\Controllers\Tenant\Inventory;
 
 use App\Http\Controllers\Concerns\ImportsCsv;
 use App\Http\Controllers\Controller;
+use App\Models\Account;
 use App\Models\Brand;
 use App\Models\Item;
 use App\Models\ItemCategory;
 use App\Models\ItemSubcategory;
 use App\Models\ItemUnit;
 use Closure;
+use Illuminate\Database\QueryException;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\UploadedFile;
+use Illuminate\Support\Collection as SupportCollection;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Facades\Validator;
@@ -36,6 +39,14 @@ class ItemController extends Controller
     private const IMAGE_DISK = 'public';
 
     /**
+     * Memoised because both the page render and the validation rule ask for
+     * the same list within one request.
+     *
+     * @var SupportCollection<int, array{id: int, code: ?string, name: string, label: string}>|null
+     */
+    private ?SupportCollection $postingAccounts = null;
+
+    /**
      * Columns of the bulk-import template, in the order they're written to
      * the downloadable CSV. Also doubles as the set of fields read back out
      * of an uploaded file's header row (see ImportsCsv::parseCsvRows).
@@ -50,15 +61,30 @@ class ItemController extends Controller
     private const IMPORT_COLUMNS = [
         'name', 'category', 'subcategory', 'unit', 'hs_code', 'barcode',
         'min_stock', 'purchase_rate', 'sale_rate', 'is_vatable', 'is_stockable',
+        'posting_account',
     ];
 
     public function index(): Response
     {
+        $items = Item::query()
+            ->with(['category:id,name', 'subcategory:id,name', 'brand:id,name', 'account:id,code,name', 'units' => fn ($q) => $q->orderBy('name')])
+            ->latest()
+            ->get();
+
+        $stock = Item::currentStockByItem($items->modelKeys());
+
         return Inertia::render('Tenant/Inventory/Items/Index', [
             'categories' => ItemCategory::query()->orderBy('name')->get(['id', 'name']),
             'subcategories' => ItemSubcategory::query()->orderBy('name')->get(['id', 'item_category_id', 'name']),
             'brands' => Brand::query()->orderBy('name')->get(['id', 'name']),
-            'items' => Item::query()->with(['category:id,name', 'subcategory:id,name', 'brand:id,name', 'units' => fn ($q) => $q->orderBy('name')])->latest()->get(),
+            'items' => $items,
+            // Exact decimal strings, never numbers: the page formats them
+            // with money.js and never does arithmetic on them. Also what the
+            // "can this item be deactivated" hint reads.
+            'stockByItem' => $items->mapWithKeys(fn (Item $item) => [
+                $item->id => (string) ($stock[$item->id] ?? '0.0000'),
+            ]),
+            'postingAccounts' => $this->postingAccountOptions()->values(),
         ]);
     }
 
@@ -89,10 +115,26 @@ class ItemController extends Controller
         return redirect()->route('tenant.items.index')->with('status', 'Item updated.');
     }
 
+    /**
+     * Deleting an item that any document has ever referenced hits a
+     * restrictOnDelete foreign key. That used to surface as a raw SQL
+     * exception page (audit P3, "friendly FK error on delete"); here it
+     * comes back as a field error explaining why, and the image is only
+     * removed once the row has actually gone.
+     */
     public function destroy(Item $item): RedirectResponse
     {
-        $this->deleteImage($item->image_path);
-        $item->delete();
+        $imagePath = $item->image_path;
+
+        try {
+            $item->delete();
+        } catch (QueryException) {
+            return back()->withErrors([
+                'item' => "\"{$item->name}\" is used by a bill, a stock movement or another record, so it cannot be deleted. Mark it inactive instead.",
+            ]);
+        }
+
+        $this->deleteImage($imagePath);
 
         return redirect()->route('tenant.items.index')->with('status', 'Item deleted.');
     }
@@ -140,15 +182,22 @@ class ItemController extends Controller
                 'required', 'string', 'max:100',
                 Rule::unique('item_units', 'name')->where('item_id', $item->id)->ignore($itemUnit?->id),
             ],
-            // Never zero/negative - Sale::post()/Purchase::post() multiply
-            // the entered quantity by this to get the base-unit stock
-            // movement, so a zero/negative factor would corrupt every stock
-            // movement this unit is ever used on.
-            'conversion_factor' => ['required', 'numeric', 'min:0.0001'],
-            'purchase_rate' => ['nullable', 'numeric', 'min:0'],
-            'sale_rate' => ['nullable', 'numeric', 'min:0'],
-            'mrp' => ['nullable', 'numeric', 'min:0'],
+            // At least 1, at most 4 decimals. The item's own `unit` is by
+            // definition the SMALLEST unit it is counted in, so an alternate
+            // unit always contains a whole number (or a fraction >= 1) of
+            // them: a "Box" is 12 pcs, never 1/12 of one. Audit P1 found
+            // factors below 1 accepted at 4 decimals, so "1/12" was stored
+            // as 0.0833 and 12 pieces drifted to 0.9996 base units - a
+            // permanent, compounding loss of stock. More than 4 decimals is
+            // rejected rather than silently rounded (the same rule as every
+            // other quantity column, CONTRACTS C2).
+            'conversion_factor' => ['required', 'numeric', 'min:1', 'decimal:0,4'],
+            'purchase_rate' => ['nullable', 'numeric', 'min:0', 'decimal:0,4'],
+            'sale_rate' => ['nullable', 'numeric', 'min:0', 'decimal:0,4'],
+            'mrp' => ['nullable', 'numeric', 'min:0', 'decimal:0,4'],
             'is_active' => ['boolean'],
+        ], [
+            'conversion_factor.min' => 'The conversion must be at least 1: the item\'s own unit is its smallest unit, so an alternate unit holds one or more of them.',
         ]);
     }
 
@@ -161,7 +210,7 @@ class ItemController extends Controller
         return response()->streamDownload(function (): void {
             $handle = fopen('php://output', 'w');
             fputcsv($handle, self::IMPORT_COLUMNS);
-            fputcsv($handle, ['Bottled Water 1L', 'Beverages', '', 'pcs', '2201.10.00', '', '10', '15.00', '20.00', 'yes', 'yes']);
+            fputcsv($handle, ['Bottled Water 1L', 'Beverages', '', 'pcs', '2201.10.00', '', '10', '15.00', '20.00', 'yes', 'yes', 'EXE8']);
             fclose($handle);
         }, 'item-import-template.csv', ['Content-Type' => 'text/csv']);
     }
@@ -191,6 +240,11 @@ class ItemController extends Controller
 
         $categories = ItemCategory::all(['id', 'name'])->keyBy(fn (ItemCategory $category) => strtolower($category->name));
         $subcategories = ItemSubcategory::all(['id', 'item_category_id', 'name']);
+
+        // Matched by code first ("EXE8"), then by name, and only against the
+        // expense/fixed-asset accounts an item is allowed to post to - a
+        // spreadsheet operator can't be expected to know internal ids.
+        $postingAccounts = $this->postingAccountOptions();
 
         $seenBarcodes = [];
         $skipped = [];
@@ -234,6 +288,24 @@ class ItemController extends Controller
                 $subcategoryId = $subcategory->id;
             }
 
+            $postingAccountName = trim($row['posting_account'] ?? '');
+            $postingAccountId = null;
+
+            if ($postingAccountName !== '') {
+                $match = $postingAccounts->first(
+                    fn (array $account) => strtolower((string) $account['code']) === strtolower($postingAccountName)
+                        || strtolower($account['name']) === strtolower($postingAccountName),
+                );
+
+                if (! $match) {
+                    $skipped[] = ['row' => $rowNumber, 'name' => $name, 'reason' => "Unknown posting account \"{$postingAccountName}\" - it must be an expense or fixed asset account."];
+
+                    continue;
+                }
+
+                $postingAccountId = $match['id'];
+            }
+
             $data = [
                 'name' => $name,
                 'unit' => $row['unit'] ?? '',
@@ -249,9 +321,9 @@ class ItemController extends Controller
                 'unit' => ['required', 'string', 'max:50'],
                 'hs_code' => ['nullable', 'string', 'max:30'],
                 'barcode' => ['nullable', 'string', 'max:100', Rule::unique('items', 'barcode')],
-                'min_stock' => ['nullable', 'numeric', 'min:0'],
-                'purchase_rate' => ['nullable', 'numeric', 'min:0'],
-                'sale_rate' => ['nullable', 'numeric', 'min:0'],
+                'min_stock' => ['nullable', 'numeric', 'min:0', 'decimal:0,2'],
+                'purchase_rate' => ['nullable', 'numeric', 'min:0', 'decimal:0,4'],
+                'sale_rate' => ['nullable', 'numeric', 'min:0', 'decimal:0,4'],
             ]);
 
             if ($validator->fails()) {
@@ -275,6 +347,7 @@ class ItemController extends Controller
             $validRows[] = [
                 'item_category_id' => $category->id,
                 'item_subcategory_id' => $subcategoryId,
+                'account_id' => $postingAccountId,
                 'name' => $data['name'],
                 'unit' => $data['unit'],
                 'hs_code' => $data['hs_code'] === '' ? null : $data['hs_code'],
@@ -336,21 +409,99 @@ class ItemController extends Controller
                 },
             ],
             'brand_id' => ['nullable', 'exists:brands,id'],
-            'account_id' => ['nullable', 'exists:accounts,id'],
+            // The ledger account this item's purchases are debited to
+            // (Purchase::post() falls back to EXE8 "Purchases Account" when
+            // it is null). Audit P1: there was no way to set it in the UI at
+            // all, so a service item and a capital item both landed in
+            // EXE8. Restricted to Expense and Fixed Asset accounts, because
+            // those are the only two things buying an item can be.
+            'account_id' => ['nullable', $this->postingAccountRule()],
             'name' => ['required', 'string', 'max:255'],
             'description' => ['nullable', 'string'],
             'unit' => ['required', 'string', 'max:50'],
             'hs_code' => ['nullable', 'string', 'max:30'],
             'barcode' => ['nullable', 'string', 'max:100', Rule::unique('items', 'barcode')->ignore($item?->id)],
-            'min_stock' => ['nullable', 'numeric', 'min:0'],
+            'min_stock' => ['nullable', 'numeric', 'min:0', 'decimal:0,2'],
             'expiry_date' => ['nullable', 'date'],
-            'purchase_rate' => ['nullable', 'numeric', 'min:0'],
-            'sale_rate' => ['nullable', 'numeric', 'min:0'],
+            'purchase_rate' => ['nullable', 'numeric', 'min:0', 'decimal:0,4'],
+            'sale_rate' => ['nullable', 'numeric', 'min:0', 'decimal:0,4'],
             'image' => ['nullable', 'image', 'max:2048'],
             'is_vatable' => ['boolean'],
             'is_stockable' => ['boolean'],
-            'is_active' => ['boolean'],
+            'is_active' => ['boolean', $this->stillStockedRule($item)],
         ]);
+    }
+
+    /**
+     * Refuses to deactivate an item that still has stock on hand (audit P3).
+     * An inactive item disappears from every picker, so the quantity would
+     * sit in the valuation and the Balance Sheet with no way to sell, adjust
+     * or transfer it out. The item has to be emptied first.
+     */
+    private function stillStockedRule(?Item $item): Closure
+    {
+        return function (string $attribute, mixed $value, Closure $fail) use ($item): void {
+            // Nothing to guard when creating, when the item is staying (or
+            // becoming) active, or when it was already inactive.
+            if ($item === null || filter_var($value, FILTER_VALIDATE_BOOLEAN) || ! $item->is_active) {
+                return;
+            }
+
+            $onHand = $item->currentStock();
+
+            if (! $onHand->isZero()) {
+                $fail("\"{$item->name}\" still has {$onHand->formatQuantity()} {$item->unit} in stock. Clear the stock first, or leave the item active.");
+            }
+        };
+    }
+
+    /**
+     * `account_id` must be one of the accounts postingAccountOptions() offers,
+     * not any account at all: a plain `exists:accounts,id` would happily let
+     * an item post its purchases into Sundry Debtors.
+     */
+    private function postingAccountRule(): Closure
+    {
+        return function (string $attribute, mixed $value, Closure $fail): void {
+            if ($value === null || $value === '') {
+                return;
+            }
+
+            if (! $this->postingAccountOptions()->contains(fn (array $account) => $account['id'] === (int) $value)) {
+                $fail('The posting account must be an expense or fixed asset account.');
+            }
+        };
+    }
+
+    /**
+     * Accounts an item may post to: anything under the Expenses head (a
+     * normal stock or service purchase) plus the Fixed Assets group (a
+     * capital item). Resolved in PHP rather than SQL because an account hangs
+     * off either a group or a subgroup, never both (see Account::booted()),
+     * so the head is two different joins away and the table is small enough
+     * that one eager-loaded read is cheaper than the union.
+     *
+     * @return SupportCollection<int, array{id: int, code: ?string, name: string, label: string}>
+     */
+    private function postingAccountOptions(): SupportCollection
+    {
+        return $this->postingAccounts ??= Account::query()
+            ->with(['group.accountHead', 'subgroup.accountGroup.accountHead'])
+            ->orderBy('name')
+            ->get()
+            ->filter(function (Account $account): bool {
+                $group = $account->group ?? $account->subgroup?->accountGroup;
+
+                return $group?->name === 'Fixed Assets'
+                    || ($group?->accountHead->name ?? null) === 'Expenses';
+            })
+            ->map(fn (Account $account) => [
+                'id' => $account->id,
+                'code' => $account->code,
+                'name' => $account->name,
+                'label' => $account->code ? "{$account->code} - {$account->name}" : $account->name,
+            ])
+            ->values();
     }
 
     private function storeImage(UploadedFile $image): string

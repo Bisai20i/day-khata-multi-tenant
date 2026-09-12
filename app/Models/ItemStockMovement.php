@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use App\Casts\Decimal;
 use App\Enums\StockMovementType;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Model;
@@ -13,8 +14,16 @@ use Illuminate\Database\Eloquent\Relations\MorphTo;
  * deliberately decoupled from the ledger (see StockMovementType's docblock).
  * Sales/Purchase/Stock-Adjustment write these directly; nothing here posts
  * a JournalVoucher.
+ *
+ * `quantity` is always in the item's base unit, `unit_cost_rate` is always
+ * the net cost per base unit, and `value` is the exact rupee value of a
+ * priced movement (null when the movement has no cost basis at all - a sale,
+ * a store-to-store transfer, a damage write-off). `unit_cost_rate` is a
+ * derived convenience (`value / quantity`, rounded once); `value` is the
+ * authoritative figure App\Support\Inventory\StockCosting reads. See
+ * CONTRACTS C10 and Item::recordStockMovement().
  */
-#[Fillable(['item_id', 'store_id', 'movement_type', 'quantity', 'unit_cost_rate', 'reference_type', 'reference_id', 'date', 'cancelled', 'narration'])]
+#[Fillable(['item_id', 'store_id', 'movement_type', 'quantity', 'unit_cost_rate', 'value', 'reference_type', 'reference_id', 'date', 'cancelled', 'narration'])]
 class ItemStockMovement extends Model
 {
     /**
@@ -24,8 +33,9 @@ class ItemStockMovement extends Model
     {
         return [
             'movement_type' => StockMovementType::class,
-            'quantity' => 'decimal:4',
-            'unit_cost_rate' => 'decimal:4',
+            'quantity' => Decimal::class.':4',
+            'unit_cost_rate' => Decimal::class.':4',
+            'value' => Decimal::class.':2',
             'date' => 'date',
             'cancelled' => 'boolean',
         ];

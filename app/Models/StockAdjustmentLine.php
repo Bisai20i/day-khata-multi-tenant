@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use App\Casts\Decimal;
 use App\Enums\StockAdjustmentReason;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Model;
@@ -17,9 +18,9 @@ class StockAdjustmentLine extends Model
     {
         return [
             'reason_type' => StockAdjustmentReason::class,
-            'quantity' => 'decimal:4',
-            'unit_cost_rate' => 'decimal:4',
-            'line_value' => 'decimal:2',
+            'quantity' => Decimal::class.':4',
+            'unit_cost_rate' => Decimal::class.':4',
+            'line_value' => Decimal::class.':2',
         ];
     }
 

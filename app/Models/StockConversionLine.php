@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use App\Casts\Decimal;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
@@ -15,9 +16,9 @@ class StockConversionLine extends Model
     protected function casts(): array
     {
         return [
-            'quantity' => 'decimal:4',
-            'unit_cost_rate' => 'decimal:4',
-            'line_value' => 'decimal:2',
+            'quantity' => Decimal::class.':4',
+            'unit_cost_rate' => Decimal::class.':4',
+            'line_value' => Decimal::class.':2',
         ];
     }
 

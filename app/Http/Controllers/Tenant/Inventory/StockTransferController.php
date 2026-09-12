@@ -8,6 +8,7 @@ use App\Models\Item;
 use App\Models\StockTransfer;
 use App\Models\Store;
 use Barryvdh\DomPDF\Facade\Pdf;
+use Illuminate\Auth\Access\AuthorizationException;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\Response as HttpResponse;
@@ -40,8 +41,8 @@ class StockTransferController extends Controller
             'note' => ['nullable', 'string', 'max:255'],
             'lines' => ['required', 'array', 'min:1'],
             'lines.*.item_id' => ['required', 'exists:items,id'],
-            'lines.*.quantity' => ['required', 'numeric', 'min:0.0001'],
-            'lines.*.unit_cost_rate' => ['nullable', 'numeric', 'min:0'],
+            'lines.*.quantity' => ['required', 'numeric', 'min:0.0001', 'decimal:0,4'],
+            'lines.*.unit_cost_rate' => ['nullable', 'numeric', 'min:0', 'decimal:0,4'],
             'lines.*.remarks' => ['nullable', 'string', 'max:255'],
         ], [
             'to_store_id.different' => 'The source and destination store must be different.',
@@ -53,7 +54,12 @@ class StockTransferController extends Controller
                 $data['lines'],
                 $request->user(),
             );
-        } catch (InvalidArgumentException $e) {
+        } catch (InvalidArgumentException|AuthorizationException $e) {
+            // AuthorizationException as well as InvalidArgumentException:
+            // StockTransfer::post() now runs the date through
+            // ClosedFiscalYearGuard (CONTRACTS C4), which throws the former
+            // when a non-admin aims at a reopened closed year. Letting it
+            // escape would render a 403 page instead of a field error.
             return back()->withErrors(['lines' => $e->getMessage()])->withInput();
         }
 
@@ -63,12 +69,12 @@ class StockTransferController extends Controller
     public function cancel(Request $request, StockTransfer $stock_transfer): RedirectResponse
     {
         $data = $request->validate([
-            'reason' => ['required', 'string', 'max:255'],
+            'reason' => ['required', 'string', 'max:500'],
         ]);
 
         try {
             $stock_transfer->cancel($request->user(), $data['reason']);
-        } catch (InvalidArgumentException $e) {
+        } catch (InvalidArgumentException|AuthorizationException $e) {
             return back()->withErrors(['reason' => $e->getMessage()]);
         }
 

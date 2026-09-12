@@ -20,7 +20,11 @@ Route::name('tenant.')->group(function () {
     Route::prefix('stock-transfers')->name('stock-transfers.')->group(function () {
         Route::get('/', [StockTransferController::class, 'index'])->name('index');
         Route::post('/', [StockTransferController::class, 'store'])->name('store');
-        Route::post('/{stock_transfer}/cancel', [StockTransferController::class, 'cancel'])->name('cancel');
+        // Cancelling reverses both halves of the movement, so it is an admin
+        // action everywhere in this app (CONTRACTS C5).
+        Route::post('/{stock_transfer}/cancel', [StockTransferController::class, 'cancel'])
+            ->middleware('role:admin')
+            ->name('cancel');
         Route::get('/{stock_transfer}/print', [StockTransferController::class, 'print'])->name('print');
     });
 });

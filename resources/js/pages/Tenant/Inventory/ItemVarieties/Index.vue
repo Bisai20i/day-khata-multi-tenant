@@ -11,6 +11,7 @@ import Input from '@/components/ui/Input.vue';
 import Select from '@/components/ui/Select.vue';
 import RowActions from '@/components/ui/RowActions.vue';
 import { useToast } from '@/composables/useToast';
+import { formatMoney } from '@/lib/money';
 import { useConfirm } from '@/composables/useConfirm';
 import { navGroups } from '@/lib/nav-items.js';
 
@@ -119,7 +120,7 @@ const columns = [
         id: 'price_adjustment',
         header: 'Price Adjustment',
         numeric: true,
-        cell: ({ row }) => Number(row.original.price_adjustment).toFixed(2),
+        cell: ({ row }) => formatMoney(row.original.price_adjustment),
     },
     {
         id: 'status',

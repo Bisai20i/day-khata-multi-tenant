@@ -38,20 +38,41 @@ class StockAdjustmentController extends Controller
      */
     private const OPENING_STOCK_IMPORT_COLUMNS = ['item', 'quantity', 'unit_cost_rate', 'remarks'];
 
-    public function index(): Response
+    /**
+     * The list is bounded by a date range rather than loading every
+     * adjustment a tenant has ever posted (audit P3, "stock adjustment
+     * pagination"). It defaults to the open fiscal year, which is the window
+     * anyone looking at this screen actually cares about; clearing both
+     * dates falls back to the whole history.
+     */
+    public function index(Request $request): Response
     {
+        $currentYear = FiscalYear::current();
+
+        $from = $request->string('from')->toString() ?: $currentYear?->start_date?->toDateString();
+        $to = $request->string('to')->toString() ?: $currentYear?->end_date?->toDateString();
+
         return Inertia::render('Tenant/Inventory/StockAdjustments/Index', [
             'stockAdjustments' => StockAdjustment::query()
                 ->with(['lines.item:id,name,unit'])
+                ->when($from !== null && $from !== '', fn ($query) => $query->whereDate('date', '>=', $from))
+                ->when($to !== null && $to !== '', fn ($query) => $query->whereDate('date', '<=', $to))
                 ->orderByDesc('date')
                 ->orderByDesc('id')
                 ->get(),
+            'filters' => ['from' => $from, 'to' => $to],
             'items' => Item::query()->where('is_stockable', true)->orderBy('name')->get(['id', 'name', 'unit']),
             'stores' => Store::where('is_active', true)->orderBy('name')->get(),
             // See PurchaseController::index()'s identical prop for the
             // rationale - the one closed year currently reopened for
             // correction, if any.
             'correctionFiscalYear' => FiscalYear::openForCorrection()?->only(['id', 'name', 'reopen_reason']),
+            // Warns before a re-import, which replaces the existing batch
+            // rather than adding to it (see importOpeningStock()).
+            'hasOpeningStockImport' => StockAdjustment::query()
+                ->where('is_opening_import', true)
+                ->where('status', 'posted')
+                ->exists(),
         ]);
     }
 
@@ -67,8 +88,12 @@ class StockAdjustmentController extends Controller
             'lines.*.item_id' => ['required', 'exists:items,id'],
             'lines.*.direction' => ['required', 'in:in,out'],
             'lines.*.reason_type' => ['required', 'in:damage,lost,correction,found,opening,other'],
-            'lines.*.quantity' => ['required', 'numeric', 'min:0.0001'],
-            'lines.*.unit_cost_rate' => ['nullable', 'numeric', 'min:0'],
+            // `decimal:0,4` rejects an over-precise quantity here with a
+            // clean field error instead of letting App\Casts\Decimal throw
+            // further down. Audit P0-5: 0.00004 used to be charged for and
+            // then stored as 0.0000.
+            'lines.*.quantity' => ['required', 'numeric', 'min:0.0001', 'decimal:0,4'],
+            'lines.*.unit_cost_rate' => ['nullable', 'numeric', 'min:0', 'decimal:0,4'],
             'lines.*.remarks' => ['nullable', 'string', 'max:255'],
         ]);
 
@@ -90,12 +115,12 @@ class StockAdjustmentController extends Controller
     public function cancel(Request $request, StockAdjustment $stock_adjustment): RedirectResponse
     {
         $data = $request->validate([
-            'reason' => ['required', 'string', 'max:255'],
+            'reason' => ['required', 'string', 'max:500'],
         ]);
 
         try {
             $stock_adjustment->cancel($request->user(), $data['reason']);
-        } catch (InvalidArgumentException $e) {
+        } catch (InvalidArgumentException|AuthorizationException $e) {
             return back()->withErrors(['reason' => $e->getMessage()]);
         }
 
@@ -155,6 +180,12 @@ class StockAdjustmentController extends Controller
      * import's own rigor, an invalid row is simply skipped and reported
      * rather than aborting the whole file: the StockAdjustment header ends
      * up with only the lines that validated.
+     *
+     * Re-importing **replaces** the previous opening batch instead of
+     * stacking a second set of opening quantities on top of it (audit P1),
+     * and posts the one ledger entry opening stock gets - see
+     * StockAdjustment::postOpeningImport() for both. The UI warns before the
+     * upload so the replacement is never a surprise.
      */
     public function importOpeningStock(Request $request): RedirectResponse
     {
@@ -214,8 +245,8 @@ class StockAdjustmentController extends Controller
                 'quantity' => $row['quantity'] ?? '',
                 'unit_cost_rate' => $row['unit_cost_rate'] ?? '',
             ], [
-                'quantity' => ['required', 'numeric', 'gt:0'],
-                'unit_cost_rate' => ['nullable', 'numeric', 'min:0'],
+                'quantity' => ['required', 'numeric', 'gt:0', 'decimal:0,4'],
+                'unit_cost_rate' => ['nullable', 'numeric', 'min:0', 'decimal:0,4'],
             ]);
 
             if ($validator->fails()) {
@@ -232,17 +263,21 @@ class StockAdjustmentController extends Controller
                 'item_id' => $item->id,
                 'direction' => 'in',
                 'reason_type' => 'opening',
-                'quantity' => (float) $row['quantity'],
-                'unit_cost_rate' => $unitCostRate === '' ? null : (float) $unitCostRate,
+                // Kept as the CSV's own text so App\Support\Money\Quantity
+                // reads the exact decimal the operator typed; a float cast
+                // here is what audit P0-5 was about.
+                'quantity' => trim((string) $row['quantity']),
+                'unit_cost_rate' => $unitCostRate === '' ? null : $unitCostRate,
                 'remarks' => trim($row['remarks'] ?? '') === '' ? null : trim($row['remarks']),
             ];
         }
 
         $imported = 0;
+        $replaced = null;
 
         if ($lines !== []) {
             try {
-                StockAdjustment::post(
+                ['replaced' => $replaced] = StockAdjustment::postOpeningImport(
                     $request->only(['date', 'store_id', 'fiscal_year_id', 'reason']) + ['note' => 'Opening stock import'],
                     $lines,
                     $request->user(),
@@ -257,9 +292,14 @@ class StockAdjustmentController extends Controller
         }
 
         $total = $imported + count($skipped);
+        $status = "Imported opening stock for {$imported} of {$total} item(s).";
+
+        if ($replaced !== null) {
+            $status .= " The previous opening stock import (#{$replaced->id}) was cancelled and replaced.";
+        }
 
         return redirect()->route('tenant.stock-adjustments.index')
-            ->with('status', "Imported opening stock for {$imported} of {$total} item(s).")
-            ->with('importResult', ['imported' => $imported, 'skipped' => $skipped]);
+            ->with('status', $status)
+            ->with('importResult', ['imported' => $imported, 'skipped' => $skipped, 'replaced' => $replaced?->id]);
     }
 }

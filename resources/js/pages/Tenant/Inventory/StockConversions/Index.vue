@@ -11,6 +11,8 @@ import DataTable from '@/components/ui/DataTable.vue';
 import Tooltip from '@/components/ui/Tooltip.vue';
 import { useToast } from '@/composables/useToast';
 import { navGroups } from '@/lib/nav-items.js';
+import { formatMoney, formatQuantity } from '@/lib/money.js';
+import { formatBsDate } from '@/lib/format.js';
 import Create from './Create.vue';
 
 const props = defineProps({
@@ -47,7 +49,7 @@ const typeLabels = {
 function linesSummary(conversion, direction) {
     const lines = (conversion.lines ?? []).filter((line) => line.direction === direction);
     if (!lines.length) return '—';
-    return lines.map((line) => `${line.item?.name ?? '—'} (${Number(line.quantity)})`).join(', ');
+    return lines.map((line) => `${line.item?.name ?? '—'} (${formatQuantity(line.quantity)})`).join(', ');
 }
 
 const cancelling = ref(null);
@@ -73,7 +75,19 @@ function submitCancel() {
 }
 
 const columns = [
-    { accessorKey: 'date', header: 'Date' },
+    {
+        id: 'date',
+        header: 'Date (BS)',
+        numeric: false,
+        // Bikram Sambat first: it is the date a Nepali user works in, and
+        // the one the IRD reads. The AD date stays beside it as the
+        // cross-reference (contract C8 / C9).
+        cell: ({ row }) =>
+            h('div', { class: 'whitespace-nowrap' }, [
+                formatBsDate(row.original.date),
+                h('span', { class: 'ml-1 text-text-faint' }, `(${String(row.original.date ?? '').slice(0, 10)})`),
+            ]),
+    },
     {
         id: 'type',
         header: 'Type',
@@ -102,7 +116,7 @@ const columns = [
         id: 'total_value',
         header: 'Total value',
         numeric: true,
-        cell: ({ row }) => Number(row.original.total_value).toFixed(2),
+        cell: ({ row }) => formatMoney(row.original.total_value),
     },
     {
         id: 'status',

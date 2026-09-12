@@ -1,6 +1,8 @@
 <?php
 
+use App\Enums\FiscalYearStatus;
 use App\Enums\StockMovementType;
+use App\Models\FiscalYear;
 use App\Models\Item;
 use App\Models\ItemStockMovement;
 use App\Models\StockAdjustment;
@@ -14,6 +16,24 @@ uses(RefreshDatabase::class);
 afterEach(function () {
     tenancy()->end();
 });
+
+/**
+ * Every stock document now resolves and guards its fiscal year by date
+ * (CONTRACTS C4, audit P0-11), so the tenant needs one open year wide
+ * enough to hold the dates these tests post on. firstOrCreate, so a test
+ * that opens the tenant twice does not try to open a second year.
+ */
+function stockAdjustmentTestOpenFiscalYear(): FiscalYear
+{
+    return FiscalYear::firstOrCreate(
+        ['name' => '2026'],
+        [
+            'start_date' => '2026-01-01',
+            'end_date' => '2026-12-31',
+            'status' => FiscalYearStatus::Open,
+        ],
+    );
+}
 
 function provisionStockAdjustmentTestTenant(string $domain): Tenant
 {
@@ -32,6 +52,7 @@ test('an "in" adjustment increases current stock', function () {
     $tenant = provisionStockAdjustmentTestTenant('stock-adjustment-in.tenant-test');
 
     $tenant->run(function () {
+        stockAdjustmentTestOpenFiscalYear();
         $actor = stockAdjustmentTestActor();
         $item = Item::factory()->create(['is_stockable' => true]);
 
@@ -41,7 +62,7 @@ test('an "in" adjustment increases current stock', function () {
             $actor,
         );
 
-        expect($item->fresh()->currentStock())->toBe(5.0)
+        expect($item->fresh()->currentStock()->toString())->toBe('5.0000')
             ->and((float) $adjustment->total_value)->toBe(50.0);
     });
 
@@ -52,6 +73,7 @@ test('an "out" adjustment decreases current stock', function () {
     $tenant = provisionStockAdjustmentTestTenant('stock-adjustment-out.tenant-test');
 
     $tenant->run(function () {
+        stockAdjustmentTestOpenFiscalYear();
         $actor = stockAdjustmentTestActor();
         $item = Item::factory()->create(['is_stockable' => true]);
 
@@ -67,7 +89,7 @@ test('an "out" adjustment decreases current stock', function () {
             $actor,
         );
 
-        expect($item->fresh()->currentStock())->toBe(6.0);
+        expect($item->fresh()->currentStock()->toString())->toBe('6.0000');
     });
 
     $tenant->delete();
@@ -77,6 +99,7 @@ test('an "out" line exceeding current stock is rejected', function () {
     $tenant = provisionStockAdjustmentTestTenant('stock-adjustment-oversell.tenant-test');
 
     $tenant->run(function () {
+        stockAdjustmentTestOpenFiscalYear();
         $actor = stockAdjustmentTestActor();
         $item = Item::factory()->create(['is_stockable' => true]);
 
@@ -92,7 +115,7 @@ test('an "out" line exceeding current stock is rejected', function () {
             $actor,
         ))->toThrow(InvalidArgumentException::class);
 
-        expect($item->fresh()->currentStock())->toBe(3.0);
+        expect($item->fresh()->currentStock()->toString())->toBe('3.0000');
     });
 
     $tenant->delete();
@@ -102,6 +125,7 @@ test('damage and lost reasons are always zero-valued regardless of a supplied un
     $tenant = provisionStockAdjustmentTestTenant('stock-adjustment-zero-value.tenant-test');
 
     $tenant->run(function () {
+        stockAdjustmentTestOpenFiscalYear();
         $actor = stockAdjustmentTestActor();
         $item = Item::factory()->create(['is_stockable' => true]);
 
@@ -130,6 +154,7 @@ test('reason_type opening forces direction to "in" even if "out" was passed', fu
     $tenant = provisionStockAdjustmentTestTenant('stock-adjustment-opening-forces-in.tenant-test');
 
     $tenant->run(function () {
+        stockAdjustmentTestOpenFiscalYear();
         $actor = stockAdjustmentTestActor();
         $item = Item::factory()->create(['is_stockable' => true]);
 
@@ -140,7 +165,7 @@ test('reason_type opening forces direction to "in" even if "out" was passed', fu
         );
 
         expect($adjustment->lines->first()->direction)->toBe('in')
-            ->and($item->fresh()->currentStock())->toBe(7.0);
+            ->and($item->fresh()->currentStock()->toString())->toBe('7.0000');
 
         $movement = ItemStockMovement::where('item_id', $item->id)->firstOrFail();
         expect($movement->movement_type)->toBe(StockMovementType::Opening);
@@ -153,6 +178,7 @@ test('a zero or negative quantity is rejected at the model layer', function () {
     $tenant = provisionStockAdjustmentTestTenant('stock-adjustment-bad-quantity.tenant-test');
 
     $tenant->run(function () {
+        stockAdjustmentTestOpenFiscalYear();
         $actor = stockAdjustmentTestActor();
         $item = Item::factory()->create(['is_stockable' => true]);
 
@@ -176,6 +202,7 @@ test('cancelling reverts the stock impact and rejects double-cancellation', func
     $tenant = provisionStockAdjustmentTestTenant('stock-adjustment-cancel.tenant-test');
 
     $tenant->run(function () {
+        stockAdjustmentTestOpenFiscalYear();
         $actor = stockAdjustmentTestActor();
         $item = Item::factory()->create(['is_stockable' => true]);
 
@@ -185,7 +212,7 @@ test('cancelling reverts the stock impact and rejects double-cancellation', func
             $actor,
         );
 
-        expect($item->fresh()->currentStock())->toBe(8.0);
+        expect($item->fresh()->currentStock()->toString())->toBe('8.0000');
 
         $adjustment->cancel($actor, 'Recorded in error');
 
@@ -195,7 +222,7 @@ test('cancelling reverts the stock impact and rejects double-cancellation', func
             ->whereIn('reference_id', $lineIds)
             ->where('cancelled', false)
             ->count())->toBe(0)
-            ->and($item->fresh()->currentStock())->toBe(0.0)
+            ->and($item->fresh()->currentStock()->toString())->toBe('0.0000')
             ->and($adjustment->fresh()->status)->toBe('cancelled');
 
         expect(fn () => $adjustment->cancel($actor, 'Again'))->toThrow(InvalidArgumentException::class);

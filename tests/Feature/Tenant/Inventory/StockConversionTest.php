@@ -1,6 +1,8 @@
 <?php
 
+use App\Enums\FiscalYearStatus;
 use App\Enums\StockMovementType;
+use App\Models\FiscalYear;
 use App\Models\Item;
 use App\Models\ItemStockMovement;
 use App\Models\StockConversion;
@@ -15,6 +17,24 @@ uses(RefreshDatabase::class);
 afterEach(function () {
     tenancy()->end();
 });
+
+/**
+ * Every stock document now resolves and guards its fiscal year by date
+ * (CONTRACTS C4, audit P0-11), so the tenant needs one open year wide
+ * enough to hold the dates these tests post on. firstOrCreate, so a test
+ * that opens the tenant twice does not try to open a second year.
+ */
+function stockConversionTestOpenFiscalYear(): FiscalYear
+{
+    return FiscalYear::firstOrCreate(
+        ['name' => '2026'],
+        [
+            'start_date' => '2026-01-01',
+            'end_date' => '2026-12-31',
+            'status' => FiscalYearStatus::Open,
+        ],
+    );
+}
 
 function provisionStockConversionTestTenant(string $domain): Tenant
 {
@@ -33,6 +53,7 @@ test('production consumes raw materials and produces a finished good with correc
     $tenant = provisionStockConversionTestTenant('stock-conversion-production.tenant-test');
 
     $tenant->run(function () {
+        stockConversionTestOpenFiscalYear();
         $actor = stockConversionTestActor();
         $rawA = Item::factory()->create(['is_stockable' => true, 'name' => 'Raw A']);
         $rawB = Item::factory()->create(['is_stockable' => true, 'name' => 'Raw B']);
@@ -58,9 +79,9 @@ test('production consumes raw materials and produces a finished good with correc
 
         expect($conversion->type->value)->toBe('production')
             ->and($conversion->store_id)->toBe($store->id)
-            ->and($rawA->fresh()->currentStock($store->id))->toBe(10.0)
-            ->and($rawB->fresh()->currentStock($store->id))->toBe(3.0)
-            ->and($finished->fresh()->currentStock($store->id))->toBe(5.0);
+            ->and($rawA->fresh()->currentStock($store->id)->toString())->toBe('10.0000')
+            ->and($rawB->fresh()->currentStock($store->id)->toString())->toBe('3.0000')
+            ->and($finished->fresh()->currentStock($store->id)->toString())->toBe('5.0000');
 
         $movements = ItemStockMovement::query()
             ->where('reference_type', (new StockConversionLine)->getMorphClass())
@@ -91,6 +112,7 @@ test('refining converts an input item into a different output item', function ()
     $tenant = provisionStockConversionTestTenant('stock-conversion-refining.tenant-test');
 
     $tenant->run(function () {
+        stockConversionTestOpenFiscalYear();
         $actor = stockConversionTestActor();
         $raw = Item::factory()->create(['is_stockable' => true, 'name' => 'Raw Ore']);
         $refined = Item::factory()->create(['is_stockable' => true, 'name' => 'Refined Metal']);
@@ -106,8 +128,8 @@ test('refining converts an input item into a different output item', function ()
         );
 
         expect($conversion->type->value)->toBe('refining')
-            ->and($raw->fresh()->currentStock($store->id))->toBe(0.0)
-            ->and($refined->fresh()->currentStock($store->id))->toBe(40.0);
+            ->and($raw->fresh()->currentStock($store->id)->toString())->toBe('0.0000')
+            ->and($refined->fresh()->currentStock($store->id)->toString())->toBe('40.0000');
 
         $movement = ItemStockMovement::where('item_id', $refined->id)->firstOrFail();
         expect($movement->movement_type)->toBe(StockMovementType::RefiningIn);
@@ -120,6 +142,7 @@ test('repackaging converts input items into output items with dedicated repackag
     $tenant = provisionStockConversionTestTenant('stock-conversion-repackaging.tenant-test');
 
     $tenant->run(function () {
+        stockConversionTestOpenFiscalYear();
         $actor = stockConversionTestActor();
         $bulk = Item::factory()->create(['is_stockable' => true, 'name' => 'Bulk Sack (50kg)']);
         $retail = Item::factory()->create(['is_stockable' => true, 'name' => 'Retail Bag (1kg)']);
@@ -135,8 +158,8 @@ test('repackaging converts input items into output items with dedicated repackag
         );
 
         expect($conversion->type->value)->toBe('repackaging')
-            ->and($bulk->fresh()->currentStock($store->id))->toBe(0.0)
-            ->and($retail->fresh()->currentStock($store->id))->toBe(8.0);
+            ->and($bulk->fresh()->currentStock($store->id)->toString())->toBe('0.0000')
+            ->and($retail->fresh()->currentStock($store->id)->toString())->toBe('8.0000');
 
         $movements = ItemStockMovement::query()
             ->where('reference_type', (new StockConversionLine)->getMorphClass())
@@ -157,6 +180,7 @@ test('consuming more of an input item than is currently in stock is rejected and
     $tenant = provisionStockConversionTestTenant('stock-conversion-oversell.tenant-test');
 
     $tenant->run(function () {
+        stockConversionTestOpenFiscalYear();
         $actor = stockConversionTestActor();
         $raw = Item::factory()->create(['is_stockable' => true]);
         $finished = Item::factory()->create(['is_stockable' => true]);
@@ -171,8 +195,8 @@ test('consuming more of an input item than is currently in stock is rejected and
             $actor,
         ))->toThrow(InvalidArgumentException::class);
 
-        expect($raw->fresh()->currentStock($store->id))->toBe(5.0)
-            ->and($finished->fresh()->currentStock($store->id))->toBe(0.0)
+        expect($raw->fresh()->currentStock($store->id)->toString())->toBe('5.0000')
+            ->and($finished->fresh()->currentStock($store->id)->toString())->toBe('0.0000')
             ->and(StockConversion::count())->toBe(0);
     });
 
@@ -183,6 +207,7 @@ test('an input item appearing on more than one line has its requested quantity a
     $tenant = provisionStockConversionTestTenant('stock-conversion-aggregate.tenant-test');
 
     $tenant->run(function () {
+        stockConversionTestOpenFiscalYear();
         $actor = stockConversionTestActor();
         $raw = Item::factory()->create(['is_stockable' => true]);
         $finished = Item::factory()->create(['is_stockable' => true]);
@@ -202,7 +227,7 @@ test('an input item appearing on more than one line has its requested quantity a
             $actor,
         ))->toThrow(InvalidArgumentException::class);
 
-        expect($raw->fresh()->currentStock($store->id))->toBe(10.0);
+        expect($raw->fresh()->currentStock($store->id)->toString())->toBe('10.0000');
     });
 
     $tenant->delete();
@@ -212,6 +237,7 @@ test('a conversion posted at a non-default store only checks and moves stock at 
     $tenant = provisionStockConversionTestTenant('stock-conversion-store-scope.tenant-test');
 
     $tenant->run(function () {
+        stockConversionTestOpenFiscalYear();
         $actor = stockConversionTestActor();
         $raw = Item::factory()->create(['is_stockable' => true]);
         $finished = Item::factory()->create(['is_stockable' => true]);
@@ -228,8 +254,8 @@ test('a conversion posted at a non-default store only checks and moves stock at 
             $actor,
         ))->toThrow(InvalidArgumentException::class);
 
-        expect($raw->fresh()->currentStock($defaultStore->id))->toBe(10.0)
-            ->and($raw->fresh()->currentStock($secondStore->id))->toBe(0.0);
+        expect($raw->fresh()->currentStock($defaultStore->id)->toString())->toBe('10.0000')
+            ->and($raw->fresh()->currentStock($secondStore->id)->toString())->toBe('0.0000');
     });
 
     $tenant->delete();
@@ -239,6 +265,7 @@ test('at least one input and one output line are required', function () {
     $tenant = provisionStockConversionTestTenant('stock-conversion-required-lines.tenant-test');
 
     $tenant->run(function () {
+        stockConversionTestOpenFiscalYear();
         $actor = stockConversionTestActor();
         $item = Item::factory()->create(['is_stockable' => true]);
 
@@ -264,6 +291,7 @@ test('cancelling reverts the stock impact of every line and rejects double-cance
     $tenant = provisionStockConversionTestTenant('stock-conversion-cancel.tenant-test');
 
     $tenant->run(function () {
+        stockConversionTestOpenFiscalYear();
         $actor = stockConversionTestActor();
         $raw = Item::factory()->create(['is_stockable' => true]);
         $finished = Item::factory()->create(['is_stockable' => true]);
@@ -278,13 +306,13 @@ test('cancelling reverts the stock impact of every line and rejects double-cance
             $actor,
         );
 
-        expect($raw->fresh()->currentStock($store->id))->toBe(0.0)
-            ->and($finished->fresh()->currentStock($store->id))->toBe(4.0);
+        expect($raw->fresh()->currentStock($store->id)->toString())->toBe('0.0000')
+            ->and($finished->fresh()->currentStock($store->id)->toString())->toBe('4.0000');
 
         $conversion->cancel($actor, 'Recorded in error');
 
-        expect($raw->fresh()->currentStock($store->id))->toBe(10.0)
-            ->and($finished->fresh()->currentStock($store->id))->toBe(0.0)
+        expect($raw->fresh()->currentStock($store->id)->toString())->toBe('10.0000')
+            ->and($finished->fresh()->currentStock($store->id)->toString())->toBe('0.0000')
             ->and($conversion->fresh()->status)->toBe('cancelled');
 
         expect(fn () => $conversion->cancel($actor, 'Again'))->toThrow(InvalidArgumentException::class);

@@ -9,6 +9,7 @@ use App\Models\Item;
 use App\Models\StockConversion;
 use App\Models\Store;
 use Barryvdh\DomPDF\Facade\Pdf;
+use Illuminate\Auth\Access\AuthorizationException;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\Response as HttpResponse;
@@ -41,13 +42,13 @@ class StockConversionController extends Controller
             'store_id' => ['nullable', 'integer', 'exists:stores,id'],
             'input_lines' => ['required', 'array', 'min:1'],
             'input_lines.*.item_id' => ['required', 'exists:items,id'],
-            'input_lines.*.quantity' => ['required', 'numeric', 'min:0.0001'],
-            'input_lines.*.unit_cost_rate' => ['nullable', 'numeric', 'min:0'],
+            'input_lines.*.quantity' => ['required', 'numeric', 'min:0.0001', 'decimal:0,4'],
+            'input_lines.*.unit_cost_rate' => ['nullable', 'numeric', 'min:0', 'decimal:0,4'],
             'input_lines.*.remarks' => ['nullable', 'string', 'max:255'],
             'output_lines' => ['required', 'array', 'min:1'],
             'output_lines.*.item_id' => ['required', 'exists:items,id'],
-            'output_lines.*.quantity' => ['required', 'numeric', 'min:0.0001'],
-            'output_lines.*.unit_cost_rate' => ['nullable', 'numeric', 'min:0'],
+            'output_lines.*.quantity' => ['required', 'numeric', 'min:0.0001', 'decimal:0,4'],
+            'output_lines.*.unit_cost_rate' => ['nullable', 'numeric', 'min:0', 'decimal:0,4'],
             'output_lines.*.remarks' => ['nullable', 'string', 'max:255'],
         ]);
 
@@ -58,7 +59,12 @@ class StockConversionController extends Controller
                 $data['output_lines'],
                 $request->user(),
             );
-        } catch (InvalidArgumentException $e) {
+        } catch (InvalidArgumentException|AuthorizationException $e) {
+            // AuthorizationException as well as InvalidArgumentException:
+            // StockConversion::post() now runs the date through
+            // ClosedFiscalYearGuard (CONTRACTS C4), which throws the former
+            // when a non-admin aims at a reopened closed year. Letting it
+            // escape would render a 403 page instead of a field error.
             return back()->withErrors(['input_lines' => $e->getMessage()])->withInput();
         }
 
@@ -68,12 +74,12 @@ class StockConversionController extends Controller
     public function cancel(Request $request, StockConversion $stock_conversion): RedirectResponse
     {
         $data = $request->validate([
-            'reason' => ['required', 'string', 'max:255'],
+            'reason' => ['required', 'string', 'max:500'],
         ]);
 
         try {
             $stock_conversion->cancel($request->user(), $data['reason']);
-        } catch (InvalidArgumentException $e) {
+        } catch (InvalidArgumentException|AuthorizationException $e) {
             return back()->withErrors(['reason' => $e->getMessage()]);
         }
 

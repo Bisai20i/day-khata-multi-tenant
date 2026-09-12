@@ -15,6 +15,8 @@ import RowActions from '@/components/ui/RowActions.vue';
 import { useToast } from '@/composables/useToast';
 import { useConfirm } from '@/composables/useConfirm';
 import { navGroups } from '@/lib/nav-items.js';
+import { formatQuantity, formatRate } from '@/lib/money.js';
+import { todayInKathmandu } from '@/lib/format.js';
 
 const props = defineProps({
     categories: {
@@ -30,6 +32,17 @@ const props = defineProps({
         default: () => [],
     },
     items: {
+        type: Array,
+        default: () => [],
+    },
+    // Exact decimal strings keyed by item id, never numbers - see
+    // ItemController::index().
+    stockByItem: {
+        type: Object,
+        default: () => ({}),
+    },
+    // Expense and Fixed Asset accounts an item may post its purchases to.
+    postingAccounts: {
         type: Array,
         default: () => [],
     },
@@ -62,6 +75,22 @@ const brandOptions = computed(() => [
     { value: '', label: 'None' },
     ...props.brands.map((brand) => ({ value: brand.id, label: brand.name })),
 ]);
+
+const postingAccountOptions = computed(() => [
+    { value: '', label: 'Default (Purchases Account)' },
+    ...props.postingAccounts.map((account) => ({ value: account.id, label: account.label })),
+]);
+
+// "0.0000" when the item has never moved. Kept as a string all the way to
+// the formatter: this is a quantity, so it never goes through Number().
+function stockOnHand(item) {
+    return props.stockByItem[item.id] ?? '0.0000';
+}
+
+function hasStock(item) {
+    const onHand = stockOnHand(item);
+    return onHand !== '0.0000' && onHand !== '0';
+}
 
 const showModal = ref(false);
 const editing = ref(null);
@@ -113,6 +142,7 @@ const form = useForm({
     item_category_id: '',
     item_subcategory_id: '',
     brand_id: '',
+    account_id: '',
     name: '',
     description: '',
     unit: '',
@@ -132,6 +162,7 @@ form.transform((data) => ({
     ...data,
     item_subcategory_id: data.item_subcategory_id === '' ? null : data.item_subcategory_id,
     brand_id: data.brand_id === '' ? null : data.brand_id,
+    account_id: data.account_id === '' ? null : data.account_id,
     description: data.description === '' ? null : data.description,
     hs_code: data.hs_code === '' ? null : data.hs_code,
     barcode: data.barcode === '' ? null : data.barcode,
@@ -177,6 +208,7 @@ function openEdit(item) {
     form.item_category_id = item.item_category_id;
     form.item_subcategory_id = item.item_subcategory_id ?? '';
     form.brand_id = item.brand_id ?? '';
+    form.account_id = item.account_id ?? '';
     form.name = item.name;
     form.description = item.description ?? '';
     form.unit = item.unit;
@@ -221,7 +253,14 @@ function submit() {
 
 async function destroy(item) {
     if (!(await confirm({ message: 'Delete this item?', tone: 'danger', confirmLabel: 'Delete' }))) return;
-    router.delete(`/items/${item.id}`);
+    router.delete(`/items/${item.id}`, {
+        // The server refuses to delete an item any document references and
+        // returns a field error instead of a raw SQL page - surface it here,
+        // since this row action has no form of its own to render errors in.
+        onError: (errors) => {
+            if (errors.item) toast({ message: errors.item, variant: 'danger' });
+        },
+    });
 }
 
 // --- Alternate units ("Box" = 12 "pcs", etc.) --------------------------
@@ -347,18 +386,22 @@ function printBarcodeLabels() {
 // correctly the same way whereDate() does server-side. item.expiry_date may
 // be null (most items won't have one) or a full ISO datetime string, hence
 // the slice(0, 10).
+//
+// "Today" is today in Kathmandu, not in UTC: toISOString() returns the UTC
+// day, so between midnight and 05:44 local time it named yesterday and an
+// item expiring today was shown as still good (contract C8).
 const EXPIRING_SOON_WITHIN_DAYS = 30;
 
 function expiryStatus(item) {
     if (!item.expiry_date) return null;
 
     const expiry = item.expiry_date.slice(0, 10);
-    const today = new Date().toISOString().slice(0, 10);
+    const today = todayInKathmandu();
     if (expiry <= today) return 'expired';
 
     const soonUntil = new Date();
     soonUntil.setDate(soonUntil.getDate() + EXPIRING_SOON_WITHIN_DAYS);
-    if (expiry <= soonUntil.toISOString().slice(0, 10)) return 'soon';
+    if (expiry <= todayInKathmandu(soonUntil)) return 'soon';
 
     return null;
 }
@@ -398,16 +441,26 @@ const columns = [
         cell: ({ row }) => row.original.brand?.name ?? '—',
     },
     {
+        id: 'stock',
+        header: 'In stock',
+        numeric: true,
+        // 4-decimal quantities shown as quantities, trailing zeros trimmed -
+        // audit P3 found this column rendering a 4dp value at 2dp.
+        cell: ({ row }) => (row.original.is_stockable ? formatQuantity(stockOnHand(row.original)) : '—'),
+    },
+    {
         id: 'purchase_rate',
         header: 'Purchase rate',
         numeric: true,
-        cell: ({ row }) => (row.original.purchase_rate != null ? Number(row.original.purchase_rate).toFixed(2) : '—'),
+        // formatRate, not toFixed(2): a rate legitimately carries 4 decimals
+        // and 12.3456 must not print as 12.35 (audit P0-1/P3).
+        cell: ({ row }) => (row.original.purchase_rate != null ? formatRate(row.original.purchase_rate) : '—'),
     },
     {
         id: 'sale_rate',
         header: 'Sale rate',
         numeric: true,
-        cell: ({ row }) => (row.original.sale_rate != null ? Number(row.original.sale_rate).toFixed(2) : '—'),
+        cell: ({ row }) => (row.original.sale_rate != null ? formatRate(row.original.sale_rate) : '—'),
     },
     {
         id: 'expiry',
@@ -564,6 +617,22 @@ const columns = [
                     </div>
                 </div>
 
+                <div>
+                    <label for="account_id" class="mb-1 block text-sm font-semibold text-text-base">Posting account</label>
+                    <Combobox
+                        id="account_id"
+                        :model-value="form.account_id"
+                        :options="postingAccountOptions"
+                        placeholder="Default (Purchases Account)"
+                        @update:model-value="(v) => (form.account_id = v)"
+                    />
+                    <p class="mt-1 text-xs text-text-faint">
+                        Where buying this item is posted in the ledger. Leave it on the default for ordinary stock.
+                        Pick an expense account for a service item, or a fixed asset account for a capital item.
+                    </p>
+                    <p v-if="form.errors.account_id" class="mt-1 text-sm text-danger">{{ form.errors.account_id }}</p>
+                </div>
+
                 <div class="grid grid-cols-2 gap-4">
                     <div>
                         <label for="min_stock" class="mb-1 block text-sm font-semibold text-text-base">Minimum stock</label>
@@ -629,6 +698,13 @@ const columns = [
                         <label for="is_active" class="text-sm font-semibold text-text-base">Active</label>
                     </div>
                 </div>
+
+                <p v-if="editing && hasStock(editing) && !form.is_active" class="border-[1.5px] border-warning-text bg-warning-bg px-3 py-2 text-sm text-warning-text">
+                    This item still has {{ formatQuantity(stockOnHand(editing)) }} {{ editing.unit }} in stock. An inactive item
+                    disappears from every picker, so that stock could never be sold, adjusted or transferred out. Clear the stock
+                    first.
+                </p>
+                <p v-if="form.errors.is_active" class="text-sm text-danger">{{ form.errors.is_active }}</p>
             </form>
 
             <template #footer>
@@ -643,9 +719,10 @@ const columns = [
             <div v-if="!importResult" class="flex flex-col gap-4">
                 <p class="text-[13px] text-text-muted">
                     Download the template, fill in one item per row (category/subcategory are matched by name),
-                    then upload the completed CSV file. Rows with a missing name/unit, an unknown category or
-                    subcategory, or a barcode already in use (or repeated in the file) are skipped and reported
-                    after import.
+                    then upload the completed CSV file. Rows with a missing name/unit, an unknown category,
+                    subcategory or posting account, or a barcode already in use (or repeated in the file) are
+                    skipped and reported after import. The optional <strong>posting_account</strong> column takes
+                    an expense or fixed asset account code such as EXE8.
                 </p>
                 <a
                     href="/items/import/template"
@@ -721,7 +798,9 @@ const columns = [
                 <p class="text-[13px] text-text-muted">
                     Alternate units this item can be bought/sold in, alongside its base unit
                     (<strong>{{ unitsItem.unit }}</strong>). E.g. a "Box" with a conversion of 12 means
-                    selling 1 Box moves 12 {{ unitsItem.unit }} out of stock.
+                    selling 1 Box moves 12 {{ unitsItem.unit }} out of stock. The base unit is always the
+                    smallest one, so a conversion is never below 1: to sell in halves, make the half the base
+                    unit instead.
                 </p>
 
                 <div v-if="unitsItem.units?.length" class="border-[1.5px] border-border">
@@ -740,10 +819,10 @@ const columns = [
                         <tbody>
                             <tr v-for="unit in unitsItem.units" :key="unit.id" class="border-t border-border">
                                 <td class="px-2 py-1.5 font-semibold text-text-strong">{{ unit.name }}</td>
-                                <td class="px-2 py-1.5">{{ unit.conversion_factor }} {{ unitsItem.unit }}</td>
-                                <td class="px-2 py-1.5">{{ unit.purchase_rate ?? '—' }}</td>
-                                <td class="px-2 py-1.5">{{ unit.sale_rate ?? '—' }}</td>
-                                <td class="px-2 py-1.5">{{ unit.mrp ?? '—' }}</td>
+                                <td class="px-2 py-1.5">{{ formatQuantity(unit.conversion_factor) }} {{ unitsItem.unit }}</td>
+                                <td class="px-2 py-1.5">{{ unit.purchase_rate != null ? formatRate(unit.purchase_rate) : '—' }}</td>
+                                <td class="px-2 py-1.5">{{ unit.sale_rate != null ? formatRate(unit.sale_rate) : '—' }}</td>
+                                <td class="px-2 py-1.5">{{ unit.mrp != null ? formatRate(unit.mrp) : '—' }}</td>
                                 <td class="px-2 py-1.5">
                                     <Badge :variant="unit.is_active ? 'success' : 'neutral'" pill>
                                         {{ unit.is_active ? 'Active' : 'Inactive' }}
@@ -768,7 +847,7 @@ const columns = [
                         <label for="unit_conversion_factor" class="mb-1 block text-sm font-semibold text-text-base">
                             Equals (in {{ unitsItem.unit }}) <span class="text-danger">*</span>
                         </label>
-                        <Input id="unit_conversion_factor" v-model="unitForm.conversion_factor" type="number" min="0.0001" step="0.0001" placeholder="e.g. 12" required />
+                        <Input id="unit_conversion_factor" v-model="unitForm.conversion_factor" type="number" min="1" step="0.0001" placeholder="e.g. 12" required />
                         <p v-if="unitForm.errors.conversion_factor" class="mt-1 text-sm text-danger">{{ unitForm.errors.conversion_factor }}</p>
                     </div>
                     <div>

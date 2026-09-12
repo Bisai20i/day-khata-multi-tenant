@@ -1,8 +1,11 @@
 <?php
 
+use App\Enums\StockMovementType;
+use App\Models\Account;
 use App\Models\Item;
 use App\Models\ItemCategory;
 use App\Models\ItemSubcategory;
+use App\Models\Store;
 use App\Models\Tenant;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -261,6 +264,170 @@ test('an authenticated user can create, update, and delete an item', function ()
 
     $tenant->run(function () use ($itemId) {
         expect(Item::query()->find($itemId))->toBeNull();
+    });
+
+    $tenant->delete();
+});
+
+/*
+|--------------------------------------------------------------------------
+| Posting account, deactivation and deletion guards (audit P1/P3)
+|--------------------------------------------------------------------------
+|
+| An item's `account_id` decides which ledger account buying it is debited
+| to, and there was no way to set it in the UI at all, so a service item and
+| a capital item both landed in EXE8 "Purchases Account". It is offered and
+| validated as an Expense or Fixed Asset account only: those are the only
+| two things buying an item can be.
+|
+| The other two guards are about stock that cannot be reached: an inactive
+| item disappears from every picker, so deactivating one that still holds
+| stock strands that quantity in the valuation, and deleting an item any
+| document references used to render a raw SQL exception page.
+|
+*/
+
+test('an item can be given an expense posting account', function () {
+    $domain = 'item-posting-account.tenant-test';
+    $tenant = provisionItemTestTenant($domain);
+
+    $categoryId = null;
+    $accountId = null;
+    $tenant->run(function () use (&$categoryId, &$accountId) {
+        User::factory()->create(['email' => 'owner@example.com']);
+        $categoryId = ItemCategory::factory()->create(['name' => 'Services'])->id;
+        $accountId = Account::where('code', 'EXE8')->value('id');
+    });
+
+    $this->post("http://{$domain}/login", [
+        'email' => 'owner@example.com',
+        'password' => 'password',
+    ]);
+
+    $this->post("http://{$domain}/items", [
+        'item_category_id' => $categoryId,
+        'account_id' => $accountId,
+        'name' => 'Annual Audit Fee',
+        'unit' => 'pcs',
+        'is_stockable' => false,
+    ])->assertRedirect("http://{$domain}/items");
+
+    $tenant->run(function () use ($accountId) {
+        expect(Item::where('name', 'Annual Audit Fee')->value('account_id'))->toBe($accountId);
+    });
+
+    $tenant->delete();
+});
+
+test('an item cannot post to an account that is neither an expense nor a fixed asset', function () {
+    $domain = 'item-posting-account-invalid.tenant-test';
+    $tenant = provisionItemTestTenant($domain);
+
+    $categoryId = null;
+    $accountId = null;
+    $tenant->run(function () use (&$categoryId, &$accountId) {
+        User::factory()->create(['email' => 'owner@example.com']);
+        $categoryId = ItemCategory::factory()->create(['name' => 'Groceries'])->id;
+        // CA2 "Profit & Loss" is an equity account: a real account id, so a
+        // plain exists:accounts,id rule would have let it through.
+        $accountId = Account::where('code', 'CA2')->value('id');
+    });
+
+    $this->post("http://{$domain}/login", [
+        'email' => 'owner@example.com',
+        'password' => 'password',
+    ]);
+
+    $this->post("http://{$domain}/items", [
+        'item_category_id' => $categoryId,
+        'account_id' => $accountId,
+        'name' => 'Wrongly Posted Item',
+        'unit' => 'pcs',
+    ])->assertSessionHasErrors('account_id');
+
+    $tenant->run(function () {
+        expect(Item::where('name', 'Wrongly Posted Item')->exists())->toBeFalse();
+    });
+
+    $tenant->delete();
+});
+
+test('an item still holding stock cannot be deactivated', function () {
+    $domain = 'item-deactivate-with-stock.tenant-test';
+    $tenant = provisionItemTestTenant($domain);
+
+    $itemId = null;
+    $categoryId = null;
+    $tenant->run(function () use (&$itemId, &$categoryId) {
+        User::factory()->create(['email' => 'owner@example.com']);
+        $category = ItemCategory::factory()->create(['name' => 'Groceries']);
+        $categoryId = $category->id;
+
+        $item = Item::factory()->create([
+            'item_category_id' => $category->id,
+            'name' => 'Stocked Item',
+            'unit' => 'pcs',
+            'is_stockable' => true,
+            'is_active' => true,
+        ]);
+        $itemId = $item->id;
+
+        $item->recordStockMovement(
+            StockMovementType::Opening,
+            '5',
+            '2026-01-01',
+            (int) Store::where('is_active', true)->orderBy('id')->value('id'),
+        );
+    });
+
+    $this->post("http://{$domain}/login", [
+        'email' => 'owner@example.com',
+        'password' => 'password',
+    ]);
+
+    $this->put("http://{$domain}/items/{$itemId}", [
+        'item_category_id' => $categoryId,
+        'name' => 'Stocked Item',
+        'unit' => 'pcs',
+        'is_stockable' => true,
+        'is_active' => false,
+    ])->assertSessionHasErrors('is_active');
+
+    $tenant->run(function () use ($itemId) {
+        expect(Item::find($itemId)->is_active)->toBeTrue();
+    });
+
+    $tenant->delete();
+});
+
+test('deleting an item a stock movement references gives a friendly error, not a database exception', function () {
+    $domain = 'item-delete-referenced.tenant-test';
+    $tenant = provisionItemTestTenant($domain);
+
+    $itemId = null;
+    $tenant->run(function () use (&$itemId) {
+        User::factory()->create(['email' => 'owner@example.com']);
+
+        $item = Item::factory()->create(['name' => 'Referenced Item', 'is_stockable' => true]);
+        $itemId = $item->id;
+
+        $item->recordStockMovement(
+            StockMovementType::Opening,
+            '5',
+            '2026-01-01',
+            (int) Store::where('is_active', true)->orderBy('id')->value('id'),
+        );
+    });
+
+    $this->post("http://{$domain}/login", [
+        'email' => 'owner@example.com',
+        'password' => 'password',
+    ]);
+
+    $this->delete("http://{$domain}/items/{$itemId}")->assertSessionHasErrors('item');
+
+    $tenant->run(function () use ($itemId) {
+        expect(Item::find($itemId))->not->toBeNull();
     });
 
     $tenant->delete();

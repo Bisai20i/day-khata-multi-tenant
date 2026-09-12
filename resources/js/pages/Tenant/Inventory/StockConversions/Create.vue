@@ -8,6 +8,8 @@ import Input from '@/components/ui/Input.vue';
 import Select from '@/components/ui/Select.vue';
 import Combobox from '@/components/ui/Combobox.vue';
 import NepaliDateInput from '@/components/ui/NepaliDateInput.vue';
+import { formatMoney, multiplyMoney, sumMoney } from '@/lib/money.js';
+import { todayInKathmandu } from '@/lib/format.js';
 
 const props = defineProps({
     items: { type: Array, default: () => [] },
@@ -44,7 +46,8 @@ function emptyLine() {
 
 const form = useForm({
     type: 'production',
-    date: '',
+    // Today in Kathmandu, not the UTC day (contract C8).
+    date: todayInKathmandu(),
     note: '',
     store_id: null,
     input_lines: [emptyLine()],
@@ -61,31 +64,48 @@ function removeLine(section, index) {
     form[section].splice(index, 1);
 }
 
-function lineTotal(lines) {
-    return lines.reduce((sum, line) => {
-        const qty = Number(line.quantity) || 0;
-        const rate = Number(line.unit_cost_rate) || 0;
-        return sum + qty * rate;
-    }, 0);
+// Exact decimal arithmetic, never floats: multiplyMoney rounds the product
+// once, the same way the server does, so the preview and the posted document
+// always agree (contracts C1/C8).
+function lineValue(line) {
+    const quantity = String(line.quantity ?? '').trim();
+    const rate = String(line.unit_cost_rate ?? '').trim();
+
+    if (quantity === '' || rate === '') return '0.00';
+
+    try {
+        return multiplyMoney(rate, quantity);
+    } catch {
+        return '0.00';
+    }
 }
 
-const totalValue = computed(() => lineTotal(form.input_lines) + lineTotal(form.output_lines));
+const totalValue = computed(() => {
+    try {
+        return sumMoney([...form.input_lines, ...form.output_lines].map(lineValue));
+    } catch {
+        return '0.00';
+    }
+});
+
+// Sent as the strings the user typed, never through Number(): that is what
+// let a 0.00004 quantity be accepted and stored as 0.0000 (audit P0-5). A
+// blank rate stays null, meaning "no cost stated" rather than "free" - see
+// StockConversion's docblock on deferred output costing.
+function payloadLine(line) {
+    return {
+        item_id: line.item_id,
+        quantity: String(line.quantity ?? '').trim(),
+        unit_cost_rate: String(line.unit_cost_rate ?? '').trim() === '' ? null : String(line.unit_cost_rate).trim(),
+        remarks: line.remarks || null,
+    };
+}
 
 function submit() {
     form.transform((data) => ({
         ...data,
-        input_lines: data.input_lines.map((line) => ({
-            item_id: line.item_id,
-            quantity: Number(line.quantity) || 0,
-            unit_cost_rate: line.unit_cost_rate === '' ? null : Number(line.unit_cost_rate),
-            remarks: line.remarks || null,
-        })),
-        output_lines: data.output_lines.map((line) => ({
-            item_id: line.item_id,
-            quantity: Number(line.quantity) || 0,
-            unit_cost_rate: line.unit_cost_rate === '' ? null : Number(line.unit_cost_rate),
-            remarks: line.remarks || null,
-        })),
+        input_lines: data.input_lines.map(payloadLine),
+        output_lines: data.output_lines.map(payloadLine),
     })).post('/stock-conversions', {
         preserveScroll: true,
         onSuccess: () => emit('posted'),
@@ -158,12 +178,12 @@ function submit() {
                         </p>
                     </div>
                     <div>
-                        <Input v-model="line.quantity" type="number" min="0" step="0.0001" placeholder="0" />
+                        <Input v-model="line.quantity" type="number" min="0.0001" step="0.0001" placeholder="0" required />
                         <p v-if="form.errors[`input_lines.${index}.quantity`]" class="mt-1 text-xs text-danger">
                             {{ form.errors[`input_lines.${index}.quantity`] }}
                         </p>
                     </div>
-                    <Input v-model="line.unit_cost_rate" type="number" min="0" step="0.01" placeholder="0.00" />
+                    <Input v-model="line.unit_cost_rate" type="number" min="0" step="0.0001" placeholder="0.0000" />
                     <Input v-model="line.remarks" type="text" placeholder="Optional" />
                     <button
                         v-if="form.input_lines.length > 1"
@@ -208,12 +228,12 @@ function submit() {
                         </p>
                     </div>
                     <div>
-                        <Input v-model="line.quantity" type="number" min="0" step="0.0001" placeholder="0" />
+                        <Input v-model="line.quantity" type="number" min="0.0001" step="0.0001" placeholder="0" required />
                         <p v-if="form.errors[`output_lines.${index}.quantity`]" class="mt-1 text-xs text-danger">
                             {{ form.errors[`output_lines.${index}.quantity`] }}
                         </p>
                     </div>
-                    <Input v-model="line.unit_cost_rate" type="number" min="0" step="0.01" placeholder="0.00" />
+                    <Input v-model="line.unit_cost_rate" type="number" min="0" step="0.0001" placeholder="0.0000" />
                     <Input v-model="line.remarks" type="text" placeholder="Optional" />
                     <button
                         v-if="form.output_lines.length > 1"
@@ -234,7 +254,7 @@ function submit() {
             <div class="grid grid-cols-1 gap-2 border-t-[1.5px] border-border pt-3 text-sm">
                 <div>
                     <p class="text-[10px] font-bold tracking-[.8px] text-text-muted uppercase">Total value</p>
-                    <p class="font-bold text-text-strong">{{ totalValue.toFixed(2) }}</p>
+                    <p class="font-bold text-text-strong">{{ formatMoney(totalValue) }}</p>
                 </div>
             </div>
 

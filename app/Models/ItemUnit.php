@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use App\Casts\Decimal;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
@@ -35,10 +36,10 @@ class ItemUnit extends Model
     protected function casts(): array
     {
         return [
-            'conversion_factor' => 'decimal:4',
-            'purchase_rate' => 'decimal:4',
-            'sale_rate' => 'decimal:4',
-            'mrp' => 'decimal:4',
+            'conversion_factor' => Decimal::class.':4',
+            'purchase_rate' => Decimal::class.':4',
+            'sale_rate' => Decimal::class.':4',
+            'mrp' => Decimal::class.':4',
             'is_active' => 'boolean',
         ];
     }

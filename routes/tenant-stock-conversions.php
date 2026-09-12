@@ -23,7 +23,12 @@ Route::name('tenant.')->group(function () {
     Route::prefix('stock-conversions')->name('stock-conversions.')->group(function () {
         Route::get('/', [StockConversionController::class, 'index'])->name('index');
         Route::post('/', [StockConversionController::class, 'store'])->name('store');
-        Route::post('/{stock_conversion}/cancel', [StockConversionController::class, 'cancel'])->name('cancel');
+        // Cancelling puts the consumed inputs back and removes the produced
+        // outputs, so it is an admin action everywhere in this app
+        // (CONTRACTS C5).
+        Route::post('/{stock_conversion}/cancel', [StockConversionController::class, 'cancel'])
+            ->middleware('role:admin')
+            ->name('cancel');
         Route::get('/{stock_conversion}/print', [StockConversionController::class, 'print'])->name('print');
     });
 });

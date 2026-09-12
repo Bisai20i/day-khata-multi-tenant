@@ -1,6 +1,8 @@
 <?php
 
+use App\Enums\FiscalYearStatus;
 use App\Enums\StockMovementType;
+use App\Models\FiscalYear;
 use App\Models\Item;
 use App\Models\ItemStockMovement;
 use App\Models\StockAdjustment;
@@ -16,6 +18,24 @@ uses(RefreshDatabase::class);
 afterEach(function () {
     tenancy()->end();
 });
+
+/**
+ * Every stock document now resolves and guards its fiscal year by date
+ * (CONTRACTS C4, audit P0-11), so the tenant needs one open year wide
+ * enough to hold the dates these tests post on. firstOrCreate, so a test
+ * that opens the tenant twice does not try to open a second year.
+ */
+function stockTransferTestOpenFiscalYear(): FiscalYear
+{
+    return FiscalYear::firstOrCreate(
+        ['name' => '2026'],
+        [
+            'start_date' => '2026-01-01',
+            'end_date' => '2026-12-31',
+            'status' => FiscalYearStatus::Open,
+        ],
+    );
+}
 
 function provisionStockTransferTestTenant(string $domain): Tenant
 {
@@ -34,6 +54,7 @@ test('transferring stock between two stores decreases source stock and increases
     $tenant = provisionStockTransferTestTenant('stock-transfer-basic.tenant-test');
 
     $tenant->run(function () {
+        stockTransferTestOpenFiscalYear();
         $actor = stockTransferTestActor();
         $item = Item::factory()->create(['is_stockable' => true]);
         $storeA = Store::factory()->create(['is_active' => true]);
@@ -52,9 +73,9 @@ test('transferring stock between two stores decreases source stock and increases
             $actor,
         );
 
-        expect($item->fresh()->currentStock($storeA->id))->toBe(6.0)
-            ->and($item->fresh()->currentStock($storeB->id))->toBe(4.0)
-            ->and($item->fresh()->currentStock())->toBe(10.0)
+        expect($item->fresh()->currentStock($storeA->id)->toString())->toBe('6.0000')
+            ->and($item->fresh()->currentStock($storeB->id)->toString())->toBe('4.0000')
+            ->and($item->fresh()->currentStock()->toString())->toBe('10.0000')
             ->and((float) $transfer->total_value)->toBe(50.0);
 
         $line = $transfer->lines->first();
@@ -84,6 +105,7 @@ test('a transfer to the same store is rejected', function () {
     $tenant = provisionStockTransferTestTenant('stock-transfer-same-store.tenant-test');
 
     $tenant->run(function () {
+        stockTransferTestOpenFiscalYear();
         $actor = stockTransferTestActor();
         $item = Item::factory()->create(['is_stockable' => true]);
         $store = Store::factory()->create(['is_active' => true]);
@@ -100,7 +122,7 @@ test('a transfer to the same store is rejected', function () {
             $actor,
         ))->toThrow(InvalidArgumentException::class);
 
-        expect($item->fresh()->currentStock($store->id))->toBe(10.0);
+        expect($item->fresh()->currentStock($store->id)->toString())->toBe('10.0000');
     });
 
     $tenant->delete();
@@ -110,6 +132,7 @@ test('a transfer exceeding the source store\'s available stock is rejected', fun
     $tenant = provisionStockTransferTestTenant('stock-transfer-oversell.tenant-test');
 
     $tenant->run(function () {
+        stockTransferTestOpenFiscalYear();
         $actor = stockTransferTestActor();
         $item = Item::factory()->create(['is_stockable' => true]);
         $storeA = Store::factory()->create(['is_active' => true]);
@@ -127,8 +150,8 @@ test('a transfer exceeding the source store\'s available stock is rejected', fun
             $actor,
         ))->toThrow(InvalidArgumentException::class);
 
-        expect($item->fresh()->currentStock($storeA->id))->toBe(3.0)
-            ->and($item->fresh()->currentStock($storeB->id))->toBe(0.0);
+        expect($item->fresh()->currentStock($storeA->id)->toString())->toBe('3.0000')
+            ->and($item->fresh()->currentStock($storeB->id)->toString())->toBe('0.0000');
     });
 
     $tenant->delete();
@@ -138,6 +161,7 @@ test('cancelling a transfer reverts the stock impact at both stores and rejects 
     $tenant = provisionStockTransferTestTenant('stock-transfer-cancel.tenant-test');
 
     $tenant->run(function () {
+        stockTransferTestOpenFiscalYear();
         $actor = stockTransferTestActor();
         $item = Item::factory()->create(['is_stockable' => true]);
         $storeA = Store::factory()->create(['is_active' => true]);
@@ -155,13 +179,13 @@ test('cancelling a transfer reverts the stock impact at both stores and rejects 
             $actor,
         );
 
-        expect($item->fresh()->currentStock($storeA->id))->toBe(3.0)
-            ->and($item->fresh()->currentStock($storeB->id))->toBe(5.0);
+        expect($item->fresh()->currentStock($storeA->id)->toString())->toBe('3.0000')
+            ->and($item->fresh()->currentStock($storeB->id)->toString())->toBe('5.0000');
 
         $transfer->cancel($actor, 'Recorded in error');
 
-        expect($item->fresh()->currentStock($storeA->id))->toBe(8.0)
-            ->and($item->fresh()->currentStock($storeB->id))->toBe(0.0)
+        expect($item->fresh()->currentStock($storeA->id)->toString())->toBe('8.0000')
+            ->and($item->fresh()->currentStock($storeB->id)->toString())->toBe('0.0000')
             ->and($transfer->fresh()->status)->toBe('cancelled');
 
         expect(fn () => $transfer->cancel($actor, 'Again'))->toThrow(InvalidArgumentException::class);
@@ -174,6 +198,7 @@ test('a zero or negative quantity is rejected at the model layer', function () {
     $tenant = provisionStockTransferTestTenant('stock-transfer-bad-quantity.tenant-test');
 
     $tenant->run(function () {
+        stockTransferTestOpenFiscalYear();
         $actor = stockTransferTestActor();
         $item = Item::factory()->create(['is_stockable' => true]);
         $storeA = Store::factory()->create(['is_active' => true]);

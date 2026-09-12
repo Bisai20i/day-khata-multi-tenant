@@ -2,8 +2,12 @@
 
 namespace App\Models;
 
+use App\Casts\Decimal;
 use App\Enums\StockConversionType;
 use App\Enums\StockMovementType;
+use App\Support\ClosedFiscalYearGuard;
+use App\Support\Money\Money;
+use App\Support\Money\Quantity;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
@@ -43,14 +47,19 @@ use ValueError;
  *
  * Every line writes one ItemStockMovement via Item::recordStockMovement()
  * (input lines decrease, output lines increase) - nothing here creates a
- * second bookkeeping trail. unit_cost_rate is optional and recorded as-is
- * per line (same shape as StockAdjustmentLine/StockTransferLine) - this
- * deliberately does NOT auto-derive an output item's cost from the sum of
- * its consumed inputs (that's a real weighted-average-costing/allocation
- * policy question - e.g. how to split cost across multiple outputs - left
- * as a follow-up rather than guessed at here). StockValuationReportController
- * still picks up whatever unit_cost_rate an output line is given, same as
- * any other stock-increasing movement.
+ * second bookkeeping trail. Costing stays deliberately manual: an output
+ * item's cost is NOT auto-derived from the sum of its consumed inputs (how
+ * to split one input cost across several outputs is a real allocation
+ * policy question, left as a follow-up rather than guessed at here). What
+ * did change with CONTRACTS C10 is that a priced line now records its
+ * `value` as well as its rate, so the weighted average an output feeds into
+ * is the value that was actually stated; a line with no rate records no
+ * value and stays out of the cost basis entirely, rather than being valued
+ * at zero.
+ *
+ * Because nothing here goes through JournalVoucher::post(), this class calls
+ * ClosedFiscalYearGuard::assertDateInOpenYear() itself (CONTRACTS C4, audit
+ * P0-11: stock documents bypassed the fiscal-year guard entirely).
  */
 #[Fillable(['type', 'date', 'store_id', 'note', 'total_value', 'status', 'cancelled_by', 'cancelled_at', 'cancel_reason', 'created_by'])]
 class StockConversion extends Model
@@ -63,7 +72,7 @@ class StockConversion extends Model
         return [
             'type' => StockConversionType::class,
             'date' => 'date',
-            'total_value' => 'decimal:2',
+            'total_value' => Decimal::class.':2',
             'cancelled_at' => 'datetime',
         ];
     }
@@ -102,18 +111,18 @@ class StockConversion extends Model
 
     /**
      * Validates and posts every input/output line inside one transaction.
+     *
      * Input items are guarded against being consumed beyond what the
-     * conversion's store actually holds - requested quantity is aggregated
-     * per item first (an item can legitimately appear on more than one
-     * input line), then checked once per item under a row lock scoped to
-     * that store, combining Sale::post()'s per-item aggregation with
-     * StockTransfer::post()'s store-scoped row lock (StockAdjustment::
-     * post()'s own equivalent check is NOT store-scoped - this is the
-     * stricter, more correct pattern, not a mirror of that one).
+     * conversion's store actually holds: requested quantity is aggregated
+     * per item first (an item can legitimately appear on more than one input
+     * line), the items are locked with Item::lockForStockOut(), and the
+     * comparison is exact Quantity arithmetic against a store-scoped SQL
+     * sum. The old version rounded a float difference to 4 decimals, which
+     * is the comparison audit P1 flagged.
      *
      * @param  array{type: string, date: string, note?: string|null, store_id?: int|null}  $data
-     * @param  array<int, array{item_id: int, quantity: float, unit_cost_rate?: float|null, remarks?: string|null}>  $inputLines
-     * @param  array<int, array{item_id: int, quantity: float, unit_cost_rate?: float|null, remarks?: string|null}>  $outputLines
+     * @param  array<int, array{item_id: int, quantity: mixed, unit_cost_rate?: mixed, remarks?: string|null}>  $inputLines
+     * @param  array<int, array{item_id: int, quantity: mixed, unit_cost_rate?: mixed, remarks?: string|null}>  $outputLines
      */
     public static function post(array $data, array $inputLines, array $outputLines, User $actor): self
     {
@@ -132,6 +141,8 @@ class StockConversion extends Model
                 throw new InvalidArgumentException('Type must be "production", "refining", or "repackaging".');
             }
 
+            ClosedFiscalYearGuard::assertDateInOpenYear($data['date'], $actor);
+
             $storeId = isset($data['store_id']) ? (int) $data['store_id'] : Store::where('is_active', true)->orderBy('id')->value('id');
 
             if (! $storeId) {
@@ -145,14 +156,16 @@ class StockConversion extends Model
                     throw new InvalidArgumentException("Unknown item [{$line['item_id']}].");
                 }
 
-                $quantity = (float) $line['quantity'];
+                $quantity = Quantity::of($line['quantity']);
 
-                if ($quantity <= 0) {
+                if (! $quantity->isPositive()) {
                     throw new InvalidArgumentException('Quantity must be greater than zero.');
                 }
 
-                $unitCostRate = isset($line['unit_cost_rate']) ? (float) $line['unit_cost_rate'] : null;
-                $lineValue = round($quantity * ($unitCostRate ?? 0), 2);
+                $unitCostRate = Quantity::ofNullable($line['unit_cost_rate'] ?? null);
+                $lineValue = $unitCostRate === null
+                    ? Money::zero()
+                    : Money::round($quantity->toBigDecimal()->multipliedBy($unitCostRate->toBigDecimal()));
 
                 return [
                     'item' => $items[$line['item_id']],
@@ -167,35 +180,32 @@ class StockConversion extends Model
             $preparedInputs = array_map(fn (array $line) => $prepareLine($line, 'out'), $inputLines);
             $preparedOutputs = array_map(fn (array $line) => $prepareLine($line, 'in'), $outputLines);
 
-            $requestedQtyByItem = [];
+            $requestedOut = [];
+
             foreach ($preparedInputs as $line) {
                 $itemId = $line['item']->id;
-                $requestedQtyByItem[$itemId] = ($requestedQtyByItem[$itemId] ?? 0) + $line['quantity'];
+                $requestedOut[$itemId] = ($requestedOut[$itemId] ?? Quantity::zero())->plus($line['quantity']);
             }
 
-            foreach ($requestedQtyByItem as $itemId => $requestedQty) {
-                $item = $items[$itemId];
+            Item::lockForStockOut(array_keys($requestedOut));
 
-                $lockedMovements = ItemStockMovement::query()
-                    ->where('item_id', $itemId)
-                    ->where('store_id', $storeId)
-                    ->where('cancelled', false)
-                    ->lockForUpdate()
-                    ->get();
+            $available = Item::currentStockByItem(array_keys($requestedOut), $storeId);
 
-                $currentStock = (float) $lockedMovements->sum(
-                    fn (ItemStockMovement $movement) => (float) $movement->quantity * $movement->movement_type->direction(),
-                );
+            foreach ($requestedOut as $itemId => $required) {
+                $onHand = $available[$itemId] ?? Quantity::zero();
 
-                if (round($currentStock - $requestedQty, 4) < 0) {
+                if ($onHand->isLessThan($required)) {
+                    $name = $items[$itemId]->name;
+
                     throw new InvalidArgumentException(
-                        "Insufficient stock for \"{$item->name}\" at this store (available {$currentStock}, required {$requestedQty}).",
+                        "Insufficient stock for \"{$name}\" at this store "
+                        ."(available {$onHand->formatQuantity()}, required {$required->formatQuantity()})."
                     );
                 }
             }
 
             $allPreparedLines = [...$preparedInputs, ...$preparedOutputs];
-            $totalValue = round(collect($allPreparedLines)->sum('line_value'), 2);
+            $totalValue = Money::sum(array_map(fn (array $line) => $line['line_value'], $allPreparedLines));
 
             $conversion = static::create([
                 'type' => $type->value,
@@ -226,6 +236,14 @@ class StockConversion extends Model
                     default => StockMovementType::RepackagingOut,
                 };
 
+                // A zero or missing rate means "no cost stated", not "this
+                // output was free": the create form sends 0 for an untouched
+                // rate field, and a genuine zero in the basis would value
+                // real stock at nothing.
+                $value = $line['unit_cost_rate'] !== null && $line['unit_cost_rate']->isPositive()
+                    ? $line['line_value']
+                    : null;
+
                 $line['item']->recordStockMovement(
                     $movementType,
                     $line['quantity'],
@@ -233,6 +251,7 @@ class StockConversion extends Model
                     $storeId,
                     $conversionLine,
                     $line['unit_cost_rate'],
+                    $value,
                 );
             }
 
@@ -245,27 +264,42 @@ class StockConversion extends Model
      * flips the header status - no edit method exists (immutable, matching
      * every other voucher-like record in this app, including
      * StockAdjustment/StockTransfer).
+     *
+     * The row is re-read under lockForUpdate() inside the transaction and
+     * its status re-checked there (audit P0-16), and the document's own date
+     * must still fall inside the open fiscal year.
      */
     public function cancel(User $actor, string $reason): void
     {
-        if ($this->status === 'cancelled') {
-            throw new InvalidArgumentException('This stock conversion has already been cancelled.');
+        if (trim($reason) === '') {
+            throw new InvalidArgumentException('A reason is required to cancel a stock conversion.');
         }
 
         DB::transaction(function () use ($actor, $reason) {
-            $lineIds = $this->lines()->pluck('id');
+            /** @var self $fresh */
+            $fresh = static::query()->whereKey($this->getKey())->lockForUpdate()->firstOrFail();
+
+            if ($fresh->status === 'cancelled') {
+                throw new InvalidArgumentException('This stock conversion has already been cancelled.');
+            }
+
+            ClosedFiscalYearGuard::assertDateInOpenYear($fresh->date->toDateString(), $actor, $reason);
+
+            $lineIds = $fresh->lines()->pluck('id');
 
             ItemStockMovement::query()
                 ->where('reference_type', (new StockConversionLine)->getMorphClass())
                 ->whereIn('reference_id', $lineIds)
                 ->update(['cancelled' => true]);
 
-            $this->update([
+            $fresh->update([
                 'status' => 'cancelled',
                 'cancelled_by' => $actor->id,
                 'cancelled_at' => now(),
                 'cancel_reason' => $reason,
             ]);
+
+            $this->forceFill($fresh->getAttributes())->syncOriginal();
         });
     }
 }

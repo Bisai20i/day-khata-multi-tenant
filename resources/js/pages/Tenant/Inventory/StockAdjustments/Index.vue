@@ -1,6 +1,6 @@
 <script setup>
 import { computed, h, ref, watch } from 'vue';
-import { useForm, usePage } from '@inertiajs/vue3';
+import { router, useForm, usePage } from '@inertiajs/vue3';
 import { Ban, Plus, Printer } from '@lucide/vue';
 import AppLayout from '@/layouts/AppLayout.vue';
 import Card from '@/components/ui/Card.vue';
@@ -13,6 +13,8 @@ import Combobox from '@/components/ui/Combobox.vue';
 import NepaliDateInput from '@/components/ui/NepaliDateInput.vue';
 import { useToast } from '@/composables/useToast';
 import { navGroups } from '@/lib/nav-items.js';
+import { formatMoney, formatQuantity } from '@/lib/money.js';
+import { formatBsDate, todayInKathmandu } from '@/lib/format.js';
 import Create from './Create.vue';
 
 const props = defineProps({
@@ -20,6 +22,12 @@ const props = defineProps({
     items: { type: Array, default: () => [] },
     stores: { type: Array, default: () => [] },
     correctionFiscalYear: { type: Object, default: null },
+    // Server-side date window the list was built from; defaults to the open
+    // fiscal year so the page never loads a tenant's whole history.
+    filters: { type: Object, default: () => ({ from: null, to: null }) },
+    // True once an opening-stock CSV has been imported, so the import modal
+    // can warn that a second one replaces the first.
+    hasOpeningStockImport: { type: Boolean, default: false },
 });
 
 const page = usePage();
@@ -41,10 +49,36 @@ watch(
 
 const showCreateForm = ref(false);
 
+// The list is filtered on the server (the payload would otherwise grow
+// without bound), so changing a date reloads the page rather than filtering
+// in place.
+const dateFilter = ref({ from: props.filters.from ?? '', to: props.filters.to ?? '' });
+
+watch(
+    () => props.filters,
+    (filters) => {
+        dateFilter.value = { from: filters.from ?? '', to: filters.to ?? '' };
+    },
+);
+
+function applyDateFilter() {
+    router.get('/stock-adjustments', { from: dateFilter.value.from, to: dateFilter.value.to }, {
+        preserveState: true,
+        preserveScroll: true,
+        replace: true,
+    });
+}
+
+function clearDateFilter() {
+    dateFilter.value = { from: '', to: '' };
+    applyDateFilter();
+}
+
 const storeOptions = computed(() => props.stores.map((s) => ({ value: s.id, label: s.name })));
 
 const importModalOpen = ref(false);
-const importForm = useForm({ file: null, date: '', store_id: null });
+// Today in Kathmandu, not the UTC day (contract C8).
+const importForm = useForm({ file: null, date: todayInKathmandu(), store_id: null });
 const importResult = ref(null);
 
 // Same flash-watch reasoning as flash.status above: the import submit
@@ -58,6 +92,7 @@ watch(
 
 function openImport() {
     importForm.reset();
+    importForm.date = todayInKathmandu();
     importForm.clearErrors();
     importResult.value = null;
     importModalOpen.value = true;
@@ -66,6 +101,7 @@ function openImport() {
 function closeImportModal() {
     importModalOpen.value = false;
     importForm.reset();
+    importForm.date = todayInKathmandu();
     importForm.clearErrors();
     importResult.value = null;
 }
@@ -101,7 +137,7 @@ function linesSummary(adjustment) {
         .map((line) => {
             const sign = line.direction === 'in' ? '+' : '-';
             const reason = reasonLabels[line.reason_type] ?? line.reason_type;
-            return `${line.item?.name ?? '—'} (${sign}${Number(line.quantity)} ${reason})`;
+            return `${line.item?.name ?? '—'} (${sign}${formatQuantity(line.quantity)} ${reason})`;
         })
         .join(', ');
 }
@@ -129,7 +165,19 @@ function submitCancel() {
 }
 
 const columns = [
-    { accessorKey: 'date', header: 'Date' },
+    {
+        id: 'date',
+        header: 'Date (BS)',
+        numeric: false,
+        // Bikram Sambat first: it is the date a Nepali user works in, and the
+        // one the IRD reads. The AD date stays beside it as the
+        // cross-reference (contract C8 / C9).
+        cell: ({ row }) =>
+            h('div', { class: 'whitespace-nowrap' }, [
+                formatBsDate(row.original.date),
+                h('span', { class: 'ml-1 text-text-faint' }, `(${String(row.original.date ?? '').slice(0, 10)})`),
+            ]),
+    },
     {
         id: 'note',
         header: 'Note',
@@ -146,7 +194,7 @@ const columns = [
         id: 'total_value',
         header: 'Total value',
         numeric: true,
-        cell: ({ row }) => Number(row.original.total_value).toFixed(2),
+        cell: ({ row }) => formatMoney(row.original.total_value),
     },
     {
         id: 'status',
@@ -227,7 +275,22 @@ const columns = [
             </div>
 
             <Card variant="panel">
-                <DataTable :columns="columns" :data="stockAdjustments" :page-size="10" empty-message="No stock adjustments yet" />
+                <div class="mb-4 flex flex-wrap items-end gap-3 border-b-[1.5px] border-border pb-4">
+                    <div>
+                        <label class="mb-1 block text-sm font-semibold text-text-base">From</label>
+                        <NepaliDateInput v-model="dateFilter.from" @update:model-value="applyDateFilter" />
+                    </div>
+                    <div>
+                        <label class="mb-1 block text-sm font-semibold text-text-base">To</label>
+                        <NepaliDateInput v-model="dateFilter.to" @update:model-value="applyDateFilter" />
+                    </div>
+                    <Button variant="secondary" tone="purple" type="button" @click="clearDateFilter">Show all</Button>
+                    <p class="ml-auto self-center text-[12px] text-text-faint">
+                        Showing {{ stockAdjustments.length }} adjustment(s) in this date range.
+                    </p>
+                </div>
+
+                <DataTable :columns="columns" :data="stockAdjustments" :page-size="10" empty-message="No stock adjustments in this date range" />
             </Card>
         </template>
 
@@ -256,8 +319,17 @@ const columns = [
                 <p class="text-[13px] text-text-muted">
                     Download the template, fill in one item per row (items are matched by exact name), then
                     upload the completed CSV file. Every row is posted as an "opening" stock adjustment line on
-                    the date and store below. Rows with an unknown item, a non-stockable item, an invalid
-                    quantity, or a repeated item are skipped and reported after import.
+                    the date and store below, and the total is posted to the ledger as Opening Stock. Rows with
+                    an unknown item, a non-stockable item, an invalid quantity, or a repeated item are skipped
+                    and reported after import.
+                </p>
+                <p
+                    v-if="hasOpeningStockImport"
+                    class="border-[1.5px] border-warning-text bg-warning-bg px-3 py-2 text-[13px] text-warning-text"
+                >
+                    Opening stock has already been imported. Importing again <strong>replaces</strong> it: the
+                    previous opening batch is cancelled, its quantities and its ledger entry reversed, and this
+                    file becomes the opening stock. Nothing is added on top.
                 </p>
                 <a
                     href="/stock-adjustments/opening-stock/template"
@@ -304,6 +376,9 @@ const columns = [
                 <p class="text-[13px] font-semibold text-text-base">
                     Imported opening stock for {{ importResult.imported }} of
                     {{ importResult.imported + importResult.skipped.length }} row(s).
+                </p>
+                <p v-if="importResult.replaced" class="text-[13px] text-text-muted">
+                    The previous opening stock import (#{{ importResult.replaced }}) was cancelled and replaced.
                 </p>
                 <div v-if="importResult.skipped.length" class="max-h-64 overflow-auto border-[1.5px] border-border">
                     <table class="w-full text-left text-[12px]">

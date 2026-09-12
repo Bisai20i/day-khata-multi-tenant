@@ -1,6 +1,8 @@
 <?php
 
+use App\Enums\FiscalYearStatus;
 use App\Enums\StockMovementType;
+use App\Models\FiscalYear;
 use App\Models\Item;
 use App\Models\StockConversion;
 use App\Models\Store;
@@ -13,6 +15,24 @@ uses(RefreshDatabase::class);
 afterEach(function () {
     tenancy()->end();
 });
+
+/**
+ * Every stock document now resolves and guards its fiscal year by date
+ * (CONTRACTS C4, audit P0-11), so the tenant needs one open year wide
+ * enough to hold the dates these tests post on. firstOrCreate, so a test
+ * that opens the tenant twice does not try to open a second year.
+ */
+function stockConversionPrintTestOpenFiscalYear(): FiscalYear
+{
+    return FiscalYear::firstOrCreate(
+        ['name' => '2026'],
+        [
+            'start_date' => '2026-01-01',
+            'end_date' => '2026-12-31',
+            'status' => FiscalYearStatus::Open,
+        ],
+    );
+}
 
 function provisionStockConversionPrintTestTenant(string $domain): Tenant
 {
@@ -36,6 +56,7 @@ test('the stock conversion print route returns a streamed PDF for a repackaging 
 
     $conversionId = null;
     $tenant->run(function () use (&$conversionId) {
+        stockConversionPrintTestOpenFiscalYear();
         $admin = User::factory()->create(['email' => 'owner@example.com']);
         $bulk = Item::factory()->create(['is_stockable' => true, 'name' => 'Bulk Sack']);
         $retail = Item::factory()->create(['is_stockable' => true, 'name' => 'Retail Bag']);
@@ -66,6 +87,7 @@ test('the stock conversion print route is rejected for an unauthenticated reques
 
     $conversionId = null;
     $tenant->run(function () use (&$conversionId) {
+        stockConversionPrintTestOpenFiscalYear();
         $admin = User::factory()->create(['email' => 'owner@example.com']);
         $raw = Item::factory()->create(['is_stockable' => true]);
         $finished = Item::factory()->create(['is_stockable' => true]);

@@ -12,6 +12,14 @@
 @endsection
 
 @section('content')
+    @php
+        // Exact decimal formatting, never a float cast: a rate of 12.3456
+        // used to print as 12.35 and a quantity as a rounded float (audit
+        // P0-1/P0-5). See App\Support\Money.
+        $qty = fn ($value) => \App\Support\Money\Quantity::of($value)->formatQuantity();
+        $rate = fn ($value) => \App\Support\Money\Quantity::of($value)->formatRate();
+        $money = fn ($value) => \App\Support\Money\Money::of($value)->format();
+    @endphp
     @if($stockAdjustment->note)
         <div class="narration" style="margin-top: 0; margin-bottom: 12px;"><strong>Note:</strong> {{ $stockAdjustment->note }}</div>
     @endif
@@ -41,9 +49,9 @@
                     </td>
                     <td class="text-center">{{ ucfirst($line->direction) }}</td>
                     <td>{{ ucfirst($line->reason_type->value) }}</td>
-                    <td class="text-right">{{ number_format((float) $line->quantity, 4) }}</td>
-                    <td class="text-right">{{ $line->unit_cost_rate !== null ? number_format((float) $line->unit_cost_rate, 2) : '—' }}</td>
-                    <td class="text-right">{{ number_format((float) $line->line_value, 2) }}</td>
+                    <td class="text-right">{{ $qty($line->quantity) }}</td>
+                    <td class="text-right">{{ $line->unit_cost_rate !== null ? $rate($line->unit_cost_rate) : '—' }}</td>
+                    <td class="text-right">{{ $money($line->line_value) }}</td>
                     <td>{{ $line->remarks ?? '—' }}</td>
                 </tr>
             @endforeach
@@ -53,7 +61,7 @@
     <table class="totals-table">
         <tr class="grand-total">
             <td>Total Value</td>
-            <td class="text-right">{{ number_format((float) $stockAdjustment->total_value, 2) }}</td>
+            <td class="text-right">{{ $money($stockAdjustment->total_value) }}</td>
         </tr>
     </table>
     <div class="clearfix"></div>

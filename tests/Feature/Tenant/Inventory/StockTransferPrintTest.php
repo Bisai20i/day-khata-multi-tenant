@@ -1,6 +1,8 @@
 <?php
 
+use App\Enums\FiscalYearStatus;
 use App\Enums\StockMovementType;
+use App\Models\FiscalYear;
 use App\Models\Item;
 use App\Models\StockTransfer;
 use App\Models\Store;
@@ -13,6 +15,24 @@ uses(RefreshDatabase::class);
 afterEach(function () {
     tenancy()->end();
 });
+
+/**
+ * Every stock document now resolves and guards its fiscal year by date
+ * (CONTRACTS C4, audit P0-11), so the tenant needs one open year wide
+ * enough to hold the dates these tests post on. firstOrCreate, so a test
+ * that opens the tenant twice does not try to open a second year.
+ */
+function stockTransferPrintTestOpenFiscalYear(): FiscalYear
+{
+    return FiscalYear::firstOrCreate(
+        ['name' => '2026'],
+        [
+            'start_date' => '2026-01-01',
+            'end_date' => '2026-12-31',
+            'status' => FiscalYearStatus::Open,
+        ],
+    );
+}
 
 function provisionStockTransferPrintTestTenant(string $domain): Tenant
 {
@@ -36,6 +56,7 @@ test('the stock transfer print route returns a streamed PDF for an authenticated
 
     $transferId = null;
     $tenant->run(function () use (&$transferId) {
+        stockTransferPrintTestOpenFiscalYear();
         $admin = User::factory()->create(['email' => 'owner@example.com']);
         $item = Item::factory()->create(['is_stockable' => true]);
         $fromStore = Store::where('is_active', true)->orderBy('id')->firstOrFail();
@@ -65,6 +86,7 @@ test('the stock transfer print route is rejected for an unauthenticated request'
 
     $transferId = null;
     $tenant->run(function () use (&$transferId) {
+        stockTransferPrintTestOpenFiscalYear();
         $admin = User::factory()->create(['email' => 'owner@example.com']);
         $item = Item::factory()->create(['is_stockable' => true]);
         $fromStore = Store::where('is_active', true)->orderBy('id')->firstOrFail();

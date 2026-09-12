@@ -73,7 +73,7 @@ test('selling an alt unit deducts base-unit stock by the conversion factor and s
             [['item_id' => $item->id, 'item_unit_id' => $box->id, 'quantity' => 5, 'rate' => 1000]],
             $admin,
         );
-        expect($item->fresh()->currentStock())->toBe(60.0); // 5 Box * 12 = 60 pcs
+        expect($item->fresh()->currentStock()->toString())->toBe('60.0000'); // 5 Box * 12 = 60 pcs
 
         $sale = Sale::post(
             ['customer_id' => $customer->id, 'invoice_type' => 'full', 'date' => '2026-06-02', 'payment_mode' => 'credit'],
@@ -95,7 +95,7 @@ test('selling an alt unit deducts base-unit stock by the conversion factor and s
             ->where('movement_type', StockMovementType::Sale)
             ->firstOrFail();
         expect((float) $movement->quantity)->toBe(24.0)
-            ->and($item->fresh()->currentStock())->toBe(36.0); // 60 - 24
+            ->and($item->fresh()->currentStock()->toString())->toBe('36.0000'); // 60 - 24
     });
 
     $tenant->delete();
@@ -140,7 +140,7 @@ test('an item with no ItemUnit rows behaves exactly as before unit conversion ex
             [['item_id' => $item->id, 'quantity' => 10, 'rate' => 50]],
             $admin,
         );
-        expect($item->fresh()->currentStock())->toBe(10.0);
+        expect($item->fresh()->currentStock()->toString())->toBe('10.0000');
 
         // No item_unit_id sent at all - exactly the payload shape every
         // pre-existing caller (and every pre-existing test) already uses.
@@ -162,7 +162,106 @@ test('an item with no ItemUnit rows behaves exactly as before unit conversion ex
             ->where('movement_type', StockMovementType::Sale)
             ->firstOrFail();
         expect((float) $movement->quantity)->toBe(4.0)
-            ->and($item->fresh()->currentStock())->toBe(6.0); // 10 - 4
+            ->and($item->fresh()->currentStock()->toString())->toBe('6.0000'); // 10 - 4
+    });
+
+    $tenant->delete();
+});
+
+/*
+|--------------------------------------------------------------------------
+| Conversion factor validation (audit P1)
+|--------------------------------------------------------------------------
+|
+| An item's own `unit` is by definition the SMALLEST unit it is counted in,
+| so an alternate unit always holds one or more of them: a "Box" is 12 pcs,
+| never 1/12 of a piece. Factors below 1 used to be accepted at 4 decimals,
+| so "1/12" was stored as 0.0833 and 12 pieces drifted to 0.9996 base units
+| - a permanent, compounding loss of stock on every posting.
+|
+*/
+
+test('an alternate unit with a conversion factor below 1 is rejected', function () {
+    $domain = 'item-unit-factor-below-one.tenant-test';
+    $tenant = provisionItemUnitTestTenant($domain);
+
+    $itemId = null;
+    $tenant->run(function () use (&$itemId) {
+        User::factory()->create(['email' => 'owner@example.com']);
+        $itemId = Item::factory()->create(['unit' => 'pcs', 'is_stockable' => true])->id;
+    });
+
+    $this->post("http://{$domain}/login", [
+        'email' => 'owner@example.com',
+        'password' => 'password',
+    ]);
+
+    $this->post("http://{$domain}/items/{$itemId}/units", [
+        'name' => 'Half',
+        'conversion_factor' => '0.0833',
+        'is_active' => true,
+    ])->assertSessionHasErrors('conversion_factor');
+
+    $tenant->run(function () use ($itemId) {
+        expect(ItemUnit::where('item_id', $itemId)->count())->toBe(0);
+    });
+
+    $tenant->delete();
+});
+
+test('an alternate unit with more than four decimals of conversion is rejected', function () {
+    $domain = 'item-unit-factor-precision.tenant-test';
+    $tenant = provisionItemUnitTestTenant($domain);
+
+    $itemId = null;
+    $tenant->run(function () use (&$itemId) {
+        User::factory()->create(['email' => 'owner@example.com']);
+        $itemId = Item::factory()->create(['unit' => 'pcs', 'is_stockable' => true])->id;
+    });
+
+    $this->post("http://{$domain}/login", [
+        'email' => 'owner@example.com',
+        'password' => 'password',
+    ]);
+
+    // Rejected rather than silently rounded to 12.3457, which is what would
+    // otherwise reach the DECIMAL(_,4) column (CONTRACTS C2).
+    $this->post("http://{$domain}/items/{$itemId}/units", [
+        'name' => 'Crate',
+        'conversion_factor' => '12.34567',
+        'is_active' => true,
+    ])->assertSessionHasErrors('conversion_factor');
+
+    $tenant->run(function () use ($itemId) {
+        expect(ItemUnit::where('item_id', $itemId)->count())->toBe(0);
+    });
+
+    $tenant->delete();
+});
+
+test('an alternate unit with a whole conversion factor of 1 or more is accepted', function () {
+    $domain = 'item-unit-factor-valid.tenant-test';
+    $tenant = provisionItemUnitTestTenant($domain);
+
+    $itemId = null;
+    $tenant->run(function () use (&$itemId) {
+        User::factory()->create(['email' => 'owner@example.com']);
+        $itemId = Item::factory()->create(['unit' => 'pcs', 'is_stockable' => true])->id;
+    });
+
+    $this->post("http://{$domain}/login", [
+        'email' => 'owner@example.com',
+        'password' => 'password',
+    ]);
+
+    $this->post("http://{$domain}/items/{$itemId}/units", [
+        'name' => 'Box',
+        'conversion_factor' => '12',
+        'is_active' => true,
+    ])->assertSessionHasNoErrors();
+
+    $tenant->run(function () use ($itemId) {
+        expect(ItemUnit::where('item_id', $itemId)->value('conversion_factor'))->toBe('12.0000');
     });
 
     $tenant->delete();
