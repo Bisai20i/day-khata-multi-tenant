@@ -113,6 +113,25 @@ string values (the golden-vector `expected` shape).
 Helper: `DocumentCalculator::assertExactSplit(Money $due, Money $cash, Money $bank): void`: both `>= 0` and
 `cash + bank == due` exactly, else `BillingException` (`split_mismatch`, add it to the list).
 
+### C3 addendum, settled at the Phase 1 gate (2026-09-12)
+
+C3 left these open; T01 and T02 initially disagreed on the first one. Both engines now implement the rules
+below and `tests/fixtures/billing-vectors.json` (43 vectors) pins every one of them. Do not re-decide these.
+
+- A **negative** discount gives `negative_discount` for both `flat` and `percentage`, at line level and at
+  header level. `percentage_out_of_range` is only for a percentage above 100, or for a VAT rate outside
+  0 to 100 (a negative VAT rate is a range error, not a discount error).
+- Missing `vat_rate`, or an unknown `discount_type` string, gives `invalid_number`.
+- A TDS amount below zero, or above the base, gives `tds_exceeds_base`.
+- In `toArray()`: `vat_rate` and a percentage `discount_value` render at 2 decimals (`"13.00"`), a flat
+  `discount_value` renders at 2 decimals, and `lines[].vatable` stays a real boolean, not a string.
+- Trailing zeros never count toward a scale: `"1.500"` is valid money, `"1.005"` is `too_many_decimals`.
+
+Additive API beyond C1-C3 (present, safe to use): `App\Support\Money\DecimalValue` (abstract base, with
+`DecimalValue::parse()`), `InvalidAmount::$reason`, `DocumentTotals::subtotal()`, and on the JS side a
+`MoneyError` class carrying `.reason`. `parseMoney`, `parseQuantity` and `calculateDocument` still never
+throw; they return `{ ok: false, reason }` as C8 requires.
+
 ## C4. Ledger core (implemented by T03, used by everyone)
 
 - `VoucherType` gains `SalePan = 'sale_pan'` (own gapless series for PAN invoices) and
