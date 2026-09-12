@@ -150,13 +150,13 @@ isolation. Agent prompt template:
 |---|---|---|---|---|
 | T01 | Backend money foundation | 1 | done, tests not run | 91c68d3 |
 | T02 | Frontend money foundation | 1 | done, tests not run | 3a317f3 |
-| T03 | Ledger core, numbering, settings | 2 | pending | |
-| T04 | Sales and POS | 2 | pending | |
-| T05 | Sales returns and receipts | 2 | pending | |
-| T06 | Purchases, purchase returns, payments | 2 | pending | |
-| T07 | Capital documents and quotations | 2 | pending | |
-| T08 | Inventory and costing | 2 | pending | |
-| T09 | Print compliance | 2 | pending | |
+| T03 | Ledger core, numbering, settings | 2 | done, tests not run | 748d195 |
+| T04 | Sales and POS | 2 | PARTIAL, uncommitted | |
+| T05 | Sales returns and receipts | 2 | PARTIAL, uncommitted | |
+| T06 | Purchases, purchase returns, payments | 2 | PARTIAL, uncommitted | |
+| T07 | Capital documents and quotations | 2 | done, tests not run | fd2504e |
+| T08 | Inventory and costing | 2 | PARTIAL, uncommitted | |
+| T09 | Print compliance | 2 | done, tests not run | 10be87b |
 | T10 | Reports, VAT and TDS | 3 | pending | |
 | T11 | Books, fiscal year, fixed assets | 3 | pending | |
 | T12 | Sales parity features | 4 | pending | |
@@ -176,6 +176,33 @@ Ownership clean, `php -l` clean, Pint passed, no banned float op outside the san
   `CONTRACTS.md`.
 - **Awaiting the user:** `php artisan test tests/Unit/Support` and `node --test tests/js` (or `npm run test:js`).
   No agent has run any test yet.
+
+**Phase 2, first pass, 2026-09-12.** T03 `748d195`, T07 `fd2504e`, T09 `10be87b`, coordinator wiring `06cf3cd`.
+T04, T05, T06 and T08 were killed mid-edit by a session rate limit before ticking any checkbox or reporting.
+Their partial work is preserved UNCOMMITTED in the working tree (102 files) and they are being resumed in
+place, not restarted. Every changed PHP file parses (`php -l` clean across all 173 touched files).
+
+Relay to the resumed agents and to Phase 3:
+
+- **T03 deviation, T05/T06 must honour:** read the new `company_settings.sale_return_prefix` and
+  `purchase_return_prefix` rather than hardcoding `SR` / `PR`.
+- **T03 deviation, everyone:** the fiscal-year date guard sits in `JournalVoucher::write()`, so it also covers
+  year-end close and depreciation. `ClosedFiscalYearGuard::assertDateInOpenYear()` throws
+  `InvalidArgumentException` for a missing or closed year and `AuthorizationException` for a non-admin on a
+  reopened year: catch both.
+- **T03 request for T11 (Phase 3), important:** `FiscalYear::postClosingEntries()` and `postOpeningBalances()`
+  pass `(float) netBalance(...)` into `JournalVoucher::write()`, which now refuses more than 2 decimals. A
+  float artefact like `2261.1000000000004` will throw at year-end close. Fix with
+  `Money::round($net)->toString()` per line and for `$netProfit`. Round test amounts hide this, so the suite
+  can stay green while production breaks.
+- **T09 request for T04/T05/T06:** every `print()` action calls `PrintLog::record($doc, $user)` and passes
+  `copyNumber`, `dateBs`, `dateAd`, `fiscalYearName` and (invoices and notes only) `amountInWords`.
+  `pdf/sale-receipt.blade.php` does NOT extend `pdf/layout.blade.php`, so T05 must add the copy stamp, BS
+  date and amount in words to it by hand.
+- **T07 request:** `role:admin` on `capital-sales/{capitalSale}/cancel` (T04 owns `routes/tenant-sales.php`)
+  and on `capital-purchases/{capitalPurchase}/cancel` (T06 owns `routes/tenant-purchase.php`).
+- **T03 open item:** if `CompanySettingTest`'s `toBeTrue()`/`toBeFalse()` assertions fail, the one-line fix is
+  `'boolean'` casts on `CompanySetting`'s `allow_negative_stock` / `sale_*_enabled`.
 
 Carry into Phase 2 (from T02's report):
 
