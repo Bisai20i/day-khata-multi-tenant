@@ -157,8 +157,8 @@ isolation. Agent prompt template:
 | T07 | Capital documents and quotations | 2 | done, tests not run | fd2504e |
 | T08 | Inventory and costing | 2 | done, tests not run | 122959e |
 | T09 | Print compliance | 2 | done, tests not run | 10be87b |
-| T10 | Reports, VAT and TDS | 3 | pending | |
-| T11 | Books, fiscal year, fixed assets | 3 | pending | |
+| T10 | Reports, VAT and TDS | 3 | done, tests not run | 790e90a |
+| T11 | Books, fiscal year, fixed assets | 3 | done, tests not run | c4ee057 |
 | T12 | Sales parity features | 4 | pending | |
 | T13 | Purchase and inventory parity features | 4 | pending | |
 | T14 | Accounting parity features | 4 | pending | |
@@ -226,6 +226,31 @@ shares it computes; `CompanySetting` booleans cast; `ItemVarieties/Index.vue` mo
 Still open, deliberately not done: T04 asked to promote `Pos.vue`'s local scaled-BigInt quantity helpers
 (`addQuantity`, `subtractQuantity`, `compareQuantity`, `stepQuantity`) into `money.js`. `Pos.vue` works as
 written; this is a tidy-up for Phase 4 or later, and touching `money.js` mid-plan risks the 43-vector parity.
+
+**Phase 3 gate passed, 2026-09-12.** T10 `790e90a`, T11 `c4ee057`, coordinator `77c0d0c`.
+`php -l` clean on 58 changed PHP files, Pint passes on every changed file, no float op in changed app PHP,
+both engines still replay all 43 golden vectors. Every remaining `toFloat()` sits at an Excel cell boundary.
+
+Resolved at this gate:
+
+- T11's blocking request applied: `BackupController::performBackup` made public. The callers guard with
+  `is_callable()`, so while it was private an early or automatic year-end close REFUSED to run rather than
+  silently skipping its backup.
+- `JournalVoucherPostingTest` now passes an early-close reason to `close()`.
+- Cross-agent seam removed: T10 kept `StockValuationReportController::currentTotalValuation(): float` "for
+  the dashboard" while T11 moved the dashboard off it in parallel. It had zero callers and held the last
+  non-Excel `toFloat()`, so it was deleted.
+- Verified T10's changed stock expectation (3000 to 2000) against C10: weighted average is per ITEM, not per
+  store, so a store filter changes the quantity, not the unit cost. Main 10 @ 1000 + branch 10 @ 3000 gives
+  4000/20 = 200 per unit, so the branch's 10 units are worth 2000 and the stores sum back to 4000. The old
+  expectation assumed store-scoped costing, which C10 never specified. The change is correct.
+
+Known cosmetic oddity, correct by design: a cancelled credit note appears twice in the Sales Return Register
+(positive when issued, negative when cancelled). That is what makes the register tie to the ledger, but
+"Less: credit notes" on the VAT Summary can read negative in a month containing only a cancellation.
+
+Still open for Phase 4: promote `Pos.vue`'s local quantity helpers into `money.js`; `StockValuationReport-
+Controller` and `InventoryReportController` legacy self-summing paths (the dashboard no longer uses them).
 
 Carry into Phase 3:
 
