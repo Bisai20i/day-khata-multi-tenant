@@ -151,11 +151,11 @@ isolation. Agent prompt template:
 | T01 | Backend money foundation | 1 | done, tests not run | 91c68d3 |
 | T02 | Frontend money foundation | 1 | done, tests not run | 3a317f3 |
 | T03 | Ledger core, numbering, settings | 2 | done, tests not run | 748d195 |
-| T04 | Sales and POS | 2 | PARTIAL, uncommitted | |
-| T05 | Sales returns and receipts | 2 | PARTIAL, uncommitted | |
-| T06 | Purchases, purchase returns, payments | 2 | PARTIAL, uncommitted | |
+| T04 | Sales and POS | 2 | done, tests not run | 6c80439 |
+| T05 | Sales returns and receipts | 2 | done, tests not run | 2c013a3 |
+| T06 | Purchases, purchase returns, payments | 2 | done, tests not run | 287124f |
 | T07 | Capital documents and quotations | 2 | done, tests not run | fd2504e |
-| T08 | Inventory and costing | 2 | PARTIAL, uncommitted | |
+| T08 | Inventory and costing | 2 | done, tests not run | 122959e |
 | T09 | Print compliance | 2 | done, tests not run | 10be87b |
 | T10 | Reports, VAT and TDS | 3 | pending | |
 | T11 | Books, fiscal year, fixed assets | 3 | pending | |
@@ -203,6 +203,41 @@ Relay to the resumed agents and to Phase 3:
   and on `capital-purchases/{capitalPurchase}/cancel` (T06 owns `routes/tenant-purchase.php`).
 - **T03 open item:** if `CompanySettingTest`'s `toBeTrue()`/`toBeFalse()` assertions fail, the one-line fix is
   `'boolean'` casts on `CompanySetting`'s `allow_negative_stock` / `sale_*_enabled`.
+
+**Phase 2 gate passed, 2026-09-12.** All seven tasks committed: T03 `748d195`, T07 `fd2504e`, T09 `10be87b`,
+T04 `6c80439`, T05 `2c013a3`, T06 `287124f`, T08 `122959e`, coordinator `06cf3cd` and `d8455d2`.
+Ownership clean, `php -l` clean on 95 changed PHP files, Pint passes on every changed file (the two failures
+in `Central/Auth/TwoFactor*` are pre-existing repo style debt, untouched by this work). No float op in any
+changed app PHP outside the sanctioned `Money::round()`. Every `Number(` left in changed Vue converts an
+object key back to an id. Both engines still replay all 43 golden vectors: 43/43 PHP, 43/43 JS.
+
+Systematic defect found and swept at this gate: four migrations backfilled by reading a raw decimal column
+into the strict parser. SQLite gives a decimal column REAL affinity, so a row written by the old float code
+returns as `404984.71000000002`, `Money::of()` refuses it, and `tenants:migrate` stops mid-table. T04 and T08
+each caught it in their own file; the coordinator fixed the two remaining ones (`070000`, `070010`). Any new
+migration that backfills money or quantity must use `Money::round()` / `Quantity::round()` on raw reads.
+
+Cross-file requests applied by the coordinator at this gate: `Sale::outstandingAmount()` now reads
+`sales_returns.tds_amount` instead of re-deriving the share (they drift by a paisa once a note has several
+lines and a header discount), with migration `050001` backfilling that header column from the per-line
+shares it computes; `CompanySetting` booleans cast; `ItemVarieties/Index.vue` money rendered with
+`formatMoney` instead of `Number(...).toFixed(2)`.
+
+Still open, deliberately not done: T04 asked to promote `Pos.vue`'s local scaled-BigInt quantity helpers
+(`addQuantity`, `subtractQuantity`, `compareQuantity`, `stepQuantity`) into `money.js`. `Pos.vue` works as
+written; this is a tidy-up for Phase 4 or later, and touching `money.js` mid-plan risks the 43-vector parity.
+
+Carry into Phase 3:
+
+- **T03 request, critical:** `FiscalYear::postClosingEntries()` and `postOpeningBalances()` pass
+  `(float) netBalance(...)` into `JournalVoucher::write()`, which now refuses more than 2 decimals. Fix with
+  `Money::round($net)->toString()` per line and for `$netProfit`. Round test amounts hide this, so the suite
+  can stay green while a real year-end close throws.
+- **T08 request:** read stock valuation only through `StockCosting`. `StockValuationReportController` and
+  `InventoryReportController` still compute their own sums off `ItemStockMovement` and will disagree with
+  the books.
+- Reports must use the stored `invoice_number` / `credit_note_number` / `debit_note_number` and the stored
+  `tds_amount` on returns, never re-derive them, and must count only `posted` returns.
 
 Carry into Phase 2 (from T02's report):
 
