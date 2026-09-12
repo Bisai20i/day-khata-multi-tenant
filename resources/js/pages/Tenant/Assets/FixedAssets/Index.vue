@@ -13,6 +13,8 @@ import DataTable from '@/components/ui/DataTable.vue';
 import { useToast } from '@/composables/useToast';
 import { useConfirm } from '@/composables/useConfirm';
 import { navGroups } from '@/lib/nav-items.js';
+import { formatMoney } from '@/lib/money.js';
+import { todayInKathmandu } from '@/lib/format.js';
 import Create from './Create.vue';
 
 const props = defineProps({
@@ -66,15 +68,26 @@ function openDispose(asset) {
     disposing.value = asset;
     disposeForm.reset();
     disposeForm.clearErrors();
-    disposeForm.disposal_date = new Date().toISOString().slice(0, 10);
+    // todayInKathmandu(), not toISOString(): UTC is 5h45 behind Nepal, so
+    // between midnight and 05:45 local the old default dated the disposal
+    // yesterday (audit P1, timezone).
+    disposeForm.disposal_date = todayInKathmandu();
 }
 
 function onDisposeModalOpenChange(value) {
     if (!value) disposing.value = null;
 }
 
+/**
+ * The proceeds go over the wire as the string the user typed; the server
+ * validates `decimal:0,2` and parses with Money, so nothing is rounded
+ * silently in the browser (CONTRACTS C1/C8).
+ */
 function submitDispose() {
-    disposeForm.post(`/fixed-assets/${disposing.value.id}/dispose`, {
+    disposeForm.transform((data) => ({
+        ...data,
+        disposal_amount: String(data.disposal_amount ?? '').trim() === '' ? '0' : String(data.disposal_amount).trim(),
+    })).post(`/fixed-assets/${disposing.value.id}/dispose`, {
         preserveScroll: true,
         onSuccess: () => {
             disposing.value = null;
@@ -108,19 +121,21 @@ const columns = [
         id: 'cost',
         header: 'Cost',
         numeric: true,
-        cell: ({ row }) => Number(row.original.cost).toFixed(2),
+        cell: ({ row }) => formatMoney(row.original.cost),
     },
     {
         id: 'accumulated_depreciation',
         header: 'Accum. Depr.',
         numeric: true,
-        cell: ({ row }) => Number(row.original.accumulated_depreciation).toFixed(2),
+        cell: ({ row }) => formatMoney(row.original.accumulated_depreciation),
     },
     {
         id: 'wdv',
         header: 'WDV',
         numeric: true,
-        cell: ({ row }) => (Number(row.original.cost) - Number(row.original.accumulated_depreciation)).toFixed(2),
+        // wdv is appended by the FixedAsset model as an exact string, so the
+        // browser never subtracts two money values itself.
+        cell: ({ row }) => formatMoney(row.original.wdv),
     },
     {
         id: 'status',

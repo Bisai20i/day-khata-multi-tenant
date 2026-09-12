@@ -92,7 +92,7 @@ class BackupController extends Controller
      * on failure the row is kept with status "failed" (no file) so a failed
      * attempt is still visible in the list, not silently swallowed.
      */
-    private function performBackup(User $actor): Backup
+    public function performBackup(User $actor): Backup
     {
         $driver = DB::connection()->getConfig('driver');
         $extension = $driver === 'sqlite' ? 'sqlite' : 'sql';

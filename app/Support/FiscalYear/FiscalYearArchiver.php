@@ -7,6 +7,7 @@ use App\Models\FiscalYear;
 use App\Models\FiscalYearArchive;
 use App\Models\JournalVoucher;
 use App\Models\User;
+use App\Support\Money\Money;
 use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
@@ -178,7 +179,15 @@ class FiscalYearArchiver
         Schema::connection($connectionName)->create('journal_voucher_lines', function (Blueprint $table) {
             $table->id();
             $table->unsignedBigInteger('journal_voucher_id');
-            $table->string('account_code');
+            // Nullable, because plenty of real accounts have no code at all:
+            // App\Models\Concerns\HasLedgerAccount creates a customer's,
+            // supplier's, agent's and fixed asset's own ledger account with
+            // only a name. A NOT NULL column here made archiving throw for
+            // any year that contained a single party posting, which in
+            // practice is every year a tenant has actually traded in (audit
+            // P1, "Fiscal-year archiving throws for any year with party
+            // postings").
+            $table->string('account_code')->nullable();
             $table->string('account_name');
             $table->decimal('debit', 20, 2)->default(0);
             $table->decimal('credit', 20, 2)->default(0);
@@ -223,10 +232,15 @@ class FiscalYearArchiver
                     $lineRows = $voucher->lines->map(fn ($line) => [
                         'id' => $line->id,
                         'journal_voucher_id' => $voucher->id,
-                        'account_code' => $line->account->code,
-                        'account_name' => $line->account->name,
-                        'debit' => (string) $line->debit,
-                        'credit' => (string) $line->credit,
+                        // Both nullable-safe: an account with no code is
+                        // normal (party and fixed-asset accounts), and a line
+                        // whose account row has since been deleted still
+                        // deserves to be archived rather than to abort the
+                        // whole year's copy.
+                        'account_code' => $line->account?->code,
+                        'account_name' => $line->account?->name ?? 'Unknown',
+                        'debit' => Money::of($line->debit)->toString(),
+                        'credit' => Money::of($line->credit)->toString(),
                         'narration' => $line->narration,
                     ])->all();
 

@@ -92,7 +92,7 @@ test('an admin can browse an archived fiscal year and one of its vouchers, and b
             $admin,
         );
 
-        $fy1->close($fy2, $admin);
+        $fy1->close($fy2, $admin, 'Closed early by the test fixture.');
 
         // Faithful stand-in for FiscalYearArchiveController::store(), which
         // is being built in parallel and may not exist on disk yet - this
@@ -178,7 +178,7 @@ test('a non-admin cannot browse a fiscal year archive or one of its vouchers', f
             $admin,
         );
 
-        $fy1->close($fy2, $admin);
+        $fy1->close($fy2, $admin, 'Closed early by the test fixture.');
 
         $archive = FiscalYearArchiver::archive($fy1->fresh(), $admin);
         $archiveId = $archive->id;

@@ -67,12 +67,19 @@ watch(
 const showBankAccount = computed(() => form.payment_mode === 'bank');
 const showSupplier = computed(() => form.payment_mode === 'credit');
 
+/**
+ * The three decimal fields are submitted as the strings the user typed, not
+ * through Number(): the server validates them with `decimal:0,2` and parses
+ * them with Money, so a cost of 1,234.567 is refused with a clear message
+ * instead of being silently rounded to fit the column (CONTRACTS C1/C8).
+ * An empty optional box is normalised to "0" rather than to a float 0.
+ */
 function submit() {
     form.transform((data) => ({
         ...data,
-        cost: Number(data.cost) || 0,
-        salvage_value: Number(data.salvage_value) || 0,
-        depreciation_rate: Number(data.depreciation_rate) || 0,
+        cost: String(data.cost ?? '').trim(),
+        salvage_value: String(data.salvage_value ?? '').trim() === '' ? '0' : String(data.salvage_value).trim(),
+        depreciation_rate: String(data.depreciation_rate ?? '').trim(),
     })).post('/fixed-assets', {
         preserveScroll: true,
         onSuccess: () => emit('posted'),

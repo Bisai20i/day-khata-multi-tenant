@@ -15,6 +15,7 @@ import Tooltip from '@/components/ui/Tooltip.vue';
 import { useToast } from '@/composables/useToast';
 import { useConfirm } from '@/composables/useConfirm';
 import { navGroups } from '@/lib/nav-items.js';
+import { formatBsDate, todayInKathmandu } from '@/lib/format.js';
 
 const props = defineProps({
     fiscalYears: {
@@ -79,6 +80,18 @@ const closingYear = ref(null);
 
 const closeForm = useForm({
     next_fiscal_year_id: null,
+    reason: '',
+});
+
+// A year that has not reached its end date yet can only be closed with a
+// written reason, and only by an admin - the server enforces both (see
+// App\Models\FiscalYear::close()); this just tells the user before they try.
+const closingEarly = computed(() => {
+    if (!closingYear.value?.end_date) {
+        return false;
+    }
+
+    return todayInKathmandu() <= String(closingYear.value.end_date).slice(0, 10);
 });
 
 const eligibleNextYears = computed(() =>
@@ -175,7 +188,7 @@ function submitReopen() {
 async function relockFiscalYear(fiscalYear) {
     const confirmed = await confirm({
         title: 'Relock fiscal year',
-        message: `Relock "${fiscalYear.name}"? Purchase, Journal Voucher, and Stock Adjustment postings will no longer be able to target it.`,
+        message: `Relock "${fiscalYear.name}"? Purchase, Journal Voucher, and Stock Adjustment postings will no longer be able to target it, and a supplementary closing entry will sweep whatever the corrections left unswept so the year's Balance Sheet balances again.`,
         confirmLabel: 'Relock',
     });
     if (!confirmed) {
@@ -187,8 +200,8 @@ async function relockFiscalYear(fiscalYear) {
 
 const columns = [
     { accessorKey: 'name', header: 'Name' },
-    { accessorKey: 'start_date', header: 'Start Date' },
-    { accessorKey: 'end_date', header: 'End Date' },
+    { accessorKey: 'start_date', header: 'Start Date', numeric: false, cell: ({ row }) => formatBsDate(row.original.start_date) },
+    { accessorKey: 'end_date', header: 'End Date', numeric: false, cell: ({ row }) => formatBsDate(row.original.end_date) },
     {
         accessorKey: 'status',
         header: 'Status',
@@ -390,7 +403,8 @@ const columns = [
         <Modal :open="closeModalOpen" title="Close fiscal year" size="compact" @update:open="onCloseModalOpenChange">
             <div class="flex flex-col gap-4">
                 <p class="text-sm text-text-muted">
-                    This will run the year-end closing entries and carry balances forward into the selected year.
+                    This posts depreciation, the opening and closing stock entries, the year-end closing entries,
+                    and carries balances forward into the selected year. A database backup is taken first.
                 </p>
 
                 <div>
@@ -407,6 +421,25 @@ const columns = [
                         {{ closeForm.errors.next_fiscal_year_id }}
                     </p>
                 </div>
+
+                <div v-if="closingEarly">
+                    <label for="close_reason" class="mb-1 block text-sm font-semibold text-text-base">
+                        Reason for closing early <span class="text-danger">*</span>
+                    </label>
+                    <Input
+                        id="close_reason"
+                        v-model="closeForm.reason"
+                        type="text"
+                        maxlength="500"
+                        placeholder="Why is this year being closed before it ends?"
+                        required
+                    />
+                    <p class="mt-1 text-xs text-text-muted">
+                        This year has not finished yet. Closing it now freezes a period that can still receive
+                        documents, so an admin has to say why.
+                    </p>
+                    <p v-if="closeForm.errors.reason" class="mt-1 text-sm text-danger">{{ closeForm.errors.reason }}</p>
+                </div>
             </div>
 
             <template #footer>
@@ -415,7 +448,7 @@ const columns = [
                     variant="primary"
                     tone="purple"
                     type="button"
-                    :disabled="closeForm.processing || !closeForm.next_fiscal_year_id"
+                    :disabled="closeForm.processing || !closeForm.next_fiscal_year_id || (closingEarly && !closeForm.reason.trim())"
                     @click="submitClose"
                 >
                     Close fiscal year

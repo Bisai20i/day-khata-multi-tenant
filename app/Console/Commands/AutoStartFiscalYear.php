@@ -4,6 +4,8 @@ namespace App\Console\Commands;
 
 use App\Enums\FiscalYearStatus;
 use App\Enums\TenantStatus;
+use App\Http\Controllers\Tenant\Admin\BackupController;
+use App\Models\Backup;
 use App\Models\FiscalYear;
 use App\Models\Tenant;
 use App\Models\User;
@@ -11,6 +13,7 @@ use App\Support\NepaliCalendar;
 use Illuminate\Console\Command;
 use Illuminate\Support\Carbon;
 use InvalidArgumentException;
+use RuntimeException;
 use Throwable;
 
 /**
@@ -31,6 +34,14 @@ use Throwable;
  * forward from (no dates to infer, no prior year's balances to carry), so
  * that stays a deliberate action taken by the tenant's admin via
  * FiscalYearController::store().
+ *
+ * The close it runs is exactly FiscalYear::close() - the same depreciation,
+ * periodic-inventory trading pair, P&L sweep and opening balances an admin
+ * gets from the Fiscal Years screen - preceded by the same mandatory database
+ * backup. Every step stays idempotent: a tenant whose next year already
+ * exists reuses it, a tenant whose open year already covers the current
+ * period is skipped, and close() re-checks every blocker under a row lock, so
+ * a second run on the same day changes nothing.
  */
 class AutoStartFiscalYear extends Command
 {
@@ -96,21 +107,63 @@ class AutoStartFiscalYear extends Command
         $nextEnd = NepaliCalendar::bsToAd($expectedStartBsYear + 1, 4, 1)->subDay();
         $name = sprintf('%d/%02d', $expectedStartBsYear, ($expectedStartBsYear + 1) % 100);
 
+        // Idempotent: a previous run that created the year and then failed
+        // part way through the close reuses it, instead of colliding with
+        // the overlap guard on fiscal_years.
+        $next = FiscalYear::query()->where('start_date', $expectedStart->toDateString())->first();
+
+        if ($next === null) {
+            try {
+                $next = FiscalYear::create([
+                    'name' => $name,
+                    'start_date' => $expectedStart->toDateString(),
+                    'end_date' => $nextEnd->toDateString(),
+                    'status' => FiscalYearStatus::Closed,
+                ]);
+            } catch (InvalidArgumentException $e) {
+                $this->error("Tenant {$tenant->getTenantKey()}: could not create fiscal year {$name} - {$e->getMessage()}");
+
+                return;
+            }
+        }
+
         try {
-            $next = FiscalYear::create([
-                'name' => $name,
-                'start_date' => $expectedStart->toDateString(),
-                'end_date' => $nextEnd->toDateString(),
-                'status' => FiscalYearStatus::Closed,
-            ]);
-        } catch (InvalidArgumentException $e) {
-            $this->error("Tenant {$tenant->getTenantKey()}: could not create fiscal year {$name} - {$e->getMessage()}");
+            $backup = $this->takePreCloseBackup($actor);
+        } catch (RuntimeException $e) {
+            $this->error("Tenant {$tenant->getTenantKey()}: {$e->getMessage()} Fiscal year {$name} exists but was not opened; the roll-over will be retried on the next run.");
 
             return;
         }
 
-        $openFiscalYear->close($next, $actor);
+        $openFiscalYear->close(
+            $next,
+            $actor,
+            "Automatic Shrawan 1 roll-over onto fiscal year {$name} (fiscal-year:auto-start).",
+        );
 
-        $this->info("Tenant {$tenant->getTenantKey()}: rolled over to fiscal year {$name}.");
+        $this->info("Tenant {$tenant->getTenantKey()}: rolled over to fiscal year {$name} (backup {$backup->filename}).");
+    }
+
+    /**
+     * The same mandatory pre-close backup FiscalYearController::close()
+     * takes, for the same reason: a close is not undoable. Calls the
+     * tenant's existing backup mechanism rather than reimplementing a dump,
+     * and never edits it.
+     */
+    private function takePreCloseBackup(User $actor): Backup
+    {
+        $controller = new BackupController;
+
+        if (! is_callable([$controller, 'performBackup'])) {
+            throw new RuntimeException('the backup mechanism is not available, so no pre-close backup could be taken.');
+        }
+
+        $backup = $controller->performBackup($actor);
+
+        if ($backup->status !== 'completed') {
+            throw new RuntimeException('the pre-close backup failed.');
+        }
+
+        return $backup;
     }
 }

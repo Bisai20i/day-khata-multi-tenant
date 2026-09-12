@@ -23,6 +23,7 @@ import AppLayout from '@/layouts/AppLayout.vue';
 import Card from '@/components/ui/Card.vue';
 import Button from '@/components/ui/Button.vue';
 import { navGroups } from '@/lib/nav-items.js';
+import { formatMoney, formatQuantity, compareMoney, parseMoney } from '@/lib/money.js';
 
 const props = defineProps({
     notices: {
@@ -36,14 +37,22 @@ const props = defineProps({
             suppliers: { total: 0, thisWeek: 0 },
             items: { total: 0, thisWeek: 0 },
             accounts: { total: 0 },
-            sales: { today: { count: 0, total: 0 }, thisWeek: { count: 0, total: 0 } },
-            purchases: { today: { count: 0, total: 0 }, thisWeek: { count: 0, total: 0 } },
-            cashInHand: 0,
-            stockValue: 0,
-            debtors: 0,
-            creditors: 0,
-            tax: { thisWeek: { taxable: 0, nontaxable: 0, vat: 0 } },
+            sales: { today: { count: 0, total: '0.00' }, thisWeek: { count: 0, total: '0.00' } },
+            purchases: { today: { count: 0, total: '0.00' }, thisWeek: { count: 0, total: '0.00' } },
+            cashInHand: '0.00',
+            stockValue: '0.00',
+            debtors: '0.00',
+            creditors: '0.00',
+            tax: { thisWeek: { taxable: '0.00', nontaxable: '0.00', vat: '0.00' } },
         }),
+    },
+    lowStockItems: {
+        type: Array,
+        default: () => [],
+    },
+    fiscalYear: {
+        type: [Object, null],
+        default: null,
     },
     recentCustomers: {
         type: Array,
@@ -111,14 +120,35 @@ const financialCards = computed(() => [
     { key: 'creditors', label: 'Creditors (Sundry Creditors)', icon: Landmark, amount: props.kpis.creditors },
 ]);
 
-const taxSummary = computed(() => props.kpis.tax?.thisWeek ?? { taxable: 0, nontaxable: 0, vat: 0 });
+const taxSummary = computed(() => props.kpis.tax?.thisWeek ?? { taxable: '0.00', nontaxable: '0.00', vat: '0.00' });
 
-const maxTrendTotal = computed(() =>
-    Math.max(1, ...props.salesTrend.map((day) => day.total), ...props.purchaseTrend.map((day) => day.total)),
-);
+/**
+ * Tallest bar in the two trend strips, picked by exact money comparison.
+ * Only the bar GEOMETRY below leaves the decimal world - the same narrow
+ * exemption CONTRACTS C1 grants Money::toFloat() for chart data. No amount
+ * a user reads is ever produced this way.
+ */
+const maxTrendTotal = computed(() => {
+    let max = '0.00';
+
+    for (const day of [...props.salesTrend, ...props.purchaseTrend]) {
+        if (compareMoney(day.total, max) > 0) {
+            max = day.total;
+        }
+    }
+
+    return max;
+});
 
 function trendBarWidth(total) {
-    return `${Math.min(100, (Number(total ?? 0) / maxTrendTotal.value) * 100)}%`;
+    const max = parseMoney(maxTrendTotal.value);
+    const value = parseMoney(total ?? '0.00');
+
+    if (!max.ok || !value.ok || max.value === 0n) {
+        return '0%';
+    }
+
+    return `${Math.min(100, (Number(value.value) / Number(max.value)) * 100)}%`;
 }
 
 function trendDayLabel(dateString) {
@@ -138,8 +168,13 @@ function initial(name) {
     return name?.trim()?.charAt(0)?.toUpperCase() ?? '?';
 }
 
+/**
+ * Every amount on this page arrives as an exact decimal string from
+ * DashboardController and is rendered with Indian grouping (CONTRACTS C8) -
+ * no parseFloat, no toFixed, no arithmetic in the browser.
+ */
 function formatAmount(amount) {
-    return Number(amount ?? 0).toFixed(2);
+    return formatMoney(amount ?? '0.00');
 }
 </script>
 
@@ -185,6 +220,10 @@ function formatAmount(amount) {
             </Card>
         </div>
 
+        <p v-if="fiscalYear" class="mb-2 text-xs text-text-muted">
+            Ledger balances below are for fiscal year {{ fiscalYear.name }} only.
+        </p>
+
         <div class="mb-5 grid grid-cols-4 gap-4">
             <Card v-for="card in financialCards" :key="card.key" variant="panel">
                 <div class="flex size-9 items-center justify-center bg-primary-tint">
@@ -205,6 +244,24 @@ function formatAmount(amount) {
                     <p class="text-xs text-text-muted">Expiring within the next 30 days</p>
                 </div>
             </div>
+        </Card>
+
+        <Card v-if="lowStockItems.length > 0" variant="panel" title="Low Stock" class="mb-5">
+            <div class="divide-y divide-border">
+                <div
+                    v-for="item in lowStockItems"
+                    :key="`low-${item.id}`"
+                    class="flex items-center gap-3 px-1 py-1.5 text-[13px] text-text-base"
+                >
+                    <AlertTriangle class="size-4 shrink-0 text-warning-text" aria-hidden="true" />
+                    <div class="min-w-0 flex-1 truncate">{{ item.name }}</div>
+                    <div class="w-32 text-right">
+                        <span class="font-semibold text-text-strong">{{ formatQuantity(item.stock) }}</span>
+                        <span class="text-text-muted"> / {{ formatQuantity(item.minStock) }} {{ item.unit }}</span>
+                    </div>
+                </div>
+            </div>
+            <p class="mt-2 text-xs text-text-muted">Items at or below their reorder level.</p>
         </Card>
 
         <div class="mb-5 grid grid-cols-[2fr_1fr] gap-5">

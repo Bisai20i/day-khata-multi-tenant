@@ -6,6 +6,8 @@ import AppLayout from '@/layouts/AppLayout.vue';
 import Card from '@/components/ui/Card.vue';
 import Badge from '@/components/ui/Badge.vue';
 import { navGroups } from '@/lib/nav-items.js';
+import { formatMoney, sumMoney, isZeroMoney } from '@/lib/money.js';
+import { formatBsDate } from '@/lib/format.js';
 
 const props = defineProps({
     fiscalYear: { type: Object, required: true },
@@ -41,11 +43,11 @@ const voucherLabel = computed(() => {
     return `${label} #${props.voucher.voucherNumber}`;
 });
 
-const totalDebit = computed(() => props.lines.reduce((sum, line) => sum + Number(line.debit ?? 0), 0));
-const totalCredit = computed(() => props.lines.reduce((sum, line) => sum + Number(line.credit ?? 0), 0));
+const totalDebit = computed(() => sumMoney(props.lines.map((line) => line.debit ?? '0.00')));
+const totalCredit = computed(() => sumMoney(props.lines.map((line) => line.credit ?? '0.00')));
 
 function money(value) {
-    return Number(value ?? 0).toFixed(2);
+    return formatMoney(value ?? '0.00');
 }
 </script>
 
@@ -61,7 +63,7 @@ function money(value) {
                     Back to {{ fiscalYear.name }}
                 </Link>
                 <h2 class="text-base font-bold text-text-strong">{{ voucherLabel }}</h2>
-                <p class="text-xs text-text-muted">{{ voucher.date }} &middot; {{ fiscalYear.bsLabel }}</p>
+                <p class="text-xs text-text-muted">{{ formatBsDate(voucher.date) }} BS ({{ voucher.date }}) &middot; {{ fiscalYear.bsLabel }}</p>
             </div>
             <Badge variant="neutral" pill>
                 <Archive class="h-3 w-3" aria-hidden="true" />
@@ -97,8 +99,8 @@ function money(value) {
                 <div v-for="line in lines" :key="line.id" class="flex items-center px-1 py-2 text-[13px] text-text-base">
                     <div class="flex-1">{{ line.accountName }} <span class="text-text-muted">&middot; {{ line.accountCode ?? '—' }}</span></div>
                     <div class="w-40 truncate text-[12.5px] text-text-muted">{{ line.narration ?? '—' }}</div>
-                    <div class="w-28 text-right">{{ line.debit > 0 ? money(line.debit) : '—' }}</div>
-                    <div class="w-28 text-right">{{ line.credit > 0 ? money(line.credit) : '—' }}</div>
+                    <div class="w-28 text-right">{{ isZeroMoney(line.debit) ? '—' : money(line.debit) }}</div>
+                    <div class="w-28 text-right">{{ isZeroMoney(line.credit) ? '—' : money(line.credit) }}</div>
                 </div>
             </div>
 

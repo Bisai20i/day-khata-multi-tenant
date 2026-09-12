@@ -3,11 +3,13 @@
 use App\Enums\FiscalYearStatus;
 use App\Enums\VoucherType;
 use App\Models\Account;
+use App\Models\Customer;
 use App\Models\FiscalYear;
 use App\Models\FiscalYearArchive;
 use App\Models\JournalVoucher;
 use App\Models\JournalVoucherLine;
 use App\Models\Role;
+use App\Models\Supplier;
 use App\Models\Tenant;
 use App\Models\User;
 use App\Support\FiscalYear\FiscalYearArchiver;
@@ -114,7 +116,7 @@ test('an admin can archive a closed fiscal year, producing a row with correct co
 
         postArchiveTestVouchers($admin);
 
-        $fy1->close($fy2, $admin);
+        $fy1->close($fy2, $admin, 'Closed early by the test fixture.');
 
         // 3 manually-posted vouchers + 1 system-posted ClosingEntry
         // voucher all land inside fy1; the OpeningBalance voucher close()
@@ -154,7 +156,7 @@ test('archiving round-trips the ledger exactly: aggregate sums and a per-line sp
         $fiscalYearId = $fy1->id;
 
         postArchiveTestVouchers($admin);
-        $fy1->close($fy2, $admin);
+        $fy1->close($fy2, $admin, 'Closed early by the test fixture.');
     });
 
     test()->post("http://{$domain}/fiscal-years/{$fiscalYearId}/archive");
@@ -242,7 +244,7 @@ test('a fiscal year cannot be archived twice', function () {
         $fiscalYearId = $fy1->id;
 
         postArchiveTestVouchers($admin);
-        $fy1->close($fy2, $admin);
+        $fy1->close($fy2, $admin, 'Closed early by the test fixture.');
     });
 
     $first = test()->post("http://{$domain}/fiscal-years/{$fiscalYearId}/archive");
@@ -315,7 +317,7 @@ test('archiving never deletes or alters the live journal voucher data', function
         $fiscalYearId = $fy1->id;
 
         postArchiveTestVouchers($admin);
-        $fy1->close($fy2, $admin);
+        $fy1->close($fy2, $admin, 'Closed early by the test fixture.');
 
         $liveVoucherCountBefore = JournalVoucher::where('fiscal_year_id', $fy1->id)->count();
         $liveLineCountBefore = JournalVoucherLine::whereHas('journalVoucher', fn ($q) => $q->where('fiscal_year_id', $fy1->id))->count();
@@ -331,6 +333,80 @@ test('archiving never deletes or alters the live journal voucher data', function
             ->and((float) JournalVoucherLine::whereHas('journalVoucher', fn ($q) => $q->where('fiscal_year_id', $fiscalYearId))->sum('debit'))->toBe($liveDebitBefore)
             ->and((float) JournalVoucherLine::whereHas('journalVoucher', fn ($q) => $q->where('fiscal_year_id', $fiscalYearId))->sum('credit'))->toBe($liveCreditBefore);
     });
+
+    $tenant->delete();
+});
+
+test('archiving a year that contains supplier and customer postings succeeds and keeps their codeless accounts', function () {
+    // Audit P1: the archive schema made account_code NOT NULL, but a party's
+    // own ledger account (App\Models\Concerns\HasLedgerAccount) is created
+    // with only a name - so archiving threw for any year in which the tenant
+    // had actually traded with a supplier or a customer, i.e. every real
+    // year.
+    $domain = 'fy-archive-party.tenant-test';
+    $tenant = provisionArchiveTestTenant($domain);
+    $admin = loginAsArchiveAdmin($domain);
+
+    $archiveId = null;
+
+    $tenant->run(function () use ($admin, &$archiveId) {
+        $fy1 = FiscalYear::create(['name' => 'FY1', 'start_date' => '2026-01-01', 'end_date' => '2026-12-31', 'status' => FiscalYearStatus::Open]);
+        $fy2 = FiscalYear::create(['name' => 'FY2', 'start_date' => '2027-01-01', 'end_date' => '2027-12-31', 'status' => FiscalYearStatus::Closed]);
+
+        $supplier = Supplier::factory()->create(['name' => 'ABC Traders']);
+        $customer = Customer::factory()->create(['name' => 'Ram Shrestha']);
+
+        expect(Account::find($supplier->account_id)->code)->toBeNull()
+            ->and(Account::find($customer->account_id)->code)->toBeNull();
+
+        $purchases = Account::where('code', 'EXE8')->firstOrFail();
+        $sales = Account::where('code', 'INI20')->firstOrFail();
+
+        JournalVoucher::post(
+            ['date' => '2026-03-01', 'narration' => 'Credit purchase from ABC Traders'],
+            [
+                ['account_id' => $purchases->id, 'debit' => 700, 'credit' => 0],
+                ['account_id' => $supplier->account_id, 'debit' => 0, 'credit' => 700],
+            ],
+            $admin,
+        );
+
+        JournalVoucher::post(
+            ['date' => '2026-04-01', 'narration' => 'Credit sale to Ram Shrestha'],
+            [
+                ['account_id' => $customer->account_id, 'debit' => 900, 'credit' => 0],
+                ['account_id' => $sales->id, 'debit' => 0, 'credit' => 900],
+            ],
+            $admin,
+        );
+
+        $fy1->close($fy2, $admin, 'Closed early by the test fixture.');
+
+        $archive = FiscalYearArchiver::archive($fy1->fresh(), $admin);
+        $archiveId = $archive->id;
+
+        expect($archive->voucher_count)->toBeGreaterThan(0);
+
+        $connection = FiscalYearArchiver::connectionFor($archive);
+
+        $partyLines = DB::connection($connection)
+            ->table('journal_voucher_lines')
+            ->whereNull('account_code')
+            ->get();
+
+        expect($partyLines)->toHaveCount(2)
+            ->and($partyLines->pluck('account_name')->sort()->values()->all())
+            ->toBe(['ABC Traders', 'Ram Shrestha']);
+    });
+
+    // The browsing screen reads the copied sums back as exact strings, not
+    // as floats.
+    $this->get("http://{$domain}/fiscal-year-archives/{$archiveId}")
+        ->assertOk()
+        ->assertInertia(fn ($page) => $page
+            ->component('Tenant/Accounting/FiscalYearArchive/Show')
+            ->where('vouchers.0.totalDebit', '700.00')
+            ->where('vouchers.0.totalCredit', '700.00'));
 
     $tenant->delete();
 });

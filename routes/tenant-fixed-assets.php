@@ -16,17 +16,16 @@ use Illuminate\Support\Facades\Route;
 |
 */
 
-Route::name('tenant.')->group(function () {
+// Admin-only throughout (audit P1, missing role gates). Buying, disposing of
+// and depreciating a fixed asset each post straight into the ledger and move
+// the balance sheet; the manual depreciation run is the same posting
+// FiscalYear::close() performs automatically, which legacy also gated behind
+// superadmin.
+Route::name('tenant.')->middleware('role:admin')->group(function () {
     Route::prefix('fixed-assets')->name('fixed-assets.')->group(function () {
         Route::get('/', [FixedAssetController::class, 'index'])->name('index');
         Route::post('/', [FixedAssetController::class, 'store'])->name('store');
         Route::post('/{fixedAsset}/dispose', [FixedAssetController::class, 'dispose'])->name('dispose');
-
-        // Manual trigger for the same posting FiscalYear::close() runs
-        // automatically - admin-only, mirroring legacy's superadmin-gated
-        // "Post Depreciation" action.
-        Route::post('/post-depreciation', [FixedAssetController::class, 'postDepreciation'])
-            ->middleware('role:admin')
-            ->name('post-depreciation');
+        Route::post('/post-depreciation', [FixedAssetController::class, 'postDepreciation'])->name('post-depreciation');
     });
 });

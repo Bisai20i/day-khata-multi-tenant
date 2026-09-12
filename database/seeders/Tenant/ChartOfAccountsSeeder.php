@@ -35,6 +35,26 @@ class ChartOfAccountsSeeder extends Seeder
      * posted (see App\Models\Sale), added when the Sales Agent Commission
      * phase was built.
      *
+     * Inventory is periodic in this ledger (CONTRACTS C10): no stock
+     * document posts a journal, so stock only reaches the books through the
+     * trading entries App\Models\FiscalYear::close() posts on the year's
+     * last day. Three accounts carry that, and their codes are constants on
+     * FiscalYear (STOCK_IN_HAND_CODE / OPENING_STOCK_CODE /
+     * CLOSING_STOCK_CODE) because close() and AccountingReportController
+     * both look them up by code:
+     *
+     * - AS11 "Stock in Hand", a Current Assets -> Stock balance-sheet
+     *   account. It was seeded as "Opening Stock" originally, which was a
+     *   misnomer - it is the asset, not the trading expense - and it was
+     *   never posted to at all (audit P0-17).
+     * - EXE9 "Opening Stock", under Purchase Accounts: the trading-account
+     *   debit for stock carried in from last year.
+     * - INI22 "Closing Stock", under Sales Accounts: the trading-account
+     *   credit that takes unsold stock back out of cost of sales.
+     *
+     * Existing tenants get all three from
+     * 2026_09_13_110000_add_trading_stock_accounts_to_chart_of_accounts.
+     *
      * "Income" and "Expenses" are marked is_profit_and_loss=true - the
      * ledger's year-end close (App\Models\FiscalYear::close()) sweeps every
      * account under these two heads to zero and posts the net to the
@@ -80,11 +100,13 @@ class ChartOfAccountsSeeder extends Seeder
         $defaultAccounts = [
             ['subgroup' => 'Cash-In-Hand', 'code' => 'AS1', 'name' => 'Cash In Hand'],
             ['subgroup' => 'Reserve Surplus', 'code' => 'CA2', 'name' => 'Profit & Loss'],
-            ['subgroup' => 'Stock', 'code' => 'AS11', 'name' => 'Opening Stock'],
+            ['subgroup' => 'Stock', 'code' => 'AS11', 'name' => 'Stock in Hand'],
             ['group' => 'Sales Accounts', 'code' => 'INI20', 'name' => 'Sales Account'],
             ['group' => 'Sales Accounts', 'code' => 'INI21', 'name' => 'Sales Return'],
+            ['group' => 'Sales Accounts', 'code' => 'INI22', 'name' => 'Closing Stock'],
             ['group' => 'Purchase Accounts', 'code' => 'EXE8', 'name' => 'Purchases Account'],
             ['group' => 'Purchase Accounts', 'code' => 'EXE81', 'name' => 'Purchase Return'],
+            ['group' => 'Purchase Accounts', 'code' => 'EXE9', 'name' => 'Opening Stock'],
             ['group' => 'Current Liabilities', 'code' => 'LIA20', 'name' => 'Vat Payable'],
             ['group' => 'Current Assets', 'code' => 'ASA23', 'name' => 'Vat Receivable'],
             ['group' => 'Fixed Assets', 'code' => 'AS31', 'name' => 'Accumulated Depreciation'],

@@ -5,6 +5,9 @@ namespace App\Http\Controllers\Tenant\Accounting;
 use App\Http\Controllers\Controller;
 use App\Models\FiscalYearArchive;
 use App\Support\FiscalYear\FiscalYearArchiver;
+use App\Support\Money\Money;
+use Brick\Math\BigDecimal;
+use Brick\Math\RoundingMode;
 use Illuminate\Support\Facades\DB;
 use Inertia\Inertia;
 use Inertia\Response;
@@ -28,7 +31,7 @@ class ArchivedFiscalYearController extends Controller
             ->groupBy('v.id', 'v.voucher_type', 'v.voucher_number', 'v.date', 'v.narration', 'v.reason', 'v.created_by_name')
             ->orderBy('v.date')
             ->orderBy('v.voucher_number')
-            ->selectRaw('v.id, v.voucher_type, v.voucher_number, v.date, v.narration, v.reason, v.created_by_name, COALESCE(SUM(l.debit), 0) as total_debit, COALESCE(SUM(l.credit), 0) as total_credit')
+            ->selectRaw('v.id, v.voucher_type, v.voucher_number, v.date, v.narration, v.reason, v.created_by_name, COALESCE(SUM(CAST(ROUND(l.debit * 100) AS INTEGER)), 0) as total_debit_scaled, COALESCE(SUM(CAST(ROUND(l.credit * 100) AS INTEGER)), 0) as total_credit_scaled')
             ->get()
             ->map(fn ($voucher) => [
                 'id' => $voucher->id,
@@ -38,8 +41,8 @@ class ArchivedFiscalYearController extends Controller
                 'narration' => $voucher->narration,
                 'reason' => $voucher->reason,
                 'createdByName' => $voucher->created_by_name,
-                'totalDebit' => (float) $voucher->total_debit,
-                'totalCredit' => (float) $voucher->total_credit,
+                'totalDebit' => $this->fromScaled($voucher->total_debit_scaled)->toString(),
+                'totalCredit' => $this->fromScaled($voucher->total_credit_scaled)->toString(),
             ]);
 
         return Inertia::render('Tenant/Accounting/FiscalYearArchive/Show', [
@@ -68,8 +71,8 @@ class ArchivedFiscalYearController extends Controller
                 'id' => $line->id,
                 'accountCode' => $line->account_code,
                 'accountName' => $line->account_name,
-                'debit' => (float) $line->debit,
-                'credit' => (float) $line->credit,
+                'debit' => Money::of($line->debit)->toString(),
+                'credit' => Money::of($line->credit)->toString(),
                 'narration' => $line->narration,
             ]);
 
@@ -87,6 +90,18 @@ class ArchivedFiscalYearController extends Controller
             ],
             'lines' => $lines,
         ]);
+    }
+
+    /**
+     * An archive file is always SQLite, which gives its decimal columns REAL
+     * affinity - so a plain SUM() over an archived voucher's lines comes back
+     * as a float and an ordinary total reads as 2261.1000000000004. The SUM
+     * is taken on scaled integers instead and divided back here, which is
+     * lossless at the two decimals a Money holds.
+     */
+    private function fromScaled(int|float|string $scaled): Money
+    {
+        return Money::of(BigDecimal::of((int) $scaled)->dividedBy(100, 2, RoundingMode::Unnecessary));
     }
 
     /**

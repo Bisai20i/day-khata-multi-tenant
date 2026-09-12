@@ -460,7 +460,7 @@ test('cancelling a journal voucher from a now-closed fiscal year is rejected - c
             $actor,
         );
 
-        $fy1->close($fy2, $actor);
+        $fy1->close($fy2, $actor, 'Closed early by the test fixture.');
 
         expect($fy1->fresh()->status)->toBe(FiscalYearStatus::Closed)
             ->and($fy2->fresh()->status)->toBe(FiscalYearStatus::Open);

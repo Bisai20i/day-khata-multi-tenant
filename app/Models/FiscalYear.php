@@ -4,7 +4,13 @@ namespace App\Models;
 
 use App\Enums\FiscalYearStatus;
 use App\Enums\VoucherType;
+use App\Support\Inventory\StockCosting;
+use App\Support\Money\Money;
 use App\Support\NepaliCalendar;
+use Brick\Math\BigDecimal;
+use Brick\Math\RoundingMode;
+use Carbon\CarbonImmutable;
+use Illuminate\Auth\Access\AuthorizationException;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Casts\Attribute;
 use Illuminate\Database\Eloquent\Collection;
@@ -17,10 +23,32 @@ use InvalidArgumentException;
 
 #[Fillable([
     'name', 'start_date', 'end_date', 'status',
-    'closed_by', 'closed_at', 'reopened_by', 'reopened_at', 'reopen_reason', 'relocked_at',
+    'closed_by', 'closed_at', 'close_reason',
+    'reopened_by', 'reopened_at', 'reopen_reason', 'relocked_at',
 ])]
 class FiscalYear extends Model
 {
+    /**
+     * The three chart-of-accounts codes the periodic-inventory close runs
+     * on (CONTRACTS C10: stock documents post no journal at all, so stock
+     * only ever enters the ledger here and in the statements).
+     *
+     * - AS11 "Stock in Hand" is the balance-sheet asset that carries the
+     *   closing value forward into the next year's opening balances.
+     * - EXE9 "Opening Stock" is the trading-account debit: last year's
+     *   closing stock is this year's cost of goods available for sale.
+     * - INI22 "Closing Stock" is the trading-account credit that takes the
+     *   unsold stock back out of cost of sales.
+     *
+     * Seeded by Database\Seeders\Tenant\ChartOfAccountsSeeder and backfilled
+     * for existing tenants by the 2026_09_13_110000 migration.
+     */
+    public const STOCK_IN_HAND_CODE = 'AS11';
+
+    public const OPENING_STOCK_CODE = 'EXE9';
+
+    public const CLOSING_STOCK_CODE = 'INI22';
+
     protected static function booted(): void
     {
         static::saving(function (self $fiscalYear): void {
@@ -167,6 +195,14 @@ class FiscalYear extends Model
      * Adjustment create forms gain a fiscal-year picker offering only this
      * reopened year as an alternate to the current one, rather than a
      * separate "post correction" flow.
+     *
+     * relocked_at is cleared here, not merely set in relock(). A year that
+     * has already been through one reopen/relock cycle still carries the old
+     * relocked_at timestamp, and isOpenForCorrection() reads "reopened_at
+     * set AND relocked_at null" - so without this line a second reopen
+     * silently did nothing: the flag stayed false, every correction was
+     * still refused, and relock() then rejected the year as "not currently
+     * reopened for correction" (audit P1, reopen after relock).
      */
     public function reopen(User $actor, string $reason): void
     {
@@ -182,6 +218,27 @@ class FiscalYear extends Model
             throw new InvalidArgumentException('A reason is required to reopen a fiscal year.');
         }
 
+        // A correction posted into this year is rolled forward by
+        // JournalVoucher::rollForward() into every later year, and an
+        // archived year's cold-storage copy was taken before that
+        // roll-forward existed - writing into the live rows now would leave
+        // the ledger and the archive permanently disagreeing, and the
+        // archive is deliberately never rewritten. Refuse up front, naming
+        // the archived year, rather than letting the correction post and
+        // quietly diverge (T11 task 4, audit P0-19).
+        $archivedLaterYear = static::query()
+            ->whereKeyNot($this->getKey())
+            ->where('start_date', '>', $this->start_date->toDateString())
+            ->whereHas('archive')
+            ->orderBy('start_date')
+            ->first();
+
+        if ($archivedLaterYear) {
+            throw new InvalidArgumentException(
+                "\"{$this->name}\" cannot be reopened: a correction posted into it has to roll forward into \"{$archivedLaterYear->name}\", which has already been archived. Record the correction in the current year instead."
+            );
+        }
+
         $alreadyOpenForCorrection = static::openForCorrection();
         if ($alreadyOpenForCorrection && $alreadyOpenForCorrection->isNot($this)) {
             throw new InvalidArgumentException("\"{$alreadyOpenForCorrection->name}\" is already reopened for correction; relock it first.");
@@ -190,6 +247,7 @@ class FiscalYear extends Model
         $this->reopened_by = $actor->id;
         $this->reopened_at = now();
         $this->reopen_reason = $reason;
+        $this->relocked_at = null;
 
         // Best-effort backfill for a year that was closed before closed_by/
         // closed_at existed (see the migration's docblock) - never
@@ -207,69 +265,259 @@ class FiscalYear extends Model
     /**
      * Ends this year's reopened-for-correction window, re-blocking
      * Purchase/Journal Voucher/Stock Adjustment postings against it.
+     *
+     * A correction posted into an already-closed year lands on profit-and-
+     * loss accounts that close() had swept to zero, so the year is left
+     * with unswept earnings and its Balance Sheet stops balancing (audit
+     * P0-19). Relocking therefore posts a SUPPLEMENTARY closing entry that
+     * sweeps whatever the corrections left behind into "Profit & Loss",
+     * exactly the way the original sweep did. It is a no-op when the
+     * corrections had no profit-and-loss effect at all: netBalance() then
+     * reports zero for every account and postClosingEntries() writes
+     * nothing.
      */
-    public function relock(): void
+    public function relock(User $actor): void
     {
         if (! $this->isOpenForCorrection()) {
             throw new InvalidArgumentException('This fiscal year is not currently reopened for correction.');
         }
 
-        $this->relocked_at = now();
-        $this->save();
-    }
+        DB::transaction(function () use ($actor) {
+            $this->postClosingEntries($actor, "Supplementary year-end closing entries for {$this->name} (corrections posted while reopened)");
 
-    /**
-     * Closes this fiscal year and opens $next: posts this year's
-     * depreciation for every active fixed asset (must happen before the
-     * P&L sweep below, since depreciation reduces this year's profit),
-     * sweeps every profit-and-loss account to zero (posting the net to
-     * "Profit & Loss"), carries every balance-sheet account's ending
-     * balance forward as $next's opening balances, then flips the status
-     * of both years. All in one transaction.
-     */
-    public function close(self $next, User $actor): void
-    {
-        if ($this->status !== FiscalYearStatus::Open) {
-            throw new InvalidArgumentException('Only the open fiscal year can be closed.');
-        }
-
-        DB::transaction(function () use ($next, $actor) {
-            FixedAsset::postDepreciationForFiscalYear($this, $actor);
-            $this->postClosingEntries($actor);
-            $this->postOpeningBalances($next, $actor);
-
-            $this->status = FiscalYearStatus::Closed;
-            $this->closed_by = $actor->id;
-            $this->closed_at = now();
+            $this->relocked_at = now();
             $this->save();
-
-            $next->status = FiscalYearStatus::Open;
-            $next->save();
         });
     }
 
-    private function postClosingEntries(User $actor): void
+    /**
+     * Closes this fiscal year and opens $next, in one transaction:
+     *
+     * 1. This year's depreciation for every active fixed asset (it has to
+     *    reduce the year's profit before that profit is swept away).
+     * 2. The periodic-inventory trading entries: last year's stock out of
+     *    "Stock in Hand" into "Opening Stock", this year's closing stock
+     *    (valued by StockCosting, CONTRACTS C10) back into "Stock in Hand"
+     *    against "Closing Stock". Without the pair, the sweep below reports
+     *    gross profit with no cost-of-goods-sold adjustment and the Balance
+     *    Sheet carries no inventory at all (audit P0-17).
+     * 3. The P&L sweep: every profit-and-loss account to zero, the net into
+     *    "Profit & Loss".
+     * 4. Every balance-sheet account's ending balance as $next's opening
+     *    balances - which is what carries the closing stock value forward.
+     *
+     * Both fiscal year rows are re-read under lockForUpdate() and every
+     * blocker is re-checked inside the transaction, so two simultaneous
+     * close requests cannot both pass the status check and post two sets of
+     * closing entries (audit P1, FY close race). SQLite treats
+     * lockForUpdate() as a no-op, so that half is verified by review rather
+     * than by a test.
+     *
+     * $closeReason is mandatory when the year has not actually finished yet,
+     * and may then only be given by an admin: closing early freezes a period
+     * that can still legitimately receive documents, so it has to be a
+     * deliberate, attributable act rather than a mis-click (T11 task 7).
+     */
+    public function close(self $next, User $actor, ?string $closeReason = null): void
+    {
+        DB::transaction(function () use ($next, $actor, $closeReason) {
+            // Ascending key order, the deadlock-avoidance convention this
+            // app uses everywhere it locks more than one row (CONTRACTS C5).
+            $keys = [$this->getKey(), $next->getKey()];
+            sort($keys);
+            static::query()->whereIn('id', $keys)->lockForUpdate()->get();
+
+            $year = static::query()->whereKey($this->getKey())->firstOrFail();
+            $nextYear = static::query()->whereKey($next->getKey())->firstOrFail();
+
+            if ($year->status !== FiscalYearStatus::Open) {
+                throw new InvalidArgumentException('Only the open fiscal year can be closed.');
+            }
+
+            if ($nextYear->is($year)) {
+                throw new InvalidArgumentException('A fiscal year cannot be closed into itself.');
+            }
+
+            // The opening-balance voucher is dated $nextYear->start_date, so
+            // a "next" year starting on or before this one ends would
+            // restate balances inside a period this year still owns, and the
+            // Cash Book would count the same money twice (audit P0-18).
+            if ($nextYear->start_date->lessThanOrEqualTo($year->end_date)) {
+                throw new InvalidArgumentException(
+                    "\"{$nextYear->name}\" starts on {$nextYear->start_date->toDateString()}, on or before \"{$year->name}\" ends on {$year->end_date->toDateString()}. The next fiscal year has to start after this one ends."
+                );
+            }
+
+            // Re-checked here rather than only in the controller: a second
+            // close request that slipped past the controller check while the
+            // first was still running would otherwise post a second set of
+            // opening balances into $nextYear.
+            if ($nextYear->journalVouchers()->exists()) {
+                throw new InvalidArgumentException("\"{$nextYear->name}\" already has vouchers posted and cannot be used as the next year.");
+            }
+
+            $today = CarbonImmutable::now('Asia/Kathmandu')->startOfDay();
+
+            if ($today->lessThanOrEqualTo(CarbonImmutable::parse($year->end_date->toDateString()))) {
+                if (trim((string) $closeReason) === '') {
+                    throw new InvalidArgumentException(
+                        "\"{$year->name}\" does not end until {$year->end_date->toDateString()}. Closing it early needs an admin and a written reason."
+                    );
+                }
+
+                if ($actor->role?->slug !== 'admin') {
+                    throw new AuthorizationException('Only an admin may close a fiscal year before it has ended.');
+                }
+            }
+
+            FixedAsset::postDepreciationForFiscalYear($year, $actor);
+            $year->postStockTradingEntries($actor);
+            $year->postClosingEntries($actor);
+            $year->postOpeningBalances($nextYear, $actor);
+
+            $year->status = FiscalYearStatus::Closed;
+            $year->closed_by = $actor->id;
+            $year->closed_at = now();
+            $year->close_reason = trim((string) $closeReason) === '' ? null : $closeReason;
+            $year->save();
+
+            $nextYear->status = FiscalYearStatus::Open;
+            $nextYear->save();
+
+            // The caller holds $this and $next, not the re-read copies the
+            // work was actually done on - keep them in step so a caller that
+            // reads ->status straight after close() sees the truth.
+            $this->forceFill($year->getAttributes())->syncOriginal();
+            $next->forceFill($nextYear->getAttributes())->syncOriginal();
+        });
+    }
+
+    /**
+     * The periodic-inventory pair, both dated this year's last day and both
+     * posted as ClosingEntry vouchers:
+     *
+     *   Dr Opening Stock  / Cr Stock in Hand   (whatever stock was brought in)
+     *   Dr Stock in Hand  / Cr Closing Stock   (what is actually on hand now)
+     *
+     * After the pair, "Stock in Hand" holds exactly the closing value, which
+     * postOpeningBalances() carries into the new year; "Opening Stock" and
+     * "Closing Stock" are profit-and-loss accounts, so the sweep that runs
+     * next folds the stock movement into gross profit.
+     *
+     * Each voucher touches "Stock in Hand", which is what
+     * AccountingReportController uses to tell these two apart from the P&L
+     * sweep (the sweep only ever touches profit-and-loss accounts plus
+     * "Profit & Loss" itself) - see its isSweepVoucher() docblock.
+     *
+     * Both directions are handled rather than assuming a debit balance: a
+     * tenant running on allow_negative_stock can hold a negative stock
+     * position, and a negative line is rightly refused by
+     * JournalVoucher::write().
+     */
+    private function postStockTradingEntries(User $actor): void
+    {
+        $stockInHand = Account::where('code', self::STOCK_IN_HAND_CODE)->first();
+        $openingStockAccount = Account::where('code', self::OPENING_STOCK_CODE)->first();
+        $closingStockAccount = Account::where('code', self::CLOSING_STOCK_CODE)->first();
+
+        if (! $stockInHand || ! $openingStockAccount || ! $closingStockAccount) {
+            throw new InvalidArgumentException(
+                'The trading stock accounts are missing from the chart of accounts ('
+                .self::STOCK_IN_HAND_CODE.' Stock in Hand, '
+                .self::OPENING_STOCK_CODE.' Opening Stock, '
+                .self::CLOSING_STOCK_CODE.' Closing Stock). Run the tenant migrations before closing a fiscal year.'
+            );
+        }
+
+        $endDate = $this->end_date->toDateString();
+        $openingStock = $this->netBalance($stockInHand);
+
+        if (! $openingStock->isZero()) {
+            $amount = $openingStock->abs()->toString();
+
+            JournalVoucher::write(
+                $this,
+                VoucherType::ClosingEntry,
+                $endDate,
+                "Opening stock transferred to the trading account for {$this->name}",
+                null,
+                $actor,
+                $openingStock->isPositive()
+                    ? [
+                        ['account_id' => $openingStockAccount->id, 'debit' => $amount, 'credit' => '0.00', 'narration' => 'Opening stock'],
+                        ['account_id' => $stockInHand->id, 'debit' => '0.00', 'credit' => $amount, 'narration' => 'Opening stock'],
+                    ]
+                    : [
+                        ['account_id' => $stockInHand->id, 'debit' => $amount, 'credit' => '0.00', 'narration' => 'Opening stock'],
+                        ['account_id' => $openingStockAccount->id, 'debit' => '0.00', 'credit' => $amount, 'narration' => 'Opening stock'],
+                    ],
+            );
+        }
+
+        $closingStock = StockCosting::totalClosingValue($endDate);
+
+        if ($closingStock->isZero()) {
+            return;
+        }
+
+        $amount = $closingStock->abs()->toString();
+
+        JournalVoucher::write(
+            $this,
+            VoucherType::ClosingEntry,
+            $endDate,
+            "Closing stock on hand at {$endDate}",
+            null,
+            $actor,
+            $closingStock->isPositive()
+                ? [
+                    ['account_id' => $stockInHand->id, 'debit' => $amount, 'credit' => '0.00', 'narration' => 'Closing stock'],
+                    ['account_id' => $closingStockAccount->id, 'debit' => '0.00', 'credit' => $amount, 'narration' => 'Closing stock'],
+                ]
+                : [
+                    ['account_id' => $closingStockAccount->id, 'debit' => $amount, 'credit' => '0.00', 'narration' => 'Closing stock'],
+                    ['account_id' => $stockInHand->id, 'debit' => '0.00', 'credit' => $amount, 'narration' => 'Closing stock'],
+                ],
+        );
+    }
+
+    /**
+     * Sweeps every profit-and-loss account in this year to zero and posts
+     * the net to "Profit & Loss".
+     *
+     * Every amount here is a Money string, never a float. netBalance() used
+     * to hand `(float) SUM(debit) - SUM(credit)` straight to
+     * JournalVoucher::write(), which now refuses any line carrying more than
+     * two decimals - so an ordinary float summation artefact such as
+     * 2261.1000000000004 threw InvalidAmount and took the whole year-end
+     * close down with it. Test fixtures use round figures, which is exactly
+     * why the suite stayed green while a real tenant's close would have
+     * failed (audit P0-1, reported by T03).
+     */
+    private function postClosingEntries(User $actor, ?string $narration = null): void
     {
         $plAccount = Account::where('name', 'Profit & Loss')->firstOrFail();
         $accounts = $this->accountsWhereHeadIsProfitAndLoss(true);
 
         $lines = [];
-        $totalZeroingDebit = 0.0;
-        $totalZeroingCredit = 0.0;
+        $totalZeroingDebit = Money::zero();
+        $totalZeroingCredit = Money::zero();
 
         foreach ($accounts as $account) {
-            $net = (float) $this->netBalance($account);
+            $net = $this->netBalance($account);
 
-            if (round($net, 2) === 0.0) {
+            if ($net->isZero()) {
                 continue;
             }
 
-            if ($net > 0) {
-                $lines[] = ['account_id' => $account->id, 'debit' => 0, 'credit' => $net, 'narration' => 'Year-end closing'];
-                $totalZeroingCredit += $net;
+            $amount = $net->abs();
+
+            if ($net->isPositive()) {
+                $lines[] = ['account_id' => $account->id, 'debit' => '0.00', 'credit' => $amount->toString(), 'narration' => 'Year-end closing'];
+                $totalZeroingCredit = $totalZeroingCredit->plus($amount);
             } else {
-                $lines[] = ['account_id' => $account->id, 'debit' => -$net, 'credit' => 0, 'narration' => 'Year-end closing'];
-                $totalZeroingDebit += -$net;
+                $lines[] = ['account_id' => $account->id, 'debit' => $amount->toString(), 'credit' => '0.00', 'narration' => 'Year-end closing'];
+                $totalZeroingDebit = $totalZeroingDebit->plus($amount);
             }
         }
 
@@ -277,19 +525,21 @@ class FiscalYear extends Model
             return;
         }
 
-        $netProfit = $totalZeroingDebit - $totalZeroingCredit;
+        $netProfit = $totalZeroingDebit->minus($totalZeroingCredit);
 
-        if (round($netProfit, 2) !== 0.0) {
-            $lines[] = $netProfit > 0
-                ? ['account_id' => $plAccount->id, 'debit' => 0, 'credit' => $netProfit, 'narration' => 'Net profit for the year']
-                : ['account_id' => $plAccount->id, 'debit' => -$netProfit, 'credit' => 0, 'narration' => 'Net loss for the year'];
+        if (! $netProfit->isZero()) {
+            $amount = $netProfit->abs()->toString();
+
+            $lines[] = $netProfit->isPositive()
+                ? ['account_id' => $plAccount->id, 'debit' => '0.00', 'credit' => $amount, 'narration' => 'Net profit for the year']
+                : ['account_id' => $plAccount->id, 'debit' => $amount, 'credit' => '0.00', 'narration' => 'Net loss for the year'];
         }
 
         JournalVoucher::write(
             $this,
             VoucherType::ClosingEntry,
             $this->end_date->toDateString(),
-            "Year-end closing entries for {$this->name}",
+            $narration ?? "Year-end closing entries for {$this->name}",
             null,
             $actor,
             $lines,
@@ -303,15 +553,17 @@ class FiscalYear extends Model
         $lines = [];
 
         foreach ($accounts as $account) {
-            $net = (float) $this->netBalance($account);
+            $net = $this->netBalance($account);
 
-            if (round($net, 2) === 0.0) {
+            if ($net->isZero()) {
                 continue;
             }
 
-            $lines[] = $net > 0
-                ? ['account_id' => $account->id, 'debit' => $net, 'credit' => 0, 'narration' => 'Opening balance']
-                : ['account_id' => $account->id, 'debit' => 0, 'credit' => -$net, 'narration' => 'Opening balance'];
+            $amount = $net->abs()->toString();
+
+            $lines[] = $net->isPositive()
+                ? ['account_id' => $account->id, 'debit' => $amount, 'credit' => '0.00', 'narration' => 'Opening balance']
+                : ['account_id' => $account->id, 'debit' => '0.00', 'credit' => $amount, 'narration' => 'Opening balance'];
         }
 
         // Balance-sheet accounts' net balances sum to exactly zero once the
@@ -346,12 +598,30 @@ class FiscalYear extends Model
             ->get();
     }
 
-    private function netBalance(Account $account): string|float
+    /**
+     * One account's net (debit - credit) balance within this fiscal year,
+     * exact.
+     *
+     * The sum runs on scaled integers rather than on the raw DECIMAL for the
+     * same reason Item::currentStockByItem() and StockCosting do it: SQLite
+     * gives a decimal column REAL affinity, so a plain SUM() there comes
+     * back as a float and an ordinary total reads as 2261.1000000000004.
+     * Multiplying by 100 and casting to an integer inside SQL makes the sum
+     * exact on SQLite and on MySQL alike, and dividing back by 100 is
+     * lossless at the two decimals a Money holds.
+     */
+    private function netBalance(Account $account): Money
     {
-        return JournalVoucherLine::query()
+        $cast = DB::connection()->getDriverName() === 'sqlite' ? 'INTEGER' : 'SIGNED';
+
+        $netScaled = JournalVoucherLine::query()
             ->where('account_id', $account->id)
             ->whereHas('journalVoucher', fn ($query) => $query->where('fiscal_year_id', $this->id))
-            ->selectRaw('COALESCE(SUM(debit), 0) - COALESCE(SUM(credit), 0) as net')
-            ->value('net');
+            ->selectRaw(
+                "COALESCE(SUM(CAST(ROUND(debit * 100) AS {$cast})), 0) - COALESCE(SUM(CAST(ROUND(credit * 100) AS {$cast})), 0) as net_scaled"
+            )
+            ->value('net_scaled');
+
+        return Money::of(BigDecimal::of((int) $netScaled)->dividedBy(100, 2, RoundingMode::Unnecessary));
     }
 }

@@ -2,10 +2,15 @@
 
 namespace App\Models;
 
+use App\Casts\Decimal;
 use App\Enums\DepreciationMethod;
 use App\Enums\DepreciationPool;
 use App\Enums\VoucherType;
+use App\Support\ClosedFiscalYearGuard;
+use App\Support\Money\Money;
+use Carbon\CarbonImmutable;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
+use Illuminate\Database\Eloquent\Casts\Attribute;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
@@ -23,6 +28,31 @@ use InvalidArgumentException;
  * depreciation must reduce the year's profit before it is transferred to
  * Profit & Loss. See day-khata-multi-tenant mem.md for the legacy research
  * this was built from.
+ *
+ * ## The depreciation rule this implements
+ *
+ * Written-down value at the asset's own pool rate (DepreciationPool A to E
+ * pre-fill the statutory rates; the rate stays editable per asset), charged
+ * on the opening WDV for `wdv` assets and on the depreciable base for `slm`
+ * assets, **prorated by the days the asset was actually held inside the
+ * fiscal year**. An asset bought two months before the year ends is charged
+ * two months of depreciation, not a full year (audit P1, no proration by
+ * acquisition date), and a disposed asset is charged up to its disposal date
+ * and no further.
+ *
+ * Nepal's Income Tax Act schedule 2 states the same idea as a coarser
+ * "absorption" rule - an addition in the year's first third absorbs the full
+ * rate, the second third two thirds, the last third one third. Days held is
+ * the finer-grained form of exactly that intent, it can never charge MORE
+ * than the statutory rule would, and it is what the task set for this module
+ * specifies. A tenant that must file on the statutory trimesters can still
+ * reconcile, because the charge is recorded per asset per year on
+ * fixed_asset_depreciations.
+ *
+ * Depreciation never takes an asset below its salvage value, and every
+ * amount is exact Money: the old code multiplied floats and called round(),
+ * which on PHP 8.4 charged a paisa too little on a 15% run against
+ * 43,14,071.10 (audit P0-1).
  */
 #[Fillable([
     'asset_code', 'asset_name', 'account_id', 'category', 'purchase_date',
@@ -33,18 +63,27 @@ use InvalidArgumentException;
 class FixedAsset extends Model
 {
     /**
+     * Written-down value, appended to every serialized asset as an exact
+     * 2-decimal string so the Index page never has to subtract two numbers
+     * in JavaScript.
+     *
+     * @var list<string>
+     */
+    protected $appends = ['wdv'];
+
+    /**
      * @return array<string, string>
      */
     protected function casts(): array
     {
         return [
             'purchase_date' => 'date',
-            'cost' => 'decimal:2',
-            'salvage_value' => 'decimal:2',
-            'depreciation_rate' => 'decimal:2',
-            'accumulated_depreciation' => 'decimal:2',
+            'cost' => Decimal::class.':2',
+            'salvage_value' => Decimal::class.':2',
+            'depreciation_rate' => Decimal::class.':2',
+            'accumulated_depreciation' => Decimal::class.':2',
             'disposal_date' => 'date',
-            'disposal_amount' => 'decimal:2',
+            'disposal_amount' => Decimal::class.':2',
         ];
     }
 
@@ -88,9 +127,15 @@ class FixedAsset extends Model
         return $this->hasMany(FixedAssetDepreciation::class);
     }
 
-    public function getWdvAttribute(): float
+    /**
+     * Cost less accumulated depreciation. Exact Money, never a float
+     * subtraction.
+     */
+    protected function wdv(): Attribute
     {
-        return round((float) $this->cost - (float) $this->accumulated_depreciation, 2);
+        return Attribute::make(
+            get: fn (): string => Money::of($this->cost)->minus(Money::of($this->accumulated_depreciation))->toString(),
+        );
     }
 
     /**
@@ -98,16 +143,30 @@ class FixedAsset extends Model
      * purchase voucher (debit the new asset account, credit the
      * settlement account), and creates the FixedAsset row.
      *
-     * @param  array{asset_name: string, category: string, purchase_date: string, cost: float, salvage_value?: float, depreciation_method: string, depreciation_rate: float, payment_mode: string, bank_account_id?: int|null, supplier_id?: int|null, narration?: string|null}  $data
+     * @param  array{asset_name: string, category: string, purchase_date: string, cost: string|float, salvage_value?: string|float|null, depreciation_method: string, depreciation_rate: string|float, payment_mode: string, bank_account_id?: int|null, supplier_id?: int|null, narration?: string|null}  $data
      */
     public static function post(array $data, User $actor): self
     {
         return DB::transaction(function () use ($data, $actor) {
             $pool = DepreciationPool::from($data['category']);
             $method = DepreciationMethod::from($data['depreciation_method']);
-            $cost = round((float) $data['cost'], 2);
-            $salvageValue = round((float) ($data['salvage_value'] ?? 0), 2);
-            $rate = round((float) $data['depreciation_rate'], 2);
+            $cost = Money::of($data['cost']);
+            $salvageValue = Money::ofNullable($data['salvage_value'] ?? null) ?? Money::zero();
+            $rate = Money::of($data['depreciation_rate']);
+
+            if (! $cost->isPositive()) {
+                throw new InvalidArgumentException('An asset must cost more than zero.');
+            }
+
+            if ($salvageValue->isGreaterThan($cost)) {
+                throw new InvalidArgumentException('The salvage value cannot be more than the asset cost.');
+            }
+
+            // Resolves the year the purchase date actually belongs to, and
+            // refuses a date that falls in no year or in a closed one -
+            // rather than letting JournalVoucher::write() reject it later
+            // with a message about the currently open year (audit P0-11).
+            $fiscalYear = ClosedFiscalYearGuard::assertDateInOpenYear($data['purchase_date'], $actor);
 
             $fixedAssetsGroup = AccountGroup::where('name', 'Fixed Assets')->firstOrFail();
             $account = $fixedAssetsGroup->accounts()->create(['name' => $data['asset_name']]);
@@ -133,12 +192,13 @@ class FixedAsset extends Model
             $voucher = JournalVoucher::post(
                 [
                     'voucher_type' => VoucherType::FixedAssetPurchase->value,
+                    'fiscal_year_id' => $fiscalYear->id,
                     'date' => $data['purchase_date'],
                     'narration' => $data['narration'] ?? "Fixed asset purchase - {$data['asset_name']}",
                 ],
                 [
-                    ['account_id' => $account->id, 'debit' => $cost, 'credit' => 0, 'narration' => 'Asset cost'],
-                    ['account_id' => $settlementAccountId, 'debit' => 0, 'credit' => $cost, 'narration' => 'Settlement'],
+                    ['account_id' => $account->id, 'debit' => $cost->toString(), 'credit' => '0.00', 'narration' => 'Asset cost'],
+                    ['account_id' => $settlementAccountId, 'debit' => '0.00', 'credit' => $cost->toString(), 'narration' => 'Settlement'],
                 ],
                 $actor,
             );
@@ -149,11 +209,11 @@ class FixedAsset extends Model
                 'account_id' => $account->id,
                 'category' => $pool->value,
                 'purchase_date' => $data['purchase_date'],
-                'cost' => $cost,
-                'salvage_value' => $salvageValue,
+                'cost' => $cost->toString(),
+                'salvage_value' => $salvageValue->toString(),
                 'depreciation_method' => $method->value,
-                'depreciation_rate' => $rate,
-                'accumulated_depreciation' => 0,
+                'depreciation_rate' => $rate->toString(),
+                'accumulated_depreciation' => '0.00',
                 'status' => 'active',
                 'journal_voucher_id' => $voucher->id,
                 'created_by' => $actor->id,
@@ -167,111 +227,202 @@ class FixedAsset extends Model
 
     /**
      * Posts this fiscal year's depreciation for every active,
-     * not-fully-depreciated asset that hasn't already been posted for
-     * $fiscalYear (the fixed_asset_depreciations unique constraint backs
-     * this up too). Uses JournalVoucher::write() directly (bypassing
-     * post()'s "current fiscal year" resolution) because the caller always
-     * targets a specific fiscal year explicitly - both the manual admin
-     * action and the FiscalYear::close() hook below.
+     * not-fully-depreciated asset that has not already been posted for
+     * $fiscalYear.
      *
-     * @return array{posted: int, total: float}
+     * The whole run is one transaction and each asset row is re-read under
+     * lockForUpdate() before its charge is computed, so a double click can
+     * no longer commit a depreciation voucher and then fail on the
+     * fixed_asset_depreciations unique index, leaving an orphan charge in
+     * the ledger with no row explaining it (audit P1, manual depreciation
+     * run is not atomic). SQLite makes lockForUpdate() a no-op, so the
+     * concurrency half is verified by review; the "already posted" re-check
+     * inside the lock is what a test can see.
+     *
+     * @return array{posted: int, total: string}
      */
     public static function postDepreciationForFiscalYear(FiscalYear $fiscalYear, User $actor): array
     {
-        $depreciationExpense = Account::where('code', 'EXE20')->firstOrFail();
-        $accumulatedDepreciationAccount = Account::where('code', 'AS31')->firstOrFail();
+        return DB::transaction(function () use ($fiscalYear, $actor) {
+            $assetIds = static::query()->where('status', 'active')->orderBy('id')->pluck('id');
 
-        $postedCount = 0;
-        $totalPosted = 0.0;
+            $postedCount = 0;
+            $totalPosted = Money::zero();
 
-        foreach (static::where('status', 'active')->get() as $asset) {
-            $alreadyPosted = FixedAssetDepreciation::where('fixed_asset_id', $asset->id)
-                ->where('fiscal_year_id', $fiscalYear->id)
-                ->exists();
+            foreach ($assetIds as $assetId) {
+                $asset = static::query()->whereKey($assetId)->lockForUpdate()->first();
 
-            if ($alreadyPosted) {
-                continue;
+                if (! $asset || $asset->status !== 'active') {
+                    continue;
+                }
+
+                $amount = static::postDepreciationForAsset($asset, $fiscalYear, $actor);
+
+                if ($amount === null) {
+                    continue;
+                }
+
+                $postedCount++;
+                $totalPosted = $totalPosted->plus($amount);
             }
 
-            $depreciableBase = round((float) $asset->cost - (float) $asset->salvage_value, 2);
-            $openingWdv = round((float) $asset->cost - (float) $asset->accumulated_depreciation, 2);
-            $remainingDepreciable = round($depreciableBase - (float) $asset->accumulated_depreciation, 2);
-
-            if ($remainingDepreciable <= 0) {
-                continue;
-            }
-
-            $amount = $asset->depreciation_method === DepreciationMethod::StraightLine->value
-                ? round($depreciableBase * (float) $asset->depreciation_rate / 100, 2)
-                : round($openingWdv * (float) $asset->depreciation_rate / 100, 2);
-
-            $amount = min($amount, $remainingDepreciable);
-
-            if ($amount <= 0) {
-                continue;
-            }
-
-            $closingWdv = round($openingWdv - $amount, 2);
-            $postedDate = $fiscalYear->end_date->toDateString();
-
-            $voucher = JournalVoucher::write(
-                $fiscalYear,
-                VoucherType::Depreciation,
-                $postedDate,
-                "Depreciation - {$asset->asset_name} ({$asset->asset_code})",
-                null,
-                $actor,
-                [
-                    ['account_id' => $depreciationExpense->id, 'debit' => $amount, 'credit' => 0],
-                    ['account_id' => $accumulatedDepreciationAccount->id, 'debit' => 0, 'credit' => $amount],
-                ],
-            );
-
-            FixedAssetDepreciation::create([
-                'fixed_asset_id' => $asset->id,
-                'fiscal_year_id' => $fiscalYear->id,
-                'journal_voucher_id' => $voucher->id,
-                'posted_date' => $postedDate,
-                'opening_wdv' => $openingWdv,
-                'depreciation_amount' => $amount,
-                'closing_wdv' => $closingWdv,
-            ]);
-
-            $asset->update(['accumulated_depreciation' => round((float) $asset->accumulated_depreciation + $amount, 2)]);
-
-            $postedCount++;
-            $totalPosted = round($totalPosted + $amount, 2);
-        }
-
-        return ['posted' => $postedCount, 'total' => $totalPosted];
+            return ['posted' => $postedCount, 'total' => $totalPosted->toString()];
+        });
     }
 
     /**
-     * Disposes this asset: clears its accumulated depreciation, settles
-     * any proceeds, removes its cost from the books, and posts the
-     * gain/loss on disposal - all as one balanced voucher. diff > 0 is a
-     * gain, diff < 0 is a loss; diff == 0 needs neither line.
+     * Posts one asset's charge for one fiscal year, or returns null when
+     * nothing is due (already posted, fully depreciated down to salvage, or
+     * not held for a single day inside the year).
+     *
+     * $throughDate stops the proration early - the disposal date, when this
+     * runs from dispose(). It is clamped to the fiscal year, so the voucher
+     * date always sits inside the year JournalVoucher::write() is given.
+     *
+     * The caller is responsible for holding the row lock and the
+     * transaction.
      */
-    public function dispose(User $actor, string $disposalDate, float $proceeds, string $mode, ?int $bankAccountId = null): void
+    private static function postDepreciationForAsset(self $asset, FiscalYear $fiscalYear, User $actor, ?string $throughDate = null): ?Money
     {
-        if ($this->status === 'disposed') {
-            throw new InvalidArgumentException('This asset has already been disposed.');
+        $alreadyPosted = FixedAssetDepreciation::where('fixed_asset_id', $asset->id)
+            ->where('fiscal_year_id', $fiscalYear->id)
+            ->exists();
+
+        if ($alreadyPosted) {
+            return null;
         }
 
+        $yearStart = CarbonImmutable::parse($fiscalYear->start_date->toDateString());
+        $yearEnd = CarbonImmutable::parse($fiscalYear->end_date->toDateString());
+        $purchasedOn = CarbonImmutable::parse($asset->purchase_date->toDateString());
+
+        $through = $throughDate === null
+            ? $yearEnd
+            : CarbonImmutable::parse($throughDate)->startOfDay();
+
+        if ($through->greaterThan($yearEnd)) {
+            $through = $yearEnd;
+        }
+
+        $heldFrom = $purchasedOn->greaterThan($yearStart) ? $purchasedOn : $yearStart;
+
+        if ($heldFrom->greaterThan($through)) {
+            return null;
+        }
+
+        // Both ends inclusive: an asset bought on the year's last day is
+        // held for one day, not zero.
+        $daysHeld = (int) $heldFrom->diffInDays($through) + 1;
+        $daysInYear = (int) $yearStart->diffInDays($yearEnd) + 1;
+
+        $cost = Money::of($asset->cost);
+        $accumulated = Money::of($asset->accumulated_depreciation);
+        $depreciableBase = $cost->minus(Money::of($asset->salvage_value));
+        $openingWdv = $cost->minus($accumulated);
+        $remainingDepreciable = $depreciableBase->minus($accumulated);
+
+        if (! $remainingDepreciable->isPositive()) {
+            return null;
+        }
+
+        $fullYearCharge = $asset->depreciation_method === DepreciationMethod::StraightLine->value
+            ? $depreciableBase->percent($asset->depreciation_rate)
+            : $openingWdv->percent($asset->depreciation_rate);
+
+        $amount = $daysHeld === $daysInYear
+            ? $fullYearCharge
+            : $fullYearCharge->multipliedByFraction($daysHeld, $daysInYear);
+
+        // Never below salvage: the depreciable base is cost minus salvage,
+        // so capping at what is left of it is the same rule.
+        $amount = Money::min($amount, $remainingDepreciable);
+
+        if (! $amount->isPositive()) {
+            return null;
+        }
+
+        $depreciationExpense = Account::where('code', 'EXE20')->firstOrFail();
+        $accumulatedDepreciationAccount = Account::where('code', 'AS31')->firstOrFail();
+
+        $postedDate = $through->toDateString();
+
+        $voucher = JournalVoucher::write(
+            $fiscalYear,
+            VoucherType::Depreciation,
+            $postedDate,
+            "Depreciation - {$asset->asset_name} ({$asset->asset_code})",
+            null,
+            $actor,
+            [
+                ['account_id' => $depreciationExpense->id, 'debit' => $amount->toString(), 'credit' => '0.00'],
+                ['account_id' => $accumulatedDepreciationAccount->id, 'debit' => '0.00', 'credit' => $amount->toString()],
+            ],
+        );
+
+        FixedAssetDepreciation::create([
+            'fixed_asset_id' => $asset->id,
+            'fiscal_year_id' => $fiscalYear->id,
+            'journal_voucher_id' => $voucher->id,
+            'posted_date' => $postedDate,
+            'opening_wdv' => $openingWdv->toString(),
+            'depreciation_amount' => $amount->toString(),
+            'closing_wdv' => $openingWdv->minus($amount)->toString(),
+        ]);
+
+        $asset->update(['accumulated_depreciation' => $accumulated->plus($amount)->toString()]);
+
+        return $amount;
+    }
+
+    /**
+     * Disposes this asset: charges the depreciation it earned up to the
+     * disposal date, clears its accumulated depreciation, settles any
+     * proceeds, removes its cost from the books, and posts the gain/loss on
+     * disposal - all inside one transaction, with the asset row locked and
+     * its status re-checked inside that lock so a double click cannot post
+     * two disposal vouchers for one asset (audit P1).
+     *
+     * diff > 0 is a gain, diff < 0 is a loss; diff == 0 needs neither line.
+     */
+    public function dispose(User $actor, string $disposalDate, Money|string|int|null $proceeds, string $mode, ?int $bankAccountId = null): void
+    {
         DB::transaction(function () use ($actor, $disposalDate, $proceeds, $mode, $bankAccountId) {
-            $proceeds = round($proceeds, 2);
-            $accumulated = round((float) $this->accumulated_depreciation, 2);
-            $cost = round((float) $this->cost, 2);
-            $diff = round($proceeds + $accumulated - $cost, 2);
+            $locked = static::query()->whereKey($this->getKey())->lockForUpdate()->firstOrFail();
+
+            if ($locked->status === 'disposed') {
+                throw new InvalidArgumentException('This asset has already been disposed.');
+            }
+
+            $proceeds = Money::ofNullable($proceeds) ?? Money::zero();
+
+            if ($proceeds->isNegative()) {
+                throw new InvalidArgumentException('Disposal proceeds cannot be negative.');
+            }
+
+            $fiscalYear = ClosedFiscalYearGuard::assertDateInOpenYear($disposalDate, $actor);
+
+            if (CarbonImmutable::parse($disposalDate)->startOfDay()->lessThan(CarbonImmutable::parse($locked->purchase_date->toDateString()))) {
+                throw new InvalidArgumentException('An asset cannot be disposed of before it was bought.');
+            }
+
+            // The part-year charge the asset earned before it left, so the
+            // gain or loss is measured against a current WDV rather than
+            // against last year's.
+            static::postDepreciationForAsset($locked, $fiscalYear, $actor, $disposalDate);
+            $locked->refresh();
+
+            $accumulated = Money::of($locked->accumulated_depreciation);
+            $cost = Money::of($locked->cost);
+            $diff = $proceeds->plus($accumulated)->minus($cost);
 
             $lines = [];
 
-            if ($accumulated > 0) {
+            if ($accumulated->isPositive()) {
                 $accumulatedDepreciationAccount = Account::where('code', 'AS31')->firstOrFail();
-                $lines[] = ['account_id' => $accumulatedDepreciationAccount->id, 'debit' => $accumulated, 'credit' => 0, 'narration' => 'Remove accumulated depreciation'];
+                $lines[] = ['account_id' => $accumulatedDepreciationAccount->id, 'debit' => $accumulated->toString(), 'credit' => '0.00', 'narration' => 'Remove accumulated depreciation'];
             }
 
-            if ($proceeds > 0) {
+            if ($proceeds->isPositive()) {
                 if ($mode === 'cash') {
                     $settlementAccountId = Account::where('code', 'AS1')->firstOrFail()->id;
                 } elseif ($mode === 'bank') {
@@ -283,37 +434,40 @@ class FixedAsset extends Model
                     throw new InvalidArgumentException("Unknown disposal mode: {$mode}");
                 }
 
-                $lines[] = ['account_id' => $settlementAccountId, 'debit' => $proceeds, 'credit' => 0, 'narration' => 'Disposal proceeds'];
+                $lines[] = ['account_id' => $settlementAccountId, 'debit' => $proceeds->toString(), 'credit' => '0.00', 'narration' => 'Disposal proceeds'];
             }
 
-            if ($diff < 0) {
+            if ($diff->isNegative()) {
                 $lossAccount = Account::where('code', 'EXE21')->firstOrFail();
-                $lines[] = ['account_id' => $lossAccount->id, 'debit' => -$diff, 'credit' => 0, 'narration' => 'Loss on disposal'];
+                $lines[] = ['account_id' => $lossAccount->id, 'debit' => $diff->negated()->toString(), 'credit' => '0.00', 'narration' => 'Loss on disposal'];
             }
 
-            $lines[] = ['account_id' => $this->account_id, 'debit' => 0, 'credit' => $cost, 'narration' => 'Remove asset cost'];
+            $lines[] = ['account_id' => $locked->account_id, 'debit' => '0.00', 'credit' => $cost->toString(), 'narration' => 'Remove asset cost'];
 
-            if ($diff > 0) {
+            if ($diff->isPositive()) {
                 $gainAccount = Account::where('code', 'INI30')->firstOrFail();
-                $lines[] = ['account_id' => $gainAccount->id, 'debit' => 0, 'credit' => $diff, 'narration' => 'Gain on disposal'];
+                $lines[] = ['account_id' => $gainAccount->id, 'debit' => '0.00', 'credit' => $diff->toString(), 'narration' => 'Gain on disposal'];
             }
 
             $voucher = JournalVoucher::post(
                 [
                     'voucher_type' => VoucherType::AssetDisposal->value,
+                    'fiscal_year_id' => $fiscalYear->id,
                     'date' => $disposalDate,
-                    'narration' => "Disposal - {$this->asset_name} ({$this->asset_code})",
+                    'narration' => "Disposal - {$locked->asset_name} ({$locked->asset_code})",
                 ],
                 $lines,
                 $actor,
             );
 
-            $this->update([
+            $locked->update([
                 'status' => 'disposed',
                 'disposal_date' => $disposalDate,
-                'disposal_amount' => $proceeds,
+                'disposal_amount' => $proceeds->toString(),
                 'disposal_journal_voucher_id' => $voucher->id,
             ]);
+
+            $this->forceFill($locked->getAttributes())->syncOriginal();
         });
     }
 }

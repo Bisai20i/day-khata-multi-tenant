@@ -1,11 +1,13 @@
 <?php
 
 use App\Enums\FiscalYearStatus;
+use App\Enums\StockMovementType;
 use App\Models\Customer;
 use App\Models\FiscalYear;
 use App\Models\Item;
 use App\Models\Purchase;
 use App\Models\Sale;
+use App\Models\Store;
 use App\Models\Supplier;
 use App\Models\Tenant;
 use App\Models\User;
@@ -62,7 +64,7 @@ test('dashboard renders with real kpis, recent customers, and account head break
         ->where('kpis.suppliers.total', 1)
         ->where('kpis.items.total', 3)
         ->where('kpis.sales.today.count', 0)
-        ->where('kpis.sales.today.total', 0)
+        ->where('kpis.sales.today.total', '0.00')
         ->has('recentCustomers', 2)
         ->has('recentCustomers.0', fn ($customer) => $customer
             ->has('name')
@@ -154,32 +156,32 @@ test('dashboard reports the financial snapshot: cash in hand, stock value, debto
     $response->assertInertia(fn ($page) => $page
         ->component('Tenant/Dashboard')
         ->where('kpis.purchases.today.count', 2)
-        ->where('kpis.purchases.today.total', 500)
+        ->where('kpis.purchases.today.total', '500.00')
         ->where('kpis.purchases.thisWeek.count', 2)
-        ->where('kpis.purchases.thisWeek.total', 500)
-        ->where('kpis.cashInHand', 300)
-        ->where('kpis.stockValue', 200)
-        ->where('kpis.debtors', 1130)
-        ->where('kpis.creditors', 300)
-        ->where('kpis.tax.thisWeek.taxable', 1000)
-        ->where('kpis.tax.thisWeek.nontaxable', 500)
-        ->where('kpis.tax.thisWeek.vat', 130)
+        ->where('kpis.purchases.thisWeek.total', '500.00')
+        ->where('kpis.cashInHand', '300.00')
+        ->where('kpis.stockValue', '200.00')
+        ->where('kpis.debtors', '1130.00')
+        ->where('kpis.creditors', '300.00')
+        ->where('kpis.tax.thisWeek.taxable', '1000.00')
+        ->where('kpis.tax.thisWeek.nontaxable', '500.00')
+        ->where('kpis.tax.thisWeek.vat', '130.00')
         ->has('salesTrend', 7)
         ->where('salesTrend.6.date', now()->toDateString())
-        ->where('salesTrend.6.total', 1630)
+        ->where('salesTrend.6.total', '1630.00')
         ->has('purchaseTrend', 7)
         ->where('purchaseTrend.6.date', now()->toDateString())
-        ->where('purchaseTrend.6.total', 500)
+        ->where('purchaseTrend.6.total', '500.00')
         ->has('topItemsThisMonth', 2)
         ->where('topItemsThisMonth.0.name', 'Vatable Widget')
-        ->where('topItemsThisMonth.0.total', 1000)
+        ->where('topItemsThisMonth.0.total', '1000.00')
         ->where('topItemsThisMonth.1.name', 'Plain Widget')
-        ->where('topItemsThisMonth.1.total', 500)
+        ->where('topItemsThisMonth.1.total', '500.00')
         ->has('topCustomersThisMonth', 2)
         ->where('topCustomersThisMonth.0.name', 'Ram Shrestha')
-        ->where('topCustomersThisMonth.0.total', 1130)
+        ->where('topCustomersThisMonth.0.total', '1130.00')
         ->where('topCustomersThisMonth.1.name', 'Sita Gurung')
-        ->where('topCustomersThisMonth.1.total', 500)
+        ->where('topCustomersThisMonth.1.total', '500.00')
     );
 
     $tenant->delete();
@@ -232,18 +234,71 @@ test('dashboard reports today\'s sales activity and lists recent sales, excludin
     $response->assertInertia(fn ($page) => $page
         ->component('Tenant/Dashboard')
         ->where('kpis.sales.today.count', 1)
-        ->where('kpis.sales.today.total', 500)
+        ->where('kpis.sales.today.total', '500.00')
         ->where('kpis.sales.thisWeek.count', 1)
-        ->where('kpis.sales.thisWeek.total', 500)
+        ->where('kpis.sales.thisWeek.total', '500.00')
         ->has('recentSales', 1)
         ->has('recentSales.0', fn ($sale) => $sale
             ->where('customer', 'Ram Shrestha')
-            ->where('total', 500)
+            ->where('total', '500.00')
             ->where('paymentMode', 'cash')
             ->has('date')
             ->has('id')
         )
     );
+
+    $tenant->delete();
+});
+
+test('dashboard lists items at or below their reorder level and leaves the rest out', function () {
+    $domain = 'dashboard-low-stock.tenant-test';
+    $tenant = Tenant::create(['company_name' => 'Acme Co']);
+    $tenant->domains()->create(['domain' => $domain]);
+
+    $tenant->run(function () {
+        User::factory()->create(['email' => 'owner@example.com']);
+
+        FiscalYear::create([
+            'name' => 'FY1',
+            'start_date' => now()->subYear()->startOfYear(),
+            'end_date' => now()->addYear()->endOfYear(),
+            'status' => FiscalYearStatus::Open,
+        ]);
+
+        $store = Store::factory()->create();
+
+        // Below its reorder level.
+        $low = Item::factory()->create(['name' => 'Nearly Out', 'is_stockable' => true, 'min_stock' => '10.00']);
+        $low->recordStockMovement(StockMovementType::Purchase, '4', now()->toDateString(), $store->id, null, '5.0000', '20.00');
+
+        // Exactly at its reorder level: "at or below" means this counts.
+        $atLevel = Item::factory()->create(['name' => 'Exactly At Level', 'is_stockable' => true, 'min_stock' => '6.00']);
+        $atLevel->recordStockMovement(StockMovementType::Purchase, '6', now()->toDateString(), $store->id, null, '5.0000', '30.00');
+
+        // Comfortably above it.
+        $healthy = Item::factory()->create(['name' => 'Well Stocked', 'is_stockable' => true, 'min_stock' => '2.00']);
+        $healthy->recordStockMovement(StockMovementType::Purchase, '100', now()->toDateString(), $store->id, null, '5.0000', '500.00');
+
+        // No reorder level set at all: not "low", just unmonitored.
+        Item::factory()->create(['name' => 'No Reorder Level', 'is_stockable' => true, 'min_stock' => '0.00']);
+    });
+
+    $this->post("http://{$domain}/login", [
+        'email' => 'owner@example.com',
+        'password' => 'password',
+    ]);
+
+    $this->get("http://{$domain}/dashboard")
+        ->assertOk()
+        ->assertInertia(fn ($page) => $page
+            ->component('Tenant/Dashboard')
+            ->has('lowStockItems', 2)
+            ->where('lowStockItems.0.name', 'Exactly At Level')
+            ->where('lowStockItems.0.stock', '6.0000')
+            ->where('lowStockItems.0.minStock', '6.0000')
+            ->where('lowStockItems.1.name', 'Nearly Out')
+            ->where('lowStockItems.1.stock', '4.0000')
+            ->where('lowStockItems.1.minStock', '10.0000'));
 
     $tenant->delete();
 });

@@ -7,6 +7,8 @@ import Card from '@/components/ui/Card.vue';
 import DataTable from '@/components/ui/DataTable.vue';
 import Badge from '@/components/ui/Badge.vue';
 import { navGroups } from '@/lib/nav-items.js';
+import { formatMoney } from '@/lib/money.js';
+import { formatBsDate } from '@/lib/format.js';
 
 const props = defineProps({
     fiscalYear: { type: Object, required: true },
@@ -40,7 +42,7 @@ function voucherTypeLabel(type) {
 }
 
 function money(value) {
-    return Number(value ?? 0).toFixed(2);
+    return formatMoney(value ?? '0.00');
 }
 
 function voucherHref(voucherId) {
@@ -48,7 +50,7 @@ function voucherHref(voucherId) {
 }
 
 const columns = [
-    { accessorKey: 'date', header: 'Date' },
+    { accessorKey: 'date', header: 'Date', numeric: false, cell: ({ row }) => formatBsDate(row.original.date) },
     {
         id: 'voucher',
         header: 'Voucher',
@@ -82,7 +84,7 @@ const columns = [
         <div class="mb-4 flex items-center justify-between">
             <div>
                 <h2 class="text-base font-bold text-text-strong">{{ fiscalYear.name }}</h2>
-                <p class="text-xs text-text-muted">{{ fiscalYear.bsLabel }} &middot; {{ fiscalYear.startDate }} to {{ fiscalYear.endDate }}</p>
+                <p class="text-xs text-text-muted">{{ fiscalYear.bsLabel }} &middot; {{ formatBsDate(fiscalYear.startDate) }} to {{ formatBsDate(fiscalYear.endDate) }} BS</p>
             </div>
             <Badge variant="neutral" pill>
                 <Archive class="h-3 w-3" aria-hidden="true" />
