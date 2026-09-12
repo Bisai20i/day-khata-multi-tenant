@@ -5,6 +5,8 @@ namespace App\Support;
 use App\Enums\FiscalYearStatus;
 use App\Models\ActivityLog;
 use App\Models\FiscalYear;
+use App\Models\User;
+use Illuminate\Auth\Access\AuthorizationException;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Str;
 use InvalidArgumentException;
@@ -42,6 +44,48 @@ class ClosedFiscalYearGuard
         if (trim((string) $reason) === '') {
             throw new InvalidArgumentException('A reason is required to post a correction into a reopened fiscal year.');
         }
+    }
+
+    /**
+     * Resolves the fiscal year a dated document actually belongs in - the one
+     * whose range contains $date, not "whichever year happens to be open" -
+     * and returns it only when that year is postable.
+     *
+     * This is the entry point for every dated posting that does NOT go through
+     * JournalVoucher::post() (stock adjustments, transfers, conversions, the
+     * opening-stock import): those wrote into the open year no matter what
+     * date the user typed, so a bill dated Asar 30 landed in the new year's
+     * ledger while the date-filtered VAT book and Day Book still placed it in
+     * the already-filed period (audit P0-11). JournalVoucher::post() resolves
+     * its own year (it also honours an explicit fiscal_year_id for the
+     * reopened-correction flow) and then enforces the same date-inside-year
+     * rule in write(), so it does not call this.
+     *
+     * Posting into a year that is closed but reopened for correction needs the
+     * same admin + reason pair post() requires, hence the optional $actor: the
+     * check is skipped only when the resolved year is the open one.
+     *
+     * @throws InvalidArgumentException When no fiscal year covers $date, or the one that does is closed.
+     * @throws AuthorizationException When a non-admin targets a reopened closed year.
+     */
+    public static function assertDateInOpenYear(string $date, ?User $actor = null, ?string $reason = null): FiscalYear
+    {
+        $fiscalYear = FiscalYear::query()
+            ->whereDate('start_date', '<=', $date)
+            ->whereDate('end_date', '>=', $date)
+            ->first();
+
+        if (! $fiscalYear) {
+            throw new InvalidArgumentException("The date {$date} does not fall inside any fiscal year.");
+        }
+
+        static::ensurePostable($fiscalYear, $reason);
+
+        if ($fiscalYear->status !== FiscalYearStatus::Open && $actor?->role?->slug !== 'admin') {
+            throw new AuthorizationException('Only an admin may post into a reopened fiscal year.');
+        }
+
+        return $fiscalYear;
     }
 
     /**

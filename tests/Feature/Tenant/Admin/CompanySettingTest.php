@@ -1,10 +1,16 @@
 <?php
 
+use App\Enums\FiscalYearStatus;
+use App\Enums\VoucherType;
+use App\Models\Account;
 use App\Models\CompanySetting;
+use App\Models\FiscalYear;
+use App\Models\JournalVoucher;
 use App\Models\Role;
 use App\Models\Store;
 use App\Models\Tenant;
 use App\Models\User;
+use App\Models\VoucherSequence;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Storage;
@@ -109,6 +115,8 @@ function baseSettingsUpdatePayload(): array
         'sale_pan_prefix' => 'SLP',
         'sale_pan_enabled' => true,
         'purchase_prefix' => 'PU',
+        'sale_return_prefix' => 'SR',
+        'purchase_return_prefix' => 'PR',
     ];
 }
 
@@ -167,6 +175,8 @@ test('an admin can update the new invoicing and stock policy fields', function (
         'sale_abbreviated_prefix' => 'ABR',
         'sale_pan_prefix' => 'PAN',
         'purchase_prefix' => 'PRC',
+        'sale_return_prefix' => 'CRN',
+        'purchase_return_prefix' => 'DBN',
     ]);
 
     $response = test()->put("http://{$domain}/settings", $payload);
@@ -184,6 +194,8 @@ test('an admin can update the new invoicing and stock policy fields', function (
         expect($settings->sale_abbreviated_prefix)->toBe('ABR');
         expect($settings->sale_pan_prefix)->toBe('PAN');
         expect($settings->purchase_prefix)->toBe('PRC');
+        expect($settings->sale_return_prefix)->toBe('CRN');
+        expect($settings->purchase_return_prefix)->toBe('DBN');
     });
 
     $tenant->delete();
@@ -348,6 +360,129 @@ test('CompanySetting::current always returns exactly one row, even before any ro
         expect(CompanySetting::count())->toBe(1);
         expect($second->id)->toBe($first->id);
     });
+
+    $tenant->delete();
+});
+
+test('two document series cannot share a prefix', function () {
+    // "SL-7" printed on both a full invoice and a PAN invoice is
+    // indistinguishable on paper and in the VAT book.
+    $domain = 'company-settings-duplicate-prefix.tenant-test';
+    $tenant = provisionCompanySettingTestTenant($domain);
+    loginAsSettingsAdmin($domain);
+
+    $payload = array_merge(baseSettingsUpdatePayload(), ['sale_pan_prefix' => 'SL']);
+
+    test()->put("http://{$domain}/settings", $payload)->assertSessionHasErrors('sale_pan_prefix');
+
+    // Case and surrounding spaces do not make a prefix distinct either.
+    $payload = array_merge(baseSettingsUpdatePayload(), ['purchase_return_prefix' => ' sr ']);
+
+    test()->put("http://{$domain}/settings", $payload)->assertSessionHasErrors('purchase_return_prefix');
+
+    $tenant->run(function () {
+        expect(CompanySetting::current()->sale_pan_prefix)->toBe('SLP');
+    });
+
+    $tenant->delete();
+});
+
+test('a VAT rate with more than two decimals is rejected instead of being silently rounded', function () {
+    $domain = 'company-settings-vat-precision.tenant-test';
+    $tenant = provisionCompanySettingTestTenant($domain);
+    loginAsSettingsAdmin($domain);
+
+    $payload = array_merge(baseSettingsUpdatePayload(), ['default_vat_rate' => '13.005']);
+
+    test()->put("http://{$domain}/settings", $payload)->assertSessionHasErrors('default_vat_rate');
+
+    $tenant->delete();
+});
+
+test('the settings page lists every numbered series with its next number', function () {
+    $domain = 'company-settings-numbering-panel.tenant-test';
+    $tenant = provisionCompanySettingTestTenant($domain);
+    loginAsSettingsAdmin($domain);
+
+    $tenant->run(function () {
+        FiscalYear::create(['name' => 'FY1', 'start_date' => '2026-01-01', 'end_date' => '2026-12-31', 'status' => FiscalYearStatus::Open]);
+    });
+
+    test()->get("http://{$domain}/settings")
+        ->assertOk()
+        ->assertInertia(fn ($page) => $page
+            ->has('invoiceNumbering', 6)
+            ->where('invoiceNumbering.0.voucher_type', VoucherType::Sale->value)
+            ->where('invoiceNumbering.0.next_number', 1)
+            ->where('invoiceNumbering.0.can_set', true)
+        );
+
+    $tenant->delete();
+});
+
+test('an admin can set a series starting number, and cannot once that series has issued a document', function () {
+    $domain = 'company-settings-starting-number.tenant-test';
+    $tenant = provisionCompanySettingTestTenant($domain);
+    $admin = loginAsSettingsAdmin($domain);
+
+    $tenant->run(function () {
+        FiscalYear::create(['name' => 'FY1', 'start_date' => '2026-01-01', 'end_date' => '2026-12-31', 'status' => FiscalYearStatus::Open]);
+    });
+
+    test()->post("http://{$domain}/settings/starting-number", [
+        'voucher_type' => VoucherType::Sale->value,
+        'next_number' => 501,
+    ])->assertRedirect();
+
+    $tenant->run(function () {
+        $fiscalYear = FiscalYear::query()->firstOrFail();
+
+        expect(VoucherSequence::nextNumberFor($fiscalYear, VoucherType::Sale))->toBe(501)
+            ->and(VoucherSequence::nextNumberFor($fiscalYear, VoucherType::SalePan))->toBe(1);
+    });
+
+    // Issue one document in that series, then the setting locks.
+    $tenant->run(function () use ($admin) {
+        JournalVoucher::post(
+            ['voucher_type' => VoucherType::Sale->value, 'date' => '2026-06-01', 'narration' => 'Sale'],
+            [
+                ['account_id' => Account::where('code', 'AS1')->value('id'), 'debit' => 100, 'credit' => 0],
+                ['account_id' => Account::where('code', 'INI20')->value('id'), 'debit' => 0, 'credit' => 100],
+            ],
+            User::findOrFail($admin->id),
+        );
+    });
+
+    test()->post("http://{$domain}/settings/starting-number", [
+        'voucher_type' => VoucherType::Sale->value,
+        'next_number' => 900,
+    ])->assertSessionHasErrors('next_number');
+
+    $tenant->run(function () {
+        $fiscalYear = FiscalYear::query()->firstOrFail();
+
+        expect(VoucherSequence::nextNumberFor($fiscalYear, VoucherType::Sale))->toBe(502);
+    });
+
+    $tenant->delete();
+});
+
+test('a staff user cannot set a starting number', function () {
+    $domain = 'company-settings-starting-number-staff.tenant-test';
+    $tenant = provisionCompanySettingTestTenant($domain);
+
+    $tenant->run(function () {
+        $staffRole = Role::query()->where('slug', 'staff')->firstOrFail();
+        User::factory()->create(['email' => 'staffer@example.com', 'role_id' => $staffRole->id]);
+        FiscalYear::create(['name' => 'FY1', 'start_date' => '2026-01-01', 'end_date' => '2026-12-31', 'status' => FiscalYearStatus::Open]);
+    });
+
+    test()->post("http://{$domain}/login", ['email' => 'staffer@example.com', 'password' => 'password']);
+
+    test()->post("http://{$domain}/settings/starting-number", [
+        'voucher_type' => VoucherType::Sale->value,
+        'next_number' => 501,
+    ])->assertForbidden();
 
     $tenant->delete();
 });

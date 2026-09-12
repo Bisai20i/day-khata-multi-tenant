@@ -12,9 +12,12 @@ use App\Models\AccountSubgroup;
 use App\Models\FiscalYear;
 use App\Models\JournalVoucher;
 use App\Models\JournalVoucherLine;
+use App\Models\User;
+use App\Support\Money\Money;
 use Illuminate\Auth\Access\AuthorizationException;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Validator;
 use Illuminate\Validation\Rule;
 use Inertia\Inertia;
@@ -38,13 +41,71 @@ class AccountController extends Controller
      */
     private const OPENING_BALANCE_IMPORT_COLUMNS = ['code', 'name', 'debit', 'credit'];
 
+    /**
+     * The narration every opening-balance import writes on its voucher, and
+     * the only thing that marks a voucher as import-created.
+     *
+     * It is deliberately the single marker: reversing or replacing an import
+     * is allowed ONLY for a voucher carrying it, so the year-end
+     * carry-forward's own OpeningBalance voucher (narration "Opening balances
+     * carried forward from ...", written by FiscalYear::close()) can never be
+     * undone from this screen - that would silently delete the prior year's
+     * closing position.
+     */
+    private const OPENING_BALANCE_IMPORT_NARRATION = 'Opening balance import';
+
+    /**
+     * Accounts an opening-balance import may never touch.
+     *
+     * AS11 (Opening Stock) is valued from the opening-stock import instead, so
+     * that the stock ledger and the stock account can never disagree; a
+     * profit-and-loss account has no opening balance by definition (it starts
+     * every year at zero), and giving it one restates last year's result.
+     */
+    private const OPENING_BALANCE_BLOCKED_CODES = ['AS11'];
+
     public function index(): Response
     {
         return Inertia::render('Tenant/Accounting/Accounts/Index', [
             'accountGroups' => AccountGroup::query()->orderBy('name')->get(['id', 'name']),
             'accountSubgroups' => AccountSubgroup::query()->orderBy('name')->get(['id', 'account_group_id', 'name']),
             'accounts' => Account::query()->with(['group:id,name', 'subgroup:id,name'])->orderBy('name')->get(),
+            'openingBalanceImports' => $this->openingBalanceImports(),
         ]);
+    }
+
+    /**
+     * Every opening-balance import posted so far, newest first, with the one
+     * that is still in effect flagged so the Accounts page can offer to clear
+     * it. Cancelled ones stay listed: the reversal is part of the audit trail,
+     * not something to hide.
+     *
+     * @return list<array{id: int, date: string, status: string, line_count: int, total: string, fiscal_year: string|null, can_clear: bool}>
+     */
+    private function openingBalanceImports(): array
+    {
+        $openFiscalYearId = FiscalYear::query()->where('status', FiscalYearStatus::Open)->value('id');
+
+        return JournalVoucher::query()
+            ->where('voucher_type', VoucherType::OpeningBalance)
+            ->where('narration', self::OPENING_BALANCE_IMPORT_NARRATION)
+            ->with('fiscalYear:id,name')
+            ->withCount('lines')
+            ->orderByDesc('id')
+            ->get()
+            ->map(fn (JournalVoucher $voucher): array => [
+                'id' => $voucher->id,
+                'date' => $voucher->date->toDateString(),
+                'status' => $voucher->status,
+                'line_count' => $voucher->lines_count,
+                'total' => Money::sum($voucher->lines()->pluck('debit'))->toString(),
+                'fiscal_year' => $voucher->fiscalYear?->name,
+                // A reversal is dated today, so it can only land in the open
+                // year: an import from a year that has since closed stays on
+                // the ledger as history (CONTRACTS C4).
+                'can_clear' => $voucher->status === 'posted' && $voucher->fiscal_year_id === $openFiscalYearId,
+            ])
+            ->all();
     }
 
     public function store(Request $request): RedirectResponse
@@ -79,19 +140,28 @@ class AccountController extends Controller
             ->sortBy([['journalVoucher.date', 'asc'], ['id', 'asc']])
             ->values();
 
-        $runningBalance = 0.0;
+        // Money, not a float accumulator: a running balance summed in floats
+        // drifts a paisa at a time down a long ledger, and a balance that
+        // lands on exactly zero used to render as "-0.00" whenever the last
+        // subtraction happened to produce negative zero. Money's toString()
+        // is exact and prints plain "0.00". Amounts leave as strings so the
+        // page formats them with formatMoney() rather than re-deriving them
+        // from a JSON number.
+        $runningBalance = Money::zero();
 
         $entries = $entries->map(function (JournalVoucherLine $line) use (&$runningBalance) {
-            $runningBalance += (float) $line->debit - (float) $line->credit;
+            $debit = Money::of($line->debit);
+            $credit = Money::of($line->credit);
+            $runningBalance = $runningBalance->plus($debit)->minus($credit);
 
             return [
                 'date' => $line->journalVoucher->date->toDateString(),
                 'voucherType' => $line->journalVoucher->voucher_type->value,
                 'voucherNumber' => $line->journalVoucher->voucher_number,
                 'narration' => $line->narration ?? $line->journalVoucher->narration,
-                'debit' => (float) $line->debit,
-                'credit' => (float) $line->credit,
-                'balance' => $runningBalance,
+                'debit' => $debit->toString(),
+                'credit' => $credit->toString(),
+                'balance' => $runningBalance->toString(),
             ];
         });
 
@@ -202,12 +272,29 @@ class AccountController extends Controller
                 continue;
             }
 
+            if (in_array(strtoupper((string) $account->code), self::OPENING_BALANCE_BLOCKED_CODES, true)) {
+                $skipped[] = ['row' => $rowNumber, 'name' => $label, 'reason' => "\"{$account->name}\" is valued by the opening stock import, not here."];
+
+                continue;
+            }
+
+            if ($account->isProfitAndLoss()) {
+                $skipped[] = ['row' => $rowNumber, 'name' => $label, 'reason' => "\"{$account->name}\" is an income or expense account, which has no opening balance."];
+
+                continue;
+            }
+
             $validator = Validator::make([
                 'debit' => $row['debit'] ?? '',
                 'credit' => $row['credit'] ?? '',
             ], [
-                'debit' => ['nullable', 'numeric', 'min:0'],
-                'credit' => ['nullable', 'numeric', 'min:0'],
+                // decimal:0,2 as well as numeric: a rupee amount carrying a
+                // third decimal used to reach MySQL unrounded and be stored
+                // per line at whatever it rounded to, which is exactly how a
+                // file that balanced on paper posted an unbalanced voucher
+                // (audit P0-2). Rejected with the row number instead.
+                'debit' => ['nullable', 'numeric', 'decimal:0,2', 'min:0'],
+                'credit' => ['nullable', 'numeric', 'decimal:0,2', 'min:0'],
             ]);
 
             if ($validator->fails()) {
@@ -216,10 +303,10 @@ class AccountController extends Controller
                 continue;
             }
 
-            $debit = (float) ($row['debit'] ?? 0);
-            $credit = (float) ($row['credit'] ?? 0);
+            $debit = Money::ofNullable(trim((string) ($row['debit'] ?? ''))) ?? Money::zero();
+            $credit = Money::ofNullable(trim((string) ($row['credit'] ?? ''))) ?? Money::zero();
 
-            if (($debit > 0) === ($credit > 0)) {
+            if ($debit->isPositive() === $credit->isPositive()) {
                 $skipped[] = ['row' => $rowNumber, 'name' => $label, 'reason' => 'Exactly one of debit or credit must be greater than zero.'];
 
                 continue;
@@ -229,9 +316,9 @@ class AccountController extends Controller
 
             $lines[] = [
                 'account_id' => $account->id,
-                'debit' => $debit,
-                'credit' => $credit,
-                'narration' => 'Opening balance import',
+                'debit' => $debit->toString(),
+                'credit' => $credit->toString(),
+                'narration' => self::OPENING_BALANCE_IMPORT_NARRATION,
             ];
         }
 
@@ -246,15 +333,19 @@ class AccountController extends Controller
         }
 
         try {
-            JournalVoucher::post(
-                [
-                    'voucher_type' => VoucherType::OpeningBalance->value,
-                    'date' => $data['date'],
-                    'narration' => 'Opening balance import',
-                ],
-                $lines,
-                $request->user(),
-            );
+            DB::transaction(function () use ($data, $lines, $request): void {
+                $this->reverseActiveOpeningBalanceImports($request->user(), 'Replaced by a new opening balance import');
+
+                JournalVoucher::post(
+                    [
+                        'voucher_type' => VoucherType::OpeningBalance->value,
+                        'date' => $data['date'],
+                        'narration' => self::OPENING_BALANCE_IMPORT_NARRATION,
+                    ],
+                    $lines,
+                    $request->user(),
+                );
+            });
         } catch (InvalidArgumentException|AuthorizationException $e) {
             return back()->withErrors(['file' => $e->getMessage()])->withInput();
         }
@@ -262,6 +353,66 @@ class AccountController extends Controller
         return redirect()->route('tenant.accounts.index')
             ->with('status', 'Imported opening balances for '.count($lines).' account(s).')
             ->with('importResult', ['imported' => count($lines), 'skipped' => []]);
+    }
+
+    /**
+     * Clears one opening-balance import: posts its mirror through
+     * JournalVoucher::reverse() and marks it cancelled, leaving both the
+     * import and its reversal on the ledger.
+     *
+     * Restricted to import-created vouchers (see
+     * OPENING_BALANCE_IMPORT_NARRATION) so the year-end carry-forward's own
+     * OpeningBalance voucher can never be undone from this screen.
+     */
+    public function reverseOpeningBalanceImport(Request $request, JournalVoucher $journalVoucher): RedirectResponse
+    {
+        if (! $this->isOpeningBalanceImport($journalVoucher)) {
+            return back()->withErrors(['opening_balance_import' => 'Only an opening balance import can be cleared here.']);
+        }
+
+        try {
+            JournalVoucher::reverse($journalVoucher, $request->user(), 'Opening balance import cleared');
+        } catch (InvalidArgumentException|AuthorizationException $e) {
+            return back()->withErrors(['opening_balance_import' => $e->getMessage()]);
+        }
+
+        return redirect()->route('tenant.accounts.index')->with('status', 'Opening balance import cleared.');
+    }
+
+    /**
+     * Reverses every still-posted opening-balance import in the open fiscal
+     * year, so a re-import replaces the previous one instead of stacking on
+     * top of it - importing the same file twice used to double every opening
+     * balance with no way back (audit P1, "Opening balance import stacks,
+     * cannot be reversed").
+     *
+     * Scoped to the open year on purpose: an import belonging to a year that
+     * has since closed is that year's history, not something this year's
+     * import replaces, and a reversal dated today could not post into it
+     * anyway.
+     *
+     * Idempotent: a second call finds nothing left to reverse.
+     */
+    private function reverseActiveOpeningBalanceImports(User $actor, string $narration): void
+    {
+        $previous = JournalVoucher::query()
+            ->where('voucher_type', VoucherType::OpeningBalance)
+            ->where('narration', self::OPENING_BALANCE_IMPORT_NARRATION)
+            ->where('status', 'posted')
+            ->whereHas('fiscalYear', fn ($query) => $query->where('status', FiscalYearStatus::Open))
+            ->orderBy('id')
+            ->lockForUpdate()
+            ->get();
+
+        foreach ($previous as $voucher) {
+            JournalVoucher::reverse($voucher, $actor, $narration);
+        }
+    }
+
+    private function isOpeningBalanceImport(JournalVoucher $voucher): bool
+    {
+        return $voucher->voucher_type === VoucherType::OpeningBalance
+            && $voucher->narration === self::OPENING_BALANCE_IMPORT_NARRATION;
     }
 
     /**

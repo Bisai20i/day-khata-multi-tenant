@@ -116,11 +116,15 @@ const columns = [
         id: 'actions',
         header: '',
         numeric: false,
+        // Admin-only server side (routes/tenant-business.php), so the row
+        // actions are hidden rather than left to fail with a 403.
         cell: ({ row }) =>
-            h(RowActions, {
-                onEdit: () => openEdit(row.original),
-                onDelete: () => destroy(row.original),
-            }),
+            isAdmin.value
+                ? h(RowActions, {
+                      onEdit: () => openEdit(row.original),
+                      onDelete: () => destroy(row.original),
+                  })
+                : null,
     },
 ];
 </script>
@@ -129,7 +133,7 @@ const columns = [
     <AppLayout title="Account Groups" :nav-items="navItems">
         <div class="mb-4 flex items-center justify-between">
             <h2 class="text-base font-bold text-text-strong">Account Groups</h2>
-            <Button variant="primary" tone="purple" @click="openCreate">
+            <Button v-if="isAdmin" variant="primary" tone="purple" @click="openCreate">
                 <Plus class="size-4" />
                 New group
             </Button>

@@ -28,42 +28,42 @@ assertion, see task 3), `tests/Feature/Tenant/Admin/CompanySettingTest.php`, new
 
 ## Tasks
 
-- [ ] 1. `VoucherType`: add `SalePan` and `Reversal` (C4). Keep the existing docblock style; explain why each
+- [x] 1. `VoucherType`: add `SalePan` and `Reversal` (C4). Keep the existing docblock style; explain why each
   series is separate.
-- [ ] 2. `validateLines()` / `write()`: normalise each line through `Money::of()` (throws on more than 2
+- [x] 2. `validateLines()` / `write()`: normalise each line through `Money::of()` (throws on more than 2
   decimals), reject zero lines, compare totals with `Money::sum(...)->isEqualTo()` (exact). Store exactly the
   normalised strings. `JournalVoucherLine` casts switch to `Decimal::class.':2'`.
-- [ ] 3. Date guard in `post()` (C4): the date must be inside the resolved fiscal year. Add
+- [x] 3. Date guard in `post()` (C4): the date must be inside the resolved fiscal year. Add
   `ClosedFiscalYearGuard::assertDateInOpenYear()` (C4) and use it. Update the existing
   `FiscalYearReopenTest` case that posts a back-dated sale into the new year so it now asserts the rejection.
   Keep `write()`'s system-bookkeeping path (close, roll-forward) working: it targets explicit years with dates
   inside them.
-- [ ] 4. `nextVoucherNumber()`: create the sequence row race-safely (insert-or-ignore then
+- [x] 4. `nextVoucherNumber()`: create the sequence row race-safely (insert-or-ignore then
   `lockForUpdate()`), never a 500 on a simultaneous first post. Add
   `VoucherSequence::setStartingNumber()` (C4).
-- [ ] 5. `JournalVoucher::reverse()` per C4, migration adding `journal_vouchers.reversal_of_id` (nullable FK,
+- [x] 5. `JournalVoucher::reverse()` per C4, migration adding `journal_vouchers.reversal_of_id` (nullable FK,
   indexed). Rewrite `JournalVoucher::cancel()` (manual journals) on top of it, with `lockForUpdate()` + status
   re-check inside the transaction.
-- [ ] 6. Opening balance import (`AccountController`): re-import replaces the previous import batch (reverse
+- [x] 6. Opening balance import (`AccountController`): re-import replaces the previous import batch (reverse
   the prior Opening Balance voucher via `reverse()`-style mirroring, allowed for import-created Opening Balance
   vouchers only), reject P&L accounts and the stock account `AS11` (opening stock value comes only from the
   opening stock import, T08), reject amounts with more than 2 decimals, admin-only route. Add a small
   "Opening balance imports" list with a clear (reverse) action on the Accounts page.
-- [ ] 7. Ledger view (`AccountController` ledger + `Accounts/Ledger.vue`): running balance with `Money`, no
+- [x] 7. Ledger view (`AccountController` ledger + `Accounts/Ledger.vue`): running balance with `Money`, no
   `-0.00`, amounts as strings, formatted with `formatMoney`, BS date column via `formatBsDate`.
-- [ ] 8. `JournalVouchers/Create.vue`: debit/credit totals and the balanced indicator via `money.js` (exact
+- [x] 8. `JournalVouchers/Create.vue`: debit/credit totals and the balanced indicator via `money.js` (exact
   `moneyEquals`, no tolerance), inputs `inputmode="decimal"` with `step="0.01"`, default date
   `todayInKathmandu()`.
-- [ ] 9. Settings (`SettingsController`, `CompanySetting`, `Settings/Edit.vue`): prefixes must be distinct
+- [x] 9. Settings (`SettingsController`, `CompanySetting`, `Settings/Edit.vue`): prefixes must be distinct
   across all series (full, abbreviated, PAN, sales return, purchase return); new "Invoice numbering" section
   (admin) showing each series' next number for the open fiscal year with a "Set starting number" action using
   `VoucherSequence::setStartingNumber()` (disabled once a document of that series exists); casts to `Decimal`.
-- [ ] 10. `config/app.php`: `'timezone' => env('APP_TIMEZONE', 'Asia/Kathmandu')`. Grep the tests you own for
+- [x] 10. `config/app.php`: `'timezone' => env('APP_TIMEZONE', 'Asia/Kathmandu')`. Grep the tests you own for
   UTC-sensitive date assertions and fix them.
-- [ ] 11. Admin gates (`role:admin`) in your route files for: journal voucher create/store/cancel, chart of
+- [x] 11. Admin gates (`role:admin`) in your route files for: journal voucher create/store/cancel, chart of
   accounts and groups/subgroups write routes, opening balance import, settings. Block changing an account
   group's head after its accounts have postings (`AccountGroupController`).
-- [ ] 12. Tests (write, do not run): exact balance with `333.333` rejected; zero line rejected; date outside
+- [x] 12. Tests (write, do not run): exact balance with `333.333` rejected; zero line rejected; date outside
   the fiscal year rejected; reversal uses the `Reversal` series and never consumes a Sale/Receipt number;
   reverse of a voucher from a closed year rejected; starting number applies once and is refused after the
   first document; distinct prefixes; opening balance re-import replaces; AS11 and P&L accounts rejected;

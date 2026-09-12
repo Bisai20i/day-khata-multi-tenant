@@ -6,6 +6,8 @@ import Card from '@/components/ui/Card.vue';
 import Select from '@/components/ui/Select.vue';
 import DataTable from '@/components/ui/DataTable.vue';
 import { navGroups } from '@/lib/nav-items.js';
+import { formatMoney } from '@/lib/money';
+import { formatBsDate } from '@/lib/format';
 
 const props = defineProps({
     account: {
@@ -30,11 +32,23 @@ const page = usePage();
 const isAdmin = computed(() => page.props.auth?.user?.role?.slug === 'admin');
 const navItems = computed(() => navGroups(isAdmin.value));
 
+// Only the types a manual ledger reader is likely to meet need a friendly
+// label; anything else falls back to its own value, so a new VoucherType never
+// renders as a blank cell.
 const voucherTypeLabels = {
     opening_balance: 'Opening Balance',
     journal: 'Journal',
     closing_entry: 'Closing Entry',
     roll_forward_adjustment: 'Roll Forward Adjustment',
+    reversal: 'Reversal',
+    sale: 'Sale',
+    sale_abbreviated: 'Sale (Abbreviated)',
+    sale_pan: 'Sale (PAN)',
+    sale_return: 'Sales Return',
+    purchase: 'Purchase',
+    purchase_return: 'Purchase Return',
+    receipt: 'Receipt',
+    payment: 'Payment',
 };
 
 function voucherLabel(entry) {
@@ -57,8 +71,17 @@ function onFiscalYearChange(value) {
     );
 }
 
+// Amounts arrive from the server as exact decimal strings (the running
+// balance is accumulated with App\Support\Money\Money there, so it never
+// drifts and never renders "-0.00"); the page only formats them.
 const columns = [
-    { accessorKey: 'date', header: 'Date' },
+    {
+        id: 'dateBs',
+        header: 'Date (BS)',
+        numeric: false,
+        cell: ({ row }) => formatBsDate(row.original.date) || '—',
+    },
+    { accessorKey: 'date', header: 'Date (AD)' },
     {
         id: 'voucher',
         header: 'Voucher',
@@ -74,17 +97,17 @@ const columns = [
     {
         accessorKey: 'debit',
         header: 'Debit',
-        cell: ({ row }) => row.original.debit.toFixed(2),
+        cell: ({ row }) => formatMoney(row.original.debit),
     },
     {
         accessorKey: 'credit',
         header: 'Credit',
-        cell: ({ row }) => row.original.credit.toFixed(2),
+        cell: ({ row }) => formatMoney(row.original.credit),
     },
     {
         accessorKey: 'balance',
         header: 'Running Balance',
-        cell: ({ row }) => row.original.balance.toFixed(2),
+        cell: ({ row }) => formatMoney(row.original.balance),
     },
 ];
 </script>

@@ -8,6 +8,8 @@ import Input from '@/components/ui/Input.vue';
 import Combobox from '@/components/ui/Combobox.vue';
 import Select from '@/components/ui/Select.vue';
 import NepaliDateInput from '@/components/ui/NepaliDateInput.vue';
+import { formatMoney, isZeroMoney, moneyEquals, parseMoney, sumMoney } from '@/lib/money';
+import { todayInKathmandu } from '@/lib/format';
 
 const props = defineProps({
     accounts: {
@@ -52,10 +54,12 @@ function emptyLine() {
     return { account_id: null, debit: '', credit: '', narration: '' };
 }
 
+// todayInKathmandu(), never new Date().toISOString(): Nepal is UTC+05:45, so
+// the UTC day is yesterday's date for anyone posting before 05:45 local.
 const form = useForm({
     fiscal_year_id: null,
     reason: '',
-    date: '',
+    date: todayInKathmandu(),
     narration: '',
     lines: [emptyLine(), emptyLine()],
 });
@@ -72,22 +76,43 @@ function removeLine(index) {
     form.lines.splice(index, 1);
 }
 
+// A blank or not-yet-valid box contributes nothing; anything else is the exact
+// 2dp string money.js parsed, never Number(). A third decimal is not silently
+// rounded here either - it simply doesn't count towards the totals, so the
+// voucher stays visibly unbalanced until it is fixed, which is the same answer
+// JournalVoucher::validateLines() gives on the server.
+function amountOf(value) {
+    const parsed = parseMoney(value === '' || value === null || value === undefined ? 0 : value);
+
+    return parsed.ok ? parsed.value : null;
+}
+
 // Debit and credit are mutually exclusive per line: setting one clears the other
 // rather than blocking input, so the user can fix a mis-click without extra clicks.
 function setDebit(index, value) {
     form.lines[index].debit = value;
-    if (Number(value) > 0) form.lines[index].credit = '';
+    const amount = amountOf(value);
+    if (amount !== null && !isZeroMoney(amount)) form.lines[index].credit = '';
 }
 
 function setCredit(index, value) {
     form.lines[index].credit = value;
-    if (Number(value) > 0) form.lines[index].debit = '';
+    const amount = amountOf(value);
+    if (amount !== null && !isZeroMoney(amount)) form.lines[index].debit = '';
 }
 
-const totalDebit = computed(() => form.lines.reduce((sum, line) => sum + (Number(line.debit) || 0), 0));
-const totalCredit = computed(() => form.lines.reduce((sum, line) => sum + (Number(line.credit) || 0), 0));
-const isBalanced = computed(() => totalDebit.value > 0 && Math.abs(totalDebit.value - totalCredit.value) < 0.005);
-const canSubmit = computed(() => isBalanced.value && (!isClosedYearSelected.value || form.reason.trim().length > 0));
+const totalDebit = computed(() => sumMoney(form.lines.map((line) => amountOf(line.debit) ?? '0.00')));
+const totalCredit = computed(() => sumMoney(form.lines.map((line) => amountOf(line.credit) ?? '0.00')));
+
+// Exact equality, no tolerance: a 0.005 window is precisely how an unbalanced
+// voucher used to reach the database (audit P0-2).
+const isBalanced = computed(() => !isZeroMoney(totalDebit.value) && moneyEquals(totalDebit.value, totalCredit.value));
+const hasUnreadableAmount = computed(() =>
+    form.lines.some((line) => amountOf(line.debit) === null || amountOf(line.credit) === null),
+);
+const canSubmit = computed(
+    () => isBalanced.value && !hasUnreadableAmount.value && (!isClosedYearSelected.value || form.reason.trim().length > 0),
+);
 
 function submit() {
     form.transform((data) => ({
@@ -96,8 +121,8 @@ function submit() {
         reason: isClosedYearSelected.value ? data.reason : undefined,
         lines: data.lines.map((line) => ({
             account_id: line.account_id,
-            debit: Number(line.debit) || 0,
-            credit: Number(line.credit) || 0,
+            debit: amountOf(line.debit) ?? '0.00',
+            credit: amountOf(line.credit) ?? '0.00',
             narration: line.narration || undefined,
         })),
     })).post('/journal-vouchers', {
@@ -187,6 +212,7 @@ function submit() {
                         type="number"
                         min="0"
                         step="0.01"
+                        inputmode="decimal"
                         placeholder="0.00"
                         :model-value="line.debit"
                         @update:model-value="(v) => setDebit(index, v)"
@@ -195,6 +221,7 @@ function submit() {
                         type="number"
                         min="0"
                         step="0.01"
+                        inputmode="decimal"
                         placeholder="0.00"
                         :model-value="line.credit"
                         @update:model-value="(v) => setCredit(index, v)"
@@ -217,10 +244,11 @@ function submit() {
 
                 <div class="mt-4 grid grid-cols-[1fr_140px_140px_1fr_28px] items-center gap-2 border-t-[1.5px] border-border pt-3">
                     <span class="text-sm font-bold text-text-strong">Total</span>
-                    <span class="text-sm font-bold text-text-strong">{{ totalDebit.toFixed(2) }}</span>
-                    <span class="text-sm font-bold text-text-strong">{{ totalCredit.toFixed(2) }}</span>
-                    <span class="text-xs font-semibold" :class="isBalanced ? 'text-success' : 'text-danger'">
-                        {{ isBalanced ? 'Balanced' : 'Debit and credit totals must match' }}
+                    <span class="text-sm font-bold text-text-strong">{{ formatMoney(totalDebit) }}</span>
+                    <span class="text-sm font-bold text-text-strong">{{ formatMoney(totalCredit) }}</span>
+                    <span class="text-xs font-semibold" :class="isBalanced && !hasUnreadableAmount ? 'text-success' : 'text-danger'">
+                        <template v-if="hasUnreadableAmount">Every amount must be a number with at most 2 decimals</template>
+                        <template v-else>{{ isBalanced ? 'Balanced' : 'Debit and credit totals must match' }}</template>
                     </span>
                     <span></span>
                 </div>

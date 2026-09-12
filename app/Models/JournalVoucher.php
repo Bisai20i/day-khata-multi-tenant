@@ -5,15 +5,18 @@ namespace App\Models;
 use App\Enums\FiscalYearStatus;
 use App\Enums\VoucherType;
 use App\Support\ClosedFiscalYearGuard;
+use App\Support\Money\Money;
+use Carbon\CarbonImmutable;
 use Illuminate\Auth\Access\AuthorizationException;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Database\Eloquent\Relations\HasOne;
 use Illuminate\Support\Facades\DB;
 use InvalidArgumentException;
 
-#[Fillable(['fiscal_year_id', 'voucher_type', 'voucher_number', 'date', 'narration', 'reason', 'status', 'created_by'])]
+#[Fillable(['fiscal_year_id', 'voucher_type', 'voucher_number', 'date', 'narration', 'reason', 'status', 'created_by', 'reversal_of_id'])]
 class JournalVoucher extends Model
 {
     /**
@@ -52,6 +55,29 @@ class JournalVoucher extends Model
     }
 
     /**
+     * The original voucher this one reverses, when this voucher was created by
+     * reverse(). Null on every ordinary posting.
+     *
+     * @return BelongsTo<JournalVoucher, $this>
+     */
+    public function reversalOf(): BelongsTo
+    {
+        return $this->belongsTo(self::class, 'reversal_of_id');
+    }
+
+    /**
+     * The Reversal voucher that cancelled this one, if any. HasOne rather than
+     * HasMany because journal_vouchers.reversal_of_id is unique: a voucher can
+     * only ever be reversed once.
+     *
+     * @return HasOne<JournalVoucher, $this>
+     */
+    public function reversal(): HasOne
+    {
+        return $this->hasOne(self::class, 'reversal_of_id');
+    }
+
+    /**
      * The one user-facing entry point for posting a journal voucher.
      * Resolves the target fiscal year (defaults to the currently open one),
      * gates posting into a closed year behind ClosedFiscalYearGuard (only
@@ -60,6 +86,10 @@ class JournalVoucher extends Model
      * only by an admin, with a reason), and rolls a closed-year
      * correction's effect forward through any already-created subsequent
      * fiscal years.
+     *
+     * The voucher date must fall inside whichever fiscal year is resolved
+     * (enforced in write()); a date from a different year is refused rather
+     * than quietly filed under the wrong one.
      *
      * @param  array{voucher_type?: string, date: string, narration: string, reason?: string, fiscal_year_id?: int}  $header
      * @param  array<int, array{account_id: int, debit?: float|string, credit?: float|string, narration?: string}>  $lines
@@ -105,12 +135,13 @@ class JournalVoucher extends Model
     }
 
     /**
-     * Shared low-level writer: validates double-entry shape/balance,
-     * atomically claims the next voucher number, and creates the header +
-     * lines. Used directly (bypassing post()'s fiscal-year resolution and
-     * closed-year gate) by FiscalYear::close() and the roll-forward
-     * cascade, both of which target a specific fiscal year for
-     * system-generated bookkeeping rather than a user-initiated posting.
+     * Shared low-level writer: checks the date against the fiscal year,
+     * validates and normalises double-entry shape/balance, atomically claims
+     * the next voucher number, and creates the header + lines. Used directly
+     * (bypassing post()'s fiscal-year resolution and closed-year gate) by
+     * FiscalYear::close() and the roll-forward cascade, both of which target a
+     * specific fiscal year for system-generated bookkeeping rather than a
+     * user-initiated posting.
      *
      * @param  array<int, array{account_id: int, debit?: float|string, credit?: float|string, narration?: string}>  $lines
      */
@@ -123,7 +154,8 @@ class JournalVoucher extends Model
         User $actor,
         array $lines,
     ): self {
-        static::validateLines($lines);
+        $date = static::assertDateInsideFiscalYear($fiscalYear, $date);
+        $lines = static::validateLines($lines);
 
         $voucher = static::create([
             'fiscal_year_id' => $fiscalYear->id,
@@ -142,42 +174,130 @@ class JournalVoucher extends Model
     }
 
     /**
-     * @param  array<int, array{account_id: int, debit?: float|string, credit?: float|string, narration?: string}>  $lines
+     * A voucher may only be dated inside the fiscal year it posts into.
+     *
+     * Nothing checked this before: post() resolved FiscalYear::current() and
+     * wrote whatever date the form sent, so a bill dated Asar 30 posted after
+     * the Shrawan 1 auto-rollover landed in the NEW year's ledger while the
+     * date-filtered VAT book and Day Book still reported it in the already
+     * filed period (audit P0-11). Enforced in write() rather than post() so
+     * the system-bookkeeping callers are covered too; they each target an
+     * explicit year with a date inside it (FiscalYear::close() uses that
+     * year's end_date and the next year's start_date, rollForward() and
+     * FixedAsset's depreciation run the same way), so this is a no-op for
+     * them.
+     *
+     * @return string The date normalised to Y-m-d, which is what gets stored.
      */
-    private static function validateLines(array $lines): void
+    private static function assertDateInsideFiscalYear(FiscalYear $fiscalYear, string $date): string
+    {
+        $posted = CarbonImmutable::parse($date)->startOfDay();
+        $start = $fiscalYear->start_date->copy()->startOfDay();
+        $end = $fiscalYear->end_date->copy()->startOfDay();
+
+        if ($posted->lessThan($start) || $posted->greaterThan($end)) {
+            throw new InvalidArgumentException(sprintf(
+                'The date %s is outside fiscal year %s (%s to %s).',
+                $posted->toDateString(),
+                $fiscalYear->name,
+                $start->toDateString(),
+                $end->toDateString(),
+            ));
+        }
+
+        return $posted->toDateString();
+    }
+
+    /**
+     * Validates double-entry shape and balance, and returns the lines with
+     * every amount normalised to an exact 2-decimal string.
+     *
+     * Both halves matter. The old check summed raw floats and compared
+     * round($sum, 2), which let Dr 333.333 x 3 balance against Cr 999.999 and
+     * then handed the unrounded values to MySQL, which rounded each line on
+     * its own and stored Dr 999.99 against Cr 1000.00 - an unbalanced voucher
+     * that later broke year-end close (audit P0-2). Money::of() refuses
+     * anything with more than 2 decimals outright (so the caller is told,
+     * rather than silently losing a paisa), the totals are compared exactly,
+     * and the normalised strings are what gets stored.
+     *
+     * @param  array<int, array{account_id: int, debit?: float|string, credit?: float|string, narration?: string}>  $lines
+     * @return list<array{account_id: int, debit: string, credit: string, narration: string|null}>
+     */
+    private static function validateLines(array $lines): array
     {
         if (count($lines) < 2) {
             throw new InvalidArgumentException('A journal voucher needs at least two lines.');
         }
 
-        $totalDebit = 0.0;
-        $totalCredit = 0.0;
+        $normalised = [];
+        $debits = [];
+        $credits = [];
 
         foreach ($lines as $line) {
-            $debit = (float) ($line['debit'] ?? 0);
-            $credit = (float) ($line['credit'] ?? 0);
+            // ofNullable so a blank box ('' or null) reads as zero; anything
+            // else must parse exactly, with at most two decimals.
+            $debit = Money::ofNullable($line['debit'] ?? null) ?? Money::zero();
+            $credit = Money::ofNullable($line['credit'] ?? null) ?? Money::zero();
 
-            if (($debit > 0) === ($credit > 0)) {
+            if ($debit->isNegative() || $credit->isNegative()) {
+                throw new InvalidArgumentException('A journal voucher line cannot carry a negative amount; put it on the other side instead.');
+            }
+
+            // Also rejects a zero line (neither side positive): a line that
+            // moves nothing is never a real posting, and silently keeping it
+            // would let a "balanced" voucher consist entirely of nothing.
+            if ($debit->isPositive() === $credit->isPositive()) {
                 throw new InvalidArgumentException('Each line must have exactly one of debit or credit greater than zero.');
             }
 
-            $totalDebit += $debit;
-            $totalCredit += $credit;
+            $debits[] = $debit;
+            $credits[] = $credit;
+
+            $normalised[] = [
+                'account_id' => $line['account_id'],
+                'debit' => $debit->toString(),
+                'credit' => $credit->toString(),
+                'narration' => $line['narration'] ?? null,
+            ];
         }
 
-        if (round($totalDebit, 2) !== round($totalCredit, 2)) {
+        if (! Money::sum($debits)->isEqualTo(Money::sum($credits))) {
             throw new InvalidArgumentException('Total debit must equal total credit.');
         }
+
+        return $normalised;
     }
 
+    /**
+     * Claims the next number in this (fiscal year, voucher type) series.
+     *
+     * firstOrCreate() used to race here: two simultaneous first postings of a
+     * type both saw no row, both inserted, and the loser hit the unique index
+     * with a 500 instead of getting a number. insertOrIgnore() makes the
+     * create side idempotent, and the row is then re-read under
+     * lockForUpdate() so the increment itself is serialised (a no-op on
+     * SQLite, which is why this is verified by review rather than by a test).
+     */
     private static function nextVoucherNumber(FiscalYear $fiscalYear, VoucherType $type): int
     {
-        $sequence = VoucherSequence::firstOrCreate(
-            ['fiscal_year_id' => $fiscalYear->id, 'voucher_type' => $type],
-            ['last_number' => 0],
-        );
+        // Through the model's own query builder, so it uses the tenant
+        // connection and table the rest of this class does. A raw insert
+        // bypasses Eloquent's timestamps, hence the explicit pair.
+        VoucherSequence::query()->insertOrIgnore([
+            'fiscal_year_id' => $fiscalYear->id,
+            'voucher_type' => $type->value,
+            'last_number' => 0,
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
 
-        $sequence = VoucherSequence::whereKey($sequence->id)->lockForUpdate()->first();
+        $sequence = VoucherSequence::query()
+            ->where('fiscal_year_id', $fiscalYear->id)
+            ->where('voucher_type', $type)
+            ->lockForUpdate()
+            ->firstOrFail();
+
         $sequence->increment('last_number');
 
         return $sequence->last_number;
@@ -238,15 +358,94 @@ class JournalVoucher extends Model
     }
 
     /**
-     * Reverses this journal voucher: posts a brand-new voucher mirroring
-     * every line of the original (debit/credit swapped) via post() itself
-     * - so it lands in the currently open fiscal year (or a reopened
-     * closed year, if one is targeted explicitly some day) exactly like
-     * every other module's cancel() does - never edits the original
-     * (voucher immutability rule; matches Payment::cancel(),
-     * Receipt::cancel(), Sale::cancel(), etc. exactly). $reason is
-     * required, matching every other cancel-with-reversal method in this
-     * app.
+     * The one way any module cancels a posted document's ledger effect:
+     * posts a brand-new voucher mirroring every line of $original (debit and
+     * credit swapped), never editing $original itself (voucher immutability).
+     * Every module's cancel() calls this instead of mirroring the lines
+     * itself.
+     *
+     * Three rules, all of them corrections of how the modules used to do this
+     * by hand:
+     *
+     * - The reversal posts as VoucherType::Reversal, which has its own
+     *   sequence. Cancelling a sale used to post its reversal as a SaleReturn
+     *   and cancelling a return as a Sale, so a cancellation silently consumed
+     *   a real credit-note or invoice number and the printed series gained a
+     *   hole (audit P0-15). Nothing customer-facing is ever numbered by a
+     *   cancellation now.
+     * - The original's fiscal year must still be the open one. A reversal is
+     *   dated today, so reversing a document from a closed - and by then very
+     *   likely filed - year would move money out of a period whose VAT return
+     *   is already submitted. The locked decision is that such a document is
+     *   corrected with a return or credit note in the current year instead
+     *   (see todo/CONTRACTS.md C4/C5).
+     * - A document can only be reversed once, enforced by the row lock here
+     *   and by the unique index on reversal_of_id underneath it.
+     *
+     * @throws InvalidArgumentException When $original is already reversed, or its fiscal year is closed.
+     */
+    public static function reverse(self $original, User $actor, string $narration): self
+    {
+        return DB::transaction(function () use ($original, $actor, $narration) {
+            $locked = static::query()->whereKey($original->getKey())->lockForUpdate()->firstOrFail();
+
+            if (static::query()->where('reversal_of_id', $locked->id)->exists()) {
+                throw new InvalidArgumentException('This document has already been reversed.');
+            }
+
+            $fiscalYear = $locked->fiscalYear()->firstOrFail();
+
+            if ($fiscalYear->status !== FiscalYearStatus::Open) {
+                throw new InvalidArgumentException(
+                    "This document belongs to closed fiscal year {$fiscalYear->name}. Record a return or credit note in the current year instead."
+                );
+            }
+
+            $mirroredLines = $locked->lines()->orderBy('id')->get()->map(fn (JournalVoucherLine $line) => [
+                'account_id' => $line->account_id,
+                'debit' => $line->credit,
+                'credit' => $line->debit,
+                'narration' => $line->narration,
+            ])->all();
+
+            $reversal = static::write(
+                $fiscalYear,
+                VoucherType::Reversal,
+                static::today(),
+                $narration,
+                null,
+                $actor,
+                $mirroredLines,
+            );
+
+            $reversal->update(['reversal_of_id' => $locked->id]);
+            $locked->update(['status' => 'cancelled']);
+
+            return $reversal;
+        });
+    }
+
+    /**
+     * Today's date in Nepal.
+     *
+     * config('app.timezone') is Asia/Kathmandu, so now() already answers this,
+     * but the conversion is written out because the whole point is the
+     * calendar day a Nepali user is living in: an APP_TIMEZONE override in a
+     * deployment's .env must not be able to date a reversal a day early (UTC
+     * is 5h45 behind, so every posting between midnight and 05:45 local was
+     * stamped with yesterday - audit P1, timezone).
+     */
+    private static function today(): string
+    {
+        return now()->setTimezone('Asia/Kathmandu')->toDateString();
+    }
+
+    /**
+     * Cancels a manually posted journal voucher: re-reads and locks the row,
+     * re-checks every blocker inside the transaction (a status checked before
+     * the transaction let a double click cancel twice - audit P0-16), then
+     * hands the actual ledger work to reverse(). $reason is required, matching
+     * every other cancel-with-reversal method in this app.
      *
      * Two guards beyond "already cancelled" that have no equivalent on the
      * simpler dr/cr-pair vouchers (Payment/Receipt/etc.):
@@ -274,38 +473,25 @@ class JournalVoucher extends Model
      */
     public function cancel(User $actor, string $reason): void
     {
-        if ($this->status === 'cancelled') {
-            throw new InvalidArgumentException('This journal voucher has already been cancelled.');
-        }
-
-        if ($this->voucher_type !== VoucherType::Journal) {
-            throw new InvalidArgumentException("Only a manually posted journal voucher can be cancelled here; this voucher's type ({$this->voucher_type->value}) is posted by another module and must be cancelled from its own record.");
-        }
-
-        if ($sourceLabel = $this->sourceRecordLabel()) {
-            throw new InvalidArgumentException("This journal voucher was generated by {$sourceLabel} and must be cancelled from that record instead.");
-        }
-
         DB::transaction(function () use ($actor, $reason) {
-            $mirroredLines = $this->lines()->get()->map(fn (JournalVoucherLine $line) => [
-                'account_id' => $line->account_id,
-                'debit' => (float) $line->credit,
-                'credit' => (float) $line->debit,
-                'narration' => $line->narration,
-            ])->all();
+            $locked = static::query()->whereKey($this->getKey())->lockForUpdate()->firstOrFail();
 
-            static::post(
-                [
-                    'voucher_type' => VoucherType::Journal->value,
-                    'date' => now()->toDateString(),
-                    'narration' => "Cancellation of journal voucher #{$this->voucher_number}: {$reason}",
-                ],
-                $mirroredLines,
-                $actor,
-            );
+            if ($locked->status === 'cancelled') {
+                throw new InvalidArgumentException('This journal voucher has already been cancelled.');
+            }
 
-            $this->update(['status' => 'cancelled']);
+            if ($locked->voucher_type !== VoucherType::Journal) {
+                throw new InvalidArgumentException("Only a manually posted journal voucher can be cancelled here; this voucher's type ({$locked->voucher_type->value}) is posted by another module and must be cancelled from its own record.");
+            }
+
+            if ($sourceLabel = $locked->sourceRecordLabel()) {
+                throw new InvalidArgumentException("This journal voucher was generated by {$sourceLabel} and must be cancelled from that record instead.");
+            }
+
+            static::reverse($locked, $actor, "Cancellation of journal voucher #{$locked->voucher_number}: {$reason}");
         });
+
+        $this->refresh();
     }
 
     /**

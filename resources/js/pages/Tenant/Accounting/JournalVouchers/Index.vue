@@ -12,6 +12,8 @@ import Modal from '@/components/ui/Modal.vue';
 import Tooltip from '@/components/ui/Tooltip.vue';
 import { useToast } from '@/composables/useToast';
 import { navGroups } from '@/lib/nav-items.js';
+import { formatMoney, sumMoney } from '@/lib/money';
+import { formatBsDate } from '@/lib/format';
 import Create from './Create.vue';
 
 const props = defineProps({
@@ -60,14 +62,25 @@ const voucherTypeLabels = {
     journal: 'Journal',
     closing_entry: 'Closing Entry',
     roll_forward_adjustment: 'Roll Forward Adjustment',
+    reversal: 'Reversal',
 };
 
+// Ledger-side labels only. These are NOT the printed document numbers: a
+// sale's printed invoice number comes from its own stored invoice_number
+// (CONTRACTS C7), and this screen is the raw voucher ledger.
 const voucherTypePrefixes = {
     opening_balance: 'OB',
     journal: 'JV',
     closing_entry: 'CL',
     roll_forward_adjustment: 'RFA',
+    reversal: 'REV',
 };
+
+// The voucher model is serialised whole, so `date` arrives as a full ISO
+// timestamp; the calendar day is all this screen shows.
+function adDate(value) {
+    return typeof value === 'string' ? value.slice(0, 10) : '';
+}
 
 function voucherTypeLabel(type) {
     return voucherTypeLabels[type] ?? type;
@@ -78,8 +91,10 @@ function voucherLabel(voucher) {
     return `${prefix}-${voucher.voucher_number}`;
 }
 
+// Exact string arithmetic, never Number(): the lines arrive as 2dp decimal
+// strings and a float sum down a long voucher drifts a paisa.
 function voucherAmount(voucher) {
-    return voucher.lines.reduce((sum, line) => sum + (Number(line.debit) || 0), 0);
+    return sumMoney(voucher.lines.map((line) => line.debit ?? '0.00'));
 }
 
 const selectedVoucher = ref(null);
@@ -132,7 +147,18 @@ function submitCancel() {
 }
 
 const columns = [
-    { accessorKey: 'date', header: 'Date' },
+    {
+        id: 'dateBs',
+        header: 'Date (BS)',
+        numeric: false,
+        cell: ({ row }) => formatBsDate(row.original.date) || '—',
+    },
+    {
+        id: 'dateAd',
+        header: 'Date (AD)',
+        numeric: false,
+        cell: ({ row }) => adDate(row.original.date),
+    },
     {
         id: 'type',
         header: 'Type',
@@ -156,7 +182,7 @@ const columns = [
         id: 'amount',
         header: 'Amount',
         numeric: true,
-        cell: ({ row }) => voucherAmount(row.original).toFixed(2),
+        cell: ({ row }) => formatMoney(voucherAmount(row.original)),
     },
     {
         id: 'created_by',
@@ -189,7 +215,7 @@ const columns = [
                         [h(Eye, { class: 'h-[13px] w-[13px]' })],
                     ),
                 ),
-                row.original.status === 'posted' && row.original.voucher_type === 'journal'
+                isAdmin.value && row.original.status === 'posted' && row.original.voucher_type === 'journal'
                     ? h(
                           Button,
                           {
@@ -220,7 +246,7 @@ const columns = [
         <template v-else>
             <div class="mb-4 flex items-center justify-between">
                 <h2 class="text-base font-bold text-text-strong">Journal Vouchers</h2>
-                <Button variant="primary" tone="purple" @click="showCreateForm = true">
+                <Button v-if="isAdmin" variant="primary" tone="purple" @click="showCreateForm = true">
                     <Plus class="size-4" />
                     New journal voucher
                 </Button>
@@ -240,7 +266,7 @@ const columns = [
                 <div class="grid grid-cols-2 gap-3 text-sm">
                     <div>
                         <p class="text-[10px] font-bold tracking-[.8px] text-text-muted uppercase">Date</p>
-                        <p class="text-text-base">{{ selectedVoucher.date }}</p>
+                        <p class="text-text-base">{{ formatBsDate(selectedVoucher.date) || '—' }} (BS) · {{ adDate(selectedVoucher.date) }}</p>
                     </div>
                     <div>
                         <p class="text-[10px] font-bold tracking-[.8px] text-text-muted uppercase">Fiscal Year</p>
@@ -274,8 +300,8 @@ const columns = [
                             <td class="py-2 text-text-base">
                                 {{ line.account?.code ? `${line.account.code} — ${line.account.name}` : line.account?.name }}
                             </td>
-                            <td class="py-2 text-right [font-variant-numeric:tabular-nums]">{{ Number(line.debit).toFixed(2) }}</td>
-                            <td class="py-2 text-right [font-variant-numeric:tabular-nums]">{{ Number(line.credit).toFixed(2) }}</td>
+                            <td class="py-2 text-right [font-variant-numeric:tabular-nums]">{{ formatMoney(line.debit) }}</td>
+                            <td class="py-2 text-right [font-variant-numeric:tabular-nums]">{{ formatMoney(line.credit) }}</td>
                             <td class="py-2 text-text-muted">{{ line.narration ?? '—' }}</td>
                         </tr>
                     </tbody>

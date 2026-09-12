@@ -28,27 +28,42 @@ use Illuminate\Support\Facades\Route;
 */
 
 Route::name('tenant.')->group(function () {
+    // Every write path into the chart of accounts is admin-only: the shape of
+    // the chart decides which side of the books an account lands on, and the
+    // opening-balance import writes straight into the ledger (audit P1, "No
+    // role:admin on ... chart of accounts, opening balances"). The read paths
+    // stay open so staff can look an account or its ledger up.
     Route::prefix('account-groups')->name('account-groups.')->group(function () {
         Route::get('/', [AccountGroupController::class, 'index'])->name('index');
-        Route::post('/', [AccountGroupController::class, 'store'])->name('store');
-        Route::put('/{accountGroup}', [AccountGroupController::class, 'update'])->name('update');
-        Route::delete('/{accountGroup}', [AccountGroupController::class, 'destroy'])->name('destroy');
+
+        Route::middleware('role:admin')->group(function () {
+            Route::post('/', [AccountGroupController::class, 'store'])->name('store');
+            Route::put('/{accountGroup}', [AccountGroupController::class, 'update'])->name('update');
+            Route::delete('/{accountGroup}', [AccountGroupController::class, 'destroy'])->name('destroy');
+        });
     });
 
     Route::prefix('account-subgroups')->name('account-subgroups.')->group(function () {
         Route::get('/', [AccountSubgroupController::class, 'index'])->name('index');
-        Route::post('/', [AccountSubgroupController::class, 'store'])->name('store');
-        Route::put('/{accountSubgroup}', [AccountSubgroupController::class, 'update'])->name('update');
-        Route::delete('/{accountSubgroup}', [AccountSubgroupController::class, 'destroy'])->name('destroy');
+
+        Route::middleware('role:admin')->group(function () {
+            Route::post('/', [AccountSubgroupController::class, 'store'])->name('store');
+            Route::put('/{accountSubgroup}', [AccountSubgroupController::class, 'update'])->name('update');
+            Route::delete('/{accountSubgroup}', [AccountSubgroupController::class, 'destroy'])->name('destroy');
+        });
     });
 
     Route::prefix('accounts')->name('accounts.')->group(function () {
         Route::get('/', [AccountController::class, 'index'])->name('index');
-        Route::post('/', [AccountController::class, 'store'])->name('store');
-        Route::put('/{account}', [AccountController::class, 'update'])->name('update');
-        Route::delete('/{account}', [AccountController::class, 'destroy'])->name('destroy');
         Route::get('/opening-balances/template', [AccountController::class, 'openingBalanceTemplate'])->name('opening-balances.template');
-        Route::post('/opening-balances/import', [AccountController::class, 'importOpeningBalances'])->name('opening-balances.import');
+
+        Route::middleware('role:admin')->group(function () {
+            Route::post('/', [AccountController::class, 'store'])->name('store');
+            Route::put('/{account}', [AccountController::class, 'update'])->name('update');
+            Route::delete('/{account}', [AccountController::class, 'destroy'])->name('destroy');
+            Route::post('/opening-balances/import', [AccountController::class, 'importOpeningBalances'])->name('opening-balances.import');
+            Route::post('/opening-balances/{journalVoucher}/reverse', [AccountController::class, 'reverseOpeningBalanceImport'])->name('opening-balances.reverse');
+        });
     });
 
     Route::prefix('customers')->name('customers.')->group(function () {

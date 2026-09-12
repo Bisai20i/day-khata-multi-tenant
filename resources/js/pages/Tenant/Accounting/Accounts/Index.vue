@@ -14,6 +14,8 @@ import RowActions from '@/components/ui/RowActions.vue';
 import { useToast } from '@/composables/useToast';
 import { useConfirm } from '@/composables/useConfirm';
 import { navGroups } from '@/lib/nav-items.js';
+import { formatMoney } from '@/lib/money';
+import { formatBsDate } from '@/lib/format';
 
 const props = defineProps({
     accountGroups: {
@@ -25,6 +27,13 @@ const props = defineProps({
         default: () => [],
     },
     accounts: {
+        type: Array,
+        default: () => [],
+    },
+    // Every opening-balance import posted so far, newest first. A re-import
+    // reverses whatever is still posted before writing the new batch, so at
+    // most one row here is ever 'posted'.
+    openingBalanceImports: {
         type: Array,
         default: () => [],
     },
@@ -177,6 +186,20 @@ function submit() {
     }
 }
 
+async function clearOpeningBalanceImport(entry) {
+    if (
+        !(await confirm({
+            message: 'Clear this opening balance import? Its ledger effect is reversed; the import and its reversal both stay on the ledger.',
+            tone: 'danger',
+            confirmLabel: 'Clear import',
+        }))
+    ) {
+        return;
+    }
+
+    router.post(`/accounts/opening-balances/${entry.id}/reverse`, {}, { preserveScroll: true });
+}
+
 async function destroy(account) {
     if (!(await confirm({ message: 'Delete this account?', tone: 'danger', confirmLabel: 'Delete' }))) return;
     router.delete(`/accounts/${account.id}`, {
@@ -184,6 +207,8 @@ async function destroy(account) {
     });
 }
 
+// Edit/delete are admin-only server side now (routes/tenant-business.php), so
+// the row actions are hidden rather than left to fail with a 403.
 const columns = [
     { accessorKey: 'code', header: 'Code' },
     { accessorKey: 'name', header: 'Name' },
@@ -206,10 +231,12 @@ const columns = [
                     { href: `/accounts/${row.original.id}/ledger`, class: 'text-xs font-semibold text-primary hover:underline' },
                     { default: () => 'Ledger' },
                 ),
-                h(RowActions, {
-                    onEdit: () => openEdit(row.original),
-                    onDelete: () => destroy(row.original),
-                }),
+                isAdmin.value
+                    ? h(RowActions, {
+                          onEdit: () => openEdit(row.original),
+                          onDelete: () => destroy(row.original),
+                      })
+                    : null,
             ]),
     },
 ];
@@ -220,8 +247,8 @@ const columns = [
         <div class="mb-4 flex items-center justify-between">
             <h2 class="text-base font-bold text-text-strong">Accounts</h2>
             <div class="flex items-center gap-2">
-                <Button variant="secondary" tone="purple" @click="openImport">Import opening balances</Button>
-                <Button variant="primary" tone="purple" @click="openCreate">
+                <Button v-if="isAdmin" variant="secondary" tone="purple" @click="openImport">Import opening balances</Button>
+                <Button v-if="isAdmin" variant="primary" tone="purple" @click="openCreate">
                     <Plus class="size-4" />
                     New account
                 </Button>
@@ -230,6 +257,45 @@ const columns = [
 
         <Card variant="panel">
             <DataTable :columns="columns" :data="accounts" :page-size="10" empty-message="No accounts found" />
+        </Card>
+
+        <Card v-if="openingBalanceImports.length" variant="panel" title="Opening balance imports" class="mt-4">
+            <p v-if="page.props.errors?.opening_balance_import" class="mb-3 border-[1.5px] border-danger bg-danger-bg px-3 py-2 text-sm text-danger">
+                {{ page.props.errors.opening_balance_import }}
+            </p>
+            <table class="w-full text-left text-[12px]">
+                <thead class="bg-bg-subtle">
+                    <tr>
+                        <th class="px-2 py-1.5">Date (BS)</th>
+                        <th class="px-2 py-1.5">Date (AD)</th>
+                        <th class="px-2 py-1.5">Fiscal year</th>
+                        <th class="px-2 py-1.5">Accounts</th>
+                        <th class="px-2 py-1.5">Total</th>
+                        <th class="px-2 py-1.5">Status</th>
+                        <th class="px-2 py-1.5"></th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr v-for="entry in openingBalanceImports" :key="entry.id" class="border-t border-border">
+                        <td class="px-2 py-1.5">{{ formatBsDate(entry.date) || '—' }}</td>
+                        <td class="px-2 py-1.5">{{ entry.date }}</td>
+                        <td class="px-2 py-1.5">{{ entry.fiscal_year ?? '—' }}</td>
+                        <td class="px-2 py-1.5">{{ entry.line_count }}</td>
+                        <td class="px-2 py-1.5">{{ formatMoney(entry.total) }}</td>
+                        <td class="px-2 py-1.5">{{ entry.status === 'cancelled' ? 'Cleared' : 'In effect' }}</td>
+                        <td class="px-2 py-1.5 text-right">
+                            <button
+                                v-if="isAdmin && entry.can_clear"
+                                type="button"
+                                class="text-[12px] font-bold text-danger hover:underline"
+                                @click="clearOpeningBalanceImport(entry)"
+                            >
+                                Clear
+                            </button>
+                        </td>
+                    </tr>
+                </tbody>
+            </table>
         </Card>
 
         <Modal :open="showModal" :title="editing ? 'Edit Account' : 'New Account'" @update:open="onModalOpenChange">

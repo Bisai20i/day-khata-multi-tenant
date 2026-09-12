@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use App\Casts\Decimal;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Casts\Attribute;
 use Illuminate\Database\Eloquent\Model;
@@ -19,10 +20,25 @@ use Illuminate\Support\Facades\Storage;
     'sale_full_prefix', 'sale_full_enabled',
     'sale_abbreviated_prefix', 'sale_abbreviated_enabled',
     'sale_pan_prefix', 'sale_pan_enabled',
-    'purchase_prefix',
+    'purchase_prefix', 'sale_return_prefix', 'purchase_return_prefix',
 ])]
 class CompanySetting extends Model
 {
+    /**
+     * default_vat_rate is a percentage held at 2 decimals, so it goes through
+     * the Decimal cast like every other decimal column: a rate of 13.005 is
+     * refused at the write rather than rounded by MySQL into a rate that no
+     * longer matches what the settings screen shows.
+     *
+     * @return array<string, string>
+     */
+    protected function casts(): array
+    {
+        return [
+            'default_vat_rate' => Decimal::class.':2',
+        ];
+    }
+
     /**
      * Appended so the Settings edit page (which receives this model wholesale
      * as a single Inertia prop, not hand-shaped into an array by the

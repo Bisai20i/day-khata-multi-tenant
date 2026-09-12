@@ -22,5 +22,6 @@ Route::name('tenant.')->middleware('role:admin')->group(function () {
         Route::get('/', [SettingsController::class, 'edit'])->name('edit');
         Route::put('/', [SettingsController::class, 'update'])->name('update');
         Route::post('/logo', [SettingsController::class, 'uploadLogo'])->name('logo');
+        Route::post('/starting-number', [SettingsController::class, 'setStartingNumber'])->name('starting-number');
     });
 });

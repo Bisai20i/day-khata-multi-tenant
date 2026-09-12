@@ -125,7 +125,10 @@ test('an authenticated user can post a balanced journal voucher through the stor
     $cashId = null;
     $salesId = null;
     $tenant->run(function () use (&$cashId, &$salesId) {
-        User::factory()->create(['email' => 'owner@example.com']);
+        User::factory()->create([
+            'email' => 'owner@example.com',
+            'role_id' => Role::where('slug', 'admin')->value('id'),
+        ]);
         FiscalYear::create(['name' => 'FY1', 'start_date' => '2026-01-01', 'end_date' => '2026-12-31', 'status' => FiscalYearStatus::Open]);
         $cashId = Account::where('code', 'AS1')->value('id');
         $salesId = Account::where('code', 'INI20')->value('id');
@@ -156,7 +159,10 @@ test('posting an unbalanced journal voucher through the store route fails valida
     $cashId = null;
     $salesId = null;
     $tenant->run(function () use (&$cashId, &$salesId) {
-        User::factory()->create(['email' => 'owner@example.com']);
+        User::factory()->create([
+            'email' => 'owner@example.com',
+            'role_id' => Role::where('slug', 'admin')->value('id'),
+        ]);
         FiscalYear::create(['name' => 'FY1', 'start_date' => '2026-01-01', 'end_date' => '2026-12-31', 'status' => FiscalYearStatus::Open]);
         $cashId = Account::where('code', 'AS1')->value('id');
         $salesId = Account::where('code', 'INI20')->value('id');
@@ -180,7 +186,7 @@ test('posting an unbalanced journal voucher through the store route fails valida
     $tenant->delete();
 });
 
-test('posting a correction into a closed fiscal year through the store route is rejected for a non-admin', function () {
+test('a staff user cannot reach the journal voucher store route at all', function () {
     $domain = 'jv-store-closed-non-admin.tenant-test';
     $tenant = provisionLedgerControllerTestTenant($domain);
 
@@ -209,7 +215,7 @@ test('posting a correction into a closed fiscal year through the store route is 
             ['account_id' => $cashId, 'debit' => 0, 'credit' => 50],
             ['account_id' => $salesId, 'debit' => 50, 'credit' => 0],
         ],
-    ])->assertSessionHasErrors('lines');
+    ])->assertForbidden();
 
     $tenant->run(function () {
         expect(JournalVoucher::query()->count())->toBe(0);
@@ -256,6 +262,58 @@ test('an admin can post a correction into a closed fiscal year through the store
                 ->where('voucher_type', VoucherType::RollForwardAdjustment)
                 ->exists())->toBeTrue();
     });
+
+    $tenant->delete();
+});
+
+test('the ledger renders amounts as exact strings and never shows a negative zero balance', function () {
+    $domain = 'ledger-running-balance.tenant-test';
+    $tenant = provisionLedgerControllerTestTenant($domain);
+
+    $accountId = null;
+    $tenant->run(function () use (&$accountId) {
+        User::factory()->create([
+            'email' => 'owner@example.com',
+            'role_id' => Role::where('slug', 'admin')->value('id'),
+        ]);
+        FiscalYear::create(['name' => 'FY1', 'start_date' => '2026-01-01', 'end_date' => '2026-12-31', 'status' => FiscalYearStatus::Open]);
+
+        $cash = Account::where('code', 'AS1')->firstOrFail();
+        $sales = Account::where('code', 'INI20')->firstOrFail();
+        $accountId = $cash->id;
+        $actor = User::first();
+
+        // Three amounts a float running balance drifts on, ending exactly back
+        // at zero - the case that used to render as "-0.00".
+        foreach ([['0.10', 1], ['0.20', 1], ['0.30', 0]] as [$amount, $isDebit]) {
+            JournalVoucher::post(
+                ['date' => '2026-06-01', 'narration' => 'Paisa movement'],
+                $isDebit === 1
+                    ? [
+                        ['account_id' => $cash->id, 'debit' => $amount, 'credit' => 0],
+                        ['account_id' => $sales->id, 'debit' => 0, 'credit' => $amount],
+                    ]
+                    : [
+                        ['account_id' => $cash->id, 'debit' => 0, 'credit' => $amount],
+                        ['account_id' => $sales->id, 'debit' => $amount, 'credit' => 0],
+                    ],
+                $actor,
+            );
+        }
+    });
+
+    loginLedgerControllerTestUser($domain);
+
+    $this->get("http://{$domain}/accounts/{$accountId}/ledger")
+        ->assertOk()
+        ->assertInertia(fn ($page) => $page
+            ->component('Tenant/Accounting/Accounts/Ledger')
+            ->where('entries.0.debit', '0.10')
+            ->where('entries.0.balance', '0.10')
+            ->where('entries.1.balance', '0.30')
+            ->where('entries.2.credit', '0.30')
+            ->where('entries.2.balance', '0.00')
+        );
 
     $tenant->delete();
 });

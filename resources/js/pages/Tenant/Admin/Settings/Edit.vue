@@ -18,6 +18,14 @@ const props = defineProps({
         type: Array,
         default: () => [],
     },
+    // One row per independently numbered document series, with the number the
+    // next document of that series will be issued under in the open fiscal
+    // year. Read from VoucherSequence on the server; nothing here re-derives
+    // a number.
+    invoiceNumbering: {
+        type: Array,
+        default: () => [],
+    },
 });
 
 const page = usePage();
@@ -69,10 +77,34 @@ const form = useForm({
     sale_pan_prefix: props.settings.sale_pan_prefix ?? 'SLP',
     sale_pan_enabled: props.settings.sale_pan_enabled ?? true,
     purchase_prefix: props.settings.purchase_prefix ?? 'PU',
+    sale_return_prefix: props.settings.sale_return_prefix ?? 'SR',
+    purchase_return_prefix: props.settings.purchase_return_prefix ?? 'PR',
 });
 
 function submit() {
     form.put('/settings');
+}
+
+// One form reused across rows: only one starting number is ever being edited
+// at a time, and the row is identified by the voucher_type it submits.
+const startingNumberForm = useForm({ voucher_type: '', next_number: '' });
+const editingSeries = ref(null);
+
+function openStartingNumber(row) {
+    editingSeries.value = row.voucher_type;
+    startingNumberForm.clearErrors();
+    startingNumberForm.voucher_type = row.voucher_type;
+    startingNumberForm.next_number = String(row.next_number);
+}
+
+function submitStartingNumber() {
+    startingNumberForm.post('/settings/starting-number', {
+        preserveScroll: true,
+        onSuccess: () => {
+            editingSeries.value = null;
+            startingNumberForm.reset();
+        },
+    });
 }
 
 // Logo upload is a separate form/route from the main settings form (see
@@ -234,12 +266,28 @@ function submitLogo() {
                     </div>
 
                     <div class="border-t border-border pt-4">
-                        <p class="mb-3 text-[10px] font-bold tracking-[.8px] text-text-muted uppercase">Purchase</p>
+                        <p class="mb-3 text-[10px] font-bold tracking-[.8px] text-text-muted uppercase">Purchase and Returns</p>
+                        <p class="mb-3 text-sm text-text-muted">
+                            Every series needs its own prefix. Two series sharing one print the same number on two
+                            different documents.
+                        </p>
                         <div class="grid grid-cols-3 gap-4">
                             <div>
                                 <label for="purchase_prefix" class="mb-1 block text-sm font-semibold text-text-base">Purchase Prefix</label>
                                 <Input id="purchase_prefix" v-model="form.purchase_prefix" type="text" placeholder="PU" />
                                 <p v-if="form.errors.purchase_prefix" class="mt-1 text-sm text-danger">{{ form.errors.purchase_prefix }}</p>
+                            </div>
+
+                            <div>
+                                <label for="sale_return_prefix" class="mb-1 block text-sm font-semibold text-text-base">Credit Note Prefix</label>
+                                <Input id="sale_return_prefix" v-model="form.sale_return_prefix" type="text" placeholder="SR" />
+                                <p v-if="form.errors.sale_return_prefix" class="mt-1 text-sm text-danger">{{ form.errors.sale_return_prefix }}</p>
+                            </div>
+
+                            <div>
+                                <label for="purchase_return_prefix" class="mb-1 block text-sm font-semibold text-text-base">Debit Note Prefix</label>
+                                <Input id="purchase_return_prefix" v-model="form.purchase_return_prefix" type="text" placeholder="PR" />
+                                <p v-if="form.errors.purchase_return_prefix" class="mt-1 text-sm text-danger">{{ form.errors.purchase_return_prefix }}</p>
                             </div>
                         </div>
                     </div>
@@ -264,6 +312,66 @@ function submitLogo() {
                         <Button variant="primary" tone="purple" type="submit" :disabled="form.processing">Save changes</Button>
                     </div>
                 </form>
+            </Card>
+
+            <Card variant="panel" title="Invoice Numbering">
+                <p class="mb-3 text-sm text-text-muted">
+                    The number the next document of each series will be issued under in
+                    <template v-if="invoiceNumbering[0]?.fiscal_year">{{ invoiceNumbering[0].fiscal_year }}</template>
+                    <template v-else>the open fiscal year</template>. A starting number can only be set while
+                    that series has not issued anything yet: once a document carries a number, moving the
+                    counter would either repeat a printed number or leave a gap in a series that has to be
+                    gapless.
+                </p>
+                <p v-if="startingNumberForm.errors.next_number" class="mb-3 border-[1.5px] border-danger bg-danger-bg px-3 py-2 text-sm text-danger">
+                    {{ startingNumberForm.errors.next_number }}
+                </p>
+                <table class="w-full text-left text-[13px]">
+                    <thead class="bg-bg-subtle">
+                        <tr>
+                            <th class="px-2 py-1.5">Series</th>
+                            <th class="px-2 py-1.5">Prefix</th>
+                            <th class="px-2 py-1.5">Next number</th>
+                            <th class="px-2 py-1.5"></th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr v-for="row in invoiceNumbering" :key="row.voucher_type" class="border-t border-border">
+                            <td class="px-2 py-2">{{ row.label }}</td>
+                            <td class="px-2 py-2">{{ row.prefix }}</td>
+                            <td class="px-2 py-2 [font-variant-numeric:tabular-nums]">{{ row.prefix }}-{{ row.next_number }}</td>
+                            <td class="px-2 py-2 text-right">
+                                <div v-if="editingSeries === row.voucher_type" class="flex items-center justify-end gap-2">
+                                    <div class="w-32">
+                                        <Input
+                                            v-model="startingNumberForm.next_number"
+                                            type="number"
+                                            min="1"
+                                            step="1"
+                                            inputmode="numeric"
+                                        />
+                                    </div>
+                                    <Button
+                                        variant="primary"
+                                        tone="purple"
+                                        type="button"
+                                        :disabled="startingNumberForm.processing"
+                                        @click="submitStartingNumber"
+                                    >
+                                        Save
+                                    </Button>
+                                    <Button variant="secondary" tone="purple" type="button" @click="editingSeries = null">Cancel</Button>
+                                </div>
+                                <template v-else>
+                                    <Button v-if="row.can_set" variant="secondary" tone="purple" type="button" @click="openStartingNumber(row)">
+                                        Set starting number
+                                    </Button>
+                                    <span v-else class="text-text-muted">Locked - already in use</span>
+                                </template>
+                            </td>
+                        </tr>
+                    </tbody>
+                </table>
             </Card>
 
             <Card variant="panel" title="Stock & Discount Policy">
