@@ -15,6 +15,7 @@ use App\Models\Supplier;
 use App\Models\Tenant;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Carbon;
 
 uses(RefreshDatabase::class);
 
@@ -80,14 +81,15 @@ test('a sale with TDS withheld shows up on the report with the right net TDS amo
         ->assertInertia(fn ($page) => $page
             ->component('Tenant/Reports/TdsReport')
             ->has('sales', 1)
+            ->where('sales.0.entry', 'invoice')
             ->where('sales.0.party', 'Sale Customer')
-            ->where('sales.0.total', 100)
-            ->where('sales.0.net_tds_amount', 10)
+            ->where('sales.0.base_total', '100.00')
+            ->where('sales.0.tds_amount', '10.00')
             ->where('sales.0.tds_account', 'TDS Receivable')
             ->has('purchases', 0)
-            ->where('salesTotal', 10)
-            ->where('purchasesTotal', 0)
-            ->where('grandTotal', 10)
+            ->where('salesTotal', '10.00')
+            ->where('purchasesTotal', '0.00')
+            ->where('grandTotal', '10.00')
         );
 
     $tenant->delete();
@@ -123,20 +125,21 @@ test('a purchase with TDS withheld shows up on the report with the right net TDS
         ->assertOk()
         ->assertInertia(fn ($page) => $page
             ->has('purchases', 1)
+            ->where('purchases.0.entry', 'invoice')
             ->where('purchases.0.party', 'Purchase Supplier')
-            ->where('purchases.0.total', 100)
-            ->where('purchases.0.net_tds_amount', 15)
+            ->where('purchases.0.base_total', '100.00')
+            ->where('purchases.0.tds_amount', '15.00')
             ->where('purchases.0.tds_account', 'TDS Payable')
             ->has('sales', 0)
-            ->where('salesTotal', 0)
-            ->where('purchasesTotal', 15)
-            ->where('grandTotal', 15)
+            ->where('salesTotal', '0.00')
+            ->where('purchasesTotal', '15.00')
+            ->where('grandTotal', '15.00')
         );
 
     $tenant->delete();
 });
 
-test('a partial sales return reduces the net TDS shown by the proportional share reversed', function () {
+test('a posted credit note reverses TDS as its own dated row, not by rewriting the invoice', function () {
     $domain = 'tds-report-partial-sales-return.tenant-test';
     $tenant = provisionTdsReportTestTenant($domain);
 
@@ -161,8 +164,10 @@ test('a partial sales return reduces the net TDS shown by the proportional share
             $admin,
         );
 
-        // Return 1 of 2 units - return total 100, tdsShare = round(20 * (100/200), 2) = 10.
-        // Net TDS remaining on the sale: 20 - 10 = 10.
+        // Return 1 of 2 units. The credit note stores the TDS its own voucher
+        // reversed (C6); this report reads that column rather than
+        // re-deriving `tds x returned / total`, which drifts by a paisa once
+        // a note has several lines and a header discount.
         SalesReturn::post(
             ['sale_id' => $sale->id, 'date' => '2026-06-05'],
             [['sale_line_id' => $sale->lines()->first()->id, 'quantity' => 1]],
@@ -175,16 +180,19 @@ test('a partial sales return reduces the net TDS shown by the proportional share
     $this->get("http://{$domain}/reports/tds?from=2026-06-01&to=2026-06-30")
         ->assertOk()
         ->assertInertia(fn ($page) => $page
-            ->has('sales', 1)
-            ->where('sales.0.net_tds_amount', 10)
-            ->where('salesTotal', 10)
-            ->where('grandTotal', 10)
+            ->has('sales', 2)
+            ->where('sales.0.entry', 'invoice')
+            ->where('sales.0.tds_amount', '20.00')
+            ->where('sales.1.entry', 'credit_note')
+            ->where('sales.1.tds_amount', '-10.00')
+            ->where('salesTotal', '10.00')
+            ->where('grandTotal', '10.00')
         );
 
     $tenant->delete();
 });
 
-test('a partial purchase return reduces the net TDS shown by the proportional share reversed', function () {
+test('a posted debit note reverses TDS as its own dated row, not by rewriting the bill', function () {
     $domain = 'tds-report-partial-purchase-return.tenant-test';
     $tenant = provisionTdsReportTestTenant($domain);
 
@@ -208,8 +216,8 @@ test('a partial purchase return reduces the net TDS shown by the proportional sh
             $admin,
         );
 
-        // Return 1 of 4 units - return total 100, tdsShare = round(40 * (100/400), 2) = 10.
-        // Net TDS remaining on the purchase: 40 - 10 = 30.
+        // Return 1 of 4 units. The debit note stores the TDS its own voucher
+        // reversed (C6) and this report reads that column directly.
         PurchaseReturn::post(
             ['purchase_id' => $purchase->id, 'date' => '2026-06-05'],
             [['purchase_line_id' => $purchase->lines()->first()->id, 'quantity' => 1]],
@@ -222,18 +230,27 @@ test('a partial purchase return reduces the net TDS shown by the proportional sh
     $this->get("http://{$domain}/reports/tds?from=2026-06-01&to=2026-06-30")
         ->assertOk()
         ->assertInertia(fn ($page) => $page
-            ->has('purchases', 1)
-            ->where('purchases.0.net_tds_amount', 30)
-            ->where('purchasesTotal', 30)
-            ->where('grandTotal', 30)
+            ->has('purchases', 2)
+            ->where('purchases.0.entry', 'invoice')
+            ->where('purchases.0.tds_amount', '40.00')
+            ->where('purchases.1.entry', 'debit_note')
+            ->where('purchases.1.tds_amount', '-10.00')
+            ->where('purchasesTotal', '30.00')
+            ->where('grandTotal', '30.00')
         );
 
     $tenant->delete();
 });
 
-test('a cancelled sale or purchase is excluded from the TDS report entirely', function () {
+test('a cancelled sale or purchase stays in its own month and reverses in the month it was cancelled', function () {
     $domain = 'tds-report-cancelled.tenant-test';
     $tenant = provisionTdsReportTestTenant($domain);
+
+    // This test used to assert a cancelled document vanished from the report
+    // entirely, which rewrote a month the tenant may already have filed and
+    // disagreed with the ledger (the TDS voucher really did post in June and
+    // the Reversal really did post in July). C5, audit P0-20.
+    Carbon::setTestNow('2026-07-15 10:00:00');
 
     $tenant->run(function () {
         tdsReportTestOpenFiscalYear();
@@ -273,14 +290,95 @@ test('a cancelled sale or purchase is excluded from the TDS report entirely', fu
 
     loginTdsReportTestUser($domain);
 
+    // June: both documents were issued and withheld against here.
     $this->get("http://{$domain}/reports/tds?from=2026-06-01&to=2026-06-30")
         ->assertOk()
         ->assertInertia(fn ($page) => $page
-            ->has('sales', 0)
-            ->has('purchases', 0)
-            ->where('salesTotal', 0)
-            ->where('purchasesTotal', 0)
-            ->where('grandTotal', 0)
+            ->has('sales', 1)
+            ->where('sales.0.entry', 'invoice')
+            ->where('sales.0.tds_amount', '10.00')
+            ->has('purchases', 1)
+            ->where('purchases.0.entry', 'invoice')
+            ->where('purchases.0.tds_amount', '15.00')
+            ->where('salesTotal', '10.00')
+            ->where('purchasesTotal', '15.00')
+            ->where('grandTotal', '25.00')
+        );
+
+    // July: the two cancellations, and nothing else.
+    $this->get("http://{$domain}/reports/tds?from=2026-07-01&to=2026-07-31")
+        ->assertOk()
+        ->assertInertia(fn ($page) => $page
+            ->has('sales', 1)
+            ->where('sales.0.entry', 'cancelled')
+            ->where('sales.0.tds_amount', '-10.00')
+            ->has('purchases', 1)
+            ->where('purchases.0.entry', 'cancelled')
+            ->where('purchases.0.tds_amount', '-15.00')
+            ->where('salesTotal', '-10.00')
+            ->where('purchasesTotal', '-15.00')
+            ->where('grandTotal', '-25.00')
+        );
+
+    Carbon::setTestNow();
+
+    $tenant->delete();
+});
+
+test('a credit note nets against the period its own date falls in, not the invoice period', function () {
+    $domain = 'tds-report-return-own-period.tenant-test';
+    $tenant = provisionTdsReportTestTenant($domain);
+
+    $tenant->run(function () {
+        tdsReportTestOpenFiscalYear();
+        $admin = tdsReportTestAdmin();
+        $customer = Customer::factory()->create();
+        $tdsAccount = Account::factory()->create();
+        $item = Item::factory()->create(['is_vatable' => false, 'is_stockable' => false]);
+
+        // June invoice: 2 x 100 = 200, TDS 20.
+        $sale = Sale::post(
+            [
+                'customer_id' => $customer->id,
+                'invoice_type' => 'full',
+                'date' => '2026-06-01',
+                'payment_mode' => 'cash',
+                'tds_account_id' => $tdsAccount->id,
+                'tds_amount' => 20,
+            ],
+            [['item_id' => $item->id, 'quantity' => 2, 'rate' => 100, 'discount' => 0]],
+            $admin,
+        );
+
+        // Credit note raised in July, reversing half the TDS.
+        SalesReturn::post(
+            ['sale_id' => $sale->id, 'date' => '2026-07-05'],
+            [['sale_line_id' => $sale->lines()->first()->id, 'quantity' => 1]],
+            $admin,
+        );
+    });
+
+    loginTdsReportTestUser($domain);
+
+    // June is filed with the full 20 and must stay that way.
+    $this->get("http://{$domain}/reports/tds?from=2026-06-01&to=2026-06-30")
+        ->assertOk()
+        ->assertInertia(fn ($page) => $page
+            ->has('sales', 1)
+            ->where('sales.0.entry', 'invoice')
+            ->where('sales.0.tds_amount', '20.00')
+            ->where('salesTotal', '20.00')
+        );
+
+    // July carries the reversal on its own.
+    $this->get("http://{$domain}/reports/tds?from=2026-07-01&to=2026-07-31")
+        ->assertOk()
+        ->assertInertia(fn ($page) => $page
+            ->has('sales', 1)
+            ->where('sales.0.entry', 'credit_note')
+            ->where('sales.0.tds_amount', '-10.00')
+            ->where('salesTotal', '-10.00')
+            ->where('grandTotal', '-10.00')
         );
 
     $tenant->delete();
@@ -344,9 +442,9 @@ test('the combined grand total sums TDS on sales and TDS on purchases across mul
         ->assertInertia(fn ($page) => $page
             ->has('sales', 2)
             ->has('purchases', 1)
-            ->where('salesTotal', 15)
-            ->where('purchasesTotal', 20)
-            ->where('grandTotal', 35)
+            ->where('salesTotal', '15.00')
+            ->where('purchasesTotal', '20.00')
+            ->where('grandTotal', '35.00')
         );
 
     $tenant->delete();
@@ -382,7 +480,7 @@ test('a sale or purchase without TDS withheld does not appear on the report', fu
         ->assertInertia(fn ($page) => $page
             ->has('sales', 0)
             ->has('purchases', 0)
-            ->where('grandTotal', 0)
+            ->where('grandTotal', '0.00')
         );
 
     $tenant->delete();
@@ -439,11 +537,11 @@ test('the TDS report can be narrowed to a single store', function () {
         ->assertOk()
         ->assertInertia(fn ($page) => $page
             ->has('sales', 1)
-            ->where('sales.0.net_tds_amount', 10)
+            ->where('sales.0.tds_amount', '10.00')
             ->has('purchases', 0)
-            ->where('salesTotal', 10)
-            ->where('purchasesTotal', 0)
-            ->where('grandTotal', 10)
+            ->where('salesTotal', '10.00')
+            ->where('purchasesTotal', '0.00')
+            ->where('grandTotal', '10.00')
         );
 
     $tenant->delete();

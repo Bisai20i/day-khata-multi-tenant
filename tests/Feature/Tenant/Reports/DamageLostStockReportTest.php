@@ -71,13 +71,24 @@ test('the damage and lost stock report lists damage/lost lines and aggregates th
             ->component('Tenant/Reports/DamageLostStock')
             ->has('lines', 2)
             ->where('lines.0.reason', 'damage')
-            ->where('lines.0.quantity', 3)
+            // Quantities are exact 4-decimal strings now, never floats: a
+            // written-off quantity is audit evidence and 0.1 + 0.2 must
+            // never print as 0.30000000000000004.
+            ->where('lines.0.quantity', '3.0000')
+            ->where('lines.0.unit', 'pcs')
             ->where('lines.1.reason', 'lost')
-            ->where('lines.1.quantity', 2)
+            ->where('lines.1.quantity', '2.0000')
             ->has('itemWise', 1)
             ->where('itemWise.0.name', 'Widget')
-            ->where('itemWise.0.total_quantity', 5)
+            ->where('itemWise.0.unit', 'pcs')
+            ->where('itemWise.0.total_quantity', '5.0000')
             ->where('itemWise.0.transaction_count', 2)
+            // The grand total is now per base unit, because three Kilograms
+            // plus two Pieces is not "five". Everything here is in pcs, so
+            // there is exactly one bucket.
+            ->has('totalQuantities', 1)
+            ->where('totalQuantities.0.unit', 'pcs')
+            ->where('totalQuantities.0.quantity', '5.0000')
         );
 
     $tenant->delete();
@@ -107,6 +118,7 @@ test('a cancelled stock adjustment is excluded from the damage and lost stock re
         ->assertInertia(fn ($page) => $page
             ->has('lines', 0)
             ->has('itemWise', 0)
+            ->has('totalQuantities', 0)
         );
 
     $tenant->delete();
@@ -140,7 +152,9 @@ test('the damage and lost stock report can be narrowed to a single reason', func
         ->assertInertia(fn ($page) => $page
             ->has('lines', 1)
             ->where('lines.0.reason', 'lost')
-            ->where('lines.0.quantity', 2)
+            ->where('lines.0.quantity', '2.0000')
+            ->has('totalQuantities', 1)
+            ->where('totalQuantities.0.quantity', '2.0000')
         );
 
     $tenant->delete();

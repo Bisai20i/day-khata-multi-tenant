@@ -10,22 +10,40 @@ use App\Models\PurchaseReturn;
 use App\Models\Sale;
 use App\Models\SalesReturn;
 use App\Models\Store;
+use App\Support\Money\Money;
+use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Database\Eloquent\Model;
 use Illuminate\Http\Request;
 use Illuminate\Support\Collection;
 use Inertia\Inertia;
 use Inertia\Response;
 
 /**
- * TDS (Tax Deducted at Source) compliance report over a date range: every
- * posted Sale withholding TDS (a claimable credit) and every posted
- * Purchase withholding TDS (a liability owed to the tax authority), each
- * reported net of the proportional TDS share reversed by any non-cancelled
- * return against it - see SalesReturn::post()/PurchaseReturn::post()'s own
- * docblocks for the `tdsShare = round(original.tds_amount * (return.total /
- * original.total), 2)` formula this mirrors. A partially-returned invoice's
- * raw `tds_amount` column overstates what is actually still withheld, so
- * this report never reads that column directly for display - only the
- * computed net figure.
+ * TDS (Tax Deducted at Source) for a filing period: every rupee withheld on
+ * a sale (a credit this business can claim) and every rupee withheld on a
+ * purchase (a liability owed to the tax authority), as **movements in the
+ * period they actually happened in** rather than as a net figure hung on the
+ * original invoice.
+ *
+ * That is the audit fix (P0-20). The old report netted a return's TDS back
+ * into the original purchase's period, so a return filed in Ashadh silently
+ * rewrote Jestha - a month that may already have been filed - and it
+ * re-derived the reversed share as `tds x return.total / total`, which
+ * drifts by a paisa from what the credit note's voucher really posted once a
+ * note has several lines and a header discount.
+ *
+ * So each document contributes one row per event:
+ *
+ * - the invoice itself, positive, dated on the invoice (posted AND cancelled
+ *   invoices alike: a cancelled bill was still withheld against in its own
+ *   month);
+ * - a negative row for a posted credit or debit note, dated on the note,
+ *   carrying the note's OWN stored `tds_amount` - the exact amount its
+ *   voucher reversed (C6);
+ * - a negative row for a cancellation, dated on its Reversal voucher (C5).
+ *
+ * Only `status = 'posted'` returns appear: a pending request has no money
+ * effect at all and a rejected one never had any.
  */
 class TdsReportController extends Controller
 {
@@ -34,45 +52,18 @@ class TdsReportController extends Controller
         [$from, $to] = $this->resolveDateRange($request);
         $storeId = $request->integer('store_id') ?: null;
 
-        $sales = Sale::query()
-            ->with(['customer:id,name', 'journalVoucher:id,voucher_number', 'tdsAccount:id,name', 'returns'])
-            ->where('status', 'posted')
-            ->whereNotNull('tds_account_id')
-            ->whereBetween('date', [$from, $to])
-            ->when($storeId, fn ($query) => $query->where('store_id', $storeId))
-            ->orderBy('date')
-            ->orderBy('id')
-            ->get();
+        $salesRows = $this->salesRows($from, $to, $storeId);
+        $purchaseRows = $this->purchaseRows($from, $to, $storeId);
 
-        $salesRows = $sales
-            ->map(fn (Sale $sale) => $this->saleRow($sale))
-            ->filter()
-            ->values();
-
-        $purchases = Purchase::query()
-            ->with(['supplier:id,name', 'journalVoucher:id,voucher_number', 'tdsAccount:id,name', 'returns'])
-            ->where('status', 'posted')
-            ->whereNotNull('tds_account_id')
-            ->whereBetween('date', [$from, $to])
-            ->when($storeId, fn ($query) => $query->where('store_id', $storeId))
-            ->orderBy('date')
-            ->orderBy('id')
-            ->get();
-
-        $purchaseRows = $purchases
-            ->map(fn (Purchase $purchase) => $this->purchaseRow($purchase))
-            ->filter()
-            ->values();
-
-        $salesTotal = round((float) $salesRows->sum('net_tds_amount'), 2);
-        $purchasesTotal = round((float) $purchaseRows->sum('net_tds_amount'), 2);
+        $salesTotal = $this->sumTds($salesRows);
+        $purchasesTotal = $this->sumTds($purchaseRows);
 
         return Inertia::render('Tenant/Reports/TdsReport', [
             'sales' => $salesRows,
             'purchases' => $purchaseRows,
-            'salesTotal' => $salesTotal,
-            'purchasesTotal' => $purchasesTotal,
-            'grandTotal' => round($salesTotal + $purchasesTotal, 2),
+            'salesTotal' => $salesTotal->toString(),
+            'purchasesTotal' => $purchasesTotal->toString(),
+            'grandTotal' => $salesTotal->plus($purchasesTotal)->toString(),
             'stores' => Store::where('is_active', true)->orderBy('name')->get(['id', 'name']),
             'from' => $from,
             'to' => $to,
@@ -81,77 +72,174 @@ class TdsReportController extends Controller
     }
 
     /**
-     * @return array{id: int, date: string, voucher_number: string|null, party: string|null, total: float, net_tds_amount: float, tds_account: string|null}|null
+     * @return Collection<int, array<string, mixed>>
      */
-    private function saleRow(Sale $sale): ?array
+    private function salesRows(string $from, string $to, ?int $storeId): Collection
     {
-        $netTdsAmount = $this->netTdsAmount(
-            (float) $sale->tds_amount,
-            (float) $sale->total,
-            $sale->returns->map(fn (SalesReturn $return) => ['status' => $return->status, 'total' => (float) $return->total]),
-        );
+        $issued = Sale::query()
+            ->with(['customer:id,name', 'tdsAccount:id,name'])
+            ->whereIn('status', ['posted', 'cancelled'])
+            ->whereNotNull('tds_account_id')
+            ->whereDate('date', '>=', $from)
+            ->whereDate('date', '<=', $to)
+            ->when($storeId, fn (Builder $query) => $query->where('store_id', $storeId))
+            ->get()
+            ->map(fn (Sale $sale) => [
+                'entry' => 'invoice',
+                'date' => $sale->date->toDateString(),
+                'document_number' => $sale->invoice_number,
+                'party' => $sale->buyer_name ?? $sale->customer?->name,
+                'tds_account' => $sale->tdsAccount?->name,
+                'base_total' => $sale->total,
+                'tds_amount' => $sale->tds_amount,
+            ]);
 
-        if ($netTdsAmount <= 0.01) {
-            return null;
-        }
+        $cancelled = $this->cancelledInPeriod(Sale::query()->with(['customer:id,name', 'tdsAccount:id,name']), $from, $to)
+            ->whereNotNull('tds_account_id')
+            ->when($storeId, fn (Builder $query) => $query->where('store_id', $storeId))
+            ->get()
+            ->map(fn (Sale $sale) => [
+                'entry' => 'cancelled',
+                'date' => $this->cancelDate($sale),
+                'document_number' => $sale->invoice_number,
+                'party' => $sale->buyer_name ?? $sale->customer?->name,
+                'tds_account' => $sale->tdsAccount?->name,
+                'base_total' => Money::of($sale->total)->negated()->toString(),
+                'tds_amount' => Money::of($sale->tds_amount)->negated()->toString(),
+            ]);
 
-        return [
-            'id' => $sale->id,
-            'date' => $sale->date->toDateString(),
-            'voucher_number' => $sale->journalVoucher?->voucher_number,
-            'party' => $sale->customer?->name,
-            'total' => round((float) $sale->total, 2),
-            'net_tds_amount' => $netTdsAmount,
-            'tds_account' => $sale->tdsAccount?->name,
-        ];
+        $returns = SalesReturn::query()
+            ->with(['sale:id,invoice_number,customer_id,buyer_name,tds_account_id', 'sale.customer:id,name', 'sale.tdsAccount:id,name'])
+            ->where('status', 'posted')
+            ->whereDate('date', '>=', $from)
+            ->whereDate('date', '<=', $to)
+            ->when($storeId, fn (Builder $query) => $query->where('store_id', $storeId))
+            ->get()
+            ->map(fn (SalesReturn $return) => [
+                'entry' => 'credit_note',
+                'date' => $return->date->toDateString(),
+                'document_number' => $return->credit_note_number,
+                'party' => $return->sale?->buyer_name ?? $return->sale?->customer?->name,
+                'tds_account' => $return->sale?->tdsAccount?->name,
+                'base_total' => Money::of($return->total)->negated()->toString(),
+                'tds_amount' => Money::of($return->tds_amount)->negated()->toString(),
+            ]);
+
+        return $this->withoutZeroTds($issued->concat($returns)->concat($cancelled));
     }
 
     /**
-     * @return array{id: int, date: string, voucher_number: string|null, party: string|null, total: float, net_tds_amount: float, tds_account: string|null}|null
+     * @return Collection<int, array<string, mixed>>
      */
-    private function purchaseRow(Purchase $purchase): ?array
+    private function purchaseRows(string $from, string $to, ?int $storeId): Collection
     {
-        $netTdsAmount = $this->netTdsAmount(
-            (float) $purchase->tds_amount,
-            (float) $purchase->total,
-            $purchase->returns->map(fn (PurchaseReturn $return) => ['status' => $return->status, 'total' => (float) $return->total]),
-        );
+        $issued = Purchase::query()
+            ->with(['supplier:id,name', 'tdsAccount:id,name'])
+            ->whereIn('status', ['posted', 'cancelled'])
+            ->whereNotNull('tds_account_id')
+            ->whereDate('date', '>=', $from)
+            ->whereDate('date', '<=', $to)
+            ->when($storeId, fn (Builder $query) => $query->where('store_id', $storeId))
+            ->get()
+            ->map(fn (Purchase $purchase) => [
+                'entry' => 'invoice',
+                'date' => $purchase->date->toDateString(),
+                'document_number' => $purchase->bill_number,
+                'party' => $purchase->supplier?->name,
+                'tds_account' => $purchase->tdsAccount?->name,
+                'base_total' => $purchase->total,
+                'tds_amount' => $purchase->tds_amount ?? '0.00',
+            ]);
 
-        if ($netTdsAmount <= 0.01) {
-            return null;
-        }
+        $cancelled = $this->cancelledInPeriod(Purchase::query()->with(['supplier:id,name', 'tdsAccount:id,name']), $from, $to)
+            ->whereNotNull('tds_account_id')
+            ->when($storeId, fn (Builder $query) => $query->where('store_id', $storeId))
+            ->get()
+            ->map(fn (Purchase $purchase) => [
+                'entry' => 'cancelled',
+                'date' => $this->cancelDate($purchase),
+                'document_number' => $purchase->bill_number,
+                'party' => $purchase->supplier?->name,
+                'tds_account' => $purchase->tdsAccount?->name,
+                'base_total' => Money::of($purchase->total)->negated()->toString(),
+                'tds_amount' => Money::of($purchase->tds_amount ?? '0.00')->negated()->toString(),
+            ]);
 
-        return [
-            'id' => $purchase->id,
-            'date' => $purchase->date->toDateString(),
-            'voucher_number' => $purchase->journalVoucher?->voucher_number,
-            'party' => $purchase->supplier?->name,
-            'total' => round((float) $purchase->total, 2),
-            'net_tds_amount' => $netTdsAmount,
-            'tds_account' => $purchase->tdsAccount?->name,
-        ];
+        $returns = PurchaseReturn::query()
+            ->with(['purchase:id,bill_number,supplier_id,tds_account_id', 'purchase.supplier:id,name', 'purchase.tdsAccount:id,name'])
+            ->where('status', 'posted')
+            ->whereDate('date', '>=', $from)
+            ->whereDate('date', '<=', $to)
+            ->when($storeId, fn (Builder $query) => $query->where('store_id', $storeId))
+            ->get()
+            ->map(fn (PurchaseReturn $return) => [
+                'entry' => 'debit_note',
+                'date' => $return->date->toDateString(),
+                'document_number' => $return->debit_note_number,
+                'party' => $return->purchase?->supplier?->name,
+                'tds_account' => $return->purchase?->tdsAccount?->name,
+                'base_total' => Money::of($return->total)->negated()->toString(),
+                'tds_amount' => Money::of($return->tds_amount)->negated()->toString(),
+            ]);
+
+        return $this->withoutZeroTds($issued->concat($returns)->concat($cancelled));
     }
 
     /**
-     * Net TDS still withheld on a transaction: its own `tds_amount` less the
-     * proportional share reversed by every non-cancelled return against it,
-     * `tdsShare = round(tds_amount * (return.total / total), 2)` - the exact
-     * formula SalesReturn::post()/PurchaseReturn::post() use when reversing
-     * TDS on a partial return.
+     * Rows with no TDS effect at all are noise on a TDS report, so they are
+     * dropped - but only on an exact zero. The old `<= 0.01` filter was a
+     * float tolerance that quietly hid a real one paisa withholding.
      *
-     * @param  Collection<int, array{status: string, total: float}>  $returns
+     * @param  Collection<int, array<string, mixed>>  $rows
+     * @return Collection<int, array<string, mixed>>
      */
-    private function netTdsAmount(float $tdsAmount, float $total, Collection $returns): float
+    private function withoutZeroTds(Collection $rows): Collection
     {
-        if ($tdsAmount <= 0 || $total <= 0) {
-            return 0.0;
-        }
+        return $rows
+            ->reject(fn (array $row) => Money::of($row['tds_amount'])->isZero())
+            ->sortBy([['date', 'asc'], ['entry', 'asc'], ['document_number', 'asc']])
+            ->values();
+    }
 
-        $reversedShare = $returns
-            ->reject(fn (array $return) => $return['status'] === 'cancelled')
-            ->reduce(fn (float $carry, array $return) => round($carry + round($tdsAmount * ($return['total'] / $total), 2), 2), 0.0);
+    /**
+     * @param  Collection<int, array<string, mixed>>  $rows
+     */
+    private function sumTds(Collection $rows): Money
+    {
+        return Money::sum($rows->map(fn (array $row) => Money::of($row['tds_amount'])));
+    }
 
-        return round($tdsAmount - $reversedShare, 2);
+    /**
+     * Documents whose cancellation lands in the period: the Reversal
+     * voucher's own date (C5), falling back to `cancelled_at` for rows
+     * cancelled before the Reversal voucher type existed.
+     *
+     * @param  Builder<covariant Model>  $query
+     * @return Builder<covariant Model>
+     */
+    private function cancelledInPeriod($query, string $from, string $to)
+    {
+        return $query
+            ->where('status', 'cancelled')
+            ->with('reversalJournalVoucher:id,date')
+            ->where(function (Builder $outer) use ($from, $to) {
+                $outer
+                    ->whereHas(
+                        'reversalJournalVoucher',
+                        fn (Builder $voucher) => $voucher->whereDate('date', '>=', $from)->whereDate('date', '<=', $to),
+                    )
+                    ->orWhere(fn (Builder $legacy) => $legacy
+                        ->whereNull('reversal_journal_voucher_id')
+                        ->whereDate('cancelled_at', '>=', $from)
+                        ->whereDate('cancelled_at', '<=', $to));
+            });
+    }
+
+    private function cancelDate(Model $document): string
+    {
+        return $document->reversalJournalVoucher?->date?->toDateString()
+            ?? $document->cancelled_at?->toDateString()
+            ?? $document->date->toDateString();
     }
 
     /**

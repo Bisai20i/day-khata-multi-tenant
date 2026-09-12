@@ -18,6 +18,26 @@ use Illuminate\Foundation\Testing\RefreshDatabase;
 
 uses(RefreshDatabase::class);
 
+/*
+|--------------------------------------------------------------------------
+| Category-wise reports
+|--------------------------------------------------------------------------
+|
+| Two payload rules hold across every assertion below:
+|
+| - Money is a 2dp string ("260.00") and Quantity a 4dp string ("5.0000"),
+|   never a float, so nothing in the payload can round differently to what
+|   the ledger stored.
+| - Quantities are never added across units. Each row carries a
+|   `quantities` list of `{unit, quantity}` buckets in base units, sorted
+|   by unit name, instead of one scalar that added Litres to Pieces.
+|
+| Stock value comes from App\Support\Inventory\StockCosting, which averages
+| `item_stock_movements.value` (not `unit_cost_rate` x quantity), so every
+| stock fixture here records a real `value` on its priced movements.
+|
+*/
+
 afterEach(function () {
     tenancy()->end();
 });
@@ -61,9 +81,11 @@ test('sales by category aggregates per category, rolls subcategory totals up int
         $snacks = ItemCategory::factory()->create(['name' => 'Snacks']);
         $softDrinks = ItemSubcategory::factory()->create(['item_category_id' => $beverages->id, 'name' => 'Soft Drinks']);
 
-        $cola = Item::factory()->create(['item_category_id' => $beverages->id, 'item_subcategory_id' => null, 'is_vatable' => false, 'is_stockable' => false]);
-        $soda = Item::factory()->create(['item_category_id' => $beverages->id, 'item_subcategory_id' => $softDrinks->id, 'is_vatable' => false, 'is_stockable' => false]);
-        $chips = Item::factory()->create(['item_category_id' => $snacks->id, 'item_subcategory_id' => null, 'is_vatable' => false, 'is_stockable' => false]);
+        // Beverages deliberately holds two different base units so the
+        // per-unit quantity breakdown has something to keep apart.
+        $cola = Item::factory()->create(['item_category_id' => $beverages->id, 'item_subcategory_id' => null, 'unit' => 'Piece', 'is_vatable' => false, 'is_stockable' => false]);
+        $soda = Item::factory()->create(['item_category_id' => $beverages->id, 'item_subcategory_id' => $softDrinks->id, 'unit' => 'Litre', 'is_vatable' => false, 'is_stockable' => false]);
+        $chips = Item::factory()->create(['item_category_id' => $snacks->id, 'item_subcategory_id' => null, 'unit' => 'Piece', 'is_vatable' => false, 'is_stockable' => false]);
 
         // Beverages: cola (uncategorized) 2*50=100, soda (Soft Drinks) 4*25=100.
         Sale::post(
@@ -108,24 +130,41 @@ test('sales by category aggregates per category, rolls subcategory totals up int
             ->component('Tenant/Reports/SalesByCategory')
             ->has('rows', 2)
             ->where('rows.0.categoryName', 'Beverages')
-            ->where('rows.0.quantity', 6)
-            ->where('rows.0.value', 200)
+            ->where('rows.0.value', '200.00')
+            // 4 Litres of soda and 2 Pieces of cola stay two buckets rather
+            // than becoming a meaningless "6".
+            ->has('rows.0.quantities', 2)
+            ->where('rows.0.quantities.0.unit', 'Litre')
+            ->where('rows.0.quantities.0.quantity', '4.0000')
+            ->where('rows.0.quantities.1.unit', 'Piece')
+            ->where('rows.0.quantities.1.quantity', '2.0000')
             ->has('rows.0.subcategories', 2)
             ->where('rows.0.subcategories.0.subcategoryName', 'Soft Drinks')
-            ->where('rows.0.subcategories.0.quantity', 4)
-            ->where('rows.0.subcategories.0.value', 100)
+            ->where('rows.0.subcategories.0.value', '100.00')
+            ->has('rows.0.subcategories.0.quantities', 1)
+            ->where('rows.0.subcategories.0.quantities.0.unit', 'Litre')
+            ->where('rows.0.subcategories.0.quantities.0.quantity', '4.0000')
             ->where('rows.0.subcategories.1.subcategoryName', 'Uncategorized')
-            ->where('rows.0.subcategories.1.quantity', 2)
-            ->where('rows.0.subcategories.1.value', 100)
+            ->where('rows.0.subcategories.1.value', '100.00')
+            ->has('rows.0.subcategories.1.quantities', 1)
+            ->where('rows.0.subcategories.1.quantities.0.unit', 'Piece')
+            ->where('rows.0.subcategories.1.quantities.0.quantity', '2.0000')
             ->where('rows.1.categoryName', 'Snacks')
-            ->where('rows.1.quantity', 3)
-            ->where('rows.1.value', 60)
+            ->where('rows.1.value', '60.00')
+            ->has('rows.1.quantities', 1)
+            ->where('rows.1.quantities.0.unit', 'Piece')
+            ->where('rows.1.quantities.0.quantity', '3.0000')
             ->has('rows.1.subcategories', 1)
             ->where('rows.1.subcategories.0.subcategoryName', 'Uncategorized')
-            ->where('rows.1.subcategories.0.quantity', 3)
-            ->where('rows.1.subcategories.0.value', 60)
-            ->where('grandTotal.quantity', 9)
-            ->where('grandTotal.value', 260)
+            ->where('rows.1.subcategories.0.value', '60.00')
+            ->where('rows.1.subcategories.0.quantities.0.unit', 'Piece')
+            ->where('rows.1.subcategories.0.quantities.0.quantity', '3.0000')
+            ->where('grandTotal.value', '260.00')
+            ->has('grandTotal.quantities', 2)
+            ->where('grandTotal.quantities.0.unit', 'Litre')
+            ->where('grandTotal.quantities.0.quantity', '4.0000')
+            ->where('grandTotal.quantities.1.unit', 'Piece')
+            ->where('grandTotal.quantities.1.quantity', '5.0000')
         );
 
     $tenant->delete();
@@ -144,9 +183,9 @@ test('purchase by category mirrors the sales-by-category aggregation and rollup,
         $software = ItemCategory::factory()->create(['name' => 'Software']);
         $cables = ItemSubcategory::factory()->create(['item_category_id' => $hardware->id, 'name' => 'Cables']);
 
-        $cable = Item::factory()->create(['item_category_id' => $hardware->id, 'item_subcategory_id' => $cables->id, 'is_vatable' => false, 'is_stockable' => false]);
-        $board = Item::factory()->create(['item_category_id' => $hardware->id, 'item_subcategory_id' => null, 'is_vatable' => false, 'is_stockable' => false]);
-        $license = Item::factory()->create(['item_category_id' => $software->id, 'item_subcategory_id' => null, 'is_vatable' => false, 'is_stockable' => false]);
+        $cable = Item::factory()->create(['item_category_id' => $hardware->id, 'item_subcategory_id' => $cables->id, 'unit' => 'Metre', 'is_vatable' => false, 'is_stockable' => false]);
+        $board = Item::factory()->create(['item_category_id' => $hardware->id, 'item_subcategory_id' => null, 'unit' => 'Piece', 'is_vatable' => false, 'is_stockable' => false]);
+        $license = Item::factory()->create(['item_category_id' => $software->id, 'item_subcategory_id' => null, 'unit' => 'Piece', 'is_vatable' => false, 'is_stockable' => false]);
 
         // Hardware: cable (Cables) 4*25=100, board (uncategorized) 2*60=120.
         Purchase::post(
@@ -191,20 +230,37 @@ test('purchase by category mirrors the sales-by-category aggregation and rollup,
             ->component('Tenant/Reports/PurchaseByCategory')
             ->has('rows', 2)
             ->where('rows.0.categoryName', 'Hardware')
-            ->where('rows.0.quantity', 6)
-            ->where('rows.0.value', 220)
+            ->where('rows.0.value', '220.00')
+            ->has('rows.0.quantities', 2)
+            ->where('rows.0.quantities.0.unit', 'Metre')
+            ->where('rows.0.quantities.0.quantity', '4.0000')
+            ->where('rows.0.quantities.1.unit', 'Piece')
+            ->where('rows.0.quantities.1.quantity', '2.0000')
             ->has('rows.0.subcategories', 2)
             ->where('rows.0.subcategories.0.subcategoryName', 'Cables')
-            ->where('rows.0.subcategories.0.quantity', 4)
-            ->where('rows.0.subcategories.0.value', 100)
+            ->where('rows.0.subcategories.0.value', '100.00')
+            ->has('rows.0.subcategories.0.quantities', 1)
+            ->where('rows.0.subcategories.0.quantities.0.unit', 'Metre')
+            ->where('rows.0.subcategories.0.quantities.0.quantity', '4.0000')
             ->where('rows.0.subcategories.1.subcategoryName', 'Uncategorized')
-            ->where('rows.0.subcategories.1.quantity', 2)
-            ->where('rows.0.subcategories.1.value', 120)
+            ->where('rows.0.subcategories.1.value', '120.00')
+            ->has('rows.0.subcategories.1.quantities', 1)
+            ->where('rows.0.subcategories.1.quantities.0.unit', 'Piece')
+            ->where('rows.0.subcategories.1.quantities.0.quantity', '2.0000')
             ->where('rows.1.categoryName', 'Software')
-            ->where('rows.1.quantity', 1)
-            ->where('rows.1.value', 500)
-            ->where('grandTotal.quantity', 7)
-            ->where('grandTotal.value', 720)
+            ->where('rows.1.value', '500.00')
+            ->has('rows.1.quantities', 1)
+            ->where('rows.1.quantities.0.unit', 'Piece')
+            ->where('rows.1.quantities.0.quantity', '1.0000')
+            ->has('rows.1.subcategories', 1)
+            ->where('rows.1.subcategories.0.subcategoryName', 'Uncategorized')
+            ->where('rows.1.subcategories.0.value', '500.00')
+            ->where('grandTotal.value', '720.00')
+            ->has('grandTotal.quantities', 2)
+            ->where('grandTotal.quantities.0.unit', 'Metre')
+            ->where('grandTotal.quantities.0.quantity', '4.0000')
+            ->where('grandTotal.quantities.1.unit', 'Piece')
+            ->where('grandTotal.quantities.1.quantity', '3.0000')
         );
 
     $tenant->delete();
@@ -221,34 +277,43 @@ test('stock by category sums weighted-average valuation per category as of a cut
         $furniture = ItemCategory::factory()->create(['name' => 'Furniture']);
         $smallElectronics = ItemSubcategory::factory()->create(['item_category_id' => $electronics->id, 'name' => 'Small Electronics']);
 
-        $widget = Item::factory()->create(['item_category_id' => $electronics->id, 'item_subcategory_id' => null, 'name' => 'Widget', 'is_stockable' => true]);
-        $gadget = Item::factory()->create(['item_category_id' => $electronics->id, 'item_subcategory_id' => $smallElectronics->id, 'name' => 'Gadget', 'is_stockable' => true]);
-        $chair = Item::factory()->create(['item_category_id' => $furniture->id, 'item_subcategory_id' => null, 'name' => 'Chair', 'is_stockable' => true]);
+        // purchase_rate is StockCosting's fallback when an item has no priced
+        // history. Every item here does have one, so pinning it to a figure
+        // no expectation below uses makes an accidental fallback fail loudly
+        // instead of passing on the factory's random rate.
+        $widget = Item::factory()->create(['item_category_id' => $electronics->id, 'item_subcategory_id' => null, 'name' => 'Widget', 'unit' => 'Piece', 'purchase_rate' => 7, 'is_stockable' => true]);
+        $gadget = Item::factory()->create(['item_category_id' => $electronics->id, 'item_subcategory_id' => $smallElectronics->id, 'name' => 'Gadget', 'unit' => 'Box', 'purchase_rate' => 7, 'is_stockable' => true]);
+        $chair = Item::factory()->create(['item_category_id' => $furniture->id, 'item_subcategory_id' => null, 'name' => 'Chair', 'unit' => 'Piece', 'purchase_rate' => 7, 'is_stockable' => true]);
 
         $storeId = Store::where('is_active', true)->orderBy('id')->firstOrFail()->id;
 
-        // Widget: closing = 10 + 5 - 3 = 12; avgCost = (10*100 + 5*130) / 15 = 110; valuation = 1320.
-        $widget->recordStockMovement(StockMovementType::Purchase, 10, '2026-01-01', $storeId, unitCostRate: 100);
-        $widget->recordStockMovement(StockMovementType::Purchase, 5, '2026-02-10', $storeId, unitCostRate: 130);
+        // Widget: closing = 10 + 5 - 3 = 12; weighted average cost is the
+        // recorded movement value, (1000 + 650) / 15 = 110; value = 1320.
+        $widget->recordStockMovement(StockMovementType::Purchase, 10, '2026-01-01', $storeId, value: 1000);
+        $widget->recordStockMovement(StockMovementType::Purchase, 5, '2026-02-10', $storeId, value: 650);
         $widget->recordStockMovement(StockMovementType::Sale, 3, '2026-02-15', $storeId);
 
-        // After the as_of cutoff (2026-02-28) - must not affect closing or valuation.
-        $widget->recordStockMovement(StockMovementType::Purchase, 20, '2026-03-01', $storeId, unitCostRate: 200);
+        // After the as_of cutoff (2026-02-28) - must not affect the closing
+        // quantity or the cost basis it would otherwise drag up to 161.4286.
+        $widget->recordStockMovement(StockMovementType::Purchase, 20, '2026-03-01', $storeId, value: 4000);
 
-        // Cancelled - must be excluded from every sum.
+        // Cancelled - must be excluded from the quantity and from the cost
+        // basis; priced at 1000 a unit so honouring it would be obvious.
         $widget->stockMovements()->create([
             'store_id' => $storeId,
             'movement_type' => StockMovementType::AdjustmentIn,
             'quantity' => 100,
+            'unit_cost_rate' => 1000,
+            'value' => 100000,
             'date' => '2026-02-20',
             'cancelled' => true,
         ]);
 
-        // Gadget (Small Electronics): closing = 4; avgCost = 50; valuation = 200.
-        $gadget->recordStockMovement(StockMovementType::Purchase, 4, '2026-01-15', $storeId, unitCostRate: 50);
+        // Gadget (Small Electronics): closing = 4; average 200/4 = 50; value = 200.
+        $gadget->recordStockMovement(StockMovementType::Purchase, 4, '2026-01-15', $storeId, value: 200);
 
-        // Chair (Furniture, uncategorized): closing = 2; avgCost = 300; valuation = 600.
-        $chair->recordStockMovement(StockMovementType::Purchase, 2, '2026-01-01', $storeId, unitCostRate: 300);
+        // Chair (Furniture, uncategorized): closing = 2; average 600/2 = 300; value = 600.
+        $chair->recordStockMovement(StockMovementType::Purchase, 2, '2026-01-01', $storeId, value: 600);
     });
 
     loginCategoryWiseReportTestUser($domain);
@@ -257,27 +322,45 @@ test('stock by category sums weighted-average valuation per category as of a cut
         ->assertOk()
         ->assertInertia(fn ($page) => $page
             ->component('Tenant/Reports/StockByCategory')
+            ->where('asOf', '2026-02-28')
             ->has('rows', 2)
             ->where('rows.0.categoryName', 'Electronics')
-            ->where('rows.0.quantity', 16)
-            ->where('rows.0.valuation', 1520)
+            ->where('rows.0.value', '1520.00')
+            ->has('rows.0.quantities', 2)
+            ->where('rows.0.quantities.0.unit', 'Box')
+            ->where('rows.0.quantities.0.quantity', '4.0000')
+            ->where('rows.0.quantities.1.unit', 'Piece')
+            ->where('rows.0.quantities.1.quantity', '12.0000')
             ->has('rows.0.subcategories', 2)
             ->where('rows.0.subcategories.0.subcategoryName', 'Small Electronics')
-            ->where('rows.0.subcategories.0.quantity', 4)
-            ->where('rows.0.subcategories.0.valuation', 200)
-            ->where('rows.0.subcategories.0.avgCost', 50)
+            // Was asserted as quantity 4 at avgCost 50; avgCost is gone from
+            // the payload, so the 4 x 50 it stood for is pinned as the value.
+            ->where('rows.0.subcategories.0.value', '200.00')
+            ->has('rows.0.subcategories.0.quantities', 1)
+            ->where('rows.0.subcategories.0.quantities.0.unit', 'Box')
+            ->where('rows.0.subcategories.0.quantities.0.quantity', '4.0000')
             ->where('rows.0.subcategories.1.subcategoryName', 'Uncategorized')
-            ->where('rows.0.subcategories.1.quantity', 12)
-            ->where('rows.0.subcategories.1.valuation', 1320)
-            ->where('rows.0.subcategories.1.avgCost', 110)
+            // Likewise 12 x the weighted average 110.
+            ->where('rows.0.subcategories.1.value', '1320.00')
+            ->has('rows.0.subcategories.1.quantities', 1)
+            ->where('rows.0.subcategories.1.quantities.0.unit', 'Piece')
+            ->where('rows.0.subcategories.1.quantities.0.quantity', '12.0000')
             ->where('rows.1.categoryName', 'Furniture')
-            ->where('rows.1.quantity', 2)
-            ->where('rows.1.valuation', 600)
+            ->where('rows.1.value', '600.00')
+            ->has('rows.1.quantities', 1)
+            ->where('rows.1.quantities.0.unit', 'Piece')
+            ->where('rows.1.quantities.0.quantity', '2.0000')
             ->has('rows.1.subcategories', 1)
             ->where('rows.1.subcategories.0.subcategoryName', 'Uncategorized')
-            ->where('rows.1.subcategories.0.quantity', 2)
-            ->where('rows.1.subcategories.0.valuation', 600)
-            ->where('grandTotalValuation', 2120)
+            ->where('rows.1.subcategories.0.value', '600.00')
+            ->where('grandTotal.value', '2120.00')
+            ->has('grandTotal.quantities', 2)
+            ->where('grandTotal.quantities.0.unit', 'Box')
+            ->where('grandTotal.quantities.0.quantity', '4.0000')
+            ->where('grandTotal.quantities.1.unit', 'Piece')
+            ->where('grandTotal.quantities.1.quantity', '14.0000')
+            // grandTotalValuation is now the same string as grandTotal.value.
+            ->where('grandTotalValuation', '2120.00')
         );
 
     $tenant->delete();
@@ -301,9 +384,9 @@ test('grand totals sum correctly across all three category-wise reports', functi
         $beta = ItemCategory::factory()->create(['name' => 'Beta']);
         $alphaSub = ItemSubcategory::factory()->create(['item_category_id' => $alpha->id, 'name' => 'Alpha-Sub']);
 
-        $alphaNoSub = Item::factory()->create(['item_category_id' => $alpha->id, 'item_subcategory_id' => null, 'is_vatable' => false, 'is_stockable' => true]);
-        $alphaWithSub = Item::factory()->create(['item_category_id' => $alpha->id, 'item_subcategory_id' => $alphaSub->id, 'is_vatable' => false, 'is_stockable' => true]);
-        $betaItem = Item::factory()->create(['item_category_id' => $beta->id, 'item_subcategory_id' => null, 'is_vatable' => false, 'is_stockable' => true]);
+        $alphaNoSub = Item::factory()->create(['item_category_id' => $alpha->id, 'item_subcategory_id' => null, 'unit' => 'Piece', 'is_vatable' => false, 'is_stockable' => true]);
+        $alphaWithSub = Item::factory()->create(['item_category_id' => $alpha->id, 'item_subcategory_id' => $alphaSub->id, 'unit' => 'Piece', 'is_vatable' => false, 'is_stockable' => true]);
+        $betaItem = Item::factory()->create(['item_category_id' => $beta->id, 'item_subcategory_id' => null, 'unit' => 'Piece', 'is_vatable' => false, 'is_stockable' => true]);
 
         // Sales: Alpha (uncategorized) 1*100=100, Alpha (Alpha-Sub) 2*50=100, Beta 3*10=30.
         Sale::post(
@@ -347,13 +430,16 @@ test('grand totals sum correctly across all three category-wise reports', functi
         ->assertOk()
         ->assertInertia(fn ($page) => $page
             ->where('rows.0.categoryName', 'Alpha')
-            ->where('rows.0.quantity', 3)
-            ->where('rows.0.value', 200)
+            ->where('rows.0.value', '200.00')
+            ->where('rows.0.quantities.0.unit', 'Piece')
+            ->where('rows.0.quantities.0.quantity', '3.0000')
             ->where('rows.1.categoryName', 'Beta')
-            ->where('rows.1.quantity', 3)
-            ->where('rows.1.value', 30)
-            ->where('grandTotal.quantity', 6)
-            ->where('grandTotal.value', 230)
+            ->where('rows.1.value', '30.00')
+            ->where('rows.1.quantities.0.quantity', '3.0000')
+            ->where('grandTotal.value', '230.00')
+            ->has('grandTotal.quantities', 1)
+            ->where('grandTotal.quantities.0.unit', 'Piece')
+            ->where('grandTotal.quantities.0.quantity', '6.0000')
         );
 
     // Purchases: Alpha qty 5+5=10, value 100+400=500; Beta qty 6, value 90. Grand: qty 16, value 590.
@@ -361,28 +447,34 @@ test('grand totals sum correctly across all three category-wise reports', functi
         ->assertOk()
         ->assertInertia(fn ($page) => $page
             ->where('rows.0.categoryName', 'Alpha')
-            ->where('rows.0.quantity', 10)
-            ->where('rows.0.value', 500)
+            ->where('rows.0.value', '500.00')
+            ->where('rows.0.quantities.0.unit', 'Piece')
+            ->where('rows.0.quantities.0.quantity', '10.0000')
             ->where('rows.1.categoryName', 'Beta')
-            ->where('rows.1.quantity', 6)
-            ->where('rows.1.value', 90)
-            ->where('grandTotal.quantity', 16)
-            ->where('grandTotal.value', 590)
+            ->where('rows.1.value', '90.00')
+            ->where('rows.1.quantities.0.quantity', '6.0000')
+            ->where('grandTotal.value', '590.00')
+            ->has('grandTotal.quantities', 1)
+            ->where('grandTotal.quantities.0.unit', 'Piece')
+            ->where('grandTotal.quantities.0.quantity', '16.0000')
         );
 
-    // Stock as of 2026-06-30: alphaNoSub closing 5-1=4 @ avgCost 20 = 80;
-    // alphaWithSub closing 5-2=3 @ avgCost 80 = 240; Alpha total 320.
-    // betaItem closing 6-3=3 @ avgCost 15 = 45. Grand valuation: 365.
+    // Stock as of 2026-06-30: alphaNoSub closing 5-1=4 at cost 100/5=20 = 80;
+    // alphaWithSub closing 5-2=3 at cost 400/5=80 = 240; Alpha total 320.
+    // betaItem closing 6-3=3 at cost 90/6=15 = 45. Grand value: 365. Sale
+    // movements carry no value, so they never enter the cost basis.
     $this->get("http://{$domain}/reports/stock-by-category?as_of=2026-06-30")
         ->assertOk()
         ->assertInertia(fn ($page) => $page
             ->where('rows.0.categoryName', 'Alpha')
-            ->where('rows.0.quantity', 7)
-            ->where('rows.0.valuation', 320)
+            ->where('rows.0.value', '320.00')
+            ->where('rows.0.quantities.0.unit', 'Piece')
+            ->where('rows.0.quantities.0.quantity', '7.0000')
             ->where('rows.1.categoryName', 'Beta')
-            ->where('rows.1.quantity', 3)
-            ->where('rows.1.valuation', 45)
-            ->where('grandTotalValuation', 365)
+            ->where('rows.1.value', '45.00')
+            ->where('rows.1.quantities.0.quantity', '3.0000')
+            ->where('grandTotal.value', '365.00')
+            ->where('grandTotalValuation', '365.00')
         );
 
     $tenant->delete();
@@ -399,7 +491,7 @@ test('sales by category is scoped to a single store when store_id is given, and 
         $customer = Customer::factory()->create();
 
         $beverages = ItemCategory::factory()->create(['name' => 'Beverages']);
-        $cola = Item::factory()->create(['item_category_id' => $beverages->id, 'item_subcategory_id' => null, 'is_vatable' => false, 'is_stockable' => false]);
+        $cola = Item::factory()->create(['item_category_id' => $beverages->id, 'item_subcategory_id' => null, 'unit' => 'Piece', 'is_vatable' => false, 'is_stockable' => false]);
 
         $mainStoreId = Store::where('is_active', true)->orderBy('id')->firstOrFail()->id;
         $branchStoreId = Store::factory()->create(['name' => 'Branch Store'])->id;
@@ -425,10 +517,11 @@ test('sales by category is scoped to a single store when store_id is given, and 
     $this->get("http://{$domain}/reports/sales-by-category?from=2026-06-01&to=2026-06-30&store_id={$branchStoreId}")
         ->assertOk()
         ->assertInertia(fn ($page) => $page
-            ->where('rows.0.quantity', 3)
-            ->where('rows.0.value', 150)
-            ->where('grandTotal.quantity', 3)
-            ->where('grandTotal.value', 150)
+            ->where('rows.0.value', '150.00')
+            ->where('rows.0.quantities.0.unit', 'Piece')
+            ->where('rows.0.quantities.0.quantity', '3.0000')
+            ->where('grandTotal.value', '150.00')
+            ->where('grandTotal.quantities.0.quantity', '3.0000')
             ->where('storeId', $branchStoreId)
         );
 
@@ -437,10 +530,11 @@ test('sales by category is scoped to a single store when store_id is given, and 
     $this->get("http://{$domain}/reports/sales-by-category?from=2026-06-01&to=2026-06-30")
         ->assertOk()
         ->assertInertia(fn ($page) => $page
-            ->where('rows.0.quantity', 5)
-            ->where('rows.0.value', 250)
-            ->where('grandTotal.quantity', 5)
-            ->where('grandTotal.value', 250)
+            ->where('rows.0.value', '250.00')
+            ->where('rows.0.quantities.0.unit', 'Piece')
+            ->where('rows.0.quantities.0.quantity', '5.0000')
+            ->where('grandTotal.value', '250.00')
+            ->where('grandTotal.quantities.0.quantity', '5.0000')
             ->where('storeId', null)
         );
 
@@ -458,7 +552,7 @@ test('purchase by category is scoped to a single store when store_id is given, a
         $supplier = Supplier::factory()->create();
 
         $hardware = ItemCategory::factory()->create(['name' => 'Hardware']);
-        $cable = Item::factory()->create(['item_category_id' => $hardware->id, 'item_subcategory_id' => null, 'is_vatable' => false, 'is_stockable' => false]);
+        $cable = Item::factory()->create(['item_category_id' => $hardware->id, 'item_subcategory_id' => null, 'unit' => 'Piece', 'is_vatable' => false, 'is_stockable' => false]);
 
         $mainStoreId = Store::where('is_active', true)->orderBy('id')->firstOrFail()->id;
         $branchStoreId = Store::factory()->create(['name' => 'Branch Store'])->id;
@@ -484,10 +578,11 @@ test('purchase by category is scoped to a single store when store_id is given, a
     $this->get("http://{$domain}/reports/purchase-by-category?from=2026-06-01&to=2026-06-30&store_id={$branchStoreId}")
         ->assertOk()
         ->assertInertia(fn ($page) => $page
-            ->where('rows.0.quantity', 6)
-            ->where('rows.0.value', 150)
-            ->where('grandTotal.quantity', 6)
-            ->where('grandTotal.value', 150)
+            ->where('rows.0.value', '150.00')
+            ->where('rows.0.quantities.0.unit', 'Piece')
+            ->where('rows.0.quantities.0.quantity', '6.0000')
+            ->where('grandTotal.value', '150.00')
+            ->where('grandTotal.quantities.0.quantity', '6.0000')
             ->where('storeId', $branchStoreId)
         );
 
@@ -495,10 +590,11 @@ test('purchase by category is scoped to a single store when store_id is given, a
     $this->get("http://{$domain}/reports/purchase-by-category?from=2026-06-01&to=2026-06-30")
         ->assertOk()
         ->assertInertia(fn ($page) => $page
-            ->where('rows.0.quantity', 10)
-            ->where('rows.0.value', 250)
-            ->where('grandTotal.quantity', 10)
-            ->where('grandTotal.value', 250)
+            ->where('rows.0.value', '250.00')
+            ->where('rows.0.quantities.0.unit', 'Piece')
+            ->where('rows.0.quantities.0.quantity', '10.0000')
+            ->where('grandTotal.value', '250.00')
+            ->where('grandTotal.quantities.0.quantity', '10.0000')
             ->where('storeId', null)
         );
 
@@ -514,37 +610,48 @@ test('stock by category is scoped to a single store when store_id is given, and 
         categoryWiseReportTestAdmin();
 
         $electronics = ItemCategory::factory()->create(['name' => 'Electronics']);
-        $widget = Item::factory()->create(['item_category_id' => $electronics->id, 'item_subcategory_id' => null, 'name' => 'Widget', 'is_stockable' => true]);
+        $widget = Item::factory()->create(['item_category_id' => $electronics->id, 'item_subcategory_id' => null, 'name' => 'Widget', 'unit' => 'Piece', 'purchase_rate' => 7, 'is_stockable' => true]);
 
         $mainStoreId = Store::where('is_active', true)->orderBy('id')->firstOrFail()->id;
         $branchStoreId = Store::factory()->create(['name' => 'Branch Store'])->id;
 
-        // Main store: 10 @ 100 = 1000.
-        $widget->recordStockMovement(StockMovementType::Purchase, 10, '2026-01-01', $mainStoreId, unitCostRate: 100);
+        // Main store: 10 bought in for 1000.
+        $widget->recordStockMovement(StockMovementType::Purchase, 10, '2026-01-01', $mainStoreId, value: 1000);
 
-        // Branch store: 10 @ 300 = 3000.
-        $widget->recordStockMovement(StockMovementType::Purchase, 10, '2026-01-01', $branchStoreId, unitCostRate: 300);
+        // Branch store: 10 bought in for 3000.
+        $widget->recordStockMovement(StockMovementType::Purchase, 10, '2026-01-01', $branchStoreId, value: 3000);
     });
 
     loginCategoryWiseReportTestUser($domain);
 
-    // Filtered to the branch store only: qty 10, valuation 3000.
+    // Filtered to the branch store only: qty 10, value 2000.
+    //
+    // The quantity is store-scoped but the cost never is: StockCosting values
+    // one item identically in every store, at the all-stores weighted average
+    // of (1000 + 3000) / 20 = 200. So the branch's 10 units are worth 2000,
+    // not the 3000 they were bought for, and the two stores' values add back
+    // up to the 4000 total below. The old per-store average reported 3000
+    // here and so made the per-store figures disagree with the whole.
     $this->get("http://{$domain}/reports/stock-by-category?as_of=2026-01-31&store_id={$branchStoreId}")
         ->assertOk()
         ->assertInertia(fn ($page) => $page
-            ->where('rows.0.quantity', 10)
-            ->where('rows.0.valuation', 3000)
-            ->where('grandTotalValuation', 3000)
+            ->where('rows.0.value', '2000.00')
+            ->where('rows.0.quantities.0.unit', 'Piece')
+            ->where('rows.0.quantities.0.quantity', '10.0000')
+            ->where('grandTotal.value', '2000.00')
+            ->where('grandTotalValuation', '2000.00')
             ->where('storeId', $branchStoreId)
         );
 
-    // Unfiltered: cross-store qty 20, valuation 4000 (avgCost = 4000/20 = 200 exactly).
+    // Unfiltered: cross-store qty 20, value 4000 (average = 4000/20 = 200 exactly).
     $this->get("http://{$domain}/reports/stock-by-category?as_of=2026-01-31")
         ->assertOk()
         ->assertInertia(fn ($page) => $page
-            ->where('rows.0.quantity', 20)
-            ->where('rows.0.valuation', 4000)
-            ->where('grandTotalValuation', 4000)
+            ->where('rows.0.value', '4000.00')
+            ->where('rows.0.quantities.0.unit', 'Piece')
+            ->where('rows.0.quantities.0.quantity', '20.0000')
+            ->where('grandTotal.value', '4000.00')
+            ->where('grandTotalValuation', '4000.00')
             ->where('storeId', null)
         );
 

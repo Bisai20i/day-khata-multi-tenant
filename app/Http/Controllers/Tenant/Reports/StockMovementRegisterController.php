@@ -15,6 +15,7 @@ use App\Models\SaleReturnLine;
 use App\Models\StockAdjustmentLine;
 use App\Models\StockTransferLine;
 use App\Models\Store;
+use App\Support\Money\Quantity;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\MorphTo;
 use Illuminate\Http\Request;
@@ -38,7 +39,8 @@ class StockMovementRegisterController extends Controller
 
         $movements = ItemStockMovement::query()
             ->where('cancelled', false)
-            ->whereBetween('date', [$from, $to])
+            ->whereDate('date', '>=', $from)
+            ->whereDate('date', '<=', $to)
             ->when($itemId, fn ($query) => $query->where('item_id', $itemId))
             ->when($storeId, fn ($query) => $query->where('store_id', $storeId))
             ->with(['item:id,name,unit', 'store:id,name'])
@@ -63,8 +65,8 @@ class StockMovementRegisterController extends Controller
                 'storeName' => $movement->store?->name,
                 'unit' => $movement->item->unit,
                 'movementType' => $this->movementTypeLabel($movement->movement_type),
-                'quantity' => round((float) $movement->quantity * $movement->movement_type->direction(), 4),
-                'unitCostRate' => $movement->unit_cost_rate !== null ? round((float) $movement->unit_cost_rate, 4) : null,
+                'quantity' => $this->signedQuantity($movement),
+                'unitCostRate' => $movement->unit_cost_rate === null ? null : Quantity::of($movement->unit_cost_rate)->toString(),
                 'reference' => $this->referenceDescription($movement->reference, $movement->narration),
             ])->values(),
             'items' => Item::query()->orderBy('name')->get(['id', 'name']),
@@ -74,6 +76,19 @@ class StockMovementRegisterController extends Controller
             'itemId' => $itemId,
             'storeId' => $storeId,
         ]);
+    }
+
+    /**
+     * The movement's quantity with the direction folded in, as an exact
+     * 4-decimal string. Never a float: a register is the audit trail stock
+     * disputes get settled from, and 0.1 + 0.2 printing as
+     * 0.30000000000000004 is exactly the class of bug this rewrite removed.
+     */
+    private function signedQuantity(ItemStockMovement $movement): string
+    {
+        $quantity = Quantity::of($movement->quantity);
+
+        return ($movement->movement_type->direction() === -1 ? $quantity->negated() : $quantity)->toString();
     }
 
     private function movementTypeLabel(StockMovementType $type): string
@@ -107,14 +122,12 @@ class StockMovementRegisterController extends Controller
     private function referenceDescription(?Model $reference, ?string $narration): string
     {
         return match (true) {
-            $reference instanceof SaleLine => 'Sale #'.$reference->sale_id
+            $reference instanceof SaleLine => 'Sale '.($reference->sale?->invoice_number ?? '#'.$reference->sale_id)
                 .($reference->sale?->customer?->name ? ' · '.$reference->sale->customer->name : ''),
-            $reference instanceof PurchaseLine => 'Purchase #'.$reference->purchase_id
+            $reference instanceof PurchaseLine => 'Purchase '.($reference->purchase?->bill_number ?? '#'.$reference->purchase_id)
                 .($reference->purchase?->supplier?->name ? ' · '.$reference->purchase->supplier->name : ''),
-            $reference instanceof SaleReturnLine => 'Sale Return #'.$reference->sales_return_id
-                .($reference->salesReturn?->sale_id ? ' (Sale #'.$reference->salesReturn->sale_id.')' : ''),
-            $reference instanceof PurchaseReturnLine => 'Purchase Return #'.$reference->purchase_return_id
-                .($reference->purchaseReturn?->purchase_id ? ' (Purchase #'.$reference->purchaseReturn->purchase_id.')' : ''),
+            $reference instanceof SaleReturnLine => 'Credit Note '.($reference->salesReturn?->credit_note_number ?? '#'.$reference->sales_return_id),
+            $reference instanceof PurchaseReturnLine => 'Debit Note '.($reference->purchaseReturn?->debit_note_number ?? '#'.$reference->purchase_return_id),
             $reference instanceof StockAdjustmentLine => 'Stock Adjustment #'.$reference->stock_adjustment_id,
             $reference instanceof StockTransferLine => 'Stock Transfer #'.$reference->stock_transfer_id
                 .($reference->stockTransfer ? ' ('.$reference->stockTransfer->fromStore?->name.' → '.$reference->stockTransfer->toStore?->name.')' : ''),

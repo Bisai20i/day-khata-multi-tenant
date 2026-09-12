@@ -8,11 +8,16 @@ import Select from '@/components/ui/Select.vue';
 import Button from '@/components/ui/Button.vue';
 import { FileSpreadsheet } from '@lucide/vue';
 import { navGroups } from '@/lib/nav-items.js';
+import { formatMoney, compareMoney, subtractMoney } from '@/lib/money';
+import { formatBsDate } from '@/lib/format';
+
+const emptySide = () => ({ gross: '0.00', capital: '0.00', cancelled: '0.00', returns: '0.00', net: '0.00' });
 
 const props = defineProps({
-    outputVat: { type: Object, default: () => ({ gross: 0, returns: 0, net: 0 }) },
-    inputVat: { type: Object, default: () => ({ gross: 0, returns: 0, net: 0 }) },
-    netVatPayable: { type: Number, default: 0 },
+    outputVat: { type: Object, default: emptySide },
+    inputVat: { type: Object, default: emptySide },
+    netVatPayable: { type: String, default: '0.00' },
+    reconciliation: { type: Object, default: () => ({ applicable: false }) },
     stores: { type: Array, default: () => [] },
     from: { type: String, required: true },
     to: { type: String, required: true },
@@ -32,6 +37,10 @@ const storeOptions = computed(() => [
     ...props.stores.map((store) => ({ value: store.id, label: store.name })),
 ]);
 
+const rangeLabel = computed(
+    () => `BS ${formatBsDate(props.from)} to ${formatBsDate(props.to)} (AD ${props.from} to ${props.to})`,
+);
+
 function applyFilter() {
     router.get(
         window.location.pathname,
@@ -40,8 +49,6 @@ function applyFilter() {
     );
 }
 
-// Built from the currently-applied filters (not just whatever was last
-// submitted via Apply) so exporting always matches what's on screen.
 const exportUrl = computed(() => {
     const params = new URLSearchParams({ from: from.value, to: to.value });
     if (storeId.value) {
@@ -51,13 +58,17 @@ const exportUrl = computed(() => {
     return `/reports/vat-summary/export?${params.toString()}`;
 });
 
-function money(value) {
-    return Number(value ?? 0).toFixed(2);
-}
-
-const isPayable = computed(() => props.netVatPayable >= 0);
+// Exact string comparison, never a float: "is this refundable" must not
+// hinge on a rounding artefact.
+const isPayable = computed(() => compareMoney(props.netVatPayable, '0.00') >= 0);
 const netVatLabel = computed(() => (isPayable.value ? 'Net VAT Payable' : 'Net VAT Refundable'));
-const netVatAmount = computed(() => Math.abs(props.netVatPayable));
+const netVatAmount = computed(() =>
+    isPayable.value ? props.netVatPayable : subtractMoney('0.00', props.netVatPayable),
+);
+
+const reconciles = computed(
+    () => props.reconciliation.applicable === true && compareMoney(props.reconciliation.difference, '0.00') === 0,
+);
 </script>
 
 <template>
@@ -70,9 +81,12 @@ const netVatAmount = computed(() => Math.abs(props.netVatPayable));
             </Button>
         </div>
 
+        <p class="mb-1 text-[12.5px] text-text-muted">{{ rangeLabel }}</p>
+
         <p class="mb-4 text-[12.5px] text-text-muted">
-            Net VAT payable (or refundable) for the filing period — output VAT and input VAT each net out returns
-            posted in this range, regardless of which period the original sale or purchase fell in.
+            Net VAT payable or refundable for the filing period. Capital sales and capital purchases are
+            included; a cancellation and a credit or debit note reduce the period they were recorded in, not
+            the period of the original bill, so a filed month never changes.
         </p>
 
         <Card variant="panel" class="mb-4">
@@ -97,16 +111,24 @@ const netVatAmount = computed(() => Math.abs(props.netVatPayable));
             <Card variant="panel" title="Output VAT (Sales)">
                 <div class="divide-y divide-border text-[13px]">
                     <div class="flex items-center justify-between py-1.5">
-                        <span class="text-text-muted">Gross output VAT</span>
-                        <span class="font-semibold">{{ money(outputVat.gross) }}</span>
+                        <span class="text-text-muted">VAT on sales</span>
+                        <span class="font-semibold">{{ formatMoney(outputVat.gross) }}</span>
                     </div>
                     <div class="flex items-center justify-between py-1.5">
-                        <span class="text-text-muted">Less: sales returns VAT</span>
-                        <span class="font-semibold">({{ money(outputVat.returns) }})</span>
+                        <span class="text-text-muted">VAT on capital sales</span>
+                        <span class="font-semibold">{{ formatMoney(outputVat.capital) }}</span>
+                    </div>
+                    <div class="flex items-center justify-between py-1.5">
+                        <span class="text-text-muted">Less: cancelled invoices</span>
+                        <span class="font-semibold">({{ formatMoney(outputVat.cancelled) }})</span>
+                    </div>
+                    <div class="flex items-center justify-between py-1.5">
+                        <span class="text-text-muted">Less: credit notes</span>
+                        <span class="font-semibold">({{ formatMoney(outputVat.returns) }})</span>
                     </div>
                     <div class="flex items-center justify-between pt-2 text-text-strong">
                         <span class="font-bold">Net output VAT</span>
-                        <span class="font-bold">{{ money(outputVat.net) }}</span>
+                        <span class="font-bold">{{ formatMoney(outputVat.net) }}</span>
                     </div>
                 </div>
             </Card>
@@ -114,22 +136,30 @@ const netVatAmount = computed(() => Math.abs(props.netVatPayable));
             <Card variant="panel" title="Input VAT (Purchases)">
                 <div class="divide-y divide-border text-[13px]">
                     <div class="flex items-center justify-between py-1.5">
-                        <span class="text-text-muted">Gross input VAT</span>
-                        <span class="font-semibold">{{ money(inputVat.gross) }}</span>
+                        <span class="text-text-muted">VAT on purchases</span>
+                        <span class="font-semibold">{{ formatMoney(inputVat.gross) }}</span>
                     </div>
                     <div class="flex items-center justify-between py-1.5">
-                        <span class="text-text-muted">Less: purchase returns VAT</span>
-                        <span class="font-semibold">({{ money(inputVat.returns) }})</span>
+                        <span class="text-text-muted">VAT on capital purchases</span>
+                        <span class="font-semibold">{{ formatMoney(inputVat.capital) }}</span>
+                    </div>
+                    <div class="flex items-center justify-between py-1.5">
+                        <span class="text-text-muted">Less: cancelled bills</span>
+                        <span class="font-semibold">({{ formatMoney(inputVat.cancelled) }})</span>
+                    </div>
+                    <div class="flex items-center justify-between py-1.5">
+                        <span class="text-text-muted">Less: debit notes</span>
+                        <span class="font-semibold">({{ formatMoney(inputVat.returns) }})</span>
                     </div>
                     <div class="flex items-center justify-between pt-2 text-text-strong">
                         <span class="font-bold">Net input VAT</span>
-                        <span class="font-bold">{{ money(inputVat.net) }}</span>
+                        <span class="font-bold">{{ formatMoney(inputVat.net) }}</span>
                     </div>
                 </div>
             </Card>
         </div>
 
-        <Card variant="panel">
+        <Card variant="panel" class="mb-4">
             <div class="flex flex-wrap items-center justify-between gap-3">
                 <div>
                     <div class="text-[10px] font-bold tracking-[.8px] text-text-muted uppercase">{{ netVatLabel }}</div>
@@ -141,9 +171,38 @@ const netVatAmount = computed(() => Math.abs(props.netVatPayable));
                     class="px-3 py-1.5 text-lg font-bold"
                     :class="isPayable ? 'bg-danger-bg text-danger' : 'bg-success-bg text-success'"
                 >
-                    {{ money(netVatAmount) }}
+                    {{ formatMoney(netVatAmount) }}
                 </div>
             </div>
+        </Card>
+
+        <Card variant="panel" title="Ledger reconciliation">
+            <div v-if="reconciliation.applicable" class="divide-y divide-border text-[13px]">
+                <div class="flex items-center justify-between py-1.5">
+                    <span class="text-text-muted">Ledger VAT payable for the period (LIA20 less ASA23)</span>
+                    <span class="font-semibold">{{ formatMoney(reconciliation.ledgerNetVatPayable) }}</span>
+                </div>
+                <div class="flex items-center justify-between py-1.5">
+                    <span class="text-text-muted">Report total</span>
+                    <span class="font-semibold">{{ formatMoney(reconciliation.reportNetVatPayable) }}</span>
+                </div>
+                <div class="flex items-center justify-between pt-2 text-text-strong">
+                    <span class="font-bold">Difference (must be 0.00)</span>
+                    <span class="font-bold" :class="reconciles ? 'text-success' : 'text-danger'">
+                        {{ formatMoney(reconciliation.difference) }}
+                    </span>
+                </div>
+            </div>
+
+            <p v-else class="text-[12.5px] text-text-muted">
+                The chart of accounts is not split by store, so the ledger comparison only applies to the
+                whole business. Clear the store filter to see it.
+            </p>
+
+            <p v-if="reconciliation.applicable && !reconciles" class="mt-3 text-[11.5px] text-danger">
+                VAT reached Output VAT or Input VAT by a route this report does not model, almost always a
+                hand-written journal voucher. Check the Day Book for this period before filing.
+            </p>
         </Card>
     </AppLayout>
 </template>

@@ -1,49 +1,81 @@
 <script setup>
-import { computed, ref } from 'vue';
+import { computed, ref, watch } from 'vue';
 import { router, usePage } from '@inertiajs/vue3';
 import AppLayout from '@/layouts/AppLayout.vue';
 import Card from '@/components/ui/Card.vue';
 import NepaliDateInput from '@/components/ui/NepaliDateInput.vue';
+import Select from '@/components/ui/Select.vue';
 import Button from '@/components/ui/Button.vue';
 import { navGroups } from '@/lib/nav-items.js';
+import { formatMoney, isZeroMoney } from '@/lib/money.js';
+import { formatBsDate } from '@/lib/format.js';
 
 const props = defineProps({
+    fiscalYears: { type: Array, default: () => [] },
+    fiscalYearId: { type: [Number, null], default: null },
     vouchers: { type: Array, default: () => [] },
-    totalDebit: { type: Number, default: 0 },
-    totalCredit: { type: Number, default: 0 },
-    from: { type: String, required: true },
-    to: { type: String, required: true },
+    totalDebit: { type: String, default: '0.00' },
+    totalCredit: { type: String, default: '0.00' },
+    from: { type: [String, null], default: null },
+    to: { type: [String, null], default: null },
 });
 
 const page = usePage();
 const isAdmin = computed(() => page.props.auth?.user?.role?.slug === 'admin');
 const navItems = computed(() => navGroups(isAdmin.value));
 
+const fiscalYearOptions = computed(() =>
+    props.fiscalYears.map((fiscalYear) => ({
+        value: fiscalYear.id,
+        label: fiscalYear.status === 'open' ? `${fiscalYear.name} (open)` : fiscalYear.name,
+    })),
+);
+
+const fiscalYear = ref(props.fiscalYearId);
 const from = ref(props.from);
 const to = ref(props.to);
 
+// See CashBook.vue: a book is only ever read inside one fiscal year.
+watch(fiscalYear, (value) => {
+    const chosen = props.fiscalYears.find((year) => year.id === value);
+    from.value = chosen?.startDate ?? null;
+    to.value = chosen?.endDate ?? null;
+    applyFilter();
+});
+
 function applyFilter() {
-    router.get(window.location.pathname, { from: from.value, to: to.value }, { preserveState: true, preserveScroll: true });
+    router.get(
+        window.location.pathname,
+        { fiscal_year_id: fiscalYear.value ?? undefined, from: from.value ?? undefined, to: to.value ?? undefined },
+        { preserveState: true, preserveScroll: true },
+    );
 }
 
+// Kept per page rather than shared, matching this app's existing
+// per-page-file convention (mem.md gotcha #5).
 const voucherTypeLabels = {
     opening_balance: 'Opening Balance',
     journal: 'Journal',
     closing_entry: 'Closing Entry',
     roll_forward_adjustment: 'Roll Forward Adjustment',
+    reversal: 'Reversal',
     sale: 'Sale',
     sale_abbreviated: 'Sale (Abbreviated)',
+    sale_pan: 'Sale (PAN)',
     sale_return: 'Sale Return',
     purchase: 'Purchase',
     purchase_return: 'Purchase Return',
+    capital_sale: 'Capital Sale',
+    capital_purchase: 'Capital Purchase',
+    fixed_asset_purchase: 'Fixed Asset Purchase',
+    depreciation: 'Depreciation',
+    asset_disposal: 'Asset Disposal',
+    receipt: 'Receipt',
+    payment: 'Payment',
 };
 
 function voucherLabel(voucher) {
     return `${voucherTypeLabels[voucher.voucherType] ?? voucher.voucherType} #${voucher.voucherNumber}`;
-}
-
-function money(value) {
-    return Number(value ?? 0).toFixed(2);
 }
 </script>
 
@@ -55,6 +87,10 @@ function money(value) {
 
         <Card variant="panel" class="mb-4">
             <div class="flex flex-wrap items-end gap-3">
+                <div class="w-56">
+                    <label class="mb-1 block text-xs font-semibold text-text-muted">Fiscal Year</label>
+                    <Select v-model="fiscalYear" :options="fiscalYearOptions" />
+                </div>
                 <div>
                     <label class="mb-1 block text-xs font-semibold text-text-muted">From</label>
                     <NepaliDateInput v-model="from" />
@@ -68,7 +104,11 @@ function money(value) {
         </Card>
 
         <Card variant="panel">
-            <p v-if="vouchers.length === 0" class="px-1 py-6 text-center text-[13px] text-text-muted">
+            <p v-if="fiscalYearId === null" class="px-1 py-6 text-center text-[13px] text-text-muted">
+                No fiscal year has been created yet.
+            </p>
+
+            <p v-else-if="vouchers.length === 0" class="px-1 py-6 text-center text-[13px] text-text-muted">
                 No vouchers posted in this range.
             </p>
 
@@ -76,7 +116,8 @@ function money(value) {
                 <div v-for="voucher in vouchers" :key="`${voucher.voucherType}-${voucher.voucherNumber}-${voucher.date}`" class="py-2">
                     <div class="flex flex-wrap items-baseline justify-between gap-2 px-1 pb-1">
                         <div class="text-[13px] font-bold text-text-strong">
-                            {{ voucher.date }} · {{ voucherLabel(voucher) }}
+                            {{ formatBsDate(voucher.date) }} <span class="font-normal text-text-muted">({{ voucher.date }})</span> ·
+                            {{ voucherLabel(voucher) }}
                         </div>
                         <div class="text-[12.5px] text-text-muted">{{ voucher.narration ?? '—' }}</div>
                     </div>
@@ -95,15 +136,15 @@ function money(value) {
                     >
                         <div class="flex-1">{{ line.accountName }} <span class="text-text-muted">· {{ line.accountCode ?? '—' }}</span></div>
                         <div class="w-40 truncate text-[12.5px] text-text-muted">{{ line.narration ?? '—' }}</div>
-                        <div class="w-28 text-right">{{ line.debit > 0 ? money(line.debit) : '—' }}</div>
-                        <div class="w-28 text-right">{{ line.credit > 0 ? money(line.credit) : '—' }}</div>
+                        <div class="w-28 text-right">{{ isZeroMoney(line.debit) ? '—' : formatMoney(line.debit) }}</div>
+                        <div class="w-28 text-right">{{ isZeroMoney(line.credit) ? '—' : formatMoney(line.credit) }}</div>
                     </div>
                 </div>
             </div>
 
             <div v-if="vouchers.length > 0" class="mt-3 flex flex-wrap justify-end gap-6 border-t-[1.5px] border-border pt-3 text-[12.5px]">
-                <div><span class="text-text-muted">Total Debit:</span> <span class="font-semibold">{{ money(totalDebit) }}</span></div>
-                <div><span class="text-text-muted">Total Credit:</span> <span class="font-semibold">{{ money(totalCredit) }}</span></div>
+                <div><span class="text-text-muted">Total Debit:</span> <span class="font-semibold">{{ formatMoney(totalDebit) }}</span></div>
+                <div><span class="text-text-muted">Total Credit:</span> <span class="font-semibold">{{ formatMoney(totalCredit) }}</span></div>
             </div>
         </Card>
     </AppLayout>

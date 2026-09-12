@@ -8,10 +8,12 @@ import Select from '@/components/ui/Select.vue';
 import Button from '@/components/ui/Button.vue';
 import DataTable from '@/components/ui/DataTable.vue';
 import { navGroups } from '@/lib/nav-items.js';
+import { formatMoney, formatQuantity } from '@/lib/money';
+import { formatBsDate } from '@/lib/format';
 
 const props = defineProps({
     sales: { type: Array, default: () => [] },
-    totals: { type: Object, default: () => ({ count: 0, total: 0 }) },
+    totals: { type: Object, default: () => ({ count: 0, total: '0.00' }) },
     stores: { type: Array, default: () => [] },
     from: { type: String, required: true },
     to: { type: String, required: true },
@@ -45,18 +47,24 @@ function formatItems(items) {
     }
 
     return items
-        .map((item) => `${item.name ?? '—'} (${Number(item.quantity).toString()}${item.unit ? ` ${item.unit}` : ''})`)
+        .map((item) => `${item.name ?? '—'} (${formatQuantity(item.quantity)}${item.unit ? ` ${item.unit}` : ''})`)
         .join(', ');
 }
 
+const rangeLabel = computed(
+    () => `BS ${formatBsDate(props.from)} to ${formatBsDate(props.to)} (AD ${props.from} to ${props.to})`,
+);
+
 const columns = [
-    { accessorKey: 'date', header: 'Date' },
-    { id: 'id', header: 'Bill No', numeric: true, cell: ({ row }) => row.original.id },
+    { id: 'date_bs', header: 'Date (BS)', numeric: false, cell: ({ row }) => formatBsDate(row.original.date) },
+    { accessorKey: 'date', header: 'Date (AD)' },
+    // The stored invoice number (C7), not the internal row id.
+    { id: 'invoice_number', header: 'Bill No', numeric: false, cell: ({ row }) => row.original.invoice_number ?? '—' },
     { id: 'customer', header: "Buyer's Name", numeric: false, cell: ({ row }) => row.original.customer ?? '—' },
     { id: 'items', header: 'Items', numeric: false, cell: ({ row }) => formatItems(row.original.items) },
     { id: 'note', header: 'Note', numeric: false, cell: ({ row }) => row.original.note ?? '—' },
     { id: 'chalani_number', header: 'Chalani No', numeric: false, cell: ({ row }) => row.original.chalani_number ?? '—' },
-    { id: 'total', header: 'Total', numeric: true, cell: ({ row }) => row.original.total.toFixed(2) },
+    { id: 'total', header: 'Total', numeric: true, cell: ({ row }) => formatMoney(row.original.total) },
 ];
 </script>
 
@@ -69,6 +77,8 @@ const columns = [
         <p class="mb-4 text-[12.5px] text-text-muted">
             Posted sales in this range that have a note recorded against them. Cancelled sales and sales with no note are excluded.
         </p>
+
+        <p class="mb-4 text-[12.5px] text-text-muted">{{ rangeLabel }}</p>
 
         <Card variant="panel" class="mb-4">
             <div class="flex flex-wrap items-end gap-3">
@@ -93,7 +103,7 @@ const columns = [
 
             <div class="mt-3 flex flex-wrap justify-end gap-6 border-t-[1.5px] border-border pt-3 text-[12.5px]">
                 <div><span class="text-text-muted">Sales with note:</span> <span class="font-semibold">{{ totals.count }}</span></div>
-                <div><span class="text-text-muted">Total:</span> <span class="font-semibold">{{ totals.total.toFixed(2) }}</span></div>
+                <div><span class="text-text-muted">Total:</span> <span class="font-semibold">{{ formatMoney(totals.total) }}</span></div>
             </div>
         </Card>
     </AppLayout>

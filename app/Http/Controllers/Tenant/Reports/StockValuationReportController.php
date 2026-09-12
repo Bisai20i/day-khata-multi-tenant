@@ -3,103 +3,63 @@
 namespace App\Http\Controllers\Tenant\Reports;
 
 use App\Http\Controllers\Controller;
-use App\Models\Item;
 use App\Models\Store;
+use App\Support\Inventory\StockCosting;
+use App\Support\Money\Money;
 use Illuminate\Http\Request;
+use Illuminate\Support\Carbon;
 use Inertia\Inertia;
 use Inertia\Response;
 
+/**
+ * Point-in-time stock valuation snapshot: on-hand quantity and value per
+ * stockable item as of one date, sorted by value descending.
+ *
+ * Every figure comes from App\Support\Inventory\StockCosting (CONTRACTS
+ * C10), which is the one place stock is valued. This controller used to run
+ * its own weighted average off ItemStockMovement - rounding the average to
+ * 4 decimals and only then multiplying, which the audit measured valuing
+ * 100,000 units at Rs 1 plus 200,000 at Rs 2 as Rs 500,010.00 instead of Rs
+ * 500,000.00 (P0-17) - and it counted transfer-in rows as fresh purchases,
+ * so moving stock between your own stores inflated the valuation. Both the
+ * Balance Sheet and the year-end closing entry read StockCosting too, so
+ * this screen now agrees with the books by construction rather than by
+ * coincidence.
+ */
 class StockValuationReportController extends Controller
 {
-    /**
-     * Point-in-time stock valuation snapshot: for every stockable item, its
-     * on-hand quantity as of a single date and its weighted-average-cost
-     * valuation, sorted by valuation descending. Uses the same weighted-
-     * average-cost algorithm as InventoryReportController::stockSummary(),
-     * collapsed to one "as of" cutoff instead of a from/to range - computed
-     * directly from ItemStockMovement rather than Item::currentStock()
-     * (which has no date boundary), so "as of" queries into the past are
-     * correct.
-     */
     public function index(Request $request): Response
     {
-        $asOf = ($request->date('as_of') ?? now())->copy()->endOfDay();
+        $asOf = $this->resolveAsOf($request);
         $storeId = $request->integer('store_id') ?: null;
 
-        ['rows' => $rows, 'grandTotalValuation' => $grandTotalValuation] = $this->calculateValuation($asOf, $storeId);
+        $rows = StockCosting::valuationRows($asOf, $storeId)
+            ->map(fn (array $row) => [
+                'itemId' => $row['item_id'],
+                'name' => $row['name'],
+                'unit' => $row['unit'],
+                'quantity' => $row['quantity']->toString(),
+                'avgCost' => $row['average_cost'],
+                'valuation' => $row['value']->toString(),
+            ])
+            // Exact Money comparison, never a float sort key: two valuations
+            // a paisa apart must order deterministically.
+            ->sort(fn (array $a, array $b) => Money::of($b['valuation'])->compareTo(Money::of($a['valuation'])))
+            ->values();
 
         return Inertia::render('Tenant/Reports/StockValuation', [
-            'asOf' => $asOf->toDateString(),
+            'asOf' => $asOf,
             'rows' => $rows,
-            'grandTotalValuation' => $grandTotalValuation,
+            'grandTotalValuation' => Money::sum($rows->map(fn (array $row) => Money::of($row['valuation'])))->toString(),
             'stores' => Store::where('is_active', true)->orderBy('name')->get(['id', 'name']),
             'storeId' => $storeId,
         ]);
     }
 
-    /**
-     * Today's grand total valuation only, for dashboard-style callers that
-     * don't need the per-item breakdown. Reuses the exact same weighted-
-     * average-cost calculation as index() so the two never drift apart.
-     */
-    public function currentTotalValuation(): float
+    private function resolveAsOf(Request $request): string
     {
-        return $this->calculateValuation(now()->copy()->endOfDay(), null)['grandTotalValuation'];
-    }
+        $asOf = $request->string('as_of')->toString();
 
-    /**
-     * @return array{rows: array<int, array{itemId: int, name: string, unit: string, quantity: float, avgCost: float, valuation: float}>, grandTotalValuation: float}
-     */
-    private function calculateValuation(\DateTimeInterface $asOf, ?int $storeId): array
-    {
-        $rows = [];
-        $grandTotalValuation = 0.0;
-
-        Item::query()->where('is_stockable', true)->orderBy('name')->each(function (Item $item) use ($asOf, $storeId, &$rows, &$grandTotalValuation): void {
-            $movements = $item->stockMovements()->where('cancelled', false)
-                ->when($storeId !== null, fn ($query) => $query->where('store_id', $storeId))
-                ->get();
-
-            $asOfMovements = $movements->filter(fn ($movement) => $movement->date->lte($asOf));
-
-            $quantity = (float) $asOfMovements
-                ->sum(fn ($movement) => (float) $movement->quantity * $movement->movement_type->direction());
-
-            if ($movements->isEmpty() && abs($quantity) < 0.0001) {
-                return;
-            }
-
-            // Same deliberately simplified weighted-average cost as
-            // stockSummary(): every non-cancelled stock-increasing movement
-            // up to $asOf that has a recorded unit_cost_rate.
-            $costBasis = $asOfMovements->filter(
-                fn ($movement) => $movement->movement_type->direction() === 1
-                    && $movement->unit_cost_rate !== null,
-            );
-
-            $costQuantity = (float) $costBasis->sum(fn ($movement) => (float) $movement->quantity);
-            $costValue = (float) $costBasis->sum(fn ($movement) => (float) $movement->quantity * (float) $movement->unit_cost_rate);
-
-            $avgCost = $costQuantity > 0 ? round($costValue / $costQuantity, 4) : 0.0;
-            $valuation = round($avgCost * $quantity, 2);
-
-            $grandTotalValuation += $valuation;
-
-            $rows[] = [
-                'itemId' => $item->id,
-                'name' => $item->name,
-                'unit' => $item->unit,
-                'quantity' => round($quantity, 4),
-                'avgCost' => $avgCost,
-                'valuation' => $valuation,
-            ];
-        });
-
-        usort($rows, fn (array $a, array $b): int => $b['valuation'] <=> $a['valuation']);
-
-        return [
-            'rows' => $rows,
-            'grandTotalValuation' => round($grandTotalValuation, 2),
-        ];
+        return $asOf !== '' ? Carbon::parse($asOf)->toDateString() : Carbon::now()->toDateString();
     }
 }

@@ -59,8 +59,9 @@ test('the item-wise sales report aggregates quantity and value across multiple s
 
     loginItemWiseSalesTestUser($domain);
 
-    // Hand-computed: quantity 2 + 3 = 5; value 200 + 290 = 490; across 2
-    // distinct sales.
+    // Hand-computed: base quantity 2 + 3 = 5 (both lines are entered in the
+    // item's base unit, so the conversion factor is 1); value 200 + 290 =
+    // 490; across 2 distinct sales.
     $this->get("http://{$domain}/reports/item-wise-sales?from=2026-06-01&to=2026-06-30")
         ->assertOk()
         ->assertInertia(fn ($page) => $page
@@ -68,11 +69,16 @@ test('the item-wise sales report aggregates quantity and value across multiple s
             ->has('items', 1)
             ->where('items.0.name', 'Widget')
             ->where('items.0.unit', 'pcs')
-            ->where('items.0.total_quantity', 5)
-            ->where('items.0.total_value', 490)
+            // Exact decimal strings now: quantities at 4 places, money at 2.
+            ->where('items.0.total_quantity', '5.0000')
+            ->where('items.0.total_value', '490.00')
             ->where('items.0.transaction_count', 2)
-            ->where('totals.total_quantity', 5)
-            ->where('totals.total_value', 490)
+            // The unit-blind totals.total_quantity scalar is gone; quantities
+            // are grouped per unit because adding kg to pcs means nothing.
+            ->has('totals.quantities', 1)
+            ->where('totals.quantities.0.unit', 'pcs')
+            ->where('totals.quantities.0.quantity', '5.0000')
+            ->where('totals.total_value', '490.00')
         );
 
     $tenant->delete();
@@ -110,9 +116,9 @@ test('a cancelled sale is excluded from the item-wise sales report', function ()
         ->assertOk()
         ->assertInertia(fn ($page) => $page
             ->has('items', 1)
-            ->where('items.0.total_quantity', 1)
-            ->where('items.0.total_value', 100)
-            ->where('totals.total_value', 100)
+            ->where('items.0.total_quantity', '1.0000')
+            ->where('items.0.total_value', '100.00')
+            ->where('totals.total_value', '100.00')
         );
 
     $tenant->delete();
@@ -141,8 +147,9 @@ test('a sale outside the date range is excluded from the item-wise sales report'
         ->assertOk()
         ->assertInertia(fn ($page) => $page
             ->has('items', 0)
-            ->where('totals.total_quantity', 0)
-            ->where('totals.total_value', 0)
+            // No item rows means no per-unit quantity groups at all.
+            ->has('totals.quantities', 0)
+            ->where('totals.total_value', '0.00')
         );
 
     $tenant->delete();
@@ -156,8 +163,11 @@ test('the item-wise sales report sorts by total value descending and grand-total
         FiscalYear::create(['name' => 'FY1', 'start_date' => '2026-01-01', 'end_date' => '2026-12-31', 'status' => FiscalYearStatus::Open]);
         $admin = User::factory()->create(['email' => 'owner@example.com']);
         $customer = Customer::factory()->create();
-        $cheapItem = Item::factory()->create(['name' => 'Cheap Item', 'is_vatable' => false, 'is_stockable' => false]);
-        $pricyItem = Item::factory()->create(['name' => 'Pricy Item', 'is_vatable' => false, 'is_stockable' => false]);
+        // Both items share one unit on purpose: the grand total is now a
+        // per-unit breakdown, so a random factory unit would make it
+        // non-deterministic.
+        $cheapItem = Item::factory()->create(['name' => 'Cheap Item', 'unit' => 'pcs', 'is_vatable' => false, 'is_stockable' => false]);
+        $pricyItem = Item::factory()->create(['name' => 'Pricy Item', 'unit' => 'pcs', 'is_vatable' => false, 'is_stockable' => false]);
 
         // Cheap item: 10 units @ 10 = 100 total value.
         Sale::post(
@@ -181,11 +191,15 @@ test('the item-wise sales report sorts by total value descending and grand-total
         ->assertInertia(fn ($page) => $page
             ->has('items', 2)
             ->where('items.0.name', 'Pricy Item')
-            ->where('items.0.total_value', 500)
+            ->where('items.0.total_value', '500.00')
             ->where('items.1.name', 'Cheap Item')
-            ->where('items.1.total_value', 100)
-            ->where('totals.total_quantity', 11)
-            ->where('totals.total_value', 600)
+            ->where('items.1.total_value', '100.00')
+            // 10 + 1 = 11, now reported under the shared "pcs" unit instead
+            // of as one unit-blind scalar.
+            ->has('totals.quantities', 1)
+            ->where('totals.quantities.0.unit', 'pcs')
+            ->where('totals.quantities.0.quantity', '11.0000')
+            ->where('totals.total_value', '600.00')
         );
 
     $tenant->delete();
@@ -224,9 +238,9 @@ test('the item-wise sales report can be narrowed to a single store', function ()
         ->assertOk()
         ->assertInertia(fn ($page) => $page
             ->has('items', 1)
-            ->where('items.0.total_quantity', 2)
-            ->where('items.0.total_value', 200)
-            ->where('totals.total_value', 200)
+            ->where('items.0.total_quantity', '2.0000')
+            ->where('items.0.total_value', '200.00')
+            ->where('totals.total_value', '200.00')
         );
 
     $tenant->delete();

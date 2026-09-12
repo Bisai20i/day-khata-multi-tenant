@@ -8,7 +8,9 @@ use App\Models\FiscalYear;
 use App\Models\Item;
 use App\Models\StockAdjustmentLine;
 use App\Models\Store;
+use App\Support\Money\Quantity;
 use Illuminate\Http\Request;
+use Illuminate\Support\Collection;
 use Inertia\Inertia;
 use Inertia\Response;
 
@@ -49,7 +51,8 @@ class DamageLostStockReportController extends Controller
             ->when($itemId, fn ($query) => $query->where('stock_adjustment_lines.item_id', $itemId))
             ->whereHas('stockAdjustment', function ($query) use ($from, $to, $storeId) {
                 $query->where('status', 'posted')
-                    ->whereBetween('date', [$from, $to])
+                    ->whereDate('date', '>=', $from)
+                    ->whereDate('date', '<=', $to)
                     ->when($storeId, fn ($q) => $q->where('store_id', $storeId));
             });
 
@@ -59,17 +62,7 @@ class DamageLostStockReportController extends Controller
             ->sortBy(fn (StockAdjustmentLine $line) => $line->stockAdjustment->date)
             ->values();
 
-        $itemWiseRows = (clone $baseQuery)
-            ->join('stock_adjustments', 'stock_adjustments.id', '=', 'stock_adjustment_lines.stock_adjustment_id')
-            ->join('items', 'items.id', '=', 'stock_adjustment_lines.item_id')
-            ->groupBy('stock_adjustment_lines.item_id', 'items.name', 'items.unit')
-            ->orderByDesc('total_quantity')
-            ->selectRaw('stock_adjustment_lines.item_id as item_id')
-            ->selectRaw('items.name as name')
-            ->selectRaw('items.unit as unit')
-            ->selectRaw('sum(stock_adjustment_lines.quantity) as total_quantity')
-            ->selectRaw('count(distinct stock_adjustment_lines.stock_adjustment_id) as transaction_count')
-            ->get();
+        $itemWiseRows = $this->itemWiseTotals($lines);
 
         return Inertia::render('Tenant/Reports/DamageLostStock', [
             'lines' => $lines->map(fn (StockAdjustmentLine $line) => [
@@ -78,18 +71,13 @@ class DamageLostStockReportController extends Controller
                 'unit' => $line->item->unit,
                 'storeName' => $line->stockAdjustment->store?->name,
                 'reason' => $line->reason_type->value,
-                'quantity' => round((float) $line->quantity, 4),
+                'quantity' => Quantity::of($line->quantity)->toString(),
                 'remarks' => $line->remarks,
                 'note' => $line->stockAdjustment->note,
                 'stockAdjustmentId' => $line->stock_adjustment_id,
             ])->values(),
-            'itemWise' => $itemWiseRows->map(fn ($row) => [
-                'item_id' => (int) $row->item_id,
-                'name' => $row->name,
-                'unit' => $row->unit,
-                'total_quantity' => round((float) $row->total_quantity, 4),
-                'transaction_count' => (int) $row->transaction_count,
-            ])->values(),
+            'itemWise' => $itemWiseRows,
+            'totalQuantities' => $this->quantitiesByUnit($itemWiseRows),
             'items' => Item::query()->orderBy('name')->get(['id', 'name']),
             'stores' => Store::where('is_active', true)->orderBy('name')->get(['id', 'name']),
             'from' => $from,
@@ -98,6 +86,78 @@ class DamageLostStockReportController extends Controller
             'itemId' => $itemId,
             'reason' => in_array($reasonFilter, ['damage', 'lost'], true) ? $reasonFilter : null,
         ]);
+    }
+
+    /**
+     * The same rows summed per item, in exact Quantity rather than a SQL
+     * SUM() - on SQLite a DECIMAL column has REAL affinity, so summing
+     * quantities there in the database reintroduces the float drift this
+     * rewrite removed (audit P1: "0.19999999999999998").
+     *
+     * Quantities stay per item, so nothing ever adds two different units
+     * together.
+     *
+     * @param  Collection<int, StockAdjustmentLine>  $lines
+     * @return array<int, array<string, mixed>>
+     */
+    private function itemWiseTotals($lines): array
+    {
+        $byItem = [];
+
+        foreach ($lines as $line) {
+            $itemId = (int) $line->item_id;
+
+            $byItem[$itemId] ??= [
+                'item_id' => $itemId,
+                'name' => $line->item?->name,
+                'unit' => $line->item?->unit,
+                'quantity' => Quantity::zero(),
+                'adjustments' => [],
+            ];
+
+            $byItem[$itemId]['quantity'] = $byItem[$itemId]['quantity']->plus(Quantity::of($line->quantity));
+            $byItem[$itemId]['adjustments'][(int) $line->stock_adjustment_id] = true;
+        }
+
+        $rows = array_map(fn (array $row) => [
+            'item_id' => $row['item_id'],
+            'name' => $row['name'],
+            'unit' => $row['unit'],
+            'total_quantity' => $row['quantity']->toString(),
+            'transaction_count' => count($row['adjustments']),
+        ], array_values($byItem));
+
+        usort($rows, fn (array $a, array $b) => Quantity::of($b['total_quantity'])->compareTo(Quantity::of($a['total_quantity'])));
+
+        return $rows;
+    }
+
+    /**
+     * The written-off total per base unit. Three Kilograms plus two Pieces
+     * is not "five", so there is no single grand total anywhere on this
+     * report.
+     *
+     * @param  array<int, array<string, mixed>>  $itemWiseRows
+     * @return array<int, array{unit: string, quantity: string}>
+     */
+    private function quantitiesByUnit(array $itemWiseRows): array
+    {
+        $byUnit = [];
+
+        foreach ($itemWiseRows as $row) {
+            $unit = (string) ($row['unit'] ?? '');
+            $byUnit[$unit] = ($byUnit[$unit] ?? Quantity::zero())->plus(Quantity::of($row['total_quantity']));
+        }
+
+        $totals = [];
+
+        foreach ($byUnit as $unit => $quantity) {
+            $totals[] = ['unit' => $unit, 'quantity' => $quantity->toString()];
+        }
+
+        usort($totals, fn (array $a, array $b) => strcasecmp($a['unit'], $b['unit']));
+
+        return $totals;
     }
 
     /**

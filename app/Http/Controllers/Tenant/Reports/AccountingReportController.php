@@ -10,144 +10,238 @@ use App\Models\AccountHead;
 use App\Models\FiscalYear;
 use App\Models\JournalVoucher;
 use App\Models\JournalVoucherLine;
+use App\Support\Inventory\StockCosting;
+use App\Support\Money\Money;
+use Brick\Math\BigDecimal;
+use Brick\Math\RoundingMode;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Http\Request;
+use Illuminate\Support\Carbon;
 use Illuminate\Support\Collection;
 use Inertia\Inertia;
 use Inertia\Response;
+use RuntimeException;
 
 /**
- * Trial Balance / Income Statement / Balance Sheet - pure read-only
- * aggregations over JournalVoucherLine, no new tables.
+ * Trial Balance / Income Statement / Balance Sheet / Day Book / Cash Book /
+ * Bank Book - read-only aggregations over JournalVoucherLine, no new tables.
  *
- * Trial Balance and Income Statement EXCLUDE ClosingEntry-type voucher
- * lines: FiscalYear::close() posts a ClosingEntry voucher INTO the closing
- * year itself, zeroing every profit-and-loss account within that year's own
- * line set. Summing everything (including the ClosingEntry) would make a
- * closed year's trial balance/income statement always show zero P&L
- * activity, which defeats the point of either report. Balance Sheet does
- * NOT exclude anything - ClosingEntry only retargets P&L accounts (not
- * shown on a balance sheet) plus "Profit & Loss" itself (a Capital account,
- * correctly needs the closing entry's effect folded in).
+ * Three rules run through every method here.
+ *
+ * **Everything is a Money string.** Props leave this controller as exact
+ * 2-decimal strings, never floats: the pages render them with formatMoney()
+ * and never do arithmetic of their own (CONTRACTS C1/C8). Sums run on scaled
+ * integers inside SQL, because SQLite gives a decimal column REAL affinity
+ * and a plain SUM() there reintroduces the float error the whole Phase 1
+ * foundation exists to remove.
+ *
+ * **Every figure is boxed inside ONE fiscal year.** The Cash Book used to
+ * carry its opening balance from every line ever posted, including the new
+ * year's own Opening Balance voucher, which restates the same closing
+ * balances the previous year's lines already produced - so cash that ended
+ * FY1 at 600 opened FY2 at 1,200 (audit P0-18). An opening balance is now
+ * "this year's Opening Balance voucher plus this year's lines before the
+ * window", and nothing ever sums across a year boundary.
+ *
+ * **Inventory is periodic** (CONTRACTS C10). Stock documents post no
+ * journal, so a year that has not been closed yet has no stock in its
+ * ledger at all. The statements compute it instead, through StockCosting,
+ * and label it as computed. A closed year shows the entries
+ * FiscalYear::close() actually posted.
  */
 class AccountingReportController extends Controller
 {
     public function trialBalance(Request $request): Response
     {
-        $fiscalYearId = $this->resolveFiscalYearId($request);
+        $fiscalYear = $this->resolveFiscalYear($request);
 
-        $rows = collect();
-        $totalDebit = 0.0;
-        $totalCredit = 0.0;
+        $heads = [];
+        $totals = $this->emptyTrialBalanceTotals();
+        [$from, $to] = [null, null];
 
-        if ($fiscalYearId !== null) {
-            $rows = $this->accountRows(null, $fiscalYearId, excludeClosingEntry: true);
-            $totalDebit = round((float) $rows->sum('debit'), 2);
-            $totalCredit = round((float) $rows->sum('credit'), 2);
+        if ($fiscalYear !== null) {
+            [$from, $to] = $this->resolveWindow($request, $fiscalYear);
+
+            $excluded = $this->sweepVoucherIds($fiscalYear);
+            $opening = $this->balancesByAccount($fiscalYear, $excluded, null, $this->dayBefore($from));
+            $period = $this->balancesByAccount($fiscalYear, $excluded, $from, $to);
+
+            $rows = $this->trialBalanceRows($opening, $period);
+            $heads = $this->buildHierarchy($rows);
+            $totals = $this->trialBalanceTotals($rows);
         }
 
-        return Inertia::render('Tenant/Reports/TrialBalance', [
-            'fiscalYears' => FiscalYear::query()->orderByDesc('start_date')->get(['id', 'name', 'status']),
-            'fiscalYearId' => $fiscalYearId,
-            'heads' => $this->buildHierarchy($rows),
-            'totalDebit' => $totalDebit,
-            'totalCredit' => $totalCredit,
-        ]);
+        return Inertia::render('Tenant/Reports/TrialBalance', array_merge([
+            'fiscalYears' => $this->fiscalYearOptions(),
+            'fiscalYearId' => $fiscalYear?->id,
+            'from' => $from,
+            'to' => $to,
+            'heads' => $heads,
+        ], $totals));
     }
 
     public function incomeStatement(Request $request): Response
     {
-        $fiscalYearId = $this->resolveFiscalYearId($request);
+        $fiscalYear = $this->resolveFiscalYear($request);
 
         $income = [];
         $expenses = [];
-        $totalIncome = 0.0;
-        $totalExpenses = 0.0;
+        $totalIncome = Money::zero();
+        $totalExpenses = Money::zero();
+        $grossProfit = Money::zero();
+        $stock = ['opening' => '0.00', 'closing' => '0.00', 'posted' => false, 'asOf' => null];
+        [$from, $to] = [null, null];
 
-        if ($fiscalYearId !== null) {
-            $income = $this->headBalances('Income', $fiscalYearId, creditNormal: true, excludeClosingEntry: true);
-            $expenses = $this->headBalances('Expenses', $fiscalYearId, creditNormal: false, excludeClosingEntry: true);
-            $totalIncome = round((float) collect($income)->sum('amount'), 2);
-            $totalExpenses = round((float) collect($expenses)->sum('amount'), 2);
+        if ($fiscalYear !== null) {
+            [$from, $to] = $this->resolveWindow($request, $fiscalYear);
+
+            $excluded = $this->sweepVoucherIds($fiscalYear);
+            $balances = $this->balancesByAccount($fiscalYear, $excluded, $from, $to);
+
+            $stock = $this->stockPosition($fiscalYear, $to);
+
+            $income = $this->headBalances('Income', $balances, creditNormal: true);
+            $expenses = $this->headBalances('Expenses', $balances, creditNormal: false);
+
+            // A year whose trading entries have not been posted yet (it is
+            // still open, or it was closed before this feature existed) has
+            // no stock anywhere in its ledger, so the two sides are shown as
+            // computed rows. Once close() has posted them, the real EXE9 /
+            // INI22 balances are already in $balances and adding them again
+            // would double the stock movement.
+            if (! $stock['posted']) {
+                $expenses = $this->withVirtualRow($expenses, FiscalYear::OPENING_STOCK_CODE, 'Opening Stock', $stock['opening']);
+                $income = $this->withVirtualRow($income, FiscalYear::CLOSING_STOCK_CODE, 'Closing Stock', $stock['closing']);
+            }
+
+            $totalIncome = Money::sum(array_column($income, 'amount'));
+            $totalExpenses = Money::sum(array_column($expenses, 'amount'));
+            $grossProfit = $this->grossProfit($income, $expenses);
         }
 
         return Inertia::render('Tenant/Reports/IncomeStatement', [
-            'fiscalYears' => FiscalYear::query()->orderByDesc('start_date')->get(['id', 'name', 'status']),
-            'fiscalYearId' => $fiscalYearId,
+            'fiscalYears' => $this->fiscalYearOptions(),
+            'fiscalYearId' => $fiscalYear?->id,
+            'from' => $from,
+            'to' => $to,
             'income' => $income,
             'expenses' => $expenses,
-            'totalIncome' => $totalIncome,
-            'totalExpenses' => $totalExpenses,
-            'netProfit' => round($totalIncome - $totalExpenses, 2),
+            'stock' => $stock,
+            'totalIncome' => $totalIncome->toString(),
+            'totalExpenses' => $totalExpenses->toString(),
+            'grossProfit' => $grossProfit->toString(),
+            'netProfit' => $totalIncome->minus($totalExpenses)->toString(),
         ]);
     }
 
     public function balanceSheet(Request $request): Response
     {
-        $fiscalYearId = $this->resolveFiscalYearId($request);
+        $fiscalYear = $this->resolveFiscalYear($request);
 
-        $rows = collect();
-        $totalAssets = 0.0;
-        $totalLiabilitiesAndCapital = 0.0;
-        $currentYearEarnings = 0.0;
+        $heads = [];
+        $totalAssets = Money::zero();
+        $totalLiabilitiesAndCapital = Money::zero();
+        $currentYearEarnings = Money::zero();
+        $stock = ['opening' => '0.00', 'closing' => '0.00', 'posted' => false, 'asOf' => null];
+        $balanceWarning = null;
+        [$from, $to] = [null, null];
 
-        if ($fiscalYearId !== null) {
-            $fiscalYear = FiscalYear::findOrFail($fiscalYearId);
+        if ($fiscalYear !== null) {
+            [$from, $to] = $this->resolveWindow($request, $fiscalYear);
 
-            $rows = $this->accountRows(['Assets', 'Liabilities', 'Capital'], $fiscalYearId, excludeClosingEntry: false);
+            // A balance sheet is a position "as at", so it always reads the
+            // whole year up to $to - the window's `from` only moves the
+            // Trial Balance's opening column and the Income Statement's
+            // period, never a closing position.
+            //
+            // Nothing is excluded here, unlike the other two reports: the
+            // sweep retargets profit-and-loss accounts (which a balance
+            // sheet never shows) onto "Profit & Loss", a Capital account
+            // whose balance this report absolutely does need.
+            $balances = $this->balancesByAccount($fiscalYear, [], null, $to);
+
+            $rows = $this->accountRows($balances, ['Assets', 'Liabilities', 'Capital']);
+
+            $stock = $this->stockPosition($fiscalYear, $to);
+
+            // Unswept profit for EVERY year, not only an open one. A closed
+            // year stays Closed after being reopened for a correction, and
+            // that correction lands on P&L accounts the sweep had already
+            // zeroed - so a status check hid exactly the case that unbalances
+            // the report (audit P0-19). This formula is zero by construction
+            // for a cleanly closed year, and relock() re-sweeps whatever a
+            // correction left behind.
+            $currentYearEarnings = $this->unsweptProfitAndLoss($fiscalYear, $to);
+
+            // Stock the ledger does not know about yet (see stockPosition()).
+            // It is an asset AND the same amount of profit, so adding it to
+            // both sides keeps the sheet balanced instead of tipping it.
+            $stockAdjustment = Money::of($stock['closing'])->minus(Money::of($stock['opening']));
+
+            if (! $stock['posted'] && ! $stockAdjustment->isZero()) {
+                $rows = $this->withStockInHandRow($rows, $stockAdjustment);
+                $currentYearEarnings = $currentYearEarnings->plus($stockAdjustment);
+            }
 
             $assetRows = $rows->filter(fn (array $row) => $row['headName'] === 'Assets');
             $otherRows = $rows->filter(fn (array $row) => $row['headName'] !== 'Assets');
 
-            $totalAssets = round((float) $assetRows->sum('debit') - (float) $assetRows->sum('credit'), 2);
-            $totalLiabilitiesAndCapital = round((float) $otherRows->sum('credit') - (float) $otherRows->sum('debit'), 2);
+            $totalAssets = Money::sum($assetRows->pluck('debit'))->minus(Money::sum($assetRows->pluck('credit')));
+            $totalLiabilitiesAndCapital = Money::sum($otherRows->pluck('credit'))
+                ->minus(Money::sum($otherRows->pluck('debit')))
+                ->plus($currentYearEarnings);
 
-            // While the fiscal year is still open, this year's net
-            // profit/loss hasn't been swept into "Profit & Loss" yet (that
-            // only happens at FiscalYear::close()) - Assets vs.
-            // Liabilities+Capital won't balance without accounting for it,
-            // so show it as its own line rather than silently
-            // under-reporting equity. Once closed, the real ClosingEntry
-            // voucher already carries this into "Profit & Loss" (picked up
-            // by $otherRows above), so this virtual line is skipped then.
-            if ($fiscalYear->status === FiscalYearStatus::Open) {
-                $income = $this->headBalances('Income', $fiscalYearId, creditNormal: true, excludeClosingEntry: true);
-                $expenses = $this->headBalances('Expenses', $fiscalYearId, creditNormal: false, excludeClosingEntry: true);
-                $currentYearEarnings = round(
-                    (float) collect($income)->sum('amount') - (float) collect($expenses)->sum('amount'),
-                    2
-                );
-                $totalLiabilitiesAndCapital = round($totalLiabilitiesAndCapital + $currentYearEarnings, 2);
-            }
+            $balanceWarning = $this->assertBalanced($fiscalYear, $totalAssets, $totalLiabilitiesAndCapital);
+            $heads = $this->buildHierarchy($rows);
         }
 
         return Inertia::render('Tenant/Reports/BalanceSheet', [
-            'fiscalYears' => FiscalYear::query()->orderByDesc('start_date')->get(['id', 'name', 'status']),
-            'fiscalYearId' => $fiscalYearId,
-            'heads' => $this->buildHierarchy($rows),
-            'currentYearEarnings' => $currentYearEarnings,
-            'totalAssets' => $totalAssets,
-            'totalLiabilitiesAndCapital' => $totalLiabilitiesAndCapital,
+            'fiscalYears' => $this->fiscalYearOptions(),
+            'fiscalYearId' => $fiscalYear?->id,
+            'from' => $from,
+            'to' => $to,
+            'heads' => $heads,
+            'stock' => $stock,
+            'currentYearEarnings' => $currentYearEarnings->toString(),
+            'totalAssets' => $totalAssets->toString(),
+            'totalLiabilitiesAndCapital' => $totalLiabilitiesAndCapital->toString(),
+            'balanceWarning' => $balanceWarning,
         ]);
     }
 
     /**
-     * A complete chronological diary of every voucher posted in the date
-     * range, lines nested underneath - unlike Trial Balance/Income
-     * Statement this is an audit trail, not a balance computation, so
-     * ClosingEntry/OpeningBalance vouchers are NOT excluded.
+     * A complete chronological diary of every voucher posted inside the
+     * chosen fiscal year's window, lines nested underneath - unlike Trial
+     * Balance/Income Statement this is an audit trail, not a balance
+     * computation, so ClosingEntry/OpeningBalance vouchers are NOT excluded.
      */
     public function dayBook(Request $request): Response
     {
-        [$from, $to] = $this->resolveDateRange($request);
+        $fiscalYear = $this->resolveFiscalYear($request);
 
-        $vouchers = JournalVoucher::query()
-            ->with('lines.account:id,code,name')
-            ->whereBetween('date', [$from, $to])
-            ->orderBy('date')
-            ->orderBy('id')
-            ->get();
+        $vouchers = collect();
+        [$from, $to] = [null, null];
+
+        if ($fiscalYear !== null) {
+            [$from, $to] = $this->resolveWindow($request, $fiscalYear);
+
+            $vouchers = JournalVoucher::query()
+                ->with('lines.account:id,code,name')
+                ->where('fiscal_year_id', $fiscalYear->id)
+                ->whereDate('date', '>=', $from)
+                ->whereDate('date', '<=', $to)
+                ->orderBy('date')
+                ->orderBy('id')
+                ->get();
+        }
+
+        $lines = $vouchers->flatMap->lines;
 
         return Inertia::render('Tenant/Reports/DayBook', [
+            'fiscalYears' => $this->fiscalYearOptions(),
+            'fiscalYearId' => $fiscalYear?->id,
+            'from' => $from,
+            'to' => $to,
             'vouchers' => $vouchers->map(fn (JournalVoucher $voucher) => [
                 'date' => $voucher->date->toDateString(),
                 'voucherType' => $voucher->voucher_type->value,
@@ -156,15 +250,13 @@ class AccountingReportController extends Controller
                 'lines' => $voucher->lines->map(fn (JournalVoucherLine $line) => [
                     'accountCode' => $line->account->code,
                     'accountName' => $line->account->name,
-                    'debit' => (float) $line->debit,
-                    'credit' => (float) $line->credit,
+                    'debit' => Money::of($line->debit)->toString(),
+                    'credit' => Money::of($line->credit)->toString(),
                     'narration' => $line->narration,
                 ])->values(),
             ])->values(),
-            'totalDebit' => (float) $vouchers->flatMap->lines->sum('debit'),
-            'totalCredit' => (float) $vouchers->flatMap->lines->sum('credit'),
-            'from' => $from,
-            'to' => $to,
+            'totalDebit' => Money::sum($lines->map(fn (JournalVoucherLine $line) => Money::of($line->debit)))->toString(),
+            'totalCredit' => Money::sum($lines->map(fn (JournalVoucherLine $line) => Money::of($line->credit)))->toString(),
         ]);
     }
 
@@ -175,16 +267,22 @@ class AccountingReportController extends Controller
      */
     public function cashBook(Request $request): Response
     {
-        [$from, $to] = $this->resolveDateRange($request);
+        $fiscalYear = $this->resolveFiscalYear($request);
         $account = Account::where('code', 'AS1')->firstOrFail();
+
+        [$from, $to] = $fiscalYear === null ? [null, null] : $this->resolveWindow($request, $fiscalYear);
 
         return Inertia::render('Tenant/Reports/CashBook', array_merge(
             [
+                'fiscalYears' => $this->fiscalYearOptions(),
+                'fiscalYearId' => $fiscalYear?->id,
                 'account' => $account->only(['id', 'code', 'name']),
                 'from' => $from,
                 'to' => $to,
             ],
-            $this->accountBook($account, $from, $to),
+            $fiscalYear === null
+                ? $this->emptyAccountBook()
+                : $this->accountBook($account, $fiscalYear, $from, $to),
         ));
     }
 
@@ -199,120 +297,270 @@ class AccountingReportController extends Controller
      */
     public function bankBook(Request $request): Response
     {
-        [$from, $to] = $this->resolveDateRange($request);
+        $fiscalYear = $this->resolveFiscalYear($request);
 
         $accounts = Account::where('code', '!=', 'AS1')->orderBy('name')->get(['id', 'code', 'name']);
         $accountId = $request->integer('account_id') ?: $accounts->first()?->id;
         $account = $accountId ? $accounts->firstWhere('id', $accountId) : null;
 
+        [$from, $to] = $fiscalYear === null ? [null, null] : $this->resolveWindow($request, $fiscalYear);
+
         return Inertia::render('Tenant/Reports/BankBook', array_merge(
             [
+                'fiscalYears' => $this->fiscalYearOptions(),
+                'fiscalYearId' => $fiscalYear?->id,
                 'accounts' => $accounts,
                 'accountId' => $accountId,
                 'from' => $from,
                 'to' => $to,
             ],
-            $account
-                ? $this->accountBook($account, $from, $to)
-                : ['entries' => [], 'openingBalance' => 0.0, 'closingBalance' => 0.0],
+            $account && $fiscalYear
+                ? $this->accountBook($account, $fiscalYear, $from, $to)
+                : $this->emptyAccountBook(),
         ));
     }
 
     /**
-     * Defaults to the current open fiscal year's date range when no
-     * explicit `from`/`to` query params are given, falling back to
-     * month-to-date if no fiscal year exists yet. Identical logic to
-     * SalesPurchaseReportController::resolveDateRange() - duplicated
-     * rather than shared across controllers, matching this app's existing
-     * per-controller-file convention (see mem.md gotcha #5).
+     * @return Collection<int, array{id: int, name: string, status: string, startDate: string, endDate: string}>
+     */
+    private function fiscalYearOptions(): Collection
+    {
+        return FiscalYear::query()
+            ->orderByDesc('start_date')
+            ->get(['id', 'name', 'status', 'start_date', 'end_date'])
+            ->map(fn (FiscalYear $fiscalYear) => [
+                'id' => $fiscalYear->id,
+                'name' => $fiscalYear->name,
+                'status' => $fiscalYear->status->value,
+                'startDate' => $fiscalYear->start_date->toDateString(),
+                'endDate' => $fiscalYear->end_date->toDateString(),
+            ]);
+    }
+
+    private function resolveFiscalYear(Request $request): ?FiscalYear
+    {
+        $requested = $request->integer('fiscal_year_id');
+
+        if ($requested) {
+            return FiscalYear::find($requested) ?? FiscalYear::query()->where('status', FiscalYearStatus::Open)->first();
+        }
+
+        return FiscalYear::query()->where('status', FiscalYearStatus::Open)->first()
+            ?? FiscalYear::query()->orderByDesc('start_date')->first();
+    }
+
+    /**
+     * The optional date window, always clamped inside the chosen fiscal
+     * year. A report can no longer span two years (which is what let the
+     * Cash Book double-count an opening balance), and a nonsensical window
+     * falls back to the whole year rather than rendering an empty page.
      *
      * @return array{0: string, 1: string}
      */
-    private function resolveDateRange(Request $request): array
+    private function resolveWindow(Request $request, FiscalYear $fiscalYear): array
     {
+        $start = $fiscalYear->start_date->toDateString();
+        $end = $fiscalYear->end_date->toDateString();
+
         $from = $request->string('from')->toString();
         $to = $request->string('to')->toString();
 
-        if ($from !== '' && $to !== '') {
-            return [$from, $to];
-        }
+        $from = $from !== '' ? max($from, $start) : $start;
+        $to = $to !== '' ? min($to, $end) : $end;
 
-        $fiscalYear = FiscalYear::query()->where('status', FiscalYearStatus::Open)->first();
+        return $from > $to ? [$start, $end] : [$from, $to];
+    }
 
-        if ($fiscalYear) {
-            return [$fiscalYear->start_date->toDateString(), $fiscalYear->end_date->toDateString()];
-        }
-
-        return [now()->startOfMonth()->toDateString(), now()->toDateString()];
+    private function dayBefore(string $date): string
+    {
+        return Carbon::parse($date)->subDay()->toDateString();
     }
 
     /**
-     * A single account's running book over a date range: an opening
-     * balance carried from everything posted strictly before `$from`
-     * (all-time cumulative, unlike the fiscal-year-boxed Accounts/Ledger),
-     * then every line within the range with a running balance.
+     * Ids of this year's P&L SWEEP vouchers, which Trial Balance and Income
+     * Statement must leave out.
      *
-     * @return array{entries: array<int, array{date: string, voucherType: string, voucherNumber: int, narration: ?string, debit: float, credit: float, balance: float}>, openingBalance: float, closingBalance: float}
+     * FiscalYear::close() posts its sweep INTO the closing year itself,
+     * zeroing every profit-and-loss account within that year's own line
+     * set - so summing everything would make a closed year's trial balance
+     * and income statement always report zero activity, which defeats the
+     * point of either report.
+     *
+     * It is identified structurally rather than by voucher type, because
+     * close() now posts THREE ClosingEntry vouchers and only one of them is
+     * the sweep. By construction the sweep touches nothing but
+     * profit-and-loss accounts plus "Profit & Loss" itself, while each of
+     * the two trading-stock vouchers always pairs a stock account with the
+     * balance-sheet account "Stock in Hand" - so "a ClosingEntry voucher
+     * with no Stock in Hand line" is exactly the sweep, and stays exactly
+     * the sweep even in the edge case where the year's net profit is zero
+     * and the sweep carries no "Profit & Loss" line at all.
+     *
+     * @return array<int, int>
      */
-    private function accountBook(Account $account, string $from, string $to): array
+    private function sweepVoucherIds(FiscalYear $fiscalYear): array
     {
-        $openingBalance = (float) (JournalVoucherLine::query()
-            ->where('account_id', $account->id)
-            ->whereHas('journalVoucher', fn ($query) => $query->where('date', '<', $from))
-            ->selectRaw('COALESCE(SUM(debit), 0) - COALESCE(SUM(credit), 0) as net')
-            ->value('net') ?? 0);
+        $stockInHandId = Account::where('code', FiscalYear::STOCK_IN_HAND_CODE)->value('id');
 
-        $lines = JournalVoucherLine::query()
-            ->where('account_id', $account->id)
-            ->whereHas('journalVoucher', fn ($query) => $query->whereBetween('date', [$from, $to]))
-            ->with('journalVoucher')
-            ->get()
-            ->sortBy([['journalVoucher.date', 'asc'], ['id', 'asc']])
-            ->values();
+        return JournalVoucher::query()
+            ->where('fiscal_year_id', $fiscalYear->id)
+            ->where('voucher_type', VoucherType::ClosingEntry->value)
+            ->when(
+                $stockInHandId !== null,
+                fn (Builder $query) => $query->whereDoesntHave('lines', fn (Builder $lines) => $lines->where('account_id', $stockInHandId)),
+            )
+            ->pluck('id')
+            ->all();
+    }
 
-        $runningBalance = $openingBalance;
+    /**
+     * Net (debit - credit) balance per account inside one fiscal year, in a
+     * single grouped query.
+     *
+     * Scaled-integer SUM for the same reason FiscalYear::netBalance() and
+     * StockCosting use it: SQLite gives a decimal column REAL affinity, so a
+     * plain SUM() there comes back as a float. whereDate() rather than
+     * whereBetween() because a `date`-cast column is stored as a full
+     * "Y-m-d H:i:s" string on SQLite, which sorts AFTER the bare "Y-m-d" a
+     * filter sends - so the last day of any range silently fell out of it.
+     *
+     * @param  array<int, int>  $excludeVoucherIds
+     * @return array<int, Money>
+     */
+    private function balancesByAccount(FiscalYear $fiscalYear, array $excludeVoucherIds, ?string $from, ?string $to): array
+    {
+        $cast = JournalVoucherLine::query()->getConnection()->getDriverName() === 'sqlite' ? 'INTEGER' : 'SIGNED';
 
-        $entries = $lines->map(function (JournalVoucherLine $line) use (&$runningBalance) {
-            $runningBalance = round($runningBalance + (float) $line->debit - (float) $line->credit, 2);
+        $rows = JournalVoucherLine::query()
+            ->whereHas('journalVoucher', function (Builder $query) use ($fiscalYear, $excludeVoucherIds, $from, $to) {
+                $query->where('fiscal_year_id', $fiscalYear->id)
+                    ->when($excludeVoucherIds !== [], fn (Builder $q) => $q->whereNotIn('id', $excludeVoucherIds))
+                    ->when($from !== null, fn (Builder $q) => $q->whereDate('date', '>=', $from))
+                    ->when($to !== null, fn (Builder $q) => $q->whereDate('date', '<=', $to));
+            })
+            ->selectRaw(
+                "account_id,
+                 COALESCE(SUM(CAST(ROUND(debit * 100) AS {$cast})), 0) - COALESCE(SUM(CAST(ROUND(credit * 100) AS {$cast})), 0) as net_scaled"
+            )
+            ->groupBy('account_id')
+            ->pluck('net_scaled', 'account_id');
+
+        $balances = [];
+
+        foreach ($rows as $accountId => $netScaled) {
+            $balances[(int) $accountId] = Money::of(
+                BigDecimal::of((int) $netScaled)->dividedBy(100, 2, RoundingMode::Unnecessary)
+            );
+        }
+
+        return $balances;
+    }
+
+    /**
+     * Unswept profit-and-loss for this year: every P&L account's balance
+     * INCLUDING the closing entries. Zero for a cleanly closed year (that is
+     * what the sweep achieved), the year's profit for an open one, and the
+     * leftover effect of a correction for a reopened one.
+     */
+    private function unsweptProfitAndLoss(FiscalYear $fiscalYear, string $to): Money
+    {
+        $balances = $this->balancesByAccount($fiscalYear, [], null, $to);
+
+        $profitAndLossAccountIds = Account::query()
+            ->whereHas('group.accountHead', fn (Builder $query) => $query->where('is_profit_and_loss', true))
+            ->orWhereHas('subgroup.accountGroup.accountHead', fn (Builder $query) => $query->where('is_profit_and_loss', true))
+            ->pluck('id');
+
+        $net = Money::zero();
+
+        foreach ($profitAndLossAccountIds as $accountId) {
+            $net = $net->plus($balances[(int) $accountId] ?? Money::zero());
+        }
+
+        // net is debit - credit across income and expenses, so profit is its
+        // negation: income sits on the credit side.
+        return $net->negated();
+    }
+
+    /**
+     * This year's opening and closing stock, and whether the ledger already
+     * holds them.
+     *
+     * "Posted" means FiscalYear::close() has run its trading pair for this
+     * year - detected by the presence of a ClosingEntry voucher touching
+     * Stock in Hand, the same structural marker sweepVoucherIds() keys off.
+     *
+     * Not posted yet:
+     * - opening stock is the Stock in Hand balance this year was opened
+     *   with, which is every non-closing-entry line on that account (only
+     *   the opening-balance carry-forward and a manual opening-stock import
+     *   ever touch it, since inventory is periodic);
+     * - closing stock is computed live by StockCosting as at the report
+     *   date, which is exactly what close() will post.
+     *
+     * @return array{opening: string, closing: string, posted: bool, asOf: string}
+     */
+    private function stockPosition(FiscalYear $fiscalYear, string $to): array
+    {
+        $stockInHand = Account::where('code', FiscalYear::STOCK_IN_HAND_CODE)->first();
+
+        if (! $stockInHand) {
+            return ['opening' => '0.00', 'closing' => '0.00', 'posted' => false, 'asOf' => $to];
+        }
+
+        $posted = JournalVoucher::query()
+            ->where('fiscal_year_id', $fiscalYear->id)
+            ->where('voucher_type', VoucherType::ClosingEntry->value)
+            ->whereHas('lines', fn (Builder $lines) => $lines->where('account_id', $stockInHand->id))
+            ->exists();
+
+        $excluded = $this->sweepVoucherIds($fiscalYear);
+        $withoutSweep = $this->balancesByAccount($fiscalYear, $excluded, null, $fiscalYear->end_date->toDateString());
+
+        if ($posted) {
+            // After the pair, Stock in Hand nets to the posted closing value
+            // for the year and the opening value is the trading debit that
+            // moved out of it.
+            $all = $this->balancesByAccount($fiscalYear, [], null, $fiscalYear->end_date->toDateString());
+            $openingStockAccountId = Account::where('code', FiscalYear::OPENING_STOCK_CODE)->value('id');
+
+            $opening = $openingStockAccountId === null
+                ? Money::zero()
+                : ($withoutSweep[(int) $openingStockAccountId] ?? Money::zero());
 
             return [
-                'date' => $line->journalVoucher->date->toDateString(),
-                'voucherType' => $line->journalVoucher->voucher_type->value,
-                'voucherNumber' => $line->journalVoucher->voucher_number,
-                'narration' => $line->narration ?? $line->journalVoucher->narration,
-                'debit' => (float) $line->debit,
-                'credit' => (float) $line->credit,
-                'balance' => $runningBalance,
+                'opening' => $opening->toString(),
+                'closing' => ($all[$stockInHand->id] ?? Money::zero())->toString(),
+                'posted' => true,
+                'asOf' => $fiscalYear->end_date->toDateString(),
             ];
-        })->values()->all();
+        }
 
         return [
-            'entries' => $entries,
-            'openingBalance' => round($openingBalance, 2),
-            'closingBalance' => round($runningBalance, 2),
+            'opening' => ($withoutSweep[$stockInHand->id] ?? Money::zero())->toString(),
+            'closing' => StockCosting::totalClosingValue($to)->toString(),
+            'posted' => false,
+            'asOf' => $to,
         ];
     }
 
-    private function resolveFiscalYearId(Request $request): ?int
-    {
-        return $request->integer('fiscal_year_id') ?: FiscalYear::query()->where('status', FiscalYearStatus::Open)->value('id');
-    }
-
     /**
-     * Flat list of {account, head, group, subgroup, debit, credit} rows,
-     * one per account with nonzero net activity in the fiscal year,
-     * optionally restricted to a set of head names.
+     * Flat list of {account, head, group, subgroup, debit, credit} rows, one
+     * per account with a nonzero balance, optionally restricted to a set of
+     * head names. Only one of debit/credit is ever nonzero: a positive net
+     * shows as a debit balance, a negative one as a credit balance.
      *
+     * @param  array<int, Money>  $balances
      * @param  array<int, string>|null  $headNames
-     * @return Collection<int, array{account: Account, headName: string, groupName: string, subgroupName: ?string, debit: float, credit: float}>
+     * @return Collection<int, array{account: Account, headName: string, groupName: string, subgroupName: ?string, debit: Money, credit: Money}>
      */
-    private function accountRows(?array $headNames, int $fiscalYearId, bool $excludeClosingEntry): Collection
+    private function accountRows(array $balances, ?array $headNames = null): Collection
     {
         $accounts = Account::query()
             ->with(['group.accountHead', 'subgroup.accountGroup.accountHead'])
-            ->when($headNames !== null, fn ($query) => $query
-                ->whereHas('group.accountHead', fn ($q) => $q->whereIn('name', $headNames))
-                ->orWhereHas('subgroup.accountGroup.accountHead', fn ($q) => $q->whereIn('name', $headNames)))
+            ->when($headNames !== null, fn (Builder $query) => $query
+                ->whereHas('group.accountHead', fn (Builder $q) => $q->whereIn('name', $headNames))
+                ->orWhereHas('subgroup.accountGroup.accountHead', fn (Builder $q) => $q->whereIn('name', $headNames)))
             ->get();
 
         $rows = collect();
@@ -325,9 +573,9 @@ class AccountingReportController extends Controller
                 continue;
             }
 
-            [$debit, $credit] = $this->netDebitCredit($account->id, $fiscalYearId, $excludeClosingEntry);
+            $net = $balances[$account->id] ?? Money::zero();
 
-            if ($debit === 0.0 && $credit === 0.0) {
+            if ($net->isZero()) {
                 continue;
             }
 
@@ -336,8 +584,8 @@ class AccountingReportController extends Controller
                 'headName' => $head->name,
                 'groupName' => $group->name,
                 'subgroupName' => $account->subgroup?->name,
-                'debit' => $debit,
-                'credit' => $credit,
+                'debit' => $net->isPositive() ? $net : Money::zero(),
+                'credit' => $net->isNegative() ? $net->negated() : Money::zero(),
             ]);
         }
 
@@ -345,9 +593,147 @@ class AccountingReportController extends Controller
     }
 
     /**
-     * @return array<int, array{id: int, code: ?string, name: string, amount: float}>
+     * Adds the not-yet-posted stock movement onto the Balance Sheet's Stock
+     * in Hand row, creating the row when the account has no balance of its
+     * own yet (a tenant's very first year).
+     *
+     * @param  Collection<int, array<string, mixed>>  $rows
+     * @return Collection<int, array<string, mixed>>
      */
-    private function headBalances(string $headName, int $fiscalYearId, bool $creditNormal, bool $excludeClosingEntry): array
+    private function withStockInHandRow(Collection $rows, Money $adjustment): Collection
+    {
+        $stockInHand = Account::with(['group.accountHead', 'subgroup.accountGroup.accountHead'])
+            ->where('code', FiscalYear::STOCK_IN_HAND_CODE)
+            ->first();
+
+        if (! $stockInHand) {
+            return $rows;
+        }
+
+        $index = $rows->search(fn (array $row) => $row['account']->id === $stockInHand->id);
+
+        if ($index !== false) {
+            $row = $rows[$index];
+            $net = $row['debit']->minus($row['credit'])->plus($adjustment);
+            $row['debit'] = $net->isPositive() ? $net : Money::zero();
+            $row['credit'] = $net->isNegative() ? $net->negated() : Money::zero();
+
+            return $rows->replace([$index => $row]);
+        }
+
+        $head = $stockInHand->group?->accountHead ?? $stockInHand->subgroup?->accountGroup?->accountHead;
+        $group = $stockInHand->group ?? $stockInHand->subgroup?->accountGroup;
+
+        if (! $head || ! $group) {
+            return $rows;
+        }
+
+        return $rows->push([
+            'account' => $stockInHand,
+            'headName' => $head->name,
+            'groupName' => $group->name,
+            'subgroupName' => $stockInHand->subgroup?->name,
+            'debit' => $adjustment->isPositive() ? $adjustment : Money::zero(),
+            'credit' => $adjustment->isNegative() ? $adjustment->negated() : Money::zero(),
+        ]);
+    }
+
+    /**
+     * @param  array<int, Money>  $opening
+     * @param  array<int, Money>  $period
+     * @return Collection<int, array<string, mixed>>
+     */
+    private function trialBalanceRows(array $opening, array $period): Collection
+    {
+        $accountIds = array_unique([...array_keys($opening), ...array_keys($period)]);
+
+        $accounts = Account::query()
+            ->with(['group.accountHead', 'subgroup.accountGroup.accountHead'])
+            ->whereIn('id', $accountIds)
+            ->get();
+
+        $rows = collect();
+
+        foreach ($accounts as $account) {
+            $head = $account->group?->accountHead ?? $account->subgroup?->accountGroup?->accountHead;
+            $group = $account->group ?? $account->subgroup?->accountGroup;
+
+            if (! $head || ! $group) {
+                continue;
+            }
+
+            $openingNet = $opening[$account->id] ?? Money::zero();
+            $periodNet = $period[$account->id] ?? Money::zero();
+            $closingNet = $openingNet->plus($periodNet);
+
+            if ($openingNet->isZero() && $periodNet->isZero()) {
+                continue;
+            }
+
+            $rows->push([
+                'account' => $account,
+                'headName' => $head->name,
+                'groupName' => $group->name,
+                'subgroupName' => $account->subgroup?->name,
+                'openingDebit' => $openingNet->isPositive() ? $openingNet : Money::zero(),
+                'openingCredit' => $openingNet->isNegative() ? $openingNet->negated() : Money::zero(),
+                'periodDebit' => $periodNet->isPositive() ? $periodNet : Money::zero(),
+                'periodCredit' => $periodNet->isNegative() ? $periodNet->negated() : Money::zero(),
+                'closingDebit' => $closingNet->isPositive() ? $closingNet : Money::zero(),
+                'closingCredit' => $closingNet->isNegative() ? $closingNet->negated() : Money::zero(),
+                // The two columns the old report showed, kept so the page's
+                // "Debit / Credit" pair still means the closing position.
+                'debit' => $closingNet->isPositive() ? $closingNet : Money::zero(),
+                'credit' => $closingNet->isNegative() ? $closingNet->negated() : Money::zero(),
+            ]);
+        }
+
+        return $rows;
+    }
+
+    /**
+     * @return array<string, string|bool>
+     */
+    private function emptyTrialBalanceTotals(): array
+    {
+        return [
+            'totalOpeningDebit' => '0.00',
+            'totalOpeningCredit' => '0.00',
+            'totalPeriodDebit' => '0.00',
+            'totalPeriodCredit' => '0.00',
+            'totalDebit' => '0.00',
+            'totalCredit' => '0.00',
+            'inBalance' => true,
+        ];
+    }
+
+    /**
+     * @param  Collection<int, array<string, mixed>>  $rows
+     * @return array<string, string|bool>
+     */
+    private function trialBalanceTotals(Collection $rows): array
+    {
+        $sum = fn (string $key) => Money::sum($rows->pluck($key));
+
+        $closingDebit = $sum('closingDebit');
+        $closingCredit = $sum('closingCredit');
+
+        return [
+            'totalOpeningDebit' => $sum('openingDebit')->toString(),
+            'totalOpeningCredit' => $sum('openingCredit')->toString(),
+            'totalPeriodDebit' => $sum('periodDebit')->toString(),
+            'totalPeriodCredit' => $sum('periodCredit')->toString(),
+            'totalDebit' => $closingDebit->toString(),
+            'totalCredit' => $closingCredit->toString(),
+            'inBalance' => $closingDebit->isEqualTo($closingCredit),
+        ];
+    }
+
+    /**
+     * @param  array<int, Money>  $balances
+     * @return array<int, array{id: ?int, code: ?string, name: string, amount: string, computed: bool}>
+     */
+    private function headBalances(string $headName, array $balances, bool $creditNormal): array
     {
         $head = AccountHead::where('name', $headName)->first();
 
@@ -356,17 +742,17 @@ class AccountingReportController extends Controller
         }
 
         $accounts = Account::query()
-            ->whereHas('group', fn ($q) => $q->where('account_head_id', $head->id))
-            ->orWhereHas('subgroup.accountGroup', fn ($q) => $q->where('account_head_id', $head->id))
+            ->whereHas('group', fn (Builder $query) => $query->where('account_head_id', $head->id))
+            ->orWhereHas('subgroup.accountGroup', fn (Builder $query) => $query->where('account_head_id', $head->id))
             ->get();
 
         $rows = [];
 
         foreach ($accounts as $account) {
-            [$debit, $credit] = $this->netDebitCredit($account->id, $fiscalYearId, $excludeClosingEntry);
-            $amount = $creditNormal ? round($credit - $debit, 2) : round($debit - $credit, 2);
+            $net = $balances[$account->id] ?? Money::zero();
+            $amount = $creditNormal ? $net->negated() : $net;
 
-            if ($amount === 0.0) {
+            if ($amount->isZero()) {
                 continue;
             }
 
@@ -374,7 +760,8 @@ class AccountingReportController extends Controller
                 'id' => $account->id,
                 'code' => $account->code,
                 'name' => $account->name,
-                'amount' => $amount,
+                'amount' => $amount->toString(),
+                'computed' => false,
             ];
         }
 
@@ -382,38 +769,176 @@ class AccountingReportController extends Controller
     }
 
     /**
-     * @return array{0: float, 1: float} [debit, credit] - only one is ever
-     *                                   nonzero: net>0 shows as a debit balance, net<0 as a credit balance.
+     * @param  array<int, array{id: ?int, code: ?string, name: string, amount: string, computed: bool}>  $rows
+     * @return array<int, array{id: ?int, code: ?string, name: string, amount: string, computed: bool}>
      */
-    private function netDebitCredit(int $accountId, int $fiscalYearId, bool $excludeClosingEntry): array
+    private function withVirtualRow(array $rows, string $code, string $name, string $amount): array
     {
-        $sums = JournalVoucherLine::query()
-            ->where('account_id', $accountId)
-            ->whereHas('journalVoucher', function ($query) use ($fiscalYearId, $excludeClosingEntry) {
-                $query->where('fiscal_year_id', $fiscalYearId);
+        if (Money::of($amount)->isZero()) {
+            return $rows;
+        }
 
-                if ($excludeClosingEntry) {
-                    $query->where('voucher_type', '!=', VoucherType::ClosingEntry->value);
-                }
+        $rows[] = [
+            'id' => null,
+            'code' => $code,
+            'name' => $name,
+            'amount' => Money::of($amount)->toString(),
+            'computed' => true,
+        ];
+
+        return $rows;
+    }
+
+    /**
+     * Trading-account gross profit: sales plus closing stock, less purchases
+     * and opening stock. Only the two trading groups take part - indirect
+     * income and indirect expenses belong below the gross profit line.
+     *
+     * @param  array<int, array{code: ?string, amount: string}>  $income
+     * @param  array<int, array{code: ?string, amount: string}>  $expenses
+     */
+    private function grossProfit(array $income, array $expenses): Money
+    {
+        $tradingCodes = fn (string $groupName) => Account::query()
+            ->whereHas('group', fn (Builder $query) => $query->where('name', $groupName))
+            ->pluck('code')
+            ->filter()
+            ->all();
+
+        $salesCodes = [...$tradingCodes('Sales Accounts'), FiscalYear::CLOSING_STOCK_CODE];
+        $purchaseCodes = [...$tradingCodes('Purchase Accounts'), FiscalYear::OPENING_STOCK_CODE];
+
+        $total = function (array $rows, array $codes): Money {
+            $matching = array_filter($rows, fn (array $row) => $row['code'] !== null && in_array($row['code'], $codes, true));
+
+            return Money::sum(array_column($matching, 'amount'));
+        };
+
+        return $total($income, $salesCodes)->minus($total($expenses, $purchaseCodes));
+    }
+
+    /**
+     * Assets must equal Liabilities + Capital, always. A mismatch is a real
+     * bookkeeping defect (a half-posted close, a correction that never got
+     * swept), so it fails loudly under test and shows the operator a visible
+     * warning row in production rather than a silently wrong statement.
+     */
+    private function assertBalanced(FiscalYear $fiscalYear, Money $assets, Money $liabilitiesAndCapital): ?string
+    {
+        if ($assets->isEqualTo($liabilitiesAndCapital)) {
+            return null;
+        }
+
+        $difference = $assets->minus($liabilitiesAndCapital);
+
+        $message = "This balance sheet does not balance: assets {$assets->toString()} against liabilities and capital {$liabilitiesAndCapital->toString()}, a difference of {$difference->toString()}. Check \"{$fiscalYear->name}\" for a closing entry that did not complete.";
+
+        if (app()->runningUnitTests()) {
+            throw new RuntimeException($message);
+        }
+
+        return $message;
+    }
+
+    /**
+     * @return array{entries: array<int, array<string, mixed>>, openingBalance: string, closingBalance: string}
+     */
+    private function emptyAccountBook(): array
+    {
+        return ['entries' => [], 'openingBalance' => '0.00', 'closingBalance' => '0.00'];
+    }
+
+    /**
+     * A single account's running book over a window INSIDE one fiscal year.
+     *
+     * Opening balance = that year's Opening Balance voucher lines, plus that
+     * year's lines dated before `$from`. Nothing is ever summed across a
+     * year boundary: the old all-time cumulative opening counted the new
+     * year's Opening Balance voucher on top of the previous year's own
+     * lines, so a cash balance of 600 at the end of FY1 opened FY2 at 1,200
+     * (audit P0-18).
+     *
+     * The two halves are deliberately disjoint - the entries list leaves out
+     * Opening Balance vouchers entirely - so a window starting on the year's
+     * first day cannot count the carry-forward twice.
+     *
+     * @return array{entries: array<int, array<string, mixed>>, openingBalance: string, closingBalance: string}
+     */
+    private function accountBook(Account $account, FiscalYear $fiscalYear, string $from, string $to): array
+    {
+        $cast = JournalVoucherLine::query()->getConnection()->getDriverName() === 'sqlite' ? 'INTEGER' : 'SIGNED';
+
+        $openingScaled = JournalVoucherLine::query()
+            ->where('account_id', $account->id)
+            ->whereHas('journalVoucher', function (Builder $query) use ($fiscalYear, $from) {
+                $query->where('fiscal_year_id', $fiscalYear->id)
+                    ->where(fn (Builder $q) => $q
+                        ->where('voucher_type', VoucherType::OpeningBalance->value)
+                        ->orWhereDate('date', '<', $from));
             })
-            ->selectRaw('COALESCE(SUM(debit), 0) as debit, COALESCE(SUM(credit), 0) as credit')
-            ->first();
+            ->selectRaw(
+                "COALESCE(SUM(CAST(ROUND(debit * 100) AS {$cast})), 0) - COALESCE(SUM(CAST(ROUND(credit * 100) AS {$cast})), 0) as net_scaled"
+            )
+            ->value('net_scaled');
 
-        $net = round((float) $sums->debit - (float) $sums->credit, 2);
+        $openingBalance = Money::of(BigDecimal::of((int) $openingScaled)->dividedBy(100, 2, RoundingMode::Unnecessary));
 
-        return $net >= 0 ? [$net, 0.0] : [0.0, -$net];
+        $lines = JournalVoucherLine::query()
+            ->where('account_id', $account->id)
+            ->whereHas('journalVoucher', function (Builder $query) use ($fiscalYear, $from, $to) {
+                $query->where('fiscal_year_id', $fiscalYear->id)
+                    ->where('voucher_type', '!=', VoucherType::OpeningBalance->value)
+                    ->whereDate('date', '>=', $from)
+                    ->whereDate('date', '<=', $to);
+            })
+            ->with('journalVoucher')
+            ->get()
+            ->sortBy([['journalVoucher.date', 'asc'], ['id', 'asc']])
+            ->values();
+
+        $runningBalance = $openingBalance;
+
+        $entries = $lines->map(function (JournalVoucherLine $line) use (&$runningBalance) {
+            $debit = Money::of($line->debit);
+            $credit = Money::of($line->credit);
+            $runningBalance = $runningBalance->plus($debit)->minus($credit);
+
+            return [
+                'date' => $line->journalVoucher->date->toDateString(),
+                'voucherType' => $line->journalVoucher->voucher_type->value,
+                'voucherNumber' => $line->journalVoucher->voucher_number,
+                'narration' => $line->narration ?? $line->journalVoucher->narration,
+                'debit' => $debit->toString(),
+                'credit' => $credit->toString(),
+                'balance' => $runningBalance->toString(),
+            ];
+        })->values()->all();
+
+        return [
+            'entries' => $entries,
+            // Money never renders "-0.00" (CONTRACTS C1), so a zero balance
+            // always prints as 0.00 whichever side it arrived from.
+            'openingBalance' => $openingBalance->toString(),
+            'closingBalance' => $runningBalance->toString(),
+        ];
     }
 
     /**
      * Nests flat account rows into head -> group -> (subgroup, optional) ->
      * accounts, for the hierarchical Trial Balance / Balance Sheet pages.
+     * Every Money is rendered to its exact string here, at the last possible
+     * moment before the props leave the controller.
      *
-     * @param  Collection<int, array{account: Account, headName: string, groupName: string, subgroupName: ?string, debit: float, credit: float}>  $rows
+     * @param  Collection<int, array<string, mixed>>  $rows
      * @return array<int, array{name: string, groups: array<int, array{name: string, accounts: array, subgroups: array}>}>
      */
     private function buildHierarchy(Collection $rows): array
     {
         $heads = [];
+        $moneyKeys = [
+            'debit', 'credit',
+            'openingDebit', 'openingCredit', 'periodDebit', 'periodCredit', 'closingDebit', 'closingCredit',
+        ];
 
         foreach ($rows as $row) {
             $account = $row['account'];
@@ -421,9 +946,13 @@ class AccountingReportController extends Controller
                 'id' => $account->id,
                 'code' => $account->code,
                 'name' => $account->name,
-                'debit' => $row['debit'],
-                'credit' => $row['credit'],
             ];
+
+            foreach ($moneyKeys as $key) {
+                if (isset($row[$key])) {
+                    $accountRow[$key] = $row[$key]->toString();
+                }
+            }
 
             $heads[$row['headName']] ??= ['name' => $row['headName'], 'groups' => []];
             $heads[$row['headName']]['groups'][$row['groupName']] ??= ['name' => $row['groupName'], 'accounts' => [], 'subgroups' => []];

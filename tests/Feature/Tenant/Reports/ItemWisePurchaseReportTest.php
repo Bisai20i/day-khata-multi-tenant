@@ -83,15 +83,22 @@ test('the item-wise purchase report aggregates quantity, value, and transaction 
             ->component('Tenant/Reports/ItemWisePurchase')
             ->has('items', 2)
             ->where('items.0.name', 'Gadget')
-            ->where('items.0.total_quantity', 1)
-            ->where('items.0.total_value', 500)
+            // Exact decimal strings now: base quantities at 4 places, money
+            // at 2. Every line here is entered in the item's base unit, so
+            // the base quantity equals the entered quantity.
+            ->where('items.0.total_quantity', '1.0000')
+            ->where('items.0.total_value', '500.00')
             ->where('items.0.transaction_count', 1)
             ->where('items.1.name', 'Widget')
-            ->where('items.1.total_quantity', 5)
-            ->where('items.1.total_value', 350)
+            ->where('items.1.total_quantity', '5.0000')
+            ->where('items.1.total_value', '350.00')
             ->where('items.1.transaction_count', 2)
-            ->where('totals.total_quantity', 6)
-            ->where('totals.total_value', 850)
+            // The unit-blind totals.total_quantity scalar is gone; 1 + 5 = 6
+            // is now reported under the shared "pcs" unit.
+            ->has('totals.quantities', 1)
+            ->where('totals.quantities.0.unit', 'pcs')
+            ->where('totals.quantities.0.quantity', '6.0000')
+            ->where('totals.total_value', '850.00')
         );
 
     $tenant->delete();
@@ -127,11 +134,13 @@ test('the item-wise purchase report excludes a cancelled purchase from the item 
         ->assertOk()
         ->assertInertia(fn ($page) => $page
             ->has('items', 1)
-            ->where('items.0.total_quantity', 1)
-            ->where('items.0.total_value', 100)
+            ->where('items.0.total_quantity', '1.0000')
+            ->where('items.0.total_value', '100.00')
             ->where('items.0.transaction_count', 1)
-            ->where('totals.total_quantity', 1)
-            ->where('totals.total_value', 100)
+            ->has('totals.quantities', 1)
+            ->where('totals.quantities.0.unit', 'pcs')
+            ->where('totals.quantities.0.quantity', '1.0000')
+            ->where('totals.total_value', '100.00')
         );
 
     $tenant->delete();
@@ -167,8 +176,8 @@ test('the item-wise purchase report excludes a purchase outside the requested da
         ->assertOk()
         ->assertInertia(fn ($page) => $page
             ->has('items', 1)
-            ->where('items.0.total_value', 100)
-            ->where('totals.total_value', 100)
+            ->where('items.0.total_value', '100.00')
+            ->where('totals.total_value', '100.00')
         );
 
     $tenant->delete();
@@ -207,9 +216,9 @@ test('the item-wise purchase report can be narrowed to a single store', function
         ->assertOk()
         ->assertInertia(fn ($page) => $page
             ->has('items', 1)
-            ->where('items.0.total_quantity', 1)
-            ->where('items.0.total_value', 100)
-            ->where('totals.total_value', 100)
+            ->where('items.0.total_quantity', '1.0000')
+            ->where('items.0.total_value', '100.00')
+            ->where('totals.total_value', '100.00')
         );
 
     $tenant->delete();

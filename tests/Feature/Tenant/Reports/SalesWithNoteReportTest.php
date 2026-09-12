@@ -36,14 +36,15 @@ test('the sales with note report includes only sales with a non-blank note', fun
     $domain = 'sales-with-note.tenant-test';
     $tenant = provisionSalesWithNoteTestTenant($domain);
 
-    $tenant->run(function () {
+    $invoiceNumber = null;
+    $tenant->run(function () use (&$invoiceNumber) {
         FiscalYear::create(['name' => 'FY1', 'start_date' => '2026-01-01', 'end_date' => '2026-12-31', 'status' => FiscalYearStatus::Open]);
         $admin = User::factory()->create(['email' => 'owner@example.com']);
         $customer = Customer::factory()->create(['name' => 'Ram Shrestha']);
         $item = Item::factory()->create(['name' => 'Widget', 'unit' => 'pcs', 'is_vatable' => false, 'is_stockable' => false]);
 
         // Has a real note - must appear.
-        Sale::post(
+        $noted = Sale::post(
             [
                 'customer_id' => $customer->id,
                 'invoice_type' => 'full',
@@ -55,6 +56,8 @@ test('the sales with note report includes only sales with a non-blank note', fun
             [['item_id' => $item->id, 'quantity' => 2, 'rate' => 100, 'discount' => 0]],
             $admin,
         );
+
+        $invoiceNumber = $noted->invoice_number;
 
         // narration explicitly null - must NOT appear.
         Sale::post(
@@ -84,10 +87,23 @@ test('the sales with note report includes only sales with a non-blank note', fun
         ->assertInertia(fn ($page) => $page
             ->component('Tenant/Reports/SalesWithNote')
             ->has('sales', 1)
+            // The row now carries the stored invoice number, so an operator
+            // can tie a note back to the printed bill.
+            ->where('sales.0.invoice_number', $invoiceNumber)
             ->where('sales.0.note', 'Customer requested rush delivery')
             ->where('sales.0.chalani_number', 'CH-100')
             ->where('sales.0.customer', 'Ram Shrestha')
+            ->has('sales.0.items', 1)
+            ->where('sales.0.items.0.name', 'Widget')
+            // Exact 4-decimal quantity string, and the unit the LINE was
+            // entered in (no item_unit_id here, so it falls back to the
+            // item's base unit).
+            ->where('sales.0.items.0.quantity', '2.0000')
+            ->where('sales.0.items.0.unit', 'pcs')
+            // Money is a 2-decimal string: 2 x 100, exempt item, no VAT.
+            ->where('sales.0.total', '200.00')
             ->where('totals.count', 1)
+            ->where('totals.total', '200.00')
         );
 
     $tenant->delete();
@@ -118,7 +134,8 @@ test('a cancelled sale with a note is excluded from the sales with note report',
         ->assertInertia(fn ($page) => $page
             ->has('sales', 0)
             ->where('totals.count', 0)
-            ->where('totals.total', 0)
+            // An empty period totals to the 2-decimal string "0.00", not 0.
+            ->where('totals.total', '0.00')
         );
 
     $tenant->delete();
@@ -148,6 +165,7 @@ test('a sale with a note outside the date range is excluded from the sales with 
         ->assertInertia(fn ($page) => $page
             ->has('sales', 0)
             ->where('totals.count', 0)
+            ->where('totals.total', '0.00')
         );
 
     $tenant->delete();
@@ -187,6 +205,8 @@ test('the sales with note report can be narrowed to a single store', function ()
         ->assertInertia(fn ($page) => $page
             ->has('sales', 1)
             ->where('sales.0.note', 'Store A note')
+            ->where('totals.count', 1)
+            ->where('totals.total', '100.00')
         );
 
     $tenant->delete();

@@ -7,11 +7,14 @@ import NepaliDateInput from '@/components/ui/NepaliDateInput.vue';
 import Select from '@/components/ui/Select.vue';
 import Button from '@/components/ui/Button.vue';
 import { navGroups } from '@/lib/nav-items.js';
+import { formatMoney, formatQuantity } from '@/lib/money';
+import { formatBsDate } from '@/lib/format';
 
 const props = defineProps({
     asOf: { type: String, required: true },
     rows: { type: Array, default: () => [] },
-    grandTotalValuation: { type: Number, default: 0 },
+    grandTotal: { type: Object, default: () => ({ value: '0.00', quantities: [] }) },
+    grandTotalValuation: { type: String, default: '0.00' },
     stores: { type: Array, default: () => [] },
     storeId: { type: [Number, null], default: null },
 });
@@ -36,12 +39,16 @@ function applyFilter() {
     );
 }
 
-function qty(value) {
-    return Number(value ?? 0).toFixed(4);
-}
+const asOfLabel = computed(() => `As of BS ${formatBsDate(props.asOf)} (AD ${props.asOf})`);
 
-function money(value) {
-    return Number(value ?? 0).toFixed(2);
+// Quantities are a per-base-unit breakdown, never one number: 12 Boxes plus
+// 30 Kilograms is not "42". An empty list renders as a dash.
+function quantityLabel(quantities) {
+    if (!quantities || quantities.length === 0) {
+        return '—';
+    }
+
+    return quantities.map((entry) => `${formatQuantity(entry.quantity)} ${entry.unit}`.trim()).join(', ');
 }
 </script>
 
@@ -50,6 +57,10 @@ function money(value) {
         <div class="mb-4 flex items-center justify-between">
             <h2 class="text-base font-bold text-text-strong">Stock by Category</h2>
         </div>
+
+        <p class="mb-4 text-[12.5px] text-text-muted">
+            {{ asOfLabel }}. values come from the same weighted average cost the Balance Sheet uses.
+        </p>
 
         <Card variant="panel" class="mb-4">
             <div class="flex flex-wrap items-end gap-3">
@@ -73,17 +84,15 @@ function money(value) {
             <div v-else class="divide-y divide-border">
                 <div class="flex items-center px-1 py-1.5 text-[10px] font-bold tracking-[.8px] text-text-muted uppercase">
                     <div class="flex-1">Category / Subcategory</div>
-                    <div class="w-28 text-right">Quantity</div>
-                    <div class="w-28 text-right">Avg Cost</div>
+                    <div class="w-56 text-right">Quantity</div>
                     <div class="w-32 text-right">Valuation</div>
                 </div>
 
                 <template v-for="category in rows" :key="category.categoryId">
                     <div class="flex items-center px-1 py-1.5 text-[13px] font-bold text-text-strong">
                         <div class="flex-1">{{ category.categoryName }}</div>
-                        <div class="w-28 text-right">{{ qty(category.quantity) }}</div>
-                        <div class="w-28 text-right">{{ money(category.avgCost) }}</div>
-                        <div class="w-32 text-right">{{ money(category.valuation) }}</div>
+                        <div class="w-56 text-right">{{ quantityLabel(category.quantities) }}</div>
+                        <div class="w-32 text-right">{{ formatMoney(category.value) }}</div>
                     </div>
 
                     <div
@@ -92,16 +101,15 @@ function money(value) {
                         class="flex items-center px-1 py-1 pl-6 text-[13px] text-text-base"
                     >
                         <div class="flex-1">{{ subcategory.subcategoryName }}</div>
-                        <div class="w-28 text-right">{{ qty(subcategory.quantity) }}</div>
-                        <div class="w-28 text-right">{{ money(subcategory.avgCost) }}</div>
-                        <div class="w-32 text-right">{{ money(subcategory.valuation) }}</div>
+                        <div class="w-56 text-right">{{ quantityLabel(subcategory.quantities) }}</div>
+                        <div class="w-32 text-right">{{ formatMoney(subcategory.value) }}</div>
                     </div>
                 </template>
             </div>
 
             <div class="mt-3 flex items-center justify-end gap-6 border-t-[1.5px] border-border pt-3 text-[13px] font-bold text-text-strong">
                 <div>Grand Total Valuation</div>
-                <div class="w-32 text-right">{{ money(grandTotalValuation) }}</div>
+                <div class="w-32 text-right">{{ formatMoney(grandTotalValuation) }}</div>
             </div>
         </Card>
     </AppLayout>

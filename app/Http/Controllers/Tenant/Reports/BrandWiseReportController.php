@@ -5,8 +5,10 @@ namespace App\Http\Controllers\Tenant\Reports;
 use App\Http\Controllers\Controller;
 use App\Models\Brand;
 use App\Models\Item;
-use App\Models\ItemStockMovement;
 use App\Models\Store;
+use App\Support\Inventory\StockCosting;
+use App\Support\Money\Money;
+use App\Support\Money\Quantity;
 use Illuminate\Http\Request;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Collection;
@@ -18,137 +20,184 @@ use Inertia\Response;
  * day_khata's Companywisestock/singleCompanywisestock
  * (reportsController.php), grouped by Brand (Item.brand_id) instead of
  * ItemCategory. Structurally identical to
- * CategoryWiseReportController::stockByCategory() - the exact same
- * weighted-average-cost, as-of-cutoff algorithm - just flat: a Brand has no
- * "subcategory" nested beneath it the way an ItemCategory does, so there's
- * no second nesting level here. Only the stock report is built (legacy's
- * Company/brand concept was never wired into a sales/purchase-by-brand
- * report to begin with - see the audit note in BrandController's docblock).
+ * CategoryWiseReportController::stockByCategory(), just flat: a Brand has no
+ * "subcategory" nested beneath it the way an ItemCategory does. Only the
+ * stock report is built (legacy's Company/brand concept was never wired
+ * into a sales/purchase-by-brand report to begin with - see the audit note
+ * in BrandController's docblock).
+ *
+ * Values are read through App\Support\Inventory\StockCosting (C10), the one
+ * place stock is valued, and quantities are kept per base unit rather than
+ * added across units - see CategoryWiseReportController's docblock for both.
  */
 class BrandWiseReportController extends Controller
 {
     /**
      * Every Brand is always represented, even with zero stock, so a brand
-     * with no stockable items still shows as a zero row rather than
-     * silently vanishing. A trailing "Unbranded" row covers items with no
-     * brand_id, but only when they actually carry nonzero stock/valuation -
-     * matching buildCategoryStockRows()'s "Uncategorized" convention.
+     * with no stockable items still shows as a zero row rather than silently
+     * vanishing. A trailing "Unbranded" row covers items with no brand_id,
+     * but only when they actually carry stock or value - matching the
+     * "Uncategorized" convention on the category report.
      */
     public function stockByBrand(Request $request): Response
     {
-        $asOf = Carbon::parse($request->string('as_of')->toString() ?: now()->toDateString())->endOfDay();
+        $asOf = $this->resolveAsOf($request);
         $storeId = $request->integer('store_id') ?: null;
 
         $brands = Brand::query()->orderBy('name')->get();
-        $aggregates = $this->brandAggregatesFromStockMovements($asOf, $storeId);
+        $aggregates = $this->brandAggregatesFromStock($asOf, $storeId);
 
         ['rows' => $rows, 'grandTotal' => $grandTotal] = $this->buildBrandStockRows($brands, $aggregates);
 
         return Inertia::render('Tenant/Reports/StockByBrand', [
-            'asOf' => $asOf->toDateString(),
+            'asOf' => $asOf,
             'rows' => $rows,
-            'grandTotalValuation' => $grandTotal['valuation'],
+            'grandTotal' => $grandTotal,
+            'grandTotalValuation' => $grandTotal['value'],
             'stores' => Store::where('is_active', true)->orderBy('name')->get(['id', 'name']),
             'storeId' => $storeId,
         ]);
     }
 
     /**
-     * Per-item weighted-average valuation (same algorithm as
-     * CategoryWiseReportController::categoryAggregatesFromStockMovements())
-     * summed into brand buckets.
-     *
-     * @return array<string, array{quantity: float, valuation: float}> keyed by brand_id, empty string in place of the brand_id when the item has none
+     * @return array<string, array{value: Money, quantities: array<string, Quantity>}> keyed by brand_id, empty string for items with none
      */
-    private function brandAggregatesFromStockMovements(Carbon $asOf, ?int $storeId): array
+    private function brandAggregatesFromStock(string $asOf, ?int $storeId): array
     {
+        $items = Item::query()
+            ->where('is_stockable', true)
+            ->get(['id', 'brand_id', 'unit'])
+            ->keyBy('id');
+
         $aggregates = [];
 
-        Item::query()->where('is_stockable', true)->orderBy('name')->each(function (Item $item) use ($asOf, $storeId, &$aggregates): void {
-            $movements = $item->stockMovements()->where('cancelled', false)
-                ->when($storeId !== null, fn ($query) => $query->where('store_id', $storeId))
-                ->get();
+        foreach (StockCosting::valuationRows($asOf, $storeId) as $row) {
+            $item = $items->get($row['item_id']);
 
-            $closing = (float) $movements
-                ->filter(fn (ItemStockMovement $movement) => $movement->date->lte($asOf))
-                ->sum(fn (ItemStockMovement $movement) => (float) $movement->quantity * $movement->movement_type->direction());
-
-            $costBasis = $movements->filter(
-                fn (ItemStockMovement $movement) => $movement->movement_type->direction() === 1
-                    && $movement->date->lte($asOf)
-                    && $movement->unit_cost_rate !== null,
-            );
-
-            $costQuantity = (float) $costBasis->sum(fn (ItemStockMovement $movement) => (float) $movement->quantity);
-            $costValue = (float) $costBasis->sum(fn (ItemStockMovement $movement) => (float) $movement->quantity * (float) $movement->unit_cost_rate);
-            $avgCost = $costQuantity > 0 ? round($costValue / $costQuantity, 4) : 0.0;
-            $valuation = round($avgCost * $closing, 2);
+            if ($item === null) {
+                continue;
+            }
 
             $key = (string) $item->brand_id;
-            $aggregates[$key] ??= ['quantity' => 0.0, 'valuation' => 0.0];
-            $aggregates[$key]['quantity'] += $closing;
-            $aggregates[$key]['valuation'] += $valuation;
-        });
+            $unit = (string) ($item->unit ?? '');
+
+            $aggregates[$key] ??= ['value' => Money::zero(), 'quantities' => []];
+            $aggregates[$key]['quantities'][$unit] ??= Quantity::zero();
+
+            $aggregates[$key]['value'] = $aggregates[$key]['value']->plus($row['value']);
+            $aggregates[$key]['quantities'][$unit] = $aggregates[$key]['quantities'][$unit]->plus($row['quantity']);
+        }
 
         return $aggregates;
     }
 
     /**
-     * Exact mirror of buildCategoryStockRows()'s {quantity, valuation}
-     * shape and "only show the leftover bucket when it's nonzero" rule,
-     * minus the subcategory nesting level - a Brand has none.
-     *
      * @param  Collection<int, Brand>  $brands
-     * @param  array<string, array{quantity: float, valuation: float}>  $aggregates
-     * @return array{rows: array<int, array<string, mixed>>, grandTotal: array{valuation: float}}
+     * @param  array<string, array{value: Money, quantities: array<string, Quantity>}>  $aggregates
+     * @return array{rows: array<int, array<string, mixed>>, grandTotal: array{value: string, quantities: array<int, array{unit: string, quantity: string}>}}
      */
     private function buildBrandStockRows(Collection $brands, array $aggregates): array
     {
         $rows = [];
-        $grandValuation = 0.0;
+        $grandValue = Money::zero();
+        $grandQuantities = [];
 
         foreach ($brands as $brand) {
-            $aggregate = $aggregates[(string) $brand->id] ?? ['quantity' => 0.0, 'valuation' => 0.0];
+            $aggregate = $aggregates[(string) $brand->id] ?? null;
 
             $rows[] = [
                 'brandId' => $brand->id,
                 'brandName' => $brand->name,
-                'quantity' => round($aggregate['quantity'], 4),
-                'valuation' => round($aggregate['valuation'], 2),
-                'avgCost' => $this->weightedAverage($aggregate['valuation'], $aggregate['quantity']),
+                'value' => ($aggregate['value'] ?? Money::zero())->toString(),
+                'quantities' => $this->presentQuantities($aggregate['quantities'] ?? []),
             ];
 
-            $grandValuation += $aggregate['valuation'];
+            if ($aggregate !== null) {
+                $grandValue = $grandValue->plus($aggregate['value']);
+                $grandQuantities = $this->mergeQuantities($grandQuantities, $aggregate['quantities']);
+            }
         }
 
-        $unassigned = $aggregates[''] ?? ['quantity' => 0.0, 'valuation' => 0.0];
+        $unbranded = $aggregates[''] ?? null;
 
-        if (abs($unassigned['quantity']) > 0.00001 || abs($unassigned['valuation']) > 0.001) {
+        if ($unbranded !== null && ! $this->isEmptyAggregate($unbranded)) {
             $rows[] = [
                 'brandId' => null,
                 'brandName' => 'Unbranded',
-                'quantity' => round($unassigned['quantity'], 4),
-                'valuation' => round($unassigned['valuation'], 2),
-                'avgCost' => $this->weightedAverage($unassigned['valuation'], $unassigned['quantity']),
+                'value' => $unbranded['value']->toString(),
+                'quantities' => $this->presentQuantities($unbranded['quantities']),
             ];
 
-            $grandValuation += $unassigned['valuation'];
+            $grandValue = $grandValue->plus($unbranded['value']);
+            $grandQuantities = $this->mergeQuantities($grandQuantities, $unbranded['quantities']);
         }
 
         return [
             'rows' => $rows,
             'grandTotal' => [
-                'valuation' => round($grandValuation, 2),
+                'value' => $grandValue->toString(),
+                'quantities' => $this->presentQuantities($grandQuantities),
             ],
         ];
     }
 
     /**
-     * Derived display-only average cost (valuation / quantity) - never
-     * summed independently across rows, unlike quantity/valuation.
+     * @param  array<string, Quantity>  $into
+     * @param  array<string, Quantity>  $from
+     * @return array<string, Quantity>
      */
-    private function weightedAverage(float $valuation, float $quantity): float
+    private function mergeQuantities(array $into, array $from): array
     {
-        return abs($quantity) > 0.00001 ? round($valuation / $quantity, 4) : 0.0;
+        foreach ($from as $unit => $quantity) {
+            $into[$unit] = ($into[$unit] ?? Quantity::zero())->plus($quantity);
+        }
+
+        return $into;
+    }
+
+    /**
+     * @param  array<string, Quantity>  $quantities
+     * @return array<int, array{unit: string, quantity: string}>
+     */
+    private function presentQuantities(array $quantities): array
+    {
+        $presented = [];
+
+        foreach ($quantities as $unit => $quantity) {
+            if ($quantity->isZero()) {
+                continue;
+            }
+
+            $presented[] = ['unit' => $unit, 'quantity' => $quantity->toString()];
+        }
+
+        usort($presented, fn (array $a, array $b) => strcasecmp($a['unit'], $b['unit']));
+
+        return $presented;
+    }
+
+    /**
+     * @param  array{value: Money, quantities: array<string, Quantity>}  $aggregate
+     */
+    private function isEmptyAggregate(array $aggregate): bool
+    {
+        if (! $aggregate['value']->isZero()) {
+            return false;
+        }
+
+        foreach ($aggregate['quantities'] as $quantity) {
+            if (! $quantity->isZero()) {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    private function resolveAsOf(Request $request): string
+    {
+        $asOf = $request->string('as_of')->toString();
+
+        return $asOf !== '' ? Carbon::parse($asOf)->toDateString() : Carbon::now()->toDateString();
     }
 }

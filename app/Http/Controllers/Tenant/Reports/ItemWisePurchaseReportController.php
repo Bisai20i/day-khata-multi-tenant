@@ -7,17 +7,28 @@ use App\Http\Controllers\Controller;
 use App\Models\FiscalYear;
 use App\Models\PurchaseLine;
 use App\Models\Store;
+use App\Support\Money\Money;
+use App\Support\Money\Quantity;
+use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Database\Eloquent\Model;
 use Illuminate\Http\Request;
+use Illuminate\Support\Collection;
 use Inertia\Inertia;
 use Inertia\Response;
 
 /**
- * Item-level counterpart to the invoice-level Purchase Register: aggregates
- * every PurchaseLine of every posted Purchase in a date range by item, so a
- * user can see what's actually being bought (total quantity/value per item)
- * rather than one row per invoice. Cancelled purchases and out-of-range
- * purchases are excluded entirely, matching the VAT-book convention
- * elsewhere in this report suite.
+ * Item-level counterpart to the invoice-level Purchase Register: every
+ * PurchaseLine of every posted Purchase in a date range, aggregated by item,
+ * so a user can see what is actually being bought rather than one row per
+ * invoice. Cancelled and out-of-range purchases are excluded entirely,
+ * matching the register above it.
+ *
+ * Quantities are in BASE units (`quantity x unit_conversion_factor`), not
+ * whatever unit each line happened to be entered in. Buying 2 Boxes of 12
+ * and 3 loose pieces is 27 pieces, not "5" (audit P1: alternate units were
+ * being added to base units). For the same reason the grand total is a
+ * per-unit breakdown rather than one number - adding Kilograms to Pieces
+ * produces a figure nobody can use.
  */
 class ItemWisePurchaseReportController extends Controller
 {
@@ -26,42 +37,103 @@ class ItemWisePurchaseReportController extends Controller
         [$from, $to] = $this->resolveDateRange($request);
         $storeId = $request->integer('store_id') ?: null;
 
-        $rows = PurchaseLine::query()
+        $lines = PurchaseLine::query()
             ->join('purchases', 'purchases.id', '=', 'purchase_lines.purchase_id')
             ->join('items', 'items.id', '=', 'purchase_lines.item_id')
             ->where('purchases.status', 'posted')
-            ->whereBetween('purchases.date', [$from, $to])
-            ->when($storeId, fn ($query) => $query->where('purchases.store_id', $storeId))
-            ->groupBy('purchase_lines.item_id', 'items.name', 'items.unit')
-            ->orderByDesc('total_value')
-            ->selectRaw('purchase_lines.item_id as item_id')
-            ->selectRaw('items.name as name')
-            ->selectRaw('items.unit as unit')
-            ->selectRaw('sum(purchase_lines.quantity) as total_quantity')
-            ->selectRaw('sum(purchase_lines.line_total) as total_value')
-            ->selectRaw('count(distinct purchase_lines.purchase_id) as transaction_count')
-            ->get();
+            ->whereDate('purchases.date', '>=', $from)
+            ->whereDate('purchases.date', '<=', $to)
+            ->when($storeId, fn (Builder $query) => $query->where('purchases.store_id', $storeId))
+            ->get([
+                'purchase_lines.item_id as item_id',
+                'purchase_lines.purchase_id as document_id',
+                'purchase_lines.quantity as quantity',
+                'purchase_lines.unit_conversion_factor as unit_conversion_factor',
+                'purchase_lines.line_total as line_total',
+                'items.name as name',
+                'items.unit as unit',
+            ]);
 
-        $items = $rows->map(fn (PurchaseLine $row) => [
-            'item_id' => (int) $row->item_id,
-            'name' => $row->name,
-            'unit' => $row->unit,
-            'total_quantity' => round((float) $row->total_quantity, 4),
-            'total_value' => round((float) $row->total_value, 2),
-            'transaction_count' => (int) $row->transaction_count,
-        ])->values();
+        $items = $this->aggregateByItem($lines);
 
         return Inertia::render('Tenant/Reports/ItemWisePurchase', [
             'items' => $items,
             'totals' => [
-                'total_quantity' => round((float) $items->sum('total_quantity'), 4),
-                'total_value' => round((float) $items->sum('total_value'), 2),
+                'total_value' => Money::sum($items->map(fn (array $row) => Money::of($row['total_value'])))->toString(),
+                'quantities' => $this->quantitiesByUnit($items),
             ],
             'stores' => Store::where('is_active', true)->orderBy('name')->get(['id', 'name']),
             'from' => $from,
             'to' => $to,
             'storeId' => $storeId,
         ]);
+    }
+
+    /**
+     * @param  Collection<int, Model>  $lines
+     * @return Collection<int, array<string, mixed>>
+     */
+    private function aggregateByItem(Collection $lines): Collection
+    {
+        $byItem = [];
+
+        foreach ($lines as $line) {
+            $itemId = (int) $line->item_id;
+
+            $byItem[$itemId] ??= [
+                'item_id' => $itemId,
+                'name' => $line->name,
+                'unit' => $line->unit,
+                'quantity' => Quantity::zero(),
+                'value' => Money::zero(),
+                'documents' => [],
+            ];
+
+            $byItem[$itemId]['quantity'] = $byItem[$itemId]['quantity']->plus(
+                Quantity::round(
+                    Quantity::of($line->quantity)->toBigDecimal()
+                        ->multipliedBy(Quantity::of($line->unit_conversion_factor ?? '1')->toBigDecimal())
+                )
+            );
+            $byItem[$itemId]['value'] = $byItem[$itemId]['value']->plus(Money::of($line->line_total));
+            $byItem[$itemId]['documents'][(int) $line->document_id] = true;
+        }
+
+        return collect($byItem)
+            ->map(fn (array $row) => [
+                'item_id' => $row['item_id'],
+                'name' => $row['name'],
+                'unit' => $row['unit'],
+                'total_quantity' => $row['quantity']->toString(),
+                'total_value' => $row['value']->toString(),
+                'transaction_count' => count($row['documents']),
+            ])
+            ->sort(fn (array $a, array $b) => Money::of($b['total_value'])->compareTo(Money::of($a['total_value'])))
+            ->values();
+    }
+
+    /**
+     * @param  Collection<int, array<string, mixed>>  $items
+     * @return array<int, array{unit: string, quantity: string}>
+     */
+    private function quantitiesByUnit(Collection $items): array
+    {
+        $byUnit = [];
+
+        foreach ($items as $row) {
+            $unit = (string) ($row['unit'] ?? '');
+            $byUnit[$unit] = ($byUnit[$unit] ?? Quantity::zero())->plus(Quantity::of($row['total_quantity']));
+        }
+
+        $totals = [];
+
+        foreach ($byUnit as $unit => $quantity) {
+            $totals[] = ['unit' => $unit, 'quantity' => $quantity->toString()];
+        }
+
+        usort($totals, fn (array $a, array $b) => strcasecmp($a['unit'], $b['unit']));
+
+        return $totals;
     }
 
     /**

@@ -44,24 +44,34 @@ test('a sale shows up with a negative signed quantity and a purchase with a posi
     $domain = 'stock-movement-register-signs.tenant-test';
     $tenant = provisionStockMovementRegisterTestTenant($domain);
 
-    $tenant->run(function () {
+    $purchaseReference = null;
+    $saleReference = null;
+    $tenant->run(function () use (&$purchaseReference, &$saleReference) {
         stockMovementRegisterOpenFiscalYear();
         $admin = User::factory()->create(['email' => 'owner@example.com']);
         $customer = Customer::factory()->create();
         $supplier = Supplier::factory()->create();
         $item = Item::factory()->create(['is_vatable' => false, 'is_stockable' => true]);
 
-        Purchase::post(
+        $purchase = Purchase::post(
             ['supplier_id' => $supplier->id, 'date' => '2026-06-01', 'payment_mode' => 'cash'],
             [['item_id' => $item->id, 'quantity' => 10, 'rate' => 50, 'discount' => 0]],
             $admin,
         );
 
-        Sale::post(
+        $sale = Sale::post(
             ['customer_id' => $customer->id, 'invoice_type' => 'full', 'date' => '2026-06-02', 'payment_mode' => 'cash'],
             [['item_id' => $item->id, 'quantity' => 4, 'rate' => 80, 'discount' => 0]],
             $admin,
         );
+
+        // The reference column names the document the way the counterparty
+        // would recognise it: the supplier's own bill number (absent here,
+        // so it falls back to "#<id>") and our stored invoice number, each
+        // followed by the party name. It is no longer the internal
+        // purchase/sale row id on its own.
+        $purchaseReference = "Purchase #{$purchase->id} · {$supplier->name}";
+        $saleReference = "Sale {$sale->invoice_number} · {$customer->name}";
     });
 
     loginStockMovementRegisterTestUser($domain);
@@ -72,9 +82,13 @@ test('a sale shows up with a negative signed quantity and a purchase with a posi
             ->component('Tenant/Reports/StockMovementRegister')
             ->has('movements', 2)
             ->where('movements.0.movementType', 'Purchase')
-            ->where('movements.0.quantity', 10)
+            // Signed 4-decimal strings now, never floats: this register is
+            // what a stock dispute gets settled from.
+            ->where('movements.0.quantity', '10.0000')
+            ->where('movements.0.reference', $purchaseReference)
             ->where('movements.1.movementType', 'Sale')
-            ->where('movements.1.quantity', -4)
+            ->where('movements.1.quantity', '-4.0000')
+            ->where('movements.1.reference', $saleReference)
         );
 
     $tenant->delete();
@@ -212,7 +226,7 @@ test('the register can be narrowed to a single store, carries the store name on 
         ->assertOk()
         ->assertInertia(fn ($page) => $page
             ->has('movements', 1)
-            ->where('movements.0.quantity', 7)
+            ->where('movements.0.quantity', '7.0000')
             ->where('movements.0.storeName', $branchStoreName)
             ->where('storeId', $branchStoreId)
         );

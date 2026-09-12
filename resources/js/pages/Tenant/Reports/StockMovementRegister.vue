@@ -8,6 +8,8 @@ import Select from '@/components/ui/Select.vue';
 import Button from '@/components/ui/Button.vue';
 import DataTable from '@/components/ui/DataTable.vue';
 import { navGroups } from '@/lib/nav-items.js';
+import { formatQuantity, formatRate } from '@/lib/money';
+import { formatBsDate } from '@/lib/format';
 
 const props = defineProps({
     movements: { type: Array, default: () => [] },
@@ -46,12 +48,24 @@ function applyFilter() {
     );
 }
 
+const rangeLabel = computed(
+    () => `BS ${formatBsDate(props.from)} to ${formatBsDate(props.to)} (AD ${props.from} to ${props.to})`,
+);
+
+// The quantity arrives as an exact 4-decimal string, so its sign is read
+// off the string itself - parsing it back into a float just to pick a
+// colour is the habit this rewrite removed.
 function quantitySign(value) {
-    return value > 0 ? 'text-success' : value < 0 ? 'text-danger' : '';
+    if (value.startsWith('-')) {
+        return 'text-danger';
+    }
+
+    return /[1-9]/.test(value) ? 'text-success' : '';
 }
 
 const columns = [
-    { accessorKey: 'date', header: 'Date' },
+    { id: 'date_bs', header: 'Date (BS)', numeric: false, cell: ({ row }) => formatBsDate(row.original.date) },
+    { accessorKey: 'date', header: 'Date (AD)' },
     { accessorKey: 'itemName', header: 'Item' },
     { id: 'storeName', header: 'Store', numeric: false, cell: ({ row }) => row.original.storeName ?? '—' },
     { accessorKey: 'unit', header: 'Unit' },
@@ -64,14 +78,14 @@ const columns = [
             h(
                 'span',
                 { class: `font-semibold ${quantitySign(row.original.quantity)}` },
-                (row.original.quantity > 0 ? '+' : '') + row.original.quantity.toFixed(4),
+                (row.original.quantity.startsWith('-') ? '' : '+') + formatQuantity(row.original.quantity),
             ),
     },
     {
         id: 'unitCostRate',
         header: 'Unit Cost',
         numeric: true,
-        cell: ({ row }) => (row.original.unitCostRate !== null ? row.original.unitCostRate.toFixed(4) : '—'),
+        cell: ({ row }) => (row.original.unitCostRate === null ? '—' : formatRate(row.original.unitCostRate)),
     },
     { accessorKey: 'reference', header: 'Reference' },
 ];
@@ -82,6 +96,8 @@ const columns = [
         <div class="mb-4 flex items-center justify-between">
             <h2 class="text-base font-bold text-text-strong">Stock Movement Register</h2>
         </div>
+
+        <p class="mb-4 text-[12.5px] text-text-muted">{{ rangeLabel }}</p>
 
         <Card variant="panel" class="mb-4">
             <div class="flex flex-wrap items-end gap-3">

@@ -8,12 +8,21 @@ import Select from '@/components/ui/Select.vue';
 import Button from '@/components/ui/Button.vue';
 import DataTable from '@/components/ui/DataTable.vue';
 import { navGroups } from '@/lib/nav-items.js';
+import { formatMoney } from '@/lib/money';
+import { formatBsDate } from '@/lib/format';
 
 const props = defineProps({
     rows: { type: Array, default: () => [] },
     totals: {
         type: Object,
-        default: () => ({ current: 0, days31_60: 0, days61_90: 0, days90Plus: 0, total: 0 }),
+        default: () => ({
+            opening: '0.00',
+            current: '0.00',
+            days31_60: '0.00',
+            days61_90: '0.00',
+            days90Plus: '0.00',
+            total: '0.00',
+        }),
     },
     stores: { type: Array, default: () => [] },
     asOf: { type: String, required: true },
@@ -32,6 +41,8 @@ const storeOptions = computed(() => [
     ...props.stores.map((store) => ({ value: store.id, label: store.name })),
 ]);
 
+const asOfLabel = computed(() => `As of BS ${formatBsDate(props.asOf)} (AD ${props.asOf})`);
+
 function applyFilter() {
     router.get(
         window.location.pathname,
@@ -42,11 +53,12 @@ function applyFilter() {
 
 const columns = [
     { id: 'party', header: 'Supplier', numeric: false, cell: ({ row }) => row.original.party },
-    { id: 'current', header: 'Current (0-30)', numeric: true, cell: ({ row }) => row.original.current.toFixed(2) },
-    { id: 'days31_60', header: '31-60 days', numeric: true, cell: ({ row }) => row.original.days31_60.toFixed(2) },
-    { id: 'days61_90', header: '61-90 days', numeric: true, cell: ({ row }) => row.original.days61_90.toFixed(2) },
-    { id: 'days90Plus', header: '90+ days', numeric: true, cell: ({ row }) => row.original.days90Plus.toFixed(2) },
-    { id: 'total', header: 'Total', numeric: true, cell: ({ row }) => row.original.total.toFixed(2) },
+    { id: 'opening', header: 'Opening / unallocated', numeric: true, cell: ({ row }) => formatMoney(row.original.opening) },
+    { id: 'current', header: 'Current (0-30)', numeric: true, cell: ({ row }) => formatMoney(row.original.current) },
+    { id: 'days31_60', header: '31-60 days', numeric: true, cell: ({ row }) => formatMoney(row.original.days31_60) },
+    { id: 'days61_90', header: '61-90 days', numeric: true, cell: ({ row }) => formatMoney(row.original.days61_90) },
+    { id: 'days90Plus', header: '90+ days', numeric: true, cell: ({ row }) => formatMoney(row.original.days90Plus) },
+    { id: 'total', header: 'Total', numeric: true, cell: ({ row }) => formatMoney(row.original.total) },
 ];
 </script>
 
@@ -55,6 +67,8 @@ const columns = [
         <div class="mb-4 flex items-center justify-between">
             <h2 class="text-base font-bold text-text-strong">Aged Payables</h2>
         </div>
+
+        <p class="mb-4 text-[12.5px] text-text-muted">{{ asOfLabel }}</p>
 
         <Card variant="panel" class="mb-4">
             <div class="flex flex-wrap items-end gap-3">
@@ -71,21 +85,21 @@ const columns = [
         </Card>
 
         <Card variant="panel">
-            <DataTable :columns="columns" :data="rows" :page-size="25" empty-message="No outstanding credit purchases" />
+            <DataTable :columns="columns" :data="rows" :page-size="25" empty-message="Nothing outstanding" />
 
             <div class="mt-3 flex flex-wrap justify-end gap-6 border-t-[1.5px] border-border pt-3 text-[12.5px]">
-                <div><span class="text-text-muted">Current:</span> <span class="font-semibold">{{ totals.current.toFixed(2) }}</span></div>
-                <div><span class="text-text-muted">31-60:</span> <span class="font-semibold">{{ totals.days31_60.toFixed(2) }}</span></div>
-                <div><span class="text-text-muted">61-90:</span> <span class="font-semibold">{{ totals.days61_90.toFixed(2) }}</span></div>
-                <div><span class="text-text-muted">90+:</span> <span class="font-semibold">{{ totals.days90Plus.toFixed(2) }}</span></div>
-                <div><span class="text-text-muted">Total:</span> <span class="font-semibold">{{ totals.total.toFixed(2) }}</span></div>
+                <div><span class="text-text-muted">Opening:</span> <span class="font-semibold">{{ formatMoney(totals.opening) }}</span></div>
+                <div><span class="text-text-muted">Current:</span> <span class="font-semibold">{{ formatMoney(totals.current) }}</span></div>
+                <div><span class="text-text-muted">31-60:</span> <span class="font-semibold">{{ formatMoney(totals.days31_60) }}</span></div>
+                <div><span class="text-text-muted">61-90:</span> <span class="font-semibold">{{ formatMoney(totals.days61_90) }}</span></div>
+                <div><span class="text-text-muted">90+:</span> <span class="font-semibold">{{ formatMoney(totals.days90Plus) }}</span></div>
+                <div><span class="text-text-muted">Total:</span> <span class="font-semibold">{{ formatMoney(totals.total) }}</span></div>
             </div>
 
             <p class="mt-3 text-[11.5px] text-text-faint">
-                Only reflects credit purchases reduced by purchase returns against them. A payment made
-                to a supplier recorded via a manual journal voucher (rather than a dedicated
-                make-payment feature, which doesn't exist yet) won't reduce the outstanding amount shown
-                here.
+                The ageing buckets cover open credit bills. Anything else the supplier's ledger carries -
+                a migrated opening payable, a payment on account, a manual journal voucher - sits in
+                "Opening / unallocated", so this report always adds up to the supplier's ledger balance.
             </p>
         </Card>
     </AppLayout>

@@ -12,16 +12,16 @@ use Maatwebsite\Excel\Concerns\WithMapping;
 use PhpOffice\PhpSpreadsheet\Style\NumberFormat;
 
 /**
- * Exact mirror of SalesVatBookExport for
- * SalesPurchaseReportController::purchaseVatBook()'s `rows`/`totals`
- * payload. See SalesVatBookExport's own docblock for the reasoning.
+ * The credit-note book as a real .xlsx, built from exactly the rows
+ * SalesPurchaseReportController::salesReturnRegister() renders, so the
+ * sheet and the screen can never disagree. Posted notes only (C6), each
+ * carrying its stored `credit_note_number` and the invoice number of the
+ * sale it credits.
  *
- * The invoice column is the SUPPLIER's bill number, never our internal
- * voucher number (audit P1): an input-VAT claim is checked against the
- * seller's own invoice, so our voucher number is of no use to anyone
- * reconciling this book.
+ * Money cells are real numbers with a 2-decimal format - `Money::toFloat()`
+ * at the cell boundary and nowhere else (C1).
  */
-class PurchaseVatBookExport implements FromCollection, WithColumnFormatting, WithHeadings, WithMapping
+class SalesReturnRegisterExport implements FromCollection, WithColumnFormatting, WithHeadings, WithMapping
 {
     /**
      * @param  Collection<int, array<string, mixed>>  $rows
@@ -40,14 +40,14 @@ class PurchaseVatBookExport implements FromCollection, WithColumnFormatting, Wit
         return $this->rows->values()->push([
             'sn' => null,
             'date' => null,
-            'bill_number' => null,
-            'supplier' => 'Total',
-            'supplier_pan' => null,
+            'credit_note_number' => null,
+            'invoice_number' => null,
+            'buyer_name' => 'Total',
+            'buyer_pan' => null,
             'entry' => null,
             'taxable_amount' => $this->totals['taxable_amount'],
             'nontaxable_amount' => $this->totals['nontaxable_amount'],
             'vat_amount' => $this->totals['vat_amount'],
-            'capital_amount' => $this->totals['capital_amount'],
             'total' => $this->totals['total'],
         ]);
     }
@@ -57,7 +57,7 @@ class PurchaseVatBookExport implements FromCollection, WithColumnFormatting, Wit
      */
     public function headings(): array
     {
-        return ['SN', 'Date (BS)', 'Date (AD)', 'Bill #', 'Supplier', 'Supplier PAN', 'Entry', 'Taxable', 'Exempt', 'VAT', 'Capital', 'Total'];
+        return ['SN', 'Date (BS)', 'Date (AD)', 'Credit Note #', 'Against Invoice #', 'Buyer', 'Buyer PAN', 'Entry', 'Taxable', 'Exempt', 'VAT', 'Total'];
     }
 
     /**
@@ -66,7 +66,6 @@ class PurchaseVatBookExport implements FromCollection, WithColumnFormatting, Wit
     public function columnFormats(): array
     {
         return [
-            'H' => NumberFormat::FORMAT_NUMBER_00,
             'I' => NumberFormat::FORMAT_NUMBER_00,
             'J' => NumberFormat::FORMAT_NUMBER_00,
             'K' => NumberFormat::FORMAT_NUMBER_00,
@@ -84,14 +83,14 @@ class PurchaseVatBookExport implements FromCollection, WithColumnFormatting, Wit
             $row['sn'],
             $row['date'] === null ? '' : NepaliCalendar::formatBs($row['date']),
             $row['date'] ?? '',
-            $row['bill_number'] ?? '',
-            $row['supplier'] ?? '',
-            $row['supplier_pan'] ?? '',
+            $row['credit_note_number'] ?? '',
+            $row['invoice_number'] ?? '',
+            $row['buyer_name'] ?? '',
+            $row['buyer_pan'] ?? '',
             $row['entry'] ?? '',
             Money::of($row['taxable_amount'])->toFloat(),
             Money::of($row['nontaxable_amount'])->toFloat(),
             Money::of($row['vat_amount'])->toFloat(),
-            Money::of($row['capital_amount'])->toFloat(),
             Money::of($row['total'])->toFloat(),
         ];
     }

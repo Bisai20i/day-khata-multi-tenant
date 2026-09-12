@@ -8,10 +8,13 @@ import Select from '@/components/ui/Select.vue';
 import Button from '@/components/ui/Button.vue';
 import DataTable from '@/components/ui/DataTable.vue';
 import { navGroups } from '@/lib/nav-items.js';
+import { formatQuantity } from '@/lib/money';
+import { formatBsDate } from '@/lib/format';
 
 const props = defineProps({
     lines: { type: Array, default: () => [] },
     itemWise: { type: Array, default: () => [] },
+    totalQuantities: { type: Array, default: () => [] },
     items: { type: Array, default: () => [] },
     stores: { type: Array, default: () => [] },
     from: { type: String, required: true },
@@ -70,23 +73,38 @@ function applyFilter() {
 const reasonLabels = { damage: 'Damage', lost: 'Lost' };
 
 const listColumns = [
-    { accessorKey: 'date', header: 'Date' },
+    { id: 'date_bs', header: 'Date (BS)', numeric: false, cell: ({ row }) => formatBsDate(row.original.date) },
+    { accessorKey: 'date', header: 'Date (AD)' },
     { accessorKey: 'itemName', header: 'Item' },
     { accessorKey: 'unit', header: 'Unit' },
     { id: 'storeName', header: 'Store', numeric: false, cell: ({ row }) => row.original.storeName ?? '—' },
     { id: 'reason', header: 'Reason', numeric: false, cell: ({ row }) => reasonLabels[row.original.reason] ?? row.original.reason },
-    { id: 'quantity', header: 'Quantity', numeric: true, cell: ({ row }) => Number(row.original.quantity).toFixed(4) },
+    { id: 'quantity', header: 'Quantity', numeric: true, cell: ({ row }) => formatQuantity(row.original.quantity) },
     { id: 'remarks', header: 'Remarks', numeric: false, cell: ({ row }) => row.original.remarks ?? '—' },
 ];
 
 const itemWiseColumns = [
     { accessorKey: 'name', header: 'Item' },
     { accessorKey: 'unit', header: 'Unit' },
-    { id: 'total_quantity', header: 'Total Quantity', numeric: true, cell: ({ row }) => Number(row.original.total_quantity).toFixed(4) },
+    { id: 'total_quantity', header: 'Total Quantity', numeric: true, cell: ({ row }) => formatQuantity(row.original.total_quantity) },
     { accessorKey: 'transaction_count', header: 'Entries', numeric: true },
 ];
 
-const totalQuantity = computed(() => props.lines.reduce((sum, line) => sum + Number(line.quantity), 0));
+const rangeLabel = computed(
+    () => `BS ${formatBsDate(props.from)} to ${formatBsDate(props.to)} (AD ${props.from} to ${props.to})`,
+);
+
+// Per base unit, never one number: writing off 3 Kilograms and 2 Pieces is
+// not "5". The server sums each unit separately in exact Quantity.
+const totalQuantityLabel = computed(() => {
+    if (props.totalQuantities.length === 0) {
+        return '—';
+    }
+
+    return props.totalQuantities
+        .map((entry) => `${formatQuantity(entry.quantity)} ${entry.unit}`.trim())
+        .join(', ');
+});
 </script>
 
 <template>
@@ -94,6 +112,8 @@ const totalQuantity = computed(() => props.lines.reduce((sum, line) => sum + Num
         <div class="mb-4 flex items-center justify-between">
             <h2 class="text-base font-bold text-text-strong">Damage & Lost Stock</h2>
         </div>
+
+        <p class="mb-4 text-[12.5px] text-text-muted">{{ rangeLabel }}</p>
 
         <Card variant="panel" class="mb-4">
             <div class="flex flex-wrap items-end gap-3">
@@ -130,7 +150,7 @@ const totalQuantity = computed(() => props.lines.reduce((sum, line) => sum + Num
             <DataTable :columns="listColumns" :data="lines" :page-size="25" empty-message="No damage or lost stock entries in this range" />
             <div class="mt-3 border-t-[1.5px] border-border pt-3 text-sm">
                 <span class="text-[10px] font-bold tracking-[.8px] text-text-muted uppercase">Total quantity written off:</span>
-                <span class="ml-2 font-bold text-text-strong">{{ totalQuantity.toFixed(4) }}</span>
+                <span class="ml-2 font-bold text-text-strong">{{ totalQuantityLabel }}</span>
             </div>
         </Card>
 

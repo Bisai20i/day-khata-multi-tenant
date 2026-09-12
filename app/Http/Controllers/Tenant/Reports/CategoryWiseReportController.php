@@ -7,10 +7,14 @@ use App\Http\Controllers\Controller;
 use App\Models\FiscalYear;
 use App\Models\Item;
 use App\Models\ItemCategory;
-use App\Models\ItemStockMovement;
 use App\Models\PurchaseLine;
 use App\Models\SaleLine;
 use App\Models\Store;
+use App\Support\Inventory\StockCosting;
+use App\Support\Money\Money;
+use App\Support\Money\Quantity;
+use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Database\Eloquent\Model;
 use Illuminate\Http\Request;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Collection;
@@ -18,18 +22,29 @@ use Inertia\Inertia;
 use Inertia\Response;
 
 /**
- * Category-wise rollups over Sale/Purchase/stock data - siblings of the
- * per-item Sales/Purchase registers and the per-item Stock Summary, but
- * grouped by ItemCategory (with an ItemSubcategory breakdown nested inside
- * each category row) instead of listed per invoice/item. Read-only, no new
- * tables.
+ * Category-wise rollups over sales, purchases and stock - siblings of the
+ * per-item registers and the Stock Summary, grouped by ItemCategory (with an
+ * ItemSubcategory breakdown nested inside each category row).
+ *
+ * Two rules from the 2026-09-11 audit shape every figure here:
+ *
+ * - **Values come from stored decimals and StockCosting, never a float.**
+ *   Stock value is App\Support\Inventory\StockCosting (C10), the one place
+ *   stock is valued; the old per-category weighted average rounded the cost
+ *   to 4 decimals before multiplying and counted transfer-in rows as fresh
+ *   stock, so a category total disagreed with the Balance Sheet.
+ * - **Quantities are never added across units.** Summing 12 Boxes and 30
+ *   Kilograms into "42" is not a number anyone can use, so every quantity
+ *   total is a per-base-unit breakdown: line quantities are converted to
+ *   base units with the line's own `unit_conversion_factor` and grouped by
+ *   the item's base unit.
  */
 class CategoryWiseReportController extends Controller
 {
     /**
-     * Every ItemCategory (and its subcategories) is always represented,
-     * even with zero activity, so a category with no sales in the range
-     * still shows as a zero row rather than silently vanishing.
+     * Every ItemCategory (and its subcategories) is always represented, even
+     * with zero activity, so a category with no sales in the range still
+     * shows as a zero row rather than silently vanishing.
      */
     public function salesByCategory(Request $request): Response
     {
@@ -75,26 +90,25 @@ class CategoryWiseReportController extends Controller
     }
 
     /**
-     * On-hand quantity and valuation as of a single date (not a from/to
-     * range), grouped by category/subcategory. Reuses the exact
-     * weighted-average-cost and "closing quantity as of a date" algorithm
-     * from InventoryReportController::stockSummary() - see that method's
-     * docblock - just summed per category instead of listed per item.
+     * On-hand quantity and value as of a single date, grouped by
+     * category/subcategory - StockCosting::valuationRows() summed into
+     * buckets instead of listed per item.
      */
     public function stockByCategory(Request $request): Response
     {
-        $asOf = Carbon::parse($request->string('as_of')->toString() ?: now()->toDateString())->endOfDay();
+        $asOf = $this->resolveAsOf($request);
         $storeId = $request->integer('store_id') ?: null;
 
         $categories = ItemCategory::query()->with('subcategories')->orderBy('name')->get();
-        $aggregates = $this->categoryAggregatesFromStockMovements($asOf, $storeId);
+        $aggregates = $this->categoryAggregatesFromStock($asOf, $storeId);
 
-        ['rows' => $rows, 'grandTotal' => $grandTotal] = $this->buildCategoryStockRows($categories, $aggregates);
+        ['rows' => $rows, 'grandTotal' => $grandTotal] = $this->buildCategoryValueRows($categories, $aggregates);
 
         return Inertia::render('Tenant/Reports/StockByCategory', [
-            'asOf' => $asOf->toDateString(),
+            'asOf' => $asOf,
             'rows' => $rows,
-            'grandTotalValuation' => $grandTotal['valuation'],
+            'grandTotal' => $grandTotal,
+            'grandTotalValuation' => $grandTotal['value'],
             'stores' => Store::where('is_active', true)->orderBy('name')->get(['id', 'name']),
             'storeId' => $storeId,
         ]);
@@ -102,257 +116,266 @@ class CategoryWiseReportController extends Controller
 
     /**
      * Posted-only sale line totals grouped by category/subcategory within
-     * the date range.
+     * the date range, with quantities in base units keyed by unit.
      *
-     * @return array<string, array{quantity: float, value: float}> keyed "{categoryId}:{subcategoryId}" (empty string in place of the subcategoryId when the item has none)
+     * @return array<string, array{value: Money, quantities: array<string, Quantity>}> keyed "{categoryId}:{subcategoryId}"
      */
     private function categoryAggregatesFromSaleLines(string $from, string $to, ?int $storeId): array
     {
-        return SaleLine::query()
+        $rows = SaleLine::query()
             ->join('sales', 'sales.id', '=', 'sale_lines.sale_id')
             ->join('items', 'items.id', '=', 'sale_lines.item_id')
             ->where('sales.status', 'posted')
-            ->whereBetween('sales.date', [$from, $to])
-            ->when($storeId !== null, fn ($query) => $query->where('sales.store_id', $storeId))
+            ->whereDate('sales.date', '>=', $from)
+            ->whereDate('sales.date', '<=', $to)
+            ->when($storeId !== null, fn (Builder $query) => $query->where('sales.store_id', $storeId))
             ->get([
                 'items.item_category_id as category_id',
                 'items.item_subcategory_id as subcategory_id',
+                'items.unit as unit',
                 'sale_lines.quantity as quantity',
+                'sale_lines.unit_conversion_factor as unit_conversion_factor',
                 'sale_lines.line_total as line_total',
-            ])
-            ->groupBy(fn ($row) => "{$row->category_id}:{$row->subcategory_id}")
-            ->map(fn (Collection $rows) => [
-                'quantity' => (float) $rows->sum('quantity'),
-                'value' => (float) $rows->sum('line_total'),
-            ])
-            ->all();
+            ]);
+
+        return $this->bucket($rows);
     }
 
     /**
      * Exact mirror of categoryAggregatesFromSaleLines() using
      * Purchase/PurchaseLine.
      *
-     * @return array<string, array{quantity: float, value: float}> keyed "{categoryId}:{subcategoryId}" (empty string in place of the subcategoryId when the item has none)
+     * @return array<string, array{value: Money, quantities: array<string, Quantity>}> keyed "{categoryId}:{subcategoryId}"
      */
     private function categoryAggregatesFromPurchaseLines(string $from, string $to, ?int $storeId): array
     {
-        return PurchaseLine::query()
+        $rows = PurchaseLine::query()
             ->join('purchases', 'purchases.id', '=', 'purchase_lines.purchase_id')
             ->join('items', 'items.id', '=', 'purchase_lines.item_id')
             ->where('purchases.status', 'posted')
-            ->whereBetween('purchases.date', [$from, $to])
-            ->when($storeId !== null, fn ($query) => $query->where('purchases.store_id', $storeId))
+            ->whereDate('purchases.date', '>=', $from)
+            ->whereDate('purchases.date', '<=', $to)
+            ->when($storeId !== null, fn (Builder $query) => $query->where('purchases.store_id', $storeId))
             ->get([
                 'items.item_category_id as category_id',
                 'items.item_subcategory_id as subcategory_id',
+                'items.unit as unit',
                 'purchase_lines.quantity as quantity',
+                'purchase_lines.unit_conversion_factor as unit_conversion_factor',
                 'purchase_lines.line_total as line_total',
-            ])
-            ->groupBy(fn ($row) => "{$row->category_id}:{$row->subcategory_id}")
-            ->map(fn (Collection $rows) => [
-                'quantity' => (float) $rows->sum('quantity'),
-                'value' => (float) $rows->sum('line_total'),
-            ])
-            ->all();
+            ]);
+
+        return $this->bucket($rows);
     }
 
     /**
-     * Per-item weighted-average valuation (same algorithm as
-     * InventoryReportController::stockSummary(), collapsed to a single
-     * as-of cutoff instead of a from/to range) summed into category/
-     * subcategory buckets.
+     * Sums raw line rows into category/subcategory buckets. Quantities are
+     * converted to base units (`quantity x unit_conversion_factor`, one
+     * rounding at 4 decimals, exactly what the stock movement recorded) and
+     * kept per unit so two different units never land in one number.
      *
-     * @return array<string, array{quantity: float, valuation: float}> keyed "{categoryId}:{subcategoryId}" (empty string in place of the subcategoryId when the item has none)
+     * @param  Collection<int, Model>  $rows
+     * @return array<string, array{value: Money, quantities: array<string, Quantity>}>
      */
-    private function categoryAggregatesFromStockMovements(Carbon $asOf, ?int $storeId): array
+    private function bucket(Collection $rows): array
     {
         $aggregates = [];
 
-        Item::query()->where('is_stockable', true)->orderBy('name')->each(function (Item $item) use ($asOf, $storeId, &$aggregates): void {
-            $movements = $item->stockMovements()->where('cancelled', false)
-                ->when($storeId !== null, fn ($query) => $query->where('store_id', $storeId))
-                ->get();
+        foreach ($rows as $row) {
+            $key = "{$row->category_id}:{$row->subcategory_id}";
+            $unit = (string) ($row->unit ?? '');
 
-            $closing = (float) $movements
-                ->filter(fn (ItemStockMovement $movement) => $movement->date->lte($asOf))
-                ->sum(fn (ItemStockMovement $movement) => (float) $movement->quantity * $movement->movement_type->direction());
+            $aggregates[$key] ??= ['value' => Money::zero(), 'quantities' => []];
+            $aggregates[$key]['quantities'][$unit] ??= Quantity::zero();
 
-            $costBasis = $movements->filter(
-                fn (ItemStockMovement $movement) => $movement->movement_type->direction() === 1
-                    && $movement->date->lte($asOf)
-                    && $movement->unit_cost_rate !== null,
+            $aggregates[$key]['value'] = $aggregates[$key]['value']->plus(Money::of($row->line_total));
+            $aggregates[$key]['quantities'][$unit] = $aggregates[$key]['quantities'][$unit]->plus(
+                Quantity::round(
+                    Quantity::of($row->quantity)->toBigDecimal()
+                        ->multipliedBy(Quantity::of($row->unit_conversion_factor ?? '1')->toBigDecimal())
+                )
             );
-
-            $costQuantity = (float) $costBasis->sum(fn (ItemStockMovement $movement) => (float) $movement->quantity);
-            $costValue = (float) $costBasis->sum(fn (ItemStockMovement $movement) => (float) $movement->quantity * (float) $movement->unit_cost_rate);
-            $avgCost = $costQuantity > 0 ? round($costValue / $costQuantity, 4) : 0.0;
-            $valuation = round($avgCost * $closing, 2);
-
-            $key = "{$item->item_category_id}:{$item->item_subcategory_id}";
-            $aggregates[$key] ??= ['quantity' => 0.0, 'valuation' => 0.0];
-            $aggregates[$key]['quantity'] += $closing;
-            $aggregates[$key]['valuation'] += $valuation;
-        });
+        }
 
         return $aggregates;
     }
 
     /**
-     * Nests every ItemCategory/ItemSubcategory into rows carrying
-     * {quantity, value}, defaulting to zero wherever the aggregates map has
-     * no entry for that category/subcategory. Items without a subcategory
-     * roll into the category total and surface as an "Uncategorized" row
-     * only when they actually contributed nonzero activity, so the grand
-     * total always equals the sum of every shown row.
+     * Closing stock quantity and value per category/subcategory, read through
+     * StockCosting (C10) so a category total can never disagree with the
+     * Balance Sheet's Stock in Hand.
+     *
+     * @return array<string, array{value: Money, quantities: array<string, Quantity>}>
+     */
+    private function categoryAggregatesFromStock(string $asOf, ?int $storeId): array
+    {
+        $items = Item::query()
+            ->where('is_stockable', true)
+            ->get(['id', 'item_category_id', 'item_subcategory_id', 'unit'])
+            ->keyBy('id');
+
+        $aggregates = [];
+
+        foreach (StockCosting::valuationRows($asOf, $storeId) as $row) {
+            $item = $items->get($row['item_id']);
+
+            if ($item === null) {
+                continue;
+            }
+
+            $key = "{$item->item_category_id}:{$item->item_subcategory_id}";
+            $unit = (string) ($item->unit ?? '');
+
+            $aggregates[$key] ??= ['value' => Money::zero(), 'quantities' => []];
+            $aggregates[$key]['quantities'][$unit] ??= Quantity::zero();
+
+            $aggregates[$key]['value'] = $aggregates[$key]['value']->plus($row['value']);
+            $aggregates[$key]['quantities'][$unit] = $aggregates[$key]['quantities'][$unit]->plus($row['quantity']);
+        }
+
+        return $aggregates;
+    }
+
+    /**
+     * Nests every ItemCategory/ItemSubcategory into rows carrying a value and
+     * a per-unit quantity breakdown, defaulting to zero wherever the
+     * aggregates map has no entry. Items without a subcategory roll into the
+     * category total and surface as an "Uncategorized" row only when they
+     * actually contributed something, so the grand total always equals the
+     * sum of every shown row.
      *
      * @param  Collection<int, ItemCategory>  $categories
-     * @param  array<string, array{quantity: float, value: float}>  $aggregates
-     * @return array{rows: array<int, array<string, mixed>>, grandTotal: array{quantity: float, value: float}}
+     * @param  array<string, array{value: Money, quantities: array<string, Quantity>}>  $aggregates
+     * @return array{rows: array<int, array<string, mixed>>, grandTotal: array{value: string, quantities: array<int, array{unit: string, quantity: string}>}}
      */
     private function buildCategoryValueRows(Collection $categories, array $aggregates): array
     {
         $rows = [];
-        $grandQuantity = 0.0;
-        $grandValue = 0.0;
+        $grandValue = Money::zero();
+        $grandQuantities = [];
 
         foreach ($categories as $category) {
-            $categoryQuantity = 0.0;
-            $categoryValue = 0.0;
+            $categoryValue = Money::zero();
+            $categoryQuantities = [];
             $subcategoryRows = [];
 
             foreach ($category->subcategories as $subcategory) {
-                $aggregate = $aggregates["{$category->id}:{$subcategory->id}"] ?? ['quantity' => 0.0, 'value' => 0.0];
-
-                $categoryQuantity += $aggregate['quantity'];
-                $categoryValue += $aggregate['value'];
+                $aggregate = $aggregates["{$category->id}:{$subcategory->id}"] ?? null;
 
                 $subcategoryRows[] = [
                     'subcategoryId' => $subcategory->id,
                     'subcategoryName' => $subcategory->name,
-                    'quantity' => round($aggregate['quantity'], 4),
-                    'value' => round($aggregate['value'], 2),
+                    'value' => ($aggregate['value'] ?? Money::zero())->toString(),
+                    'quantities' => $this->presentQuantities($aggregate['quantities'] ?? []),
                 ];
+
+                if ($aggregate !== null) {
+                    $categoryValue = $categoryValue->plus($aggregate['value']);
+                    $categoryQuantities = $this->mergeQuantities($categoryQuantities, $aggregate['quantities']);
+                }
             }
 
-            $unassigned = $aggregates["{$category->id}:"] ?? ['quantity' => 0.0, 'value' => 0.0];
+            $unassigned = $aggregates["{$category->id}:"] ?? null;
 
-            if (abs($unassigned['quantity']) > 0.00001 || abs($unassigned['value']) > 0.001) {
-                $categoryQuantity += $unassigned['quantity'];
-                $categoryValue += $unassigned['value'];
+            if ($unassigned !== null && ! $this->isEmptyAggregate($unassigned)) {
+                $categoryValue = $categoryValue->plus($unassigned['value']);
+                $categoryQuantities = $this->mergeQuantities($categoryQuantities, $unassigned['quantities']);
 
                 $subcategoryRows[] = [
                     'subcategoryId' => null,
                     'subcategoryName' => 'Uncategorized',
-                    'quantity' => round($unassigned['quantity'], 4),
-                    'value' => round($unassigned['value'], 2),
+                    'value' => $unassigned['value']->toString(),
+                    'quantities' => $this->presentQuantities($unassigned['quantities']),
                 ];
             }
 
             $rows[] = [
                 'categoryId' => $category->id,
                 'categoryName' => $category->name,
-                'quantity' => round($categoryQuantity, 4),
-                'value' => round($categoryValue, 2),
+                'value' => $categoryValue->toString(),
+                'quantities' => $this->presentQuantities($categoryQuantities),
                 'subcategories' => $subcategoryRows,
             ];
 
-            $grandQuantity += $categoryQuantity;
-            $grandValue += $categoryValue;
+            $grandValue = $grandValue->plus($categoryValue);
+            $grandQuantities = $this->mergeQuantities($grandQuantities, $categoryQuantities);
         }
 
         return [
             'rows' => $rows,
             'grandTotal' => [
-                'quantity' => round($grandQuantity, 4),
-                'value' => round($grandValue, 2),
+                'value' => $grandValue->toString(),
+                'quantities' => $this->presentQuantities($grandQuantities),
             ],
         ];
     }
 
     /**
-     * Exact mirror of buildCategoryValueRows() for the stock report's
-     * {quantity, valuation} shape, with a derived (never independently
-     * summed) weighted-average cost per row for display.
-     *
-     * @param  Collection<int, ItemCategory>  $categories
-     * @param  array<string, array{quantity: float, valuation: float}>  $aggregates
-     * @return array{rows: array<int, array<string, mixed>>, grandTotal: array{valuation: float}}
+     * @param  array<string, Quantity>  $into
+     * @param  array<string, Quantity>  $from
+     * @return array<string, Quantity>
      */
-    private function buildCategoryStockRows(Collection $categories, array $aggregates): array
+    private function mergeQuantities(array $into, array $from): array
     {
-        $rows = [];
-        $grandValuation = 0.0;
-
-        foreach ($categories as $category) {
-            $categoryQuantity = 0.0;
-            $categoryValuation = 0.0;
-            $subcategoryRows = [];
-
-            foreach ($category->subcategories as $subcategory) {
-                $aggregate = $aggregates["{$category->id}:{$subcategory->id}"] ?? ['quantity' => 0.0, 'valuation' => 0.0];
-
-                $categoryQuantity += $aggregate['quantity'];
-                $categoryValuation += $aggregate['valuation'];
-
-                $subcategoryRows[] = [
-                    'subcategoryId' => $subcategory->id,
-                    'subcategoryName' => $subcategory->name,
-                    'quantity' => round($aggregate['quantity'], 4),
-                    'valuation' => round($aggregate['valuation'], 2),
-                    'avgCost' => $this->weightedAverage($aggregate['valuation'], $aggregate['quantity']),
-                ];
-            }
-
-            $unassigned = $aggregates["{$category->id}:"] ?? ['quantity' => 0.0, 'valuation' => 0.0];
-
-            if (abs($unassigned['quantity']) > 0.00001 || abs($unassigned['valuation']) > 0.001) {
-                $categoryQuantity += $unassigned['quantity'];
-                $categoryValuation += $unassigned['valuation'];
-
-                $subcategoryRows[] = [
-                    'subcategoryId' => null,
-                    'subcategoryName' => 'Uncategorized',
-                    'quantity' => round($unassigned['quantity'], 4),
-                    'valuation' => round($unassigned['valuation'], 2),
-                    'avgCost' => $this->weightedAverage($unassigned['valuation'], $unassigned['quantity']),
-                ];
-            }
-
-            $rows[] = [
-                'categoryId' => $category->id,
-                'categoryName' => $category->name,
-                'quantity' => round($categoryQuantity, 4),
-                'valuation' => round($categoryValuation, 2),
-                'avgCost' => $this->weightedAverage($categoryValuation, $categoryQuantity),
-                'subcategories' => $subcategoryRows,
-            ];
-
-            $grandValuation += $categoryValuation;
+        foreach ($from as $unit => $quantity) {
+            $into[$unit] = ($into[$unit] ?? Quantity::zero())->plus($quantity);
         }
 
-        return [
-            'rows' => $rows,
-            'grandTotal' => [
-                'valuation' => round($grandValuation, 2),
-            ],
-        ];
+        return $into;
     }
 
     /**
-     * Derived display-only average cost (valuation / quantity) - never
-     * summed independently across rows, unlike quantity/valuation.
+     * @param  array<string, Quantity>  $quantities
+     * @return array<int, array{unit: string, quantity: string}>
      */
-    private function weightedAverage(float $valuation, float $quantity): float
+    private function presentQuantities(array $quantities): array
     {
-        return abs($quantity) > 0.00001 ? round($valuation / $quantity, 4) : 0.0;
+        $presented = [];
+
+        foreach ($quantities as $unit => $quantity) {
+            if ($quantity->isZero()) {
+                continue;
+            }
+
+            $presented[] = ['unit' => $unit, 'quantity' => $quantity->toString()];
+        }
+
+        usort($presented, fn (array $a, array $b) => strcasecmp($a['unit'], $b['unit']));
+
+        return $presented;
+    }
+
+    /**
+     * @param  array{value: Money, quantities: array<string, Quantity>}  $aggregate
+     */
+    private function isEmptyAggregate(array $aggregate): bool
+    {
+        if (! $aggregate['value']->isZero()) {
+            return false;
+        }
+
+        foreach ($aggregate['quantities'] as $quantity) {
+            if (! $quantity->isZero()) {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    private function resolveAsOf(Request $request): string
+    {
+        $asOf = $request->string('as_of')->toString();
+
+        return $asOf !== '' ? Carbon::parse($asOf)->toDateString() : Carbon::now()->toDateString();
     }
 
     /**
      * Defaults to the current open fiscal year's date range when no
      * explicit `from`/`to` query params are given, falling back to
      * month-to-date if no fiscal year exists yet. Identical logic to
-     * SalesPurchaseReportController::resolveDateRange() - duplicated
-     * rather than shared across controllers, matching this app's existing
+     * SalesPurchaseReportController::resolveDateRange() - duplicated rather
+     * than shared across controllers, matching this app's existing
      * per-controller-file convention (see mem.md gotcha #5).
      *
      * @return array{0: string, 1: string}

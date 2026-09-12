@@ -29,11 +29,6 @@ function loginInventoryReportTestUser(string $domain): void
     ]);
 }
 
-function nearly(float $expected): Closure
-{
-    return fn ($actual) => abs((float) $actual - $expected) < 0.001;
-}
-
 test('stock summary computes opening/in/out/closing quantities and weighted-average valuation over a date range', function () {
     $domain = 'stock-summary-report.tenant-test';
     $tenant = provisionInventoryReportTestTenant($domain);
@@ -47,17 +42,22 @@ test('stock summary computes opening/in/out/closing quantities and weighted-aver
         $storeId = Store::where('is_active', true)->orderBy('id')->firstOrFail()->id;
 
         // Before the range (from=2026-02-01): contributes to opening only.
-        $item->recordStockMovement(StockMovementType::Purchase, 10, '2026-01-01', $storeId, unitCostRate: 100);
+        //
+        // The valuation now comes from StockCosting, which averages each
+        // movement's `value` rather than unit_cost_rate x quantity, so a
+        // priced movement has to carry one; recordStockMovement() derives the
+        // per-base-unit rate from it. 10 units for Rs 1,000 is Rs 100 each.
+        $item->recordStockMovement(StockMovementType::Purchase, 10, '2026-01-01', $storeId, value: 1000);
 
-        // Within the range: qty in / qty out, and both feed the valuation
-        // basis since they're stock-increasing/-decreasing respectively.
-        $item->recordStockMovement(StockMovementType::Purchase, 5, '2026-02-10', $storeId, unitCostRate: 130);
+        // Within the range: qty in / qty out. Only the purchase feeds the
+        // valuation basis - a sale leaves stock at selling price, not cost.
+        $item->recordStockMovement(StockMovementType::Purchase, 5, '2026-02-10', $storeId, value: 650);
         $item->recordStockMovement(StockMovementType::Sale, 3, '2026-02-15', $storeId);
 
         // After the range (to=2026-02-28): must not affect qty in/out,
         // opening, closing, or the as-of valuation - this is the "as of a
         // past date" guarantee, not just Item::currentStock().
-        $item->recordStockMovement(StockMovementType::Purchase, 20, '2026-03-01', $storeId, unitCostRate: 200);
+        $item->recordStockMovement(StockMovementType::Purchase, 20, '2026-03-01', $storeId, value: 4000);
 
         // Cancelled: falls inside the range but must be excluded from
         // every sum.
@@ -76,17 +76,21 @@ test('stock summary computes opening/in/out/closing quantities and weighted-aver
         ->assertOk()
         ->assertInertia(fn ($page) => $page
             ->component('Tenant/Reports/StockSummary')
+            ->where('from', '2026-02-01')
+            ->where('to', '2026-02-28')
             ->where('rows', fn ($rows) => count($rows) === 1)
             ->where('rows.0.itemId', $itemId)
-            ->where('rows.0.opening', nearly(10.0))
-            ->where('rows.0.qtyIn', nearly(5.0))
-            ->where('rows.0.qtyOut', nearly(3.0))
-            ->where('rows.0.closing', nearly(12.0))
-            // weighted avg = (10*100 + 5*130) / 15 = 110.0
-            ->where('rows.0.avgCost', nearly(110.0))
-            // 110 * 12 = 1320.0
-            ->where('rows.0.valuation', nearly(1320.0))
-            ->where('grandTotalValuation', nearly(1320.0))
+            // Every figure is an exact decimal string now: quantities and the
+            // average cost at 4 places, rupee values at 2.
+            ->where('rows.0.opening', '10.0000')
+            ->where('rows.0.qtyIn', '5.0000')
+            ->where('rows.0.qtyOut', '3.0000')
+            ->where('rows.0.closing', '12.0000')
+            // weighted avg = (1000 + 650) / 15 = 110.0
+            ->where('rows.0.avgCost', '110.0000')
+            // 110 * 12 = 1320.00, rounded to rupees exactly once.
+            ->where('rows.0.valuation', '1320.00')
+            ->where('grandTotalValuation', '1320.00')
             ->etc()
         );
 
@@ -128,11 +132,12 @@ test('stock summary is scoped to a single store when store_id is given, and sums
         $mainStoreId = Store::where('is_active', true)->orderBy('id')->firstOrFail()->id;
         $branchStoreId = Store::factory()->create(['name' => 'Branch Store'])->id;
 
-        // Main store: 10 in @ 100.
-        $item->recordStockMovement(StockMovementType::Purchase, 10, '2026-02-05', $mainStoreId, unitCostRate: 100);
+        // Main store: 10 in @ 100. The priced `value` is what StockCosting
+        // averages over; unit_cost_rate alone is not a cost basis.
+        $item->recordStockMovement(StockMovementType::Purchase, 10, '2026-02-05', $mainStoreId, value: 1000);
 
         // Branch store: 6 in @ 100.
-        $item->recordStockMovement(StockMovementType::Purchase, 6, '2026-02-10', $branchStoreId, unitCostRate: 100);
+        $item->recordStockMovement(StockMovementType::Purchase, 6, '2026-02-10', $branchStoreId, value: 600);
     });
 
     loginInventoryReportTestUser($domain);
@@ -141,9 +146,13 @@ test('stock summary is scoped to a single store when store_id is given, and sums
     $this->get("http://{$domain}/reports/stock-summary?from=2026-02-01&to=2026-02-28&store_id={$branchStoreId}")
         ->assertOk()
         ->assertInertia(fn ($page) => $page
-            ->where('rows.0.closing', nearly(6.0))
-            ->where('rows.0.valuation', nearly(600.0))
-            ->where('grandTotalValuation', nearly(600.0))
+            // The quantity is store-scoped but the weighted average cost
+            // never is: (1000 + 600) / 16 = 100 in both views, so the
+            // per-store values still add up to the all-stores total.
+            ->where('rows.0.closing', '6.0000')
+            ->where('rows.0.avgCost', '100.0000')
+            ->where('rows.0.valuation', '600.00')
+            ->where('grandTotalValuation', '600.00')
             ->where('storeId', $branchStoreId)
             ->etc()
         );
@@ -153,11 +162,66 @@ test('stock summary is scoped to a single store when store_id is given, and sums
     $this->get("http://{$domain}/reports/stock-summary?from=2026-02-01&to=2026-02-28")
         ->assertOk()
         ->assertInertia(fn ($page) => $page
-            ->where('rows.0.closing', nearly(16.0))
-            ->where('rows.0.valuation', nearly(1600.0))
-            ->where('grandTotalValuation', nearly(1600.0))
+            ->where('rows.0.closing', '16.0000')
+            ->where('rows.0.avgCost', '100.0000')
+            ->where('rows.0.valuation', '1600.00')
+            ->where('grandTotalValuation', '1600.00')
             ->where('storeId', null)
             ->etc()
+        );
+
+    $tenant->delete();
+});
+
+test('the combined stock summary leaves store transfers out of qty in and qty out', function () {
+    $domain = 'stock-summary-transfers.tenant-test';
+    $tenant = provisionInventoryReportTestTenant($domain);
+
+    // Audit P0-17: moving 10 units from the main store to the branch created a
+    // TransferIn that looked like 10 more units bought and a TransferOut that
+    // looked like 10 sold, so the all-stores movement columns read double the
+    // real activity. Relocating your own goods is not stock entering or
+    // leaving the business. Opening and closing still count transfers, because
+    // for a single store they really are movements.
+    $itemId = null;
+    $branchId = null;
+
+    $tenant->run(function () use (&$itemId, &$branchId) {
+        User::factory()->create(['email' => 'owner@example.com']);
+
+        $item = Item::factory()->create(['name' => 'Travelling Item', 'unit' => 'pcs', 'is_stockable' => true, 'purchase_rate' => 7]);
+        $itemId = $item->id;
+
+        $main = Store::where('is_active', true)->orderBy('id')->firstOrFail();
+        $branch = Store::factory()->create(['name' => 'Branch Store']);
+        $branchId = $branch->id;
+
+        $item->recordStockMovement(StockMovementType::Purchase, 30, '2026-02-01', $main->id, value: 3000);
+        $item->recordStockMovement(StockMovementType::TransferOut, 10, '2026-02-05', $main->id);
+        $item->recordStockMovement(StockMovementType::TransferIn, 10, '2026-02-05', $branch->id);
+    });
+
+    loginInventoryReportTestUser($domain);
+
+    // Combined: 30 in, nothing out, 30 on hand. The two transfer legs cancel
+    // in the closing quantity and must not show up in the movement columns.
+    $this->get("http://{$domain}/reports/stock-summary?from=2026-02-01&to=2026-02-28")
+        ->assertOk()
+        ->assertInertia(fn ($page) => $page
+            ->has('rows', 1)
+            ->where('rows.0.qtyIn', '30.0000')
+            ->where('rows.0.qtyOut', '0.0000')
+            ->where('rows.0.closing', '30.0000')
+        );
+
+    // One store: the transfer in IS a real movement for the branch.
+    $this->get("http://{$domain}/reports/stock-summary?from=2026-02-01&to=2026-02-28&store_id={$branchId}")
+        ->assertOk()
+        ->assertInertia(fn ($page) => $page
+            ->has('rows', 1)
+            ->where('rows.0.qtyIn', '10.0000')
+            ->where('rows.0.qtyOut', '0.0000')
+            ->where('rows.0.closing', '10.0000')
         );
 
     $tenant->delete();

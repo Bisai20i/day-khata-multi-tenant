@@ -25,36 +25,36 @@ matching files in `tests/Feature/Tenant/Reports/` (all except `AccountingReportT
 
 ## Tasks
 
-- [ ] 1. Money everywhere: aggregate in SQL `SUM` on DECIMAL, read as strings, any further arithmetic in
+- [x] 1. Money everywhere: aggregate in SQL `SUM` on DECIMAL, read as strings, any further arithmetic in
   `Money`/`Quantity`, send strings to Inertia, format with `formatMoney`/`formatQuantity` on the page. Remove
   every `(float)`/`round()`. Excel exports keep **numeric** cells (use `toFloat()` only at the cell boundary,
   with a 2-decimal number format) so sums work in Excel. Date filters are inclusive on both ends on SQLite
   and MySQL (compare on the date column, never `whereBetween` against datetimes that drop the last day).
-- [ ] 2. Status semantics: only `posted` returns count (C6); cancelled documents appear in their original
+- [x] 2. Status semantics: only `posted` returns count (C6); cancelled documents appear in their original
   period as issued **and** as a negative "cancelled" row in the period of their reversal voucher date (C5,
   decision "filed months never change"). Apply the same effective-date rule to TDS (returns reduce TDS in the
   return's period, not the original's).
-- [ ] 3. VAT Summary and both VAT books include capital sales and capital purchases (separate "Capital"
+- [x] 3. VAT Summary and both VAT books include capital sales and capital purchases (separate "Capital"
   column/section) using the Phase 2 fields, so output VAT and input VAT equal the LIA20 and ASA23 ledger
   movements for the period. Add a reconciliation line on the VAT Summary: "Ledger VAT payable/receivable for
   the period" vs "Report total", with the difference (must be 0.00).
-- [ ] 4. Sales VAT book columns: BS date (and AD), stored `invoice_number`, buyer name and buyer PAN from the
+- [x] 4. Sales VAT book columns: BS date (and AD), stored `invoice_number`, buyer name and buyer PAN from the
   snapshot, taxable, exempt, VAT, total. Purchase VAT book: BS date, supplier bill number (not our voucher
   number), supplier PAN (from `supplier.tpin` / snapshot), taxable, exempt, VAT, capital. Same columns in the
   Excel exports.
-- [ ] 5. New Sales Return register and Purchase Return register (VAT books for credit/debit notes), with
+- [x] 5. New Sales Return register and Purchase Return register (VAT books for credit/debit notes), with
   exports; request route `require`s and nav entries from the coordinator.
-- [ ] 6. Aged Receivables/Payables use `Sale::outstandingAmount()` / `Purchase::outstandingAmount()` (exact,
+- [x] 6. Aged Receivables/Payables use `Sale::outstandingAmount()` / `Purchase::outstandingAmount()` (exact,
   no `<= 0.01` filters), plus an "Opening / unallocated" bucket from party ledger balances not explained by
   open invoices. New ledger-based Debtors and Creditors list (every customer/supplier with a non-zero balance
   for the selected fiscal year) with export.
-- [ ] 7. Stock reports (`StockSummary`, `StockValuation`, category/brand stock, stock movement register):
+- [x] 7. Stock reports (`StockSummary`, `StockValuation`, category/brand stock, stock movement register):
   values from `StockCosting` (C10), quantities as `Quantity` 4dp, transfers excluded from the combined view,
   item-wise quantity totals never add different units together (group by base unit).
-- [ ] 8. Payment-mode filter on the Sales and Purchase registers.
-- [ ] 9. Every report page: BS date column and BS date range labels via `formatBsDate`, `formatMoney` for
+- [x] 8. Payment-mode filter on the Sales and Purchase registers.
+- [x] 9. Every report page: BS date column and BS date range labels via `formatBsDate`, `formatMoney` for
   money, no raw `.toFixed`.
-- [ ] 10. Tests (write, do not run): VAT Summary equals the VAT ledger movement with a capital purchase, a
+- [x] 10. Tests (write, do not run): VAT Summary equals the VAT ledger movement with a capital purchase, a
   cancelled sale (cancelled next month) and a posted return; a rejected return has no VAT effect; the cancelled
   sale shows in the original month as issued and as a negative row in the cancel month; TDS return effect in
   the return's period; Sales VAT book shows buyer PAN and the stored invoice number; Purchase VAT book shows

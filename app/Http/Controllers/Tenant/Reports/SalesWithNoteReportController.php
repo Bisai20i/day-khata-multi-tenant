@@ -7,6 +7,8 @@ use App\Http\Controllers\Controller;
 use App\Models\FiscalYear;
 use App\Models\Sale;
 use App\Models\Store;
+use App\Support\Money\Money;
+use App\Support\Money\Quantity;
 use Illuminate\Http\Request;
 use Inertia\Inertia;
 use Inertia\Response;
@@ -45,9 +47,10 @@ class SalesWithNoteReportController extends Controller
         $storeId = $request->integer('store_id') ?: null;
 
         $sales = Sale::query()
-            ->with(['customer:id,name', 'lines.item:id,name,unit'])
+            ->with(['customer:id,name', 'lines.item:id,name,unit', 'lines.itemUnit:id,name'])
             ->where('status', 'posted')
-            ->whereBetween('date', [$from, $to])
+            ->whereDate('date', '>=', $from)
+            ->whereDate('date', '<=', $to)
             ->whereNotNull('narration')
             ->where('narration', '!=', '')
             ->when($storeId, fn ($query) => $query->where('store_id', $storeId))
@@ -59,15 +62,18 @@ class SalesWithNoteReportController extends Controller
             'sales' => $sales->map(fn (Sale $sale) => [
                 'id' => $sale->id,
                 'date' => $sale->date->toDateString(),
-                'customer' => $sale->customer?->name,
+                'invoice_number' => $sale->invoice_number,
+                'customer' => $sale->buyer_name ?? $sale->customer?->name,
                 'items' => $sale->lines->map(fn ($line) => [
                     'name' => $line->item?->name,
-                    'quantity' => round((float) $line->quantity, 4),
-                    'unit' => $line->item?->unit,
+                    'quantity' => Quantity::of($line->quantity)->toString(),
+                    // The unit the line was ENTERED in, not the base unit: a
+                    // line sold in Boxes printed "2 Piece" before (audit P1).
+                    'unit' => $line->itemUnit?->name ?? $line->item?->unit,
                 ])->values(),
                 'note' => $sale->narration,
                 'chalani_number' => $sale->chalani_number,
-                'total' => (float) $sale->total,
+                'total' => $sale->total,
             ])->values(),
             'stores' => Store::where('is_active', true)->orderBy('name')->get(['id', 'name']),
             'from' => $from,
@@ -75,7 +81,7 @@ class SalesWithNoteReportController extends Controller
             'storeId' => $storeId,
             'totals' => [
                 'count' => $sales->count(),
-                'total' => round((float) $sales->sum('total'), 2),
+                'total' => Money::sum($sales->map(fn (Sale $sale) => Money::of($sale->total)))->toString(),
             ],
         ]);
     }
