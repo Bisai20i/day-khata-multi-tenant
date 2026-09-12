@@ -211,6 +211,35 @@
         line-height: 1.4;
     }
 
+    .copy-stamp {
+        display: inline-block;
+        margin-top: 5px;
+        padding: 2px 7px;
+        border: 1.3px solid #1a1a1a;
+        font-size: 8.5px;
+        font-weight: bold;
+        text-transform: uppercase;
+        letter-spacing: .6px;
+    }
+
+    .copy-stamp.is-copy {
+        border-color: #a30000;
+        color: #a30000;
+    }
+
+    .date-ad {
+        color: #777;
+    }
+
+    .amount-in-words {
+        clear: both;
+        margin-top: 12px;
+        padding: 6px 8px;
+        border: 1px solid #1a1a1a;
+        font-size: 9px;
+        line-height: 1.4;
+    }
+
 </style>
 </head>
 <body>
@@ -223,6 +252,17 @@
         $logoPath = $company->logo_path
             ? \Illuminate\Support\Facades\Storage::disk('public')->path($company->logo_path)
             : null;
+
+        // Contract C9 print-compliance variables. Every one of them has a
+        // safe default derived from what the layout already required, so a
+        // document view whose controller has not been wired up yet still
+        // renders - it just shows an Original stamp and no fiscal year,
+        // rather than blowing up mid-print.
+        $printCopyNumber = max(1, (int) ($copyNumber ?? 1));
+        $printDateAd = $dateAd ?? $documentDate;
+        $printDateBs = $dateBs ?? \App\Support\NepaliCalendar::formatBs($printDateAd);
+        $printFiscalYearName = $fiscalYearName ?? null;
+        $printAmountInWords = $amountInWords ?? null;
     @endphp
     <table class="header-table">
         <tr>
@@ -250,8 +290,25 @@
                 <div class="doc-title">@yield('title', 'Document')</div>
                 <div class="doc-meta">
                     <div><strong>No:</strong> {{ $documentNumber }}</div>
-                    <div><strong>Date:</strong> {{ $documentDate }}</div>
+                    {{-- BS first, AD beside it: the Bikram Sambat date is the
+                         one the IRD reads, the AD date is the cross-reference. --}}
+                    @if($printDateBs !== '')
+                        <div>
+                            <strong>Date (BS):</strong> {{ $printDateBs }}
+                            <span class="date-ad">(AD {{ $printDateAd }})</span>
+                        </div>
+                    @else
+                        <div><strong>Date (AD):</strong> {{ $printDateAd }}</div>
+                    @endif
+                    @if($printFiscalYearName)
+                        <div><strong>Fiscal Year:</strong> {{ $printFiscalYearName }}</div>
+                    @endif
                     @yield('doc-meta-extra')
+                </div>
+                {{-- Only the first print is the original; every reprint has to
+                     say so on the face of the document. --}}
+                <div class="copy-stamp{{ $printCopyNumber > 1 ? ' is-copy' : '' }}">
+                    {{ $printCopyNumber > 1 ? 'Copy of Original - '.($printCopyNumber - 1) : 'Original' }}
                 </div>
             </td>
         </tr>
@@ -260,6 +317,14 @@
     <div class="divider"></div>
 
     @yield('content')
+
+    {{-- Rendered here rather than inside each document view so that every
+         invoice and note picks the words up from its controller alone. It
+         lands directly under the totals block, which is where a Nepali bill
+         carries it. --}}
+    @if($printAmountInWords)
+        <div class="amount-in-words"><strong>Amount in Words:</strong> {{ $printAmountInWords }}</div>
+    @endif
 
     @if($company->invoice_footer_note)
         <div class="footer-note">{{ $company->invoice_footer_note }}</div>

@@ -67,3 +67,47 @@ test('bsToAd rejects a day beyond the month it belongs to', function () {
 test('bsToAd rejects a month outside 1-12', function () {
     NepaliCalendar::bsToAd(2081, 13, 1);
 })->throws(InvalidArgumentException::class);
+
+/**
+ * `formatBs()` is what every PDF and print-log row shows (contract C9). It
+ * wraps `adToBs()` without changing it: same conversion, zero-padded, and an
+ * empty string instead of an exception for anything it cannot convert - a
+ * printed document must never show a date that is not the real one, and one
+ * bad row must not take a whole invoice PDF down. `formatBsDate()` in
+ * `resources/js/lib/format.js` behaves identically.
+ */
+test('formatBs zero-pads a known AD date into its BS equivalent', function (string $ad, int $bsYear, int $bsMonth, int $bsDay) {
+    $expected = sprintf('%04d-%02d-%02d', $bsYear, $bsMonth, $bsDay);
+
+    expect(NepaliCalendar::formatBs($ad))->toBe($expected);
+})->with('known_ad_bs_pairs');
+
+test('formatBs pads single-digit months and days', function () {
+    // BS 2081-01-01: both parts need a leading zero, which is exactly what
+    // the JS twin does with padStart(2, '0').
+    expect(NepaliCalendar::formatBs('2024-04-13'))->toBe('2081-01-01');
+});
+
+test('formatBs accepts a Carbon instance and ignores the time of day', function () {
+    expect(NepaliCalendar::formatBs(Carbon::create(2024, 4, 13, 23, 59, 59)))->toBe('2081-01-01');
+});
+
+test('formatBs returns an empty string rather than a wrong or missing date', function (?string $adDate) {
+    expect(NepaliCalendar::formatBs($adDate))->toBe('');
+})->with([
+    'null' => [null],
+    'empty string' => [''],
+    'blank string' => ['   '],
+    'not a date' => ['not-a-date'],
+    'before the supported range' => ['1943-04-13'],
+    'after the supported range' => ['2034-04-14'],
+]);
+
+test('formatBs agrees with adToBs for every date adToBs can convert', function () {
+    foreach (['1943-04-14', '1990-01-15', '2024-04-13', '2025-04-14', '2034-04-13'] as $ad) {
+        $bs = NepaliCalendar::adToBs($ad);
+
+        expect(NepaliCalendar::formatBs($ad))
+            ->toBe(sprintf('%04d-%02d-%02d', $bs['year'], $bs['month'], $bs['day']));
+    }
+});

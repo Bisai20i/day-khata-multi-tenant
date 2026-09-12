@@ -17,19 +17,19 @@ Modify: `app/Support/NepaliCalendar.php`, `resources/views/pdf/layout.blade.php`
 
 ## Tasks
 
-- [ ] 1. Migration `print_logs` per C9 (morphs + index, `copy_number`, `printed_by` FK, `printed_at`).
+- [x] 1. Migration `print_logs` per C9 (morphs + index, `copy_number`, `printed_by` FK, `printed_at`).
   `PrintLog::record()` computes the next copy number inside a transaction with a lock on the existing rows
   for that document, so two simultaneous prints never share a number.
-- [ ] 2. `AmountInWords::rupees(Money)`: Indian numbering (thousand, lakh, crore), paisa, negative amounts
+- [x] 2. `AmountInWords::rupees(Money)`: Indian numbering (thousand, lakh, crore), paisa, negative amounts
   ("Minus ..."), zero ("Rupees Zero Only"). Pure PHP.
-- [ ] 3. `NepaliCalendar::formatBs()` per C9 on top of the existing `adToBs()`; do not change existing method
+- [x] 3. `NepaliCalendar::formatBs()` per C9 on top of the existing `adToBs()`; do not change existing method
   behaviour.
-- [ ] 4. `pdf/layout.blade.php`: accept the C9 variables with safe defaults so documents not yet passing them
+- [x] 4. `pdf/layout.blade.php`: accept the C9 variables with safe defaults so documents not yet passing them
   still render; show "Original" or "Copy of Original - {n-1}", BS date first with AD beside it, fiscal year
   name. Keep every existing section/yield the document views rely on (read all `resources/views/pdf/*.blade.php`
   before editing).
-- [ ] 5. Print log report (admin): document type, number, copy number, who, when (BS + AD), date filter,
+- [x] 5. Print log report (admin): document type, number, copy number, who, when (BS + AD), date filter,
   pagination. Request the route `require` and nav entry from the coordinator in your report.
-- [ ] 6. Tests (write, do not run): amount in words for 0, 0.50, 1, 1,23,456.50, 10,00,00,000.00, negative;
+- [x] 6. Tests (write, do not run): amount in words for 0, 0.50, 1, 1,23,456.50, 10,00,00,000.00, negative;
   copy numbers 1, 2, 3 for repeated records; layout renders with and without the new variables; formatBs for
   known dates already covered by `NepaliCalendarTest`.

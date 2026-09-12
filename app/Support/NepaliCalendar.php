@@ -186,6 +186,36 @@ final class NepaliCalendar
     }
 
     /**
+     * Formats a stored AD date as its BS equivalent, zero-padded `YYYY-MM-DD`
+     * (contract C9) - what every PDF and print-log screen shows first, with
+     * the AD date beside it.
+     *
+     * Returns an empty string for a blank, unparsable or out-of-range date
+     * rather than throwing or printing a wrong one. Two reasons: a compliance
+     * document must never show a date that is not the real one, and a single
+     * bad row must not take a whole invoice PDF down with a 500. This mirrors
+     * `formatBsDate()` in `resources/js/lib/format.js` exactly, so the browser
+     * and the printed paper always agree.
+     *
+     * `adToBs()` itself is untouched: it still throws for anything outside
+     * BS 2000-2090, which is what callers doing arithmetic need.
+     */
+    public static function formatBs(Carbon|string|null $adDate): string
+    {
+        if ($adDate === null || (is_string($adDate) && trim($adDate) === '')) {
+            return '';
+        }
+
+        try {
+            $bs = self::adToBs($adDate);
+        } catch (\Throwable) {
+            return '';
+        }
+
+        return sprintf('%04d-%02d-%02d', $bs['year'], $bs['month'], $bs['day']);
+    }
+
+    /**
      * Converts a BS (Bikram Sambat) date to its AD (Gregorian) equivalent.
      */
     public static function bsToAd(int $bsYear, int $bsMonth, int $bsDay): Carbon
