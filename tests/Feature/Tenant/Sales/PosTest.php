@@ -53,9 +53,13 @@ test('the pos page renders its expected Inertia component with items and custome
             ->has('customers', 1)
             ->has('items', 1)
             ->has('categories')
-            ->has('accounts')
+            ->has('bankAccounts')
+            ->has('tdsAccounts')
             ->has('stores')
-            ->where('items.0.current_stock', 0.0)
+            // An exact 4dp Quantity string, never a float: the cashier's screen
+            // compares it against cart quantities through the shared money
+            // module, which refuses floats outright (CONTRACTS C8/C10).
+            ->where('items.0.current_stock', '0.0000')
         );
 
     $tenant->delete();
@@ -85,7 +89,7 @@ test('the pos page reports each stockable item\'s net on-hand quantity across al
             ->where('items.0.name', 'Service Item')
             ->where('items.0.current_stock', null)
             ->where('items.1.name', 'Stockable Item')
-            ->where('items.1.current_stock', 14.0)
+            ->where('items.1.current_stock', '14.0000')
         );
 
     $tenant->delete();

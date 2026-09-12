@@ -150,9 +150,9 @@ test('Item::currentStock($storeId) returns only that store net quantity, and nul
             $actor,
         );
 
-        expect($item->fresh()->currentStock($mainStore->id))->toBe(-3.0)
-            ->and($item->fresh()->currentStock($branch->id))->toBe(-5.0)
-            ->and($item->fresh()->currentStock())->toBe(-8.0);
+        expect($item->fresh()->currentStock($mainStore->id)->toString())->toBe('-3.0000')
+            ->and($item->fresh()->currentStock($branch->id)->toString())->toBe('-5.0000')
+            ->and($item->fresh()->currentStock()->toString())->toBe('-8.0000');
     });
 
     $tenant->delete();

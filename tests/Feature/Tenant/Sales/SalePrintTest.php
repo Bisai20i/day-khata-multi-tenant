@@ -141,7 +141,7 @@ function buildSalePrintTestSale(string $invoiceType, string $paymentMode): array
     $company = CompanySetting::current();
     $company->update(['pan_vat_number' => '123456789']);
 
-    return ['sale' => $sale->fresh(['customer', 'agent', 'bankAccount', 'lines.item']), 'company' => $company];
+    return ['sale' => $sale->fresh(['customer', 'agent', 'bankAccount', 'lines.item', 'lines.itemUnit']), 'company' => $company];
 }
 
 test('an abbreviated invoice hides buyer info and the VAT breakdown, and prints the mandatory note and boxed PAN digits', function () {
@@ -182,6 +182,14 @@ test('a pan invoice shows buyer info but hides the VAT breakdown', function () {
             'documentNumber' => 'SLP-1',
             'documentDate' => '2026-06-01',
         ])->render();
+
+        // Audit P0-10: a PAN bill used to charge a hidden 13% VAT that this
+        // very view then hid from the customer, so the printed grand total was
+        // 1130 on a 1000 line with no VAT row explaining it.
+        expect($sale->vat_amount)->toBe('0.00')
+            ->and($sale->vat_rate)->toBe('0.00')
+            ->and($sale->total)->toBe('1000.00')
+            ->and($sale->nontaxable_amount)->toBe('1000.00');
 
         expect($html)
             ->toContain('Bill To')
@@ -331,6 +339,101 @@ test('the sale print route resolves the document number prefix from configured i
         ->andReturn($fakePdf);
 
     $this->get("http://{$domain}/sales/{$saleId}/print")->assertOk();
+
+    $tenant->delete();
+});
+
+test('the printed invoice orders its totals subtotal, discount, taxable, VAT, grand total and shows net receivable', function () {
+    $domain = 'sale-print-totals-order.tenant-test';
+    $tenant = provisionSalePrintTestTenant($domain);
+
+    $tenant->run(function () {
+        $admin = User::factory()->create(['email' => 'owner@example.com']);
+        FiscalYear::create(['name' => 'FY1', 'start_date' => '2026-01-01', 'end_date' => '2026-12-31', 'status' => FiscalYearStatus::Open]);
+        $customer = Customer::factory()->create(['name' => 'Order Test Customer']);
+        $item = Item::factory()->create(['is_vatable' => true, 'is_stockable' => false, 'hs_code' => '1234.56.78']);
+        $tdsAccount = Account::factory()->create();
+
+        $sale = Sale::post(
+            [
+                'customer_id' => $customer->id,
+                'invoice_type' => 'full',
+                'date' => '2026-06-01',
+                'payment_mode' => 'credit',
+                'discount' => '100',
+                'discount_type' => 'flat',
+                'tds_account_id' => $tdsAccount->id,
+                'tds_amount' => '90',
+            ],
+            [['item_id' => $item->id, 'quantity' => '1.5', 'rate' => '1000.00']],
+            $admin,
+        );
+
+        $html = view('pdf.sale', [
+            'sale' => $sale->fresh(['customer', 'agent', 'bankAccount', 'lines.item', 'lines.itemUnit']),
+            'company' => CompanySetting::current(),
+            'documentNumber' => $sale->invoice_number,
+            'documentDate' => '2026-06-01',
+        ])->render();
+
+        // The discount has to be visibly taken off before the taxable amount
+        // the VAT is charged on (audit P1: "taxable prints before discount").
+        // Scoped to the totals table, since "Discount" is also a column header
+        // in the items table above it.
+        $totalsBlock = substr($html, (int) strpos($html, 'totals-table'));
+        $order = ['Subtotal', 'Discount', 'Taxable Amount', 'VAT (', 'Grand Total', 'TDS Withheld', 'Net Receivable'];
+        $positions = array_map(fn (string $label) => strpos($totalsBlock, $label), $order);
+
+        expect($positions)->not->toContain(false)
+            ->and($positions)->toBe(array_values(collect($positions)->sort()->all()));
+
+        // 1.5 x 1000 = 1500, less a 100 discount = 1400 taxable, VAT 182,
+        // grand total 1582, less 90 TDS withheld = 1492 receivable.
+        expect($html)
+            ->toContain('1,500.00')
+            ->toContain('1,400.00')
+            ->toContain('182.00')
+            ->toContain('1,582.00')
+            ->toContain('1,492.00')
+            // 4dp-capable quantity and rate, so qty x rate visibly equals the line.
+            ->toContain('1.5')
+            ->toContain('HS Code')
+            ->toContain('1234.56.78');
+    });
+
+    $tenant->delete();
+});
+
+test('the printed invoice shows the buyer as the bill was issued, not the renamed customer', function () {
+    $domain = 'sale-print-buyer-snapshot.tenant-test';
+    $tenant = provisionSalePrintTestTenant($domain);
+
+    $tenant->run(function () {
+        $admin = User::factory()->create(['email' => 'owner@example.com']);
+        FiscalYear::create(['name' => 'FY1', 'start_date' => '2026-01-01', 'end_date' => '2026-12-31', 'status' => FiscalYearStatus::Open]);
+        $customer = Customer::factory()->create(['name' => 'Original Buyer', 'tpin' => '600123456']);
+        $item = Item::factory()->create(['is_vatable' => false, 'is_stockable' => false]);
+
+        $sale = Sale::post(
+            ['customer_id' => $customer->id, 'invoice_type' => 'full', 'date' => '2026-06-01', 'payment_mode' => 'credit'],
+            [['item_id' => $item->id, 'quantity' => '1', 'rate' => '100.00']],
+            $admin,
+        );
+
+        expect($sale->buyer_name)->toBe('Original Buyer')->and($sale->buyer_pan)->toBe('600123456');
+
+        // Editing the customer must not rewrite an already-issued tax invoice.
+        $customer->update(['name' => 'Renamed Buyer']);
+
+        $html = view('pdf.sale', [
+            'sale' => $sale->fresh(['customer', 'agent', 'bankAccount', 'lines.item', 'lines.itemUnit']),
+            'company' => CompanySetting::current(),
+            'documentNumber' => $sale->invoice_number,
+            'documentDate' => '2026-06-01',
+        ])->render();
+
+        expect($html)->toContain('Original Buyer')->not->toContain('Renamed Buyer');
+    });
 
     $tenant->delete();
 });

@@ -2,11 +2,12 @@
 
 namespace App\Models;
 
+use App\Casts\Decimal;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
-#[Fillable(['sale_id', 'item_id', 'item_unit_id', 'quantity', 'unit_conversion_factor', 'rate', 'discount', 'discount_type', 'vatable', 'line_total'])]
+#[Fillable(['sale_id', 'item_id', 'item_unit_id', 'quantity', 'unit_conversion_factor', 'rate', 'discount', 'discount_type', 'discount_amount', 'vatable', 'line_total'])]
 class SaleLine extends Model
 {
     /**
@@ -15,12 +16,13 @@ class SaleLine extends Model
     protected function casts(): array
     {
         return [
-            'quantity' => 'decimal:4',
-            'unit_conversion_factor' => 'decimal:4',
-            'rate' => 'decimal:4',
-            'discount' => 'decimal:2',
+            'quantity' => Decimal::class.':4',
+            'unit_conversion_factor' => Decimal::class.':4',
+            'rate' => Decimal::class.':4',
+            'discount' => Decimal::class.':2',
+            'discount_amount' => Decimal::class.':2',
             'vatable' => 'boolean',
-            'line_total' => 'decimal:2',
+            'line_total' => Decimal::class.':2',
         ];
     }
 

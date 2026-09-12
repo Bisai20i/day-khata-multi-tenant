@@ -6,6 +6,7 @@ use App\Models\CompanySetting;
 use App\Models\Customer;
 use App\Models\FiscalYear;
 use App\Models\Item;
+use App\Models\Role;
 use App\Models\Sale;
 use App\Models\Tenant;
 use App\Models\User;
@@ -91,7 +92,12 @@ test('cancelling a sale through the cancel route requires a reason and posts a r
 
     $saleId = null;
     $tenant->run(function () use (&$saleId) {
-        $admin = User::factory()->create(['email' => 'owner@example.com']);
+        // Cancelling is admin-only now (CONTRACTS C5): it voids an issued tax
+        // invoice and posts a reversing voucher into the live books.
+        $admin = User::factory()->create([
+            'email' => 'owner@example.com',
+            'role_id' => Role::where('slug', 'admin')->value('id'),
+        ]);
         FiscalYear::create(['name' => 'FY1', 'start_date' => '2026-01-01', 'end_date' => '2026-12-31', 'status' => FiscalYearStatus::Open]);
         $customer = Customer::factory()->create();
         $item = Item::factory()->create(['is_vatable' => false, 'is_stockable' => false]);
@@ -118,7 +124,7 @@ test('cancelling a sale through the cancel route requires a reason and posts a r
     $tenant->delete();
 });
 
-test('the accounts picker for bank/TDS is available on the create form data', function () {
+test('the bank and TDS pickers are available on the create form data', function () {
     $domain = 'sales-accounts-prop.tenant-test';
     $tenant = provisionSaleControllerTestTenant($domain);
 
@@ -131,7 +137,7 @@ test('the accounts picker for bank/TDS is available on the create form data', fu
 
     $this->get("http://{$domain}/sales")
         ->assertOk()
-        ->assertInertia(fn ($page) => $page->has('accounts')->has('customers')->has('items'));
+        ->assertInertia(fn ($page) => $page->has('bankAccounts')->has('tdsAccounts')->has('customers')->has('items')->has('invoiceSettings'));
 
     $tenant->delete();
 });

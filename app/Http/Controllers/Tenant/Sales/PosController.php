@@ -4,11 +4,12 @@ namespace App\Http\Controllers\Tenant\Sales;
 
 use App\Http\Controllers\Controller;
 use App\Models\Account;
+use App\Models\CompanySetting;
 use App\Models\Customer;
 use App\Models\Item;
 use App\Models\ItemCategory;
-use App\Models\ItemStockMovement;
 use App\Models\Store;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Collection;
 use Inertia\Inertia;
 use Inertia\Response;
@@ -26,43 +27,66 @@ use Inertia\Response;
  */
 class PosController extends Controller
 {
+    /**
+     * Party ledgers are never a settlement account - see
+     * SaleController::settlementAccounts() for the full reasoning. Duplicated
+     * here rather than shared, because the two controllers are owned by
+     * different route files and neither should reach into the other.
+     */
+    private const PARTY_SUBGROUPS = ['Sundry Debtors', 'Sundry Creditors', 'Sales Agents'];
+
     public function index(): Response
     {
-        $stockByItem = $this->currentStockByItem();
+        $settings = CompanySetting::current();
 
         $items = Item::query()->where('is_active', true)->orderBy('name')
-            ->get(['id', 'name', 'unit', 'is_vatable', 'is_stockable', 'item_category_id', 'sale_rate', 'image_path', 'barcode'])
-            ->map(function (Item $item) use ($stockByItem) {
-                $item->current_stock = $item->is_stockable ? round($stockByItem->get($item->id, 0.0), 4) : null;
+            ->get(['id', 'name', 'unit', 'is_vatable', 'is_stockable', 'item_category_id', 'sale_rate', 'image_path', 'barcode']);
 
-                return $item;
-            });
+        $stock = Item::currentStockByItem($items->pluck('id')->all());
+
+        $items = $items->map(function (Item $item) use ($stock) {
+            // An exact 4dp string, not a float: the cashier's screen compares
+            // this against cart quantities through the shared money module,
+            // which never accepts a float (CONTRACTS C8).
+            $item->current_stock = $item->is_stockable
+                ? ($stock[$item->id] ?? null)?->toString()
+                : null;
+
+            return $item;
+        });
 
         return Inertia::render('Tenant/Sales/Pos', [
             'customers' => Customer::query()->orderBy('name')->get(['id', 'name', 'mobile_no']),
             'items' => $items,
             'categories' => ItemCategory::query()->where('is_active', true)->orderBy('name')->get(['id', 'name']),
-            'accounts' => Account::query()->orderBy('name')->get(['id', 'code', 'name']),
+            'bankAccounts' => $this->settlementAccounts(),
+            'tdsAccounts' => $this->settlementAccounts(),
             'stores' => Store::where('is_active', true)->orderBy('name')->get(['id', 'name']),
+            'invoiceSettings' => [
+                'default_vat_rate' => $settings->default_vat_rate,
+                'default_store_id' => $settings->default_store_id,
+                'sale_full_enabled' => (bool) $settings->sale_full_enabled,
+                'sale_abbreviated_enabled' => (bool) $settings->sale_abbreviated_enabled,
+                'sale_pan_enabled' => (bool) $settings->sale_pan_enabled,
+            ],
         ]);
     }
 
     /**
-     * Net on-hand quantity per item, across every store, keyed by item_id.
-     * A single bulk query + in-memory grouping (same signed-sum-by-direction
-     * approach as Item::currentStock()) rather than one query per item, since
-     * this runs over the whole active catalog on every POS page load.
+     * Cash, bank and TDS ledgers: every balance-sheet account that is not a
+     * party ledger.
      *
-     * @return Collection<int, float>
+     * @return Collection<int, Account>
      */
-    private function currentStockByItem(): Collection
+    private function settlementAccounts(): Collection
     {
-        return ItemStockMovement::query()
-            ->where('cancelled', false)
-            ->get(['item_id', 'quantity', 'movement_type'])
-            ->groupBy('item_id')
-            ->map(fn (Collection $movements) => (float) $movements->sum(
-                fn (ItemStockMovement $movement) => (float) $movement->quantity * $movement->movement_type->direction(),
-            ));
+        return Account::query()
+            ->where(function (Builder $query) {
+                $query->whereHas('group.accountHead', fn (Builder $head) => $head->where('is_profit_and_loss', false))
+                    ->orWhereHas('subgroup.accountGroup.accountHead', fn (Builder $head) => $head->where('is_profit_and_loss', false));
+            })
+            ->whereDoesntHave('subgroup', fn (Builder $subgroup) => $subgroup->whereIn('name', self::PARTY_SUBGROUPS))
+            ->orderBy('name')
+            ->get(['id', 'code', 'name']);
     }
 }

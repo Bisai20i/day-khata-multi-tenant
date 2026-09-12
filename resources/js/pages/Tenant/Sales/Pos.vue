@@ -27,6 +27,19 @@ import Tooltip from '@/components/ui/Tooltip.vue';
 import NepaliDateInput from '@/components/ui/NepaliDateInput.vue';
 import { useToast } from '@/composables/useToast';
 import { navGroups } from '@/lib/nav-items.js';
+import {
+    addMoney,
+    calculateDocument,
+    compareMoney,
+    formatMoney,
+    formatQuantity,
+    formatRate,
+    moneyEquals,
+    parseMoney,
+    parseQuantity,
+    subtractMoney,
+} from '@/lib/money';
+import { todayInKathmandu } from '@/lib/format';
 
 /**
  * POS / walk-in quick-sale screen. Purely a different UI over the existing
@@ -60,8 +73,19 @@ const props = defineProps({
     customers: { type: Array, default: () => [] },
     items: { type: Array, default: () => [] },
     categories: { type: Array, default: () => [] },
-    accounts: { type: Array, default: () => [] },
+    bankAccounts: { type: Array, default: () => [] },
+    tdsAccounts: { type: Array, default: () => [] },
     stores: { type: Array, default: () => [] },
+    invoiceSettings: {
+        type: Object,
+        default: () => ({
+            default_vat_rate: '13.00',
+            default_store_id: null,
+            sale_full_enabled: true,
+            sale_abbreviated_enabled: true,
+            sale_pan_enabled: true,
+        }),
+    },
 });
 
 const page = usePage();
@@ -76,23 +100,80 @@ const CARTS_STORAGE_KEY = 'day-khata:pos-carts';
 
 const customerOptions = computed(() => props.customers.map((c) => ({ value: c.id, label: c.name })));
 const storeOptions = computed(() => props.stores.map((s) => ({ value: s.id, label: s.name })));
-const accountOptions = computed(() =>
-    props.accounts.map((a) => ({ value: a.id, label: a.code ? `${a.code} — ${a.name}` : a.name })),
+const bankAccountOptions = computed(() =>
+    props.bankAccounts.map((a) => ({ value: a.id, label: a.code ? `${a.code} — ${a.name}` : a.name })),
+);
+const tdsAccountOptions = computed(() =>
+    props.tdsAccounts.map((a) => ({ value: a.id, label: a.code ? `${a.code} — ${a.name}` : a.name })),
 );
 const itemsById = computed(() => Object.fromEntries(props.items.map((i) => [i.id, i])));
 
-const invoiceTypeOptions = [
-    { value: 'full', label: 'Full tax invoice' },
-    { value: 'abbreviated', label: 'Abbreviated tax invoice' },
-    { value: 'pan', label: 'PAN invoice' },
-];
+// Only the invoice types the tenant has switched on in Settings - the server
+// rejects a disabled type as well, this just keeps it off the cashier's list.
+const invoiceTypeOptions = computed(() =>
+    [
+        { value: 'full', label: 'Full tax invoice', enabled: props.invoiceSettings.sale_full_enabled },
+        { value: 'abbreviated', label: 'Abbreviated tax invoice', enabled: props.invoiceSettings.sale_abbreviated_enabled },
+        { value: 'pan', label: 'PAN invoice', enabled: props.invoiceSettings.sale_pan_enabled },
+    ].filter((option) => option.enabled),
+);
 
-function round2(value) {
-    return Math.round((Number(value) || 0) * 100) / 100;
+// --- Exact quantity arithmetic (4 decimals) --------------------------------
+// resources/js/lib/money.js parses and formats quantities but exposes no
+// add/compare helpers yet (a cross-file request is open for them), and this
+// screen steps, sums and compares quantities constantly. Everything below
+// works on the canonical 4dp string as a scaled BigInt, exactly the way the
+// shared module works internally - never through Number() or parseFloat, so
+// +1 on 0.125 can no longer turn into 1.13 (audit P1 "POS applies round2 to
+// quantities").
+const QUANTITY_SCALE = 4;
+
+function toScaledQuantity(value) {
+    const parsed = parseQuantity(value === '' || value === null || value === undefined ? '0' : value);
+    if (!parsed.ok) return null;
+
+    const negative = parsed.value.startsWith('-');
+    const scaled = BigInt((negative ? parsed.value.slice(1) : parsed.value).replace('.', ''));
+
+    return negative ? -scaled : scaled;
 }
 
-function today() {
-    return new Date().toISOString().slice(0, 10);
+function fromScaledQuantity(scaled) {
+    const negative = scaled < 0n;
+    const digits = (negative ? -scaled : scaled).toString().padStart(QUANTITY_SCALE + 1, '0');
+    const text = `${digits.slice(0, -QUANTITY_SCALE)}.${digits.slice(-QUANTITY_SCALE)}`;
+
+    return negative ? `-${text}` : text;
+}
+
+/** Exact `a + b` on two quantities, or null when either is not a valid quantity. */
+function addQuantity(a, b) {
+    const left = toScaledQuantity(a);
+    const right = toScaledQuantity(b);
+
+    return left === null || right === null ? null : fromScaledQuantity(left + right);
+}
+
+/** Exact `a - b` on two quantities, or null when either is not a valid quantity. */
+function subtractQuantity(a, b) {
+    const left = toScaledQuantity(a);
+    const right = toScaledQuantity(b);
+
+    return left === null || right === null ? null : fromScaledQuantity(left - right);
+}
+
+/** -1, 0 or 1. Exact, no tolerance. Returns null when either side is unparsable. */
+function compareQuantity(a, b) {
+    const left = toScaledQuantity(a);
+    const right = toScaledQuantity(b);
+    if (left === null || right === null) return null;
+
+    return left === right ? 0 : left < right ? -1 : 1;
+}
+
+/** Adds a whole number of units to a quantity, keeping its fractional part intact. */
+function stepQuantity(value, delta) {
+    return addQuantity(value, String(delta));
 }
 
 // --- Multiple parallel draft carts ("tabs") -------------------------------
@@ -111,7 +192,6 @@ const CART_FORM_FIELDS = [
     'bank_account_id',
     'discount',
     'discount_type',
-    'vat_rate',
     'cash_amount',
     'bank_amount',
     'tds_account_id',
@@ -126,16 +206,17 @@ function freshCartData() {
     return {
         customer_id: null,
         store_id: null,
-        invoice_type: 'full',
+        invoice_type: invoiceTypeOptions.value[0]?.value ?? 'full',
         chalani_number: '',
-        date: today(),
+        // Asia/Kathmandu, not UTC: a toISOString() default dated every sale
+        // struck between midnight and 05:45 local time to the previous day.
+        date: todayInKathmandu(),
         bank_account_id: null,
         discount: '',
         // 'fixed' | 'percent' - matches each cart line's own discountType
         // convention (see addToCart()); mapped to the backend's
         // 'flat'/'percentage' enum only at submit time (completeSale()).
         discount_type: 'fixed',
-        vat_rate: '13',
         cash_amount: '',
         bank_amount: '',
         tds_account_id: null,
@@ -161,7 +242,6 @@ const form = useForm({
     bank_account_id: carts.value[0].bank_account_id,
     discount: carts.value[0].discount,
     discount_type: carts.value[0].discount_type,
-    vat_rate: carts.value[0].vat_rate,
     cash_amount: carts.value[0].cash_amount,
     bank_amount: carts.value[0].bank_amount,
     tds_account_id: carts.value[0].tds_account_id,
@@ -283,12 +363,17 @@ const ITEM_TILE_CAP = 60;
 const visibleItems = computed(() => filteredItems.value.slice(0, ITEM_TILE_CAP));
 
 function isOutOfStock(item) {
-    return item.is_stockable && item.current_stock != null && item.current_stock <= 0;
+    return item.is_stockable && item.current_stock != null && compareQuantity(item.current_stock, '0') <= 0;
 }
 
 function quantityInCart(itemId) {
     const line = form.lines.find((l) => l.item_id === itemId);
-    return line ? Number(line.quantity) || 0 : 0;
+
+    return line ? (toScaledQuantity(line.quantity) === null ? '0.0000' : parseQuantity(line.quantity || '0').value) : '0.0000';
+}
+
+function hasQuantityInCart(itemId) {
+    return compareQuantity(quantityInCart(itemId), '0') > 0;
 }
 
 // Sum of an item's quantity across every open cart tab (not just the active
@@ -297,8 +382,9 @@ function quantityInCart(itemId) {
 function totalQuantityAcrossCarts(itemId) {
     return carts.value.reduce((sum, cart, index) => {
         const line = cartLines(cart, index).find((l) => l.item_id === itemId);
-        return sum + (line ? Number(line.quantity) || 0 : 0);
-    }, 0);
+
+        return addQuantity(sum, line?.quantity ?? '0') ?? sum;
+    }, '0.0000');
 }
 
 function warnIfOverstock(itemId) {
@@ -306,9 +392,9 @@ function warnIfOverstock(itemId) {
     if (!item || !item.is_stockable || item.current_stock == null) return;
 
     const total = totalQuantityAcrossCarts(itemId);
-    if (total > item.current_stock) {
+    if (compareQuantity(total, item.current_stock) > 0) {
         toast({
-            message: `Warning: ${item.name} quantity across carts (${total}) exceeds available stock (${item.current_stock}).`,
+            message: `Warning: ${item.name} quantity across carts (${formatQuantity(total)}) exceeds available stock (${formatQuantity(item.current_stock)}).`,
             variant: 'danger',
         });
     }
@@ -342,7 +428,7 @@ function addToCart(item) {
     const index = form.lines.findIndex((l) => l.item_id === item.id);
 
     if (index !== -1) {
-        form.lines[index].quantity = String(round2((Number(form.lines[index].quantity) || 0) + 1));
+        form.lines[index].quantity = stepQuantity(form.lines[index].quantity, 1) ?? form.lines[index].quantity;
         activeTarget.value = { type: 'quantity', index };
         warnIfOverstock(item.id);
         return;
@@ -364,18 +450,20 @@ function removeLine(index) {
 
 function incrementQty(index) {
     const line = form.lines[index];
-    line.quantity = String(round2((Number(line.quantity) || 0) + 1));
+    line.quantity = stepQuantity(line.quantity, 1) ?? line.quantity;
     warnIfOverstock(line.item_id);
 }
 
 function decrementQty(index) {
     const line = form.lines[index];
-    const next = round2((Number(line.quantity) || 0) - 1);
-    if (next <= 0) {
+    const next = stepQuantity(line.quantity, -1);
+
+    if (next === null || compareQuantity(next, '0') <= 0) {
         removeLine(index);
         return;
     }
-    line.quantity = String(next);
+
+    line.quantity = next;
     warnIfOverstock(line.item_id);
 }
 
@@ -383,86 +471,84 @@ function focusTarget(type, index) {
     activeTarget.value = { type, index };
 }
 
-// A line's discount can be entered either as a flat Rs amount ("fixed") or
-// as a percentage of that line's own qty*rate base ("percent") - mirrors
-// legacy's %/Rs discount toggle per cart row. Only "percent" is clamped to
-// 0-100, matching legacy's own npSetDis()/npToggleDisType(). The resolved Rs
-// amount is what actually gets submitted (see completeSale()'s transform) -
-// the backend's `lines.*.discount` contract is unchanged, this toggle is
-// purely a cashier convenience on top of it.
-function lineDiscountAmount(line) {
-    const qty = Number(line.quantity) || 0;
-    const rate = Number(line.rate) || 0;
-    const raw = Number(line.discount) || 0;
+// --- Totals: one preview, identical to the server's calculator -------------
+// Every figure on this screen comes from calculateDocument(), the exact
+// mirror of App\Support\Billing\DocumentCalculator (CONTRACTS C3/C8). The
+// audit found quick-pay filling 56.49 against a bill the server booked at
+// 56.50, leaving the drawer a paisa short on every sale (P0-8).
 
-    if (line.discountType === 'percent') {
-        return round2(qty * rate * (Math.min(100, Math.max(0, raw)) / 100));
-    }
+const isPanInvoice = computed(() => form.invoice_type === 'pan');
 
-    return Math.max(0, raw);
-}
+// Never editable and never sent: the server always uses the tenant's
+// configured rate, and a PAN invoice carries no VAT at all.
+const effectiveVatRate = computed(() => (isPanInvoice.value ? '0.00' : String(props.invoiceSettings.default_vat_rate ?? '0')));
 
-function toggleLineDiscountType(index) {
-    const line = form.lines[index];
-    const qty = Number(line.quantity) || 0;
-    const rate = Number(line.rate) || 0;
-    const base = qty * rate;
-    const currentAmount = lineDiscountAmount(line);
-
-    if (line.discountType === 'percent') {
-        line.discount = currentAmount ? String(currentAmount) : '';
-        line.discountType = 'fixed';
-    } else {
-        const pct = base > 0 ? round2((currentAmount / base) * 100) : 0;
-        line.discount = pct ? String(pct) : '';
-        line.discountType = 'percent';
-    }
-}
-
-const lineTotals = computed(() =>
-    form.lines.map((line) => {
-        const item = itemsById.value[line.item_id];
-        const qty = Number(line.quantity) || 0;
-        const rate = Number(line.rate) || 0;
-        const discountAmount = lineDiscountAmount(line);
-
-        return { vatable: item?.is_vatable ?? false, discountAmount, total: qty * rate - discountAmount };
-    }),
+const preview = computed(() =>
+    calculateDocument(
+        form.lines.map((line) => ({
+            quantity: line.quantity,
+            rate: line.rate,
+            discount: line.discount,
+            discount_type: line.discountType === 'percent' ? 'percentage' : 'flat',
+            vatable: itemsById.value[line.item_id]?.is_vatable ?? false,
+            conversion_factor: 1,
+        })),
+        {
+            vat_rate: effectiveVatRate.value,
+            discount: form.discount,
+            discount_type: form.discount_type === 'percent' ? 'percentage' : 'flat',
+            tds_amount: form.tds_amount,
+            force_non_taxable: isPanInvoice.value,
+        },
+    ),
 );
 
-const vatableSubtotal = computed(() => lineTotals.value.filter((l) => l.vatable).reduce((s, l) => s + l.total, 0));
-const nonVatableSubtotal = computed(() => lineTotals.value.filter((l) => !l.vatable).reduce((s, l) => s + l.total, 0));
+const totals = computed(() => (preview.value.ok ? preview.value.totals : null));
+const previewError = computed(() => (preview.value.ok || form.lines.length === 0 ? null : preview.value.message));
 
-// Header discount gets the same %/Rs toggle as each cart line (see
-// toggleLineDiscountType()/lineDiscountAmount() above) - the raw value +
-// its type are what's submitted; Sale::post() computes the actual Rs
-// amount itself now.
-const headerDiscountAmount = computed(() => {
-    const raw = Number(form.discount) || 0;
-    if (form.discount_type === 'percent') {
-        return round2(vatableSubtotal.value * (Math.min(100, Math.max(0, raw)) / 100));
-    }
-    return Math.max(0, raw);
-});
-
-function toggleHeaderDiscountType() {
-    const currentAmount = headerDiscountAmount.value;
-
-    if (form.discount_type === 'percent') {
-        form.discount = currentAmount ? String(currentAmount) : '';
-        form.discount_type = 'fixed';
-    } else {
-        const pct = vatableSubtotal.value > 0 ? round2((currentAmount / vatableSubtotal.value) * 100) : 0;
-        form.discount = pct ? String(pct) : '';
-        form.discount_type = 'percent';
-    }
+/** A cart line's own total, or null while that line is still incomplete. */
+function lineTotal(index) {
+    return totals.value ? totals.value.lines[index].line_total : null;
 }
 
-const taxableAmount = computed(() => vatableSubtotal.value - headerDiscountAmount.value);
-const nontaxableAmount = computed(() => nonVatableSubtotal.value);
-const vatAmount = computed(() => round2(taxableAmount.value * ((Number(form.vat_rate) || 0) / 100)));
-const total = computed(() => taxableAmount.value + nontaxableAmount.value + vatAmount.value);
-const settlementDue = computed(() => total.value - (Number(form.tds_amount) || 0));
+/**
+ * Switching a discount between % and Rs.
+ *
+ * Percentage to flat is exact (the calculator already knows the rupee amount
+ * the percentage came to); the other direction would need a division the
+ * money module deliberately does not offer, so the field is cleared rather
+ * than carrying a silently wrong number across.
+ */
+function toggleLineDiscountType(index) {
+    const line = form.lines[index];
+
+    if (line.discountType === 'percent') {
+        const amount = totals.value?.lines[index]?.discount_amount;
+        line.discount = amount && amount !== '0.00' ? amount : '';
+        line.discountType = 'fixed';
+
+        return;
+    }
+
+    line.discount = '';
+    line.discountType = 'percent';
+}
+
+function toggleHeaderDiscountType() {
+    if (form.discount_type === 'percent') {
+        const amount = totals.value?.header_discount;
+        form.discount = amount && amount !== '0.00' ? amount : '';
+        form.discount_type = 'fixed';
+
+        return;
+    }
+
+    form.discount = '';
+    form.discount_type = 'percent';
+}
+
+/** The amount still to settle after any TDS, or null while the bill does not add up. */
+const settlementDue = computed(() => totals.value?.settlement_due ?? null);
 
 // --- Split-cash/bank payment panel -----------------------------------------
 // Mirrors legacy's always-visible Cash Paid + Bank Paid fields (no
@@ -475,38 +561,80 @@ const settlementDue = computed(() => total.value - (Number(form.tds_amount) || 0
 // there is no partial-payment-plus-credit-remainder mode server-side), so
 // this keeps the same submit-blocking guardrails the previous payment-mode
 // dropdown had, just surfaced as an inline due/change banner instead.
-const cashReceived = computed(() => Number(form.cash_amount) || 0);
-const bankReceived = computed(() => Number(form.bank_amount) || 0);
-const totalReceived = computed(() => round2(cashReceived.value + bankReceived.value));
-const dueAmount = computed(() => Math.max(0, round2(settlementDue.value - totalReceived.value)));
-const changeAmount = computed(() => Math.max(0, round2(totalReceived.value - settlementDue.value)));
+/** A cashier-typed amount as a canonical 2dp string, or null when it is not valid. */
+function enteredAmount(value) {
+    const parsed = parseMoney(value === '' || value === null || value === undefined ? '0' : value);
 
+    return parsed.ok ? parsed.value : null;
+}
+
+const cashReceived = computed(() => enteredAmount(form.cash_amount) ?? '0.00');
+const bankReceived = computed(() => enteredAmount(form.bank_amount) ?? '0.00');
+const totalReceived = computed(() => addMoney(cashReceived.value, bankReceived.value));
+
+const dueAmount = computed(() => {
+    if (!settlementDue.value) return '0.00';
+    const remaining = subtractMoney(settlementDue.value, totalReceived.value);
+
+    return compareMoney(remaining, '0.00') > 0 ? remaining : '0.00';
+});
+
+const changeAmount = computed(() => {
+    if (!settlementDue.value) return '0.00';
+    const over = subtractMoney(totalReceived.value, settlementDue.value);
+
+    return compareMoney(over, '0.00') > 0 ? over : '0.00';
+});
+
+const hasDue = computed(() => compareMoney(dueAmount.value, '0.00') > 0);
+const hasChange = computed(() => compareMoney(changeAmount.value, '0.00') > 0);
+
+/**
+ * Which payment mode the two amounts add up to.
+ *
+ * Cash above the amount due is a normal counter sale: the customer hands over
+ * a 1000 note for a 226 bill and gets change. That used to resolve to
+ * 'partial', which then refused to balance and left Complete disabled with no
+ * way to take the money (audit P1 "POS cannot give change"). The sale is
+ * posted as cash for exactly the amount due; the change is a drawer matter,
+ * not a ledger one. A bank leg still has to land on the exact amount, since
+ * there is no change to give on a transfer.
+ */
 const resolvedPaymentMode = computed(() => {
-    const cash = cashReceived.value;
-    const bank = bankReceived.value;
+    if (!settlementDue.value) return 'credit';
 
-    if (cash === 0 && bank === 0) return 'credit';
-    if (bank === 0 && Math.abs(cash - settlementDue.value) < 0.01) return 'cash';
-    if (cash === 0 && Math.abs(bank - settlementDue.value) < 0.01) return 'bank';
+    const cashIsZero = moneyEquals(cashReceived.value, '0.00');
+    const bankIsZero = moneyEquals(bankReceived.value, '0.00');
+
+    if (cashIsZero && bankIsZero) return 'credit';
+    if (bankIsZero && compareMoney(cashReceived.value, settlementDue.value) >= 0) return 'cash';
+    if (cashIsZero && moneyEquals(bankReceived.value, settlementDue.value)) return 'bank';
+
     return 'partial';
 });
 
 const showBankAccountField = computed(() => resolvedPaymentMode.value === 'bank' || resolvedPaymentMode.value === 'partial');
 
+// Exact, no tolerance (audit P0-4).
 const paymentBalanced = computed(() => {
     if (resolvedPaymentMode.value !== 'partial') return true;
-    return Math.abs(totalReceived.value - settlementDue.value) < 0.01;
+    if (!settlementDue.value) return false;
+
+    return moneyEquals(totalReceived.value, settlementDue.value);
 });
 
 // Quick payment buttons, mirroring legacy's "Full Cash" / "Full Bank" /
-// "Reset" row above the Cash Paid / Bank Paid fields.
+// "Reset" row above the Cash Paid / Bank Paid fields. They fill the exact
+// settlement due, to the paisa.
 function quickPayFullCash() {
-    form.cash_amount = settlementDue.value.toFixed(2);
+    if (!settlementDue.value) return;
+    form.cash_amount = settlementDue.value;
     form.bank_amount = '0';
 }
 
 function quickPayFullBank() {
-    form.bank_amount = settlementDue.value.toFixed(2);
+    if (!settlementDue.value) return;
+    form.bank_amount = settlementDue.value;
     form.cash_amount = '0';
 }
 
@@ -580,7 +708,7 @@ const splitQuantity = ref('');
 
 function openSplitModal(index) {
     const line = form.lines[index];
-    if (!line || (Number(line.quantity) || 0) <= 0) return;
+    if (!line || compareQuantity(line.quantity, '0') <= 0) return;
     splitLineIndex.value = index;
     splitQuantity.value = '';
     splitModalOpen.value = true;
@@ -600,25 +728,25 @@ function confirmSplit() {
         return;
     }
 
-    const currentQty = Number(line.quantity) || 0;
-    const qty = Number(splitQuantity.value);
+    const parsed = parseQuantity(splitQuantity.value === '' ? '0' : splitQuantity.value);
+    const qty = parsed.ok ? parsed.value : null;
 
-    if (!qty || qty <= 0 || qty >= currentQty) {
+    if (qty === null || compareQuantity(qty, '0') <= 0 || compareQuantity(qty, line.quantity) >= 0) {
         toast({ message: 'Enter a quantity less than the line’s current quantity.', variant: 'danger' });
         return;
     }
 
-    line.quantity = String(round2(currentQty - qty));
+    line.quantity = subtractQuantity(line.quantity, qty);
 
     const newCart = makeCart();
     newCart.customer_id = form.customer_id;
     newCart.store_id = form.store_id;
     newCart.invoice_type = form.invoice_type;
-    newCart.lines = [{ ...line, quantity: String(qty) }];
+    newCart.lines = [{ ...line, quantity: qty }];
     carts.value.push(newCart);
 
     closeSplitModal();
-    toast({ message: `Split ${qty} into a new cart.`, variant: 'success' });
+    toast({ message: `Split ${formatQuantity(qty)} into a new cart.`, variant: 'success' });
 }
 
 // --- Merge another cart tab into the active one -----------------------------
@@ -642,7 +770,7 @@ function mergeCartInto(sourceIndex) {
             (l) => l.item_id === sourceLine.item_id && l.discountType === sourceLine.discountType,
         );
         if (existing) {
-            existing.quantity = String(round2((Number(existing.quantity) || 0) + (Number(sourceLine.quantity) || 0)));
+            existing.quantity = addQuantity(existing.quantity, sourceLine.quantity) ?? existing.quantity;
         } else {
             form.lines.push({ ...sourceLine });
         }
@@ -770,97 +898,116 @@ function applyPendingCustomer() {
 const receiptOpen = ref(false);
 const receipt = ref(null);
 
-function buildReceiptSnapshot() {
-    const customer = props.customers.find((c) => c.id === form.customer_id);
-
-    return {
-        customerName: customer?.name ?? 'Walk-in',
-        date: form.date,
-        paymentMode: resolvedPaymentMode.value,
-        lines: form.lines.map((line) => {
-            const item = itemsById.value[line.item_id];
-            const qty = Number(line.quantity) || 0;
-            const rate = Number(line.rate) || 0;
-            const discount = lineDiscountAmount(line);
-
-            return { name: item?.name ?? 'Item', unit: item?.unit ?? '', quantity: qty, rate, total: qty * rate - discount };
-        }),
-        taxableAmount: taxableAmount.value,
-        nontaxableAmount: nontaxableAmount.value,
-        vatAmount: vatAmount.value,
-        total: total.value,
-        cashReceived: cashReceived.value,
-        bankReceived: bankReceived.value,
-        due: dueAmount.value,
-        change: changeAmount.value,
-    };
-}
+/**
+ * Cash actually tendered for the sale being submitted.
+ *
+ * The bill itself is posted for exactly the amount due, so the change owed is
+ * the only part of the receipt that is not a stored fact - it is captured here
+ * right before submitting, and every other figure on the receipt comes back
+ * from the server.
+ */
+let tenderedCash = '0.00';
 
 function resetForNextSale() {
     form.reset();
     form.clearErrors();
-    form.date = today();
+    form.date = todayInKathmandu();
     form.lines = [];
     activeTarget.value = null;
     scanQuery.value = '';
     syncActiveCartFromForm();
+    // The posted cart must not survive in localStorage: the audit found the
+    // print step throwing before any reset ran, leaving a cart that had
+    // already been billed sitting on screen ready to be billed again (P0-6).
+    persistCartsNow();
 }
 
 function completeSale() {
-    const snapshot = buildReceiptSnapshot();
+    if (!totals.value) return;
+
+    const expectedTotal = totals.value.total;
+    tenderedCash = cashReceived.value;
 
     form.transform((data) => ({
         ...data,
         payment_mode: resolvedPaymentMode.value,
-        // The backend now computes the actual Rs discount itself from the
-        // raw value + type (Sale::post()), rather than trusting a client-
-        // resolved number - so the raw entered value and mapped type are
-        // sent as-is, not lineDiscountAmount()/headerDiscountAmount()'s
-        // resolved Rs amounts.
-        discount: Number(data.discount) || 0,
+        // The server computes the actual Rs discount itself from the raw value
+        // plus its type, so the raw entered value and the mapped type are sent
+        // as-is - never a client-resolved amount.
+        discount: data.discount === '' ? '0' : data.discount,
         discount_type: data.discount_type === 'percent' ? 'percentage' : 'flat',
-        vat_rate: Number(data.vat_rate) || 0,
-        cash_amount: Number(data.cash_amount) || 0,
-        bank_amount: Number(data.bank_amount) || 0,
-        tds_amount: Number(data.tds_amount) || 0,
+        cash_amount: data.cash_amount === '' ? '0' : data.cash_amount,
+        bank_amount: data.bank_amount === '' ? '0' : data.bank_amount,
+        tds_amount: data.tds_amount === '' ? '0' : data.tds_amount,
+        // C8: the total the cashier was looking at. The server refuses the
+        // save if it arrives at anything else.
+        expected_total: expectedTotal,
         lines: data.lines.map((line) => ({
             item_id: line.item_id,
-            quantity: Number(line.quantity) || 0,
-            rate: Number(line.rate) || 0,
-            discount: Number(line.discount) || 0,
+            quantity: line.quantity,
+            rate: line.rate,
+            discount: line.discount === '' ? '0' : line.discount,
             discount_type: line.discountType === 'percent' ? 'percentage' : 'flat',
         })),
     })).post('/sales', {
         preserveScroll: true,
-        onSuccess: (page) => {
-            // /sales redirects to the sales index on success, so its props
-            // (loaded into `page` before we bounce back to /pos below) carry
-            // the freshly posted sale - highest id in the list, since ties
-            // can't happen within the same request. Opens a printable PDF in
-            // a new tab as an additional action alongside (not replacing)
-            // the on-screen receipt confirmation below.
-            const newestSaleId = (page.props.sales ?? []).reduce((maxId, s) => Math.max(maxId, s.id), 0);
-            if (newestSaleId) window.open(`/sales/${newestSaleId}/print`, '_blank');
+        onSuccess: () => {
+            // C11: the server says exactly which sale it created and where its
+            // print view is. Nothing is inferred from the redirected-to list
+            // any more, which is what printed the wrong bill for a back-dated
+            // sale or a second till (audit P0-6).
+            const created = page.props.flash?.created;
 
-            sessionStorage.setItem(PENDING_RECEIPT_KEY, JSON.stringify(snapshot));
+            if (created?.receipt) {
+                try {
+                    sessionStorage.setItem(
+                        PENDING_RECEIPT_KEY,
+                        JSON.stringify({ ...created.receipt, tendered_cash: tenderedCash }),
+                    );
+                } catch {
+                    // Storage unavailable - the sale is posted either way, the
+                    // cashier just won't see the on-screen receipt.
+                }
+            }
+
+            // Clear the cart (and its localStorage copy) BEFORE navigating, so
+            // a failure anywhere after this point cannot leave a billed cart
+            // behind.
             resetForNextSale();
+
+            if (created?.print_url) window.open(created.print_url, '_blank');
+
             router.visit('/pos', { onSuccess: applyPendingReceipt });
         },
     });
 }
 
 function applyPendingReceipt() {
-    const raw = sessionStorage.getItem(PENDING_RECEIPT_KEY);
+    let raw;
+    try {
+        raw = sessionStorage.getItem(PENDING_RECEIPT_KEY);
+    } catch {
+        return;
+    }
     if (!raw) return;
-    sessionStorage.removeItem(PENDING_RECEIPT_KEY);
 
     try {
+        sessionStorage.removeItem(PENDING_RECEIPT_KEY);
         receipt.value = JSON.parse(raw);
         receiptOpen.value = true;
     } catch {
         // malformed sessionStorage payload - nothing to recover, ignore.
     }
 }
+
+/** Change owed on the completed sale: cash tendered less the amount settled. */
+const receiptChange = computed(() => {
+    if (!receipt.value) return '0.00';
+
+    const over = subtractMoney(receipt.value.tendered_cash ?? '0.00', receipt.value.cash_settled ?? '0.00');
+
+    return compareMoney(over, '0.00') > 0 ? over : '0.00';
+});
 
 function closeReceipt() {
     receiptOpen.value = false;
@@ -869,6 +1016,7 @@ function closeReceipt() {
 
 const canSubmit = computed(() => {
     if (form.processing || !form.customer_id || !form.date || form.lines.length === 0) return false;
+    if (!totals.value) return false;
 
     const mode = resolvedPaymentMode.value;
     if ((mode === 'bank' || mode === 'partial') && !form.bank_account_id) return false;
@@ -1132,13 +1280,13 @@ onUnmounted(() => {
                             <p class="text-sm font-bold text-text-strong">{{ item.name }}</p>
                             <p class="mt-1 text-xs text-text-muted">{{ item.unit }}</p>
                             <p v-if="item.sale_rate != null" class="mt-1 text-xs font-semibold text-text-base">
-                                {{ Number(item.sale_rate).toFixed(2) }}
+                                {{ formatRate(item.sale_rate) }}
                             </p>
                             <p v-if="item.is_stockable" class="mt-1 text-[10px] text-text-faint">
-                                Stock: {{ item.current_stock }}
+                                Stock: {{ formatQuantity(item.current_stock) }}
                             </p>
-                            <p v-if="quantityInCart(item.id) > 0" class="mt-2 text-xs font-bold text-primary">
-                                {{ quantityInCart(item.id) }} in cart
+                            <p v-if="hasQuantityInCart(item.id)" class="mt-2 text-xs font-bold text-primary">
+                                {{ formatQuantity(quantityInCart(item.id)) }} in cart
                             </p>
                         </Card>
                         <p v-if="filteredItems.length === 0" class="col-span-full text-sm text-text-faint">No items match.</p>
@@ -1249,7 +1397,7 @@ onUnmounted(() => {
                                     {{ line.discountType === 'percent' ? '%' : 'Rs' }}
                                 </button>
                                 <span class="ml-auto shrink-0 text-xs font-bold text-text-strong">
-                                    {{ lineTotals[index].total.toFixed(2) }}
+                                    {{ lineTotal(index) === null ? '—' : formatMoney(lineTotal(index)) }}
                                 </span>
                             </div>
                         </div>
@@ -1321,23 +1469,23 @@ onUnmounted(() => {
                             <label class="mb-1 block text-sm font-semibold text-text-base">Bank account</label>
                             <Combobox
                                 :model-value="form.bank_account_id"
-                                :options="accountOptions"
+                                :options="bankAccountOptions"
                                 placeholder="Select bank account"
                                 @update:model-value="(v) => (form.bank_account_id = v)"
                             />
                             <p v-if="form.errors.bank_account_id" class="mt-1 text-sm text-danger">{{ form.errors.bank_account_id }}</p>
                         </div>
 
-                        <div v-if="dueAmount > 0" class="mt-3 flex items-center justify-between bg-warning-bg px-3 py-2 text-xs font-bold text-warning-text">
+                        <div v-if="hasDue" class="mt-3 flex items-center justify-between bg-warning-bg px-3 py-2 text-xs font-bold text-warning-text">
                             <span>Due</span>
-                            <span>{{ dueAmount.toFixed(2) }}</span>
+                            <span>{{ formatMoney(dueAmount) }}</span>
                         </div>
-                        <div v-else-if="changeAmount > 0" class="mt-3 flex items-center justify-between bg-success-bg px-3 py-2 text-xs font-bold text-success">
+                        <div v-else-if="hasChange" class="mt-3 flex items-center justify-between bg-success-bg px-3 py-2 text-xs font-bold text-success">
                             <span>Change to return</span>
-                            <span>{{ changeAmount.toFixed(2) }}</span>
+                            <span>{{ formatMoney(changeAmount) }}</span>
                         </div>
                         <p v-if="resolvedPaymentMode === 'partial' && !paymentBalanced" class="mt-1 text-xs font-semibold text-danger">
-                            Cash + bank must add up to {{ settlementDue.toFixed(2) }} for a split payment.
+                            Cash + bank must add up to exactly {{ settlementDue ? formatMoney(settlementDue) : '—' }} for a split payment.
                         </p>
 
                         <button type="button" class="mt-3 text-xs font-semibold text-primary" @click="showAdvanced = !showAdvanced">
@@ -1389,7 +1537,13 @@ onUnmounted(() => {
                             <div class="grid grid-cols-2 gap-3">
                                 <div>
                                     <label class="mb-1 block text-sm font-semibold text-text-base">VAT rate (%)</label>
-                                    <Input v-model="form.vat_rate" type="number" min="0" step="0.01" placeholder="13" />
+                                    <!-- Read-only: the server always uses the
+                                         tenant's configured rate, and a PAN
+                                         invoice carries no VAT at all. -->
+                                    <p class="flex h-9 items-center border-[1.5px] border-border bg-bg-subtle px-3 text-[13px] font-semibold text-text-muted">
+                                        {{ formatRate(effectiveVatRate) }}
+                                        <span v-if="isPanInvoice" class="ml-2 text-xs font-normal">(no VAT)</span>
+                                    </p>
                                 </div>
                                 <div>
                                     <label class="mb-1 block text-sm font-semibold text-text-base">TDS amount</label>
@@ -1401,7 +1555,7 @@ onUnmounted(() => {
                                     <label class="mb-1 block text-sm font-semibold text-text-base">TDS account</label>
                                     <Combobox
                                         :model-value="form.tds_account_id"
-                                        :options="accountOptions"
+                                        :options="tdsAccountOptions"
                                         placeholder="Optional"
                                         @update:model-value="(v) => (form.tds_account_id = v)"
                                     />
@@ -1420,17 +1574,19 @@ onUnmounted(() => {
 
                     <!-- Totals + submit -->
                     <Card variant="panel">
-                        <div class="grid grid-cols-2 gap-2 text-sm">
+                        <div v-if="totals" class="grid grid-cols-2 gap-2 text-sm">
                             <p class="text-text-muted">Taxable</p>
-                            <p class="text-right font-semibold text-text-strong">{{ taxableAmount.toFixed(2) }}</p>
+                            <p class="text-right font-semibold text-text-strong">{{ formatMoney(totals.taxable_amount) }}</p>
                             <p class="text-text-muted">Non-taxable</p>
-                            <p class="text-right font-semibold text-text-strong">{{ nontaxableAmount.toFixed(2) }}</p>
+                            <p class="text-right font-semibold text-text-strong">{{ formatMoney(totals.nontaxable_amount) }}</p>
                             <p class="text-text-muted">VAT</p>
-                            <p class="text-right font-semibold text-text-strong">{{ vatAmount.toFixed(2) }}</p>
+                            <p class="text-right font-semibold text-text-strong">{{ formatMoney(totals.vat_amount) }}</p>
                             <p class="text-base font-bold text-text-strong">Grand total</p>
-                            <p class="text-right text-base font-bold text-primary">{{ total.toFixed(2) }}</p>
+                            <p class="text-right text-base font-bold text-primary">{{ formatMoney(totals.total) }}</p>
                         </div>
+                        <p v-if="previewError" class="text-sm text-danger">{{ previewError }}</p>
                         <p v-if="form.errors.lines" class="mt-2 text-sm text-danger">{{ form.errors.lines }}</p>
+                        <p v-if="form.errors.expected_total" class="mt-2 text-sm text-danger">{{ form.errors.expected_total }}</p>
                         <Button variant="primary" tone="purple" type="button" class="mt-3 w-full justify-center" :disabled="!canSubmit" @click="completeSale">
                             Complete sale (F8)
                         </Button>
@@ -1507,37 +1663,46 @@ onUnmounted(() => {
 
         <!-- Receipt confirmation (frontend-only - no backend receipt endpoint) -->
         <Modal :open="receiptOpen" title="Sale complete" size="compact" @update:open="(v) => (v ? null : closeReceipt())">
+            <!-- Every figure below is the stored sale the server returned
+                 (C8: posted documents always render stored server values), not
+                 a client-side snapshot of what the cart looked like. The only
+                 exception is the change, which is cash tendered at the counter
+                 and never part of the bill. -->
             <div v-if="receipt" class="flex flex-col gap-3 text-sm">
                 <div class="flex justify-between text-text-muted">
-                    <span>{{ receipt.customerName }}</span>
+                    <span>{{ receipt.customer_name }}</span>
+                    <span>{{ receipt.invoice_number }}</span>
+                </div>
+                <div class="flex justify-between text-text-muted">
+                    <span>{{ receipt.date_bs }} (BS)</span>
                     <span>{{ receipt.date }}</span>
                 </div>
                 <div class="border-t border-border pt-2">
                     <div v-for="(line, i) in receipt.lines" :key="i" class="flex justify-between py-0.5">
-                        <span>{{ line.name }} × {{ line.quantity }}</span>
-                        <span class="font-semibold">{{ line.total.toFixed(2) }}</span>
+                        <span>{{ line.name }} × {{ formatQuantity(line.quantity) }} {{ line.unit }}</span>
+                        <span class="font-semibold">{{ formatMoney(line.line_total) }}</span>
                     </div>
                 </div>
                 <div class="border-t border-border pt-2">
                     <div class="flex justify-between text-base font-bold text-text-strong">
                         <span>Total</span>
-                        <span>{{ receipt.total.toFixed(2) }}</span>
+                        <span>{{ formatMoney(receipt.total) }}</span>
                     </div>
-                    <div v-if="receipt.cashReceived > 0" class="mt-1 flex justify-between text-text-muted">
-                        <span>Cash received</span>
-                        <span>{{ receipt.cashReceived.toFixed(2) }}</span>
+                    <div class="mt-1 flex justify-between text-text-muted">
+                        <span>Cash settled</span>
+                        <span>{{ formatMoney(receipt.cash_settled) }}</span>
                     </div>
-                    <div v-if="receipt.bankReceived > 0" class="flex justify-between text-text-muted">
-                        <span>Bank received</span>
-                        <span>{{ receipt.bankReceived.toFixed(2) }}</span>
+                    <div class="flex justify-between text-text-muted">
+                        <span>Bank settled</span>
+                        <span>{{ formatMoney(receipt.bank_settled) }}</span>
                     </div>
-                    <div v-if="receipt.due > 0" class="flex justify-between font-semibold text-warning-text">
-                        <span>Due</span>
-                        <span>{{ receipt.due.toFixed(2) }}</span>
+                    <div class="flex justify-between font-semibold text-warning-text">
+                        <span>Outstanding</span>
+                        <span>{{ formatMoney(receipt.outstanding) }}</span>
                     </div>
-                    <div v-if="receipt.change > 0" class="flex justify-between font-semibold text-success">
+                    <div class="flex justify-between font-semibold text-success">
                         <span>Change</span>
-                        <span>{{ receipt.change.toFixed(2) }}</span>
+                        <span>{{ formatMoney(receiptChange) }}</span>
                     </div>
                 </div>
             </div>

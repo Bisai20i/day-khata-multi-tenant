@@ -2,12 +2,20 @@
 
 namespace App\Models;
 
+use App\Casts\Decimal;
 use App\Enums\StockMovementType;
 use App\Enums\VoucherType;
+use App\Support\Billing\BillingException;
+use App\Support\Billing\DocumentCalculator;
+use App\Support\Billing\DocumentTotals;
+use App\Support\Billing\LineTotals;
+use App\Support\Money\Money;
+use App\Support\Money\Quantity;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 use InvalidArgumentException;
 
@@ -20,15 +28,28 @@ use InvalidArgumentException;
  * separately through Item::recordStockMovement(), fully decoupled from
  * the ledger. See day-khata-multi-tenant mem.md for the full research
  * this was built from.
+ *
+ * Every rupee on this document is computed by App\Support\Billing\
+ * DocumentCalculator (CONTRACTS C3) and held as App\Support\Money\Money.
+ * There is no float arithmetic anywhere in this class: the 2026-09-11 audit
+ * measured 0.39% of two-decimal products rounding the wrong way under PHP's
+ * round() (P0-1), and the browser preview disagreeing with the stored bill
+ * (P0-8). Both sides now run the same algorithm on exact decimals.
  */
 #[Fillable([
-    'customer_id', 'agent_id', 'commission_amount', 'store_id', 'journal_voucher_id', 'invoice_type', 'chalani_number', 'date', 'payment_mode',
-    'bank_account_id', 'discount', 'discount_type', 'taxable_amount', 'nontaxable_amount',
+    'customer_id', 'agent_id', 'commission_amount', 'store_id', 'journal_voucher_id', 'fiscal_year_id',
+    'invoice_number', 'buyer_name', 'buyer_pan', 'buyer_address',
+    'invoice_type', 'chalani_number', 'date', 'payment_mode',
+    'bank_account_id', 'discount', 'discount_type', 'discount_amount', 'taxable_amount', 'nontaxable_amount',
     'vat_rate', 'vat_amount', 'total', 'cash_amount', 'bank_amount',
     'tds_account_id', 'tds_amount', 'narration', 'status', 'created_by',
+    'cancelled_at', 'cancelled_by', 'cancel_reason', 'reversal_journal_voucher_id',
 ])]
 class Sale extends Model
 {
+    /** An abbreviated tax invoice may not be issued above this value (IRD rule). */
+    private const ABBREVIATED_INVOICE_CEILING = '10000.00';
+
     /**
      * @return array<string, string>
      */
@@ -36,16 +57,18 @@ class Sale extends Model
     {
         return [
             'date' => 'date',
-            'discount' => 'decimal:2',
-            'taxable_amount' => 'decimal:2',
-            'nontaxable_amount' => 'decimal:2',
-            'vat_rate' => 'decimal:2',
-            'vat_amount' => 'decimal:2',
-            'total' => 'decimal:2',
-            'cash_amount' => 'decimal:2',
-            'bank_amount' => 'decimal:2',
-            'tds_amount' => 'decimal:2',
-            'commission_amount' => 'decimal:2',
+            'cancelled_at' => 'datetime',
+            'discount' => Decimal::class.':2',
+            'discount_amount' => Decimal::class.':2',
+            'taxable_amount' => Decimal::class.':2',
+            'nontaxable_amount' => Decimal::class.':2',
+            'vat_rate' => Decimal::class.':2',
+            'vat_amount' => Decimal::class.':2',
+            'total' => Decimal::class.':2',
+            'cash_amount' => Decimal::class.':2',
+            'bank_amount' => Decimal::class.':2',
+            'tds_amount' => Decimal::class.':2',
+            'commission_amount' => Decimal::class.':2',
         ];
     }
 
@@ -82,6 +105,25 @@ class Sale extends Model
     }
 
     /**
+     * The Reversal voucher posted when this sale was cancelled (C5), or null
+     * while it is still live.
+     *
+     * @return BelongsTo<JournalVoucher, $this>
+     */
+    public function reversalJournalVoucher(): BelongsTo
+    {
+        return $this->belongsTo(JournalVoucher::class, 'reversal_journal_voucher_id');
+    }
+
+    /**
+     * @return BelongsTo<FiscalYear, $this>
+     */
+    public function fiscalYear(): BelongsTo
+    {
+        return $this->belongsTo(FiscalYear::class);
+    }
+
+    /**
      * @return BelongsTo<Account, $this>
      */
     public function bankAccount(): BelongsTo
@@ -103,6 +145,14 @@ class Sale extends Model
     public function creator(): BelongsTo
     {
         return $this->belongsTo(User::class, 'created_by');
+    }
+
+    /**
+     * @return BelongsTo<User, $this>
+     */
+    public function canceller(): BelongsTo
+    {
+        return $this->belongsTo(User::class, 'cancelled_by');
     }
 
     /**
@@ -130,56 +180,87 @@ class Sale extends Model
     }
 
     /**
-     * total minus every non-cancelled return against this sale minus every
-     * non-cancelled Receipt allocated against it - the single source of
-     * truth both Receipt::post()'s over-allocation guard and
-     * SalesPurchaseReportController::agedReceivables() use, so they can
-     * never drift apart. (Previously agedReceivables() summed ALL returns
-     * including cancelled ones - a real pre-existing bug fixed here while
-     * extracting this formula, matching SalesReturn's own "already
-     * returned" guard, which already excludes cancelled returns.)
+     * What the customer still owes on this invoice, exactly (CONTRACTS C7/T04
+     * item 4). The single source of truth for Receipt::post()'s
+     * over-allocation guard, the aged-receivables report and the debtors list,
+     * so those can never drift apart.
+     *
+     *   total
+     *   - tds_amount                (withheld by the buyer, never collectable)
+     *   - settled_at_posting        (settlement_due for cash/bank/partial, 0 for credit)
+     *   - net credit of posted returns
+     *   + refunds already paid out on those returns
+     *   - allocations of non-cancelled receipts
+     *
+     * Two rules the audit forced:
+     *
+     * - TDS is subtracted (P1 "Ledger and balances"): a credit invoice with
+     *   TDS could never be settled before, because the buyer only ever pays
+     *   `total - tds`, leaving the invoice permanently short.
+     * - Only `status = 'posted'` returns count (P0-13). A pending request has
+     *   no money effect at all and a rejected one never had any; counting them
+     *   permanently understated what the customer owed.
+     *
+     * A return's own credit to the customer is `return.total` less the TDS
+     * that return actually reversed, read from `sales_returns.tds_amount`.
+     * That column stores what the credit-note voucher posted (the sum of the
+     * per-line C6 shares), so the customer balance and the ledger can never
+     * disagree. Re-deriving the share here as `tds x returned / total` looked
+     * equivalent but drifts by a paisa once a note has several lines and a
+     * header discount, because the per-line shares round independently.
      */
-    public function outstandingAmount(): float
+    public function outstandingAmount(): Money
     {
-        return round(
-            (float) $this->total
-            - $this->returns()->where('status', '!=', 'cancelled')->sum('total')
-            - $this->receiptAllocations()->whereHas('receipt', fn ($q) => $q->where('status', '!=', 'cancelled'))->sum('amount'),
-            2
+        $total = Money::of($this->total);
+        $tds = Money::of($this->tds_amount);
+        $settlementDue = $total->minus($tds);
+
+        $settledAtPosting = $this->payment_mode === 'credit' ? Money::zero() : $settlementDue;
+
+        $returnedNet = Money::zero();
+        $refunded = Money::zero();
+
+        $postedReturns = $this->returns()
+            ->where('status', 'posted')
+            ->orderBy('id')
+            ->get(['id', 'total', 'tds_amount', 'refund_journal_voucher_id']);
+
+        foreach ($postedReturns as $return) {
+            $credit = Money::of($return->total)->minus(Money::of($return->tds_amount));
+
+            $returnedNet = $returnedNet->plus($credit);
+
+            if ($return->refund_journal_voucher_id !== null) {
+                $refunded = $refunded->plus($credit);
+            }
+        }
+
+        $allocated = Money::sum(
+            $this->receiptAllocations()
+                ->whereHas('receipt', fn ($query) => $query->where('status', '!=', 'cancelled'))
+                ->pluck('amount')
+                ->map(fn ($amount) => Money::of($amount))
         );
+
+        return $settlementDue
+            ->minus($settledAtPosting)
+            ->minus($returnedNet)
+            ->plus($refunded)
+            ->minus($allocated);
     }
 
     /**
-     * The actual Rs amount removed from the vatable subtotal by the header
-     * discount at posting time - for display (e.g. on the sale PDF), which
-     * can't just print `discount` directly since that column means
-     * different things depending on `discount_type`.
+     * The rupee amount the header discount removed from this bill.
      *
-     * When 'flat', `discount` already IS that Rs amount. When 'percentage',
-     * `discount` stores the raw entered percentage instead (post() applies
-     * it against the pre-discount vatable subtotal, which isn't stored on
-     * this row), so it's reconstructed from the stored post-discount
-     * `taxable_amount`: since `taxable_amount = vatableSubtotal * (1 -
-     * discount / 100)`, solving for the removed amount gives
-     * `taxable_amount * discount / (100 - discount)`. Degenerates to 0 at
-     * exactly 100% (division by zero) since `taxable_amount` is already 0
-     * there and the original vatable subtotal can't be recovered from it
-     * alone - a benign display-only edge case.
+     * Stored at posting since this rewrite (see the 2026_09_12_040000
+     * migration): `discount` alone is ambiguous (a raw percentage when
+     * `discount_type` is 'percentage') and the old algebraic reconstruction
+     * from `taxable_amount` cannot be exact once the discount is split
+     * proportionally between the taxable and exempt subtotals (C3 step 4).
      */
-    public function discountAmount(): float
+    public function discountAmount(): Money
     {
-        if ($this->discount_type !== 'percentage') {
-            return round((float) $this->discount, 2);
-        }
-
-        $discount = (float) $this->discount;
-        $denominator = 100 - $discount;
-
-        if ($denominator <= 0) {
-            return 0.0;
-        }
-
-        return round((float) $this->taxable_amount * $discount / $denominator, 2);
+        return Money::of($this->discount_amount);
     }
 
     /**
@@ -187,207 +268,60 @@ class Sale extends Model
      * the money side, creates the Sale + SaleLine rows, and records a
      * stock movement per stockable line.
      *
-     * @param  array{customer_id: int, invoice_type: string, chalani_number?: string|null, date: string, payment_mode: string, bank_account_id?: int|null, discount?: float, discount_type?: string, vat_rate?: float, cash_amount?: float|null, bank_amount?: float|null, tds_account_id?: int|null, tds_amount?: float, agent_id?: int|null, commission_amount?: float, narration?: string|null}  $data
-     * @param  array<int, array{item_id: int, item_unit_id?: int|null, quantity: float, rate: float, discount?: float, discount_type?: string}>  $lines
+     * The VAT rate is never taken from the request: it is always the tenant's
+     * `CompanySetting::default_vat_rate` (audit P1 - the rate used to be
+     * whatever the browser sent). A PAN invoice forces the rate to 0 and every
+     * line non-taxable through the calculator's `force_non_taxable`, which is
+     * what closes P0-10: PAN bills used to charge a hidden 13% that the PDF
+     * then hid from the customer while it still posted to LIA20.
+     *
+     * @param  array{customer_id: int, invoice_type: string, chalani_number?: string|null, date: string, payment_mode: string, bank_account_id?: int|null, discount?: string|float, discount_type?: string, cash_amount?: string|float|null, bank_amount?: string|float|null, tds_account_id?: int|null, tds_amount?: string|float, agent_id?: int|null, commission_amount?: string|float, narration?: string|null, store_id?: int|null, expected_total?: string|null}  $data
+     * @param  array<int, array{item_id: int, item_unit_id?: int|null, quantity: string|float, rate: string|float, discount?: string|float, discount_type?: string}>  $lines
      */
     public static function post(array $data, array $lines, User $actor): self
     {
         return DB::transaction(function () use ($data, $lines, $actor) {
+            $settings = CompanySetting::current();
             $customer = Customer::findOrFail($data['customer_id']);
-            $vatRate = (float) ($data['vat_rate'] ?? 13.00);
-            $headerDiscountType = static::validatedDiscountType($data['discount_type'] ?? 'flat');
-            $headerDiscountRaw = static::validatedDiscountValue((float) ($data['discount'] ?? 0), $headerDiscountType);
-
-            $agentId = $data['agent_id'] ?? null;
-            $agent = $agentId ? Agent::findOrFail($agentId) : null;
-            $commissionAmount = round((float) ($data['commission_amount'] ?? 0), 2);
-
-            if ($commissionAmount < 0) {
-                throw new InvalidArgumentException('Commission amount cannot be negative.');
-            }
-
-            $storeId = isset($data['store_id']) ? (int) $data['store_id'] : Store::where('is_active', true)->orderBy('id')->value('id');
-            if (! $storeId) {
-                throw new InvalidArgumentException('No active store is configured.');
-            }
+            $invoiceType = static::validatedInvoiceType($data['invoice_type'] ?? 'full', $settings);
+            $storeId = static::resolveStoreId($data, $settings);
 
             $items = Item::with('units')->whereIn('id', collect($lines)->pluck('item_id'))->get()->keyBy('id');
 
-            $preparedLines = [];
-            $vatableSubtotal = 0.0;
-            $nonVatableSubtotal = 0.0;
-            $requestedQtyByItem = [];
+            [$calculatorLines, $preparedLines] = static::prepareLines($lines, $items);
 
-            foreach ($lines as $line) {
-                if (! $items->has($line['item_id'])) {
-                    throw new InvalidArgumentException("Unknown item [{$line['item_id']}].");
-                }
+            $totals = DocumentCalculator::calculate($calculatorLines, [
+                'vat_rate' => $settings->default_vat_rate,
+                'discount' => $data['discount'] ?? '0',
+                'discount_type' => $data['discount_type'] ?? 'flat',
+                'tds_amount' => $data['tds_amount'] ?? '0',
+                'force_non_taxable' => $invoiceType === 'pan',
+                'expected_total' => $data['expected_total'] ?? null,
+            ]);
 
-                $item = $items[$line['item_id']];
-                $quantity = (float) $line['quantity'];
-                $rate = (float) $line['rate'];
-                [$itemUnitId, $conversionFactor] = static::resolveItemUnit($item, $line['item_unit_id'] ?? null);
-                // The base-unit quantity this line actually moves in/out of
-                // stock - e.g. 2 "Box" at conversion_factor 12 moves 24 base
-                // units. A plain base-unit line (no item_unit_id) always has
-                // conversionFactor 1.0, making this a no-op identical to
-                // pre-unit-conversion behavior. Money math below deliberately
-                // keeps using the as-entered $quantity/$rate, never this.
-                $baseQuantity = round($quantity * $conversionFactor, 4);
-                $lineDiscountType = static::validatedDiscountType($line['discount_type'] ?? 'flat');
-                $lineDiscountRaw = static::validatedDiscountValue((float) ($line['discount'] ?? 0), $lineDiscountType);
-                $lineBase = round($quantity * $rate, 2);
-                $lineDiscountAmount = $lineDiscountType === 'percentage'
-                    ? round($lineBase * $lineDiscountRaw / 100, 2)
-                    : round($lineDiscountRaw, 2);
-                $lineTotal = round($lineBase - $lineDiscountAmount, 2);
+            static::assertAbbreviatedCeiling($invoiceType, $totals->total);
 
-                if ($item->is_vatable) {
-                    $vatableSubtotal += $lineTotal;
-                } else {
-                    $nonVatableSubtotal += $lineTotal;
-                }
+            $commissionAmount = static::validatedCommission($data, $totals->total);
+            $agentId = $data['agent_id'] ?? null;
+            $agent = $agentId ? Agent::findOrFail($agentId) : null;
 
-                if ($item->is_stockable) {
-                    $requestedQtyByItem[$item->id] = ($requestedQtyByItem[$item->id] ?? 0) + $baseQuantity;
-                }
+            static::assertStockAvailable($preparedLines, $totals, $storeId, $settings);
 
-                $preparedLines[] = [
-                    'item' => $item,
-                    'quantity' => $quantity,
-                    'item_unit_id' => $itemUnitId,
-                    'unit_conversion_factor' => $conversionFactor,
-                    'base_quantity' => $baseQuantity,
-                    'rate' => $rate,
-                    'discount' => $lineDiscountRaw,
-                    'discount_type' => $lineDiscountType,
-                    'vatable' => $item->is_vatable,
-                    'line_total' => $lineTotal,
-                ];
-            }
-
-            // Negative-stock enforcement (sales only - purchases only ever
-            // increase stock, so there's nothing to check there). Skipped
-            // entirely when the tenant has opted into overselling via
-            // CompanySetting::allow_negative_stock. Checked per item, at the
-            // sale's store, using the same Item::currentStock() every other
-            // store-scoped stock read in this app uses (see PosController's
-            // stock badges) so this can never drift from what the cashier
-            // was shown on screen.
-            if (! CompanySetting::current()->allow_negative_stock) {
-                $shortages = [];
-
-                foreach ($requestedQtyByItem as $itemId => $requestedQty) {
-                    $item = $items[$itemId];
-                    $available = $item->currentStock($storeId);
-
-                    // $requestedQty is already in base units (see the
-                    // baseQuantity conversion above), matching what
-                    // currentStock() returns - so a line entered in an alt
-                    // unit is compared apples-to-apples, not against its
-                    // as-entered (e.g. "Box") quantity.
-                    if (round($available - $requestedQty, 4) < 0) {
-                        $shortages[] = "{$item->name} (available {$available}, requested {$requestedQty})";
-                    }
-                }
-
-                if ($shortages !== []) {
-                    throw new InvalidArgumentException('Insufficient stock for: '.implode(', ', $shortages));
-                }
-            }
-
-            $headerDiscountAmount = $headerDiscountType === 'percentage'
-                ? round($vatableSubtotal * $headerDiscountRaw / 100, 2)
-                : round($headerDiscountRaw, 2);
-
-            $taxableAmount = round($vatableSubtotal - $headerDiscountAmount, 2);
-            $nontaxableAmount = round($nonVatableSubtotal, 2);
-            $vatAmount = round($taxableAmount * $vatRate / 100, 2);
-            $total = round($taxableAmount + $nontaxableAmount + $vatAmount, 2);
-
-            // Soft sanity guard only (not a hard business rule, per design) -
-            // catches an obvious data-entry mistake (e.g. an extra digit)
-            // without blocking a legitimate high-commission scenario.
-            if ($commissionAmount > 0 && $total > 0 && $commissionAmount > $total * 5) {
-                throw new InvalidArgumentException('Commission amount is implausibly large relative to the sale total.');
-            }
-
-            $tdsAmount = round((float) ($data['tds_amount'] ?? 0), 2);
             $tdsAccountId = $data['tds_account_id'] ?? null;
 
-            if ($tdsAmount > 0 && ! $tdsAccountId) {
+            if ($totals->tdsAmount->isPositive() && ! $tdsAccountId) {
                 throw new InvalidArgumentException('A TDS account is required when a TDS amount is set.');
             }
 
-            $paymentMode = $data['payment_mode'];
-            $cashAmount = isset($data['cash_amount']) ? round((float) $data['cash_amount'], 2) : null;
-            $bankAmount = isset($data['bank_amount']) ? round((float) $data['bank_amount'], 2) : null;
-            $bankAccountId = $data['bank_account_id'] ?? null;
-
-            if (in_array($paymentMode, ['bank', 'partial'], true) && ! $bankAccountId) {
-                throw new InvalidArgumentException('A bank account is required for bank or partial payment.');
-            }
-
-            $settlementDue = round($total - $tdsAmount, 2);
-
-            if ($paymentMode === 'partial' && abs((($cashAmount ?? 0) + ($bankAmount ?? 0)) - $settlementDue) > 0.01) {
-                throw new InvalidArgumentException('Cash and bank amounts must add up to the settlement due.');
-            }
-
-            $voucherLines = [];
-            $voucherLines[] = ['account_id' => $customer->account_id, 'debit' => $total, 'credit' => 0, 'narration' => 'Sale total'];
-
-            $salesAccountId = Account::where('code', 'INI20')->firstOrFail()->id;
-            $voucherLines[] = ['account_id' => $salesAccountId, 'debit' => 0, 'credit' => $taxableAmount + $nontaxableAmount, 'narration' => 'Sales revenue'];
-
-            if ($vatAmount > 0) {
-                $vatPayableId = Account::where('code', 'LIA20')->firstOrFail()->id;
-                $voucherLines[] = ['account_id' => $vatPayableId, 'debit' => 0, 'credit' => $vatAmount, 'narration' => 'VAT payable'];
-            }
-
-            if ($tdsAmount > 0) {
-                $voucherLines[] = ['account_id' => $tdsAccountId, 'debit' => $tdsAmount, 'credit' => 0, 'narration' => 'TDS withheld'];
-                $voucherLines[] = ['account_id' => $customer->account_id, 'debit' => 0, 'credit' => $tdsAmount, 'narration' => 'TDS withheld'];
-            }
-
-            // Commission is a real expense the business owes the agent, not
-            // a customer-side adjustment like TDS above - posted as two
-            // extra, fully independent lines rather than netted against the
-            // customer's settlement amount.
-            if ($agentId && $commissionAmount > 0) {
-                $commissionExpenseId = Account::where('code', 'EXE22')->firstOrFail()->id;
-                $voucherLines[] = ['account_id' => $commissionExpenseId, 'debit' => $commissionAmount, 'credit' => 0, 'narration' => 'Sales commission'];
-                $voucherLines[] = ['account_id' => $agent->account_id, 'debit' => 0, 'credit' => $commissionAmount, 'narration' => 'Commission payable to agent'];
-            }
-
-            if ($paymentMode !== 'credit') {
-                $cashAccountId = Account::where('code', 'AS1')->firstOrFail()->id;
-
-                if ($paymentMode === 'cash') {
-                    $voucherLines[] = ['account_id' => $cashAccountId, 'debit' => $settlementDue, 'credit' => 0, 'narration' => 'Cash received'];
-                } elseif ($paymentMode === 'bank') {
-                    $voucherLines[] = ['account_id' => $bankAccountId, 'debit' => $settlementDue, 'credit' => 0, 'narration' => 'Bank receipt'];
-                } else {
-                    if ($cashAmount > 0) {
-                        $voucherLines[] = ['account_id' => $cashAccountId, 'debit' => $cashAmount, 'credit' => 0, 'narration' => 'Cash received'];
-                    }
-                    if ($bankAmount > 0) {
-                        $voucherLines[] = ['account_id' => $bankAccountId, 'debit' => $bankAmount, 'credit' => 0, 'narration' => 'Bank receipt'];
-                    }
-                }
-
-                $voucherLines[] = ['account_id' => $customer->account_id, 'debit' => 0, 'credit' => $settlementDue, 'narration' => 'Settlement'];
-            }
-
-            $voucherType = ($data['invoice_type'] ?? 'full') === 'abbreviated' ? VoucherType::SaleAbbreviated : VoucherType::Sale;
+            [$paymentMode, $cashAmount, $bankAmount, $bankAccountId] = static::resolvePayment($data, $totals->settlementDue);
 
             $voucher = JournalVoucher::post(
                 [
-                    'voucher_type' => $voucherType->value,
+                    'voucher_type' => static::voucherTypeFor($invoiceType)->value,
                     'date' => $data['date'],
                     'narration' => $data['narration'] ?? "Sale to {$customer->name}",
                 ],
-                $voucherLines,
+                static::voucherLines($customer, $totals, $paymentMode, $cashAmount, $bankAmount, $bankAccountId, $tdsAccountId, $agent, $commissionAmount),
                 $actor,
             );
 
@@ -397,101 +331,416 @@ class Sale extends Model
                 'commission_amount' => $commissionAmount,
                 'store_id' => $storeId,
                 'journal_voucher_id' => $voucher->id,
-                'invoice_type' => $data['invoice_type'] ?? 'full',
+                'fiscal_year_id' => $voucher->fiscal_year_id,
+                'invoice_number' => static::invoiceNumberFor($invoiceType, $voucher, $settings),
+                'buyer_name' => $customer->name,
+                'buyer_pan' => $customer->tpin,
+                'buyer_address' => $customer->address,
+                'invoice_type' => $invoiceType,
                 'chalani_number' => $data['chalani_number'] ?? null,
                 'date' => $data['date'],
                 'payment_mode' => $paymentMode,
                 'bank_account_id' => $bankAccountId,
-                'discount' => $headerDiscountRaw,
-                'discount_type' => $headerDiscountType,
-                'taxable_amount' => $taxableAmount,
-                'nontaxable_amount' => $nontaxableAmount,
-                'vat_rate' => $vatRate,
-                'vat_amount' => $vatAmount,
-                'total' => $total,
+                'discount' => static::storedHeaderDiscount($data, $totals),
+                'discount_type' => $data['discount_type'] ?? 'flat',
+                'discount_amount' => $totals->headerDiscount,
+                'taxable_amount' => $totals->taxableAmount,
+                'nontaxable_amount' => $totals->nontaxableAmount,
+                'vat_rate' => $totals->vatRate,
+                'vat_amount' => $totals->vatAmount,
+                'total' => $totals->total,
                 'cash_amount' => $paymentMode === 'partial' ? $cashAmount : null,
                 'bank_amount' => $paymentMode === 'partial' ? $bankAmount : null,
                 'tds_account_id' => $tdsAccountId,
-                'tds_amount' => $tdsAmount,
+                'tds_amount' => $totals->tdsAmount,
                 'narration' => $data['narration'] ?? null,
                 'status' => 'posted',
                 'created_by' => $actor->id,
             ]);
 
-            foreach ($preparedLines as $line) {
-                $saleLine = $sale->lines()->create([
-                    'item_id' => $line['item']->id,
-                    'item_unit_id' => $line['item_unit_id'],
-                    'quantity' => $line['quantity'],
-                    'unit_conversion_factor' => $line['unit_conversion_factor'],
-                    'rate' => $line['rate'],
-                    'discount' => $line['discount'],
-                    'discount_type' => $line['discount_type'],
-                    'vatable' => $line['vatable'],
-                    'line_total' => $line['line_total'],
-                ]);
-
-                if ($line['item']->is_stockable) {
-                    $line['item']->recordStockMovement(
-                        StockMovementType::Sale,
-                        $line['base_quantity'],
-                        $data['date'],
-                        $storeId,
-                        $saleLine,
-                    );
-                }
-            }
+            static::persistLines($sale, $preparedLines, $totals, $storeId, $data['date']);
 
             return $sale;
         });
     }
 
     /**
-     * Validates a discount type string, defaulting an empty/missing value to
-     * 'flat'. Mirrors Purchase::validatedDiscountType() exactly.
+     * Turns the request's lines into calculator input plus the item/unit
+     * context the persistence step needs afterwards.
+     *
+     * `vatable` comes from the item, never from the request - the browser has
+     * no say in whether a line carries VAT.
+     *
+     * @param  array<int, array<string, mixed>>  $lines
+     * @param  Collection<int, Item>  $items
+     * @return array{0: array<int, array<string, mixed>>, 1: array<int, array<string, mixed>>}
      */
-    private static function validatedDiscountType(string $type): string
+    private static function prepareLines(array $lines, $items): array
     {
-        if (! in_array($type, ['percentage', 'flat'], true)) {
-            throw new InvalidArgumentException("Invalid discount type [{$type}]. Expected 'percentage' or 'flat'.");
+        $calculatorLines = [];
+        $preparedLines = [];
+
+        foreach ($lines as $line) {
+            if (! $items->has($line['item_id'])) {
+                throw new InvalidArgumentException("Unknown item [{$line['item_id']}].");
+            }
+
+            $item = $items[$line['item_id']];
+            [$itemUnitId, $conversionFactor] = static::resolveItemUnit($item, $line['item_unit_id'] ?? null);
+
+            $calculatorLines[] = [
+                'quantity' => $line['quantity'],
+                'rate' => $line['rate'],
+                'discount' => $line['discount'] ?? '0',
+                'discount_type' => $line['discount_type'] ?? 'flat',
+                'vatable' => $item->is_vatable,
+                'conversion_factor' => $conversionFactor,
+            ];
+
+            $preparedLines[] = [
+                'item' => $item,
+                'item_unit_id' => $itemUnitId,
+                'raw_discount' => $line['discount'] ?? '0',
+            ];
         }
 
-        return $type;
+        return [$calculatorLines, $preparedLines];
     }
 
     /**
-     * Validates a raw discount value against its type: never negative, and
-     * capped at 100 when the type is 'percentage' (a flat Rs discount has no
-     * such ceiling). Mirrors Purchase::validatedDiscountValue() exactly.
+     * Writes the SaleLine rows and one stock movement per stockable line.
+     *
+     * The stock movement always uses the calculator's `baseQuantity` (the
+     * as-entered quantity times the line's unit conversion factor), so 2 "Box"
+     * of 12 moves 24 base units while the money side keeps using the
+     * as-entered quantity and rate.
+     *
+     * @param  array<int, array<string, mixed>>  $preparedLines
      */
-    private static function validatedDiscountValue(float $value, string $type): float
+    private static function persistLines(self $sale, array $preparedLines, DocumentTotals $totals, int $storeId, string $date): void
     {
-        if ($value < 0) {
-            throw new InvalidArgumentException('Discount value cannot be negative.');
+        foreach ($preparedLines as $index => $prepared) {
+            /** @var LineTotals $line */
+            $line = $totals->lines[$index];
+            $item = $prepared['item'];
+
+            $saleLine = $sale->lines()->create([
+                'item_id' => $item->id,
+                'item_unit_id' => $prepared['item_unit_id'],
+                'quantity' => $line->quantity,
+                'unit_conversion_factor' => $line->conversionFactor,
+                'rate' => $line->rate,
+                'discount' => $line->discountValue,
+                'discount_type' => $line->discountType,
+                'discount_amount' => $line->discountAmount,
+                'vatable' => $line->vatable,
+                'line_total' => $line->lineTotal,
+            ]);
+
+            if ($item->is_stockable) {
+                $item->recordStockMovement(
+                    StockMovementType::Sale,
+                    $line->baseQuantity,
+                    $date,
+                    $storeId,
+                    $saleLine,
+                );
+            }
+        }
+    }
+
+    /**
+     * Rejects an invoice type the tenant has switched off in Settings. The
+     * enabled flags were saved but never enforced until now (audit P1
+     * "Invoice and IRD compliance").
+     */
+    private static function validatedInvoiceType(string $invoiceType, CompanySetting $settings): string
+    {
+        $enabled = match ($invoiceType) {
+            'full' => (bool) $settings->sale_full_enabled,
+            'abbreviated' => (bool) $settings->sale_abbreviated_enabled,
+            'pan' => (bool) $settings->sale_pan_enabled,
+            default => throw new InvalidArgumentException("Invalid invoice type [{$invoiceType}]."),
+        };
+
+        if (! $enabled) {
+            throw new InvalidArgumentException('This invoice type is turned off in Settings.');
         }
 
-        if ($type === 'percentage' && $value > 100) {
-            throw new InvalidArgumentException('A percentage discount cannot exceed 100.');
+        return $invoiceType;
+    }
+
+    /**
+     * An abbreviated tax invoice may not be issued for a bill above Rs 10,000
+     * - until now that ceiling was only a printed note on the PDF, with
+     * nothing stopping the bill being issued (audit P1).
+     */
+    private static function assertAbbreviatedCeiling(string $invoiceType, Money $total): void
+    {
+        if ($invoiceType === 'abbreviated' && $total->isGreaterThan(Money::of(self::ABBREVIATED_INVOICE_CEILING))) {
+            throw new InvalidArgumentException('Use a full tax invoice above Rs 10,000.');
+        }
+    }
+
+    /**
+     * PAN invoices get their own gapless series (VoucherType::SalePan) rather
+     * than sharing the full-invoice sequence and only differing by printed
+     * prefix, which is how each printed series ended up with gaps (P0-15).
+     */
+    private static function voucherTypeFor(string $invoiceType): VoucherType
+    {
+        return match ($invoiceType) {
+            'abbreviated' => VoucherType::SaleAbbreviated,
+            'pan' => VoucherType::SalePan,
+            default => VoucherType::Sale,
+        };
+    }
+
+    /**
+     * The invoice number stored on the row and printed forever after. Exactly
+     * the `{prefix}-{voucher_number}` format the PDF derived on the fly until
+     * now, so bills posted before this change reprint identically - the
+     * difference is that changing the prefix in Settings no longer rewrites
+     * the number on an already-issued invoice (C7).
+     */
+    private static function invoiceNumberFor(string $invoiceType, JournalVoucher $voucher, CompanySetting $settings): string
+    {
+        $prefix = match ($invoiceType) {
+            'abbreviated' => $settings->sale_abbreviated_prefix,
+            'pan' => $settings->sale_pan_prefix,
+            default => $settings->sale_full_prefix,
+        };
+
+        return "{$prefix}-{$voucher->voucher_number}";
+    }
+
+    /**
+     * What goes in the `discount` column: the raw percentage the user typed
+     * when the type is 'percentage' (so the bill can print "5%"), or the flat
+     * rupee amount otherwise. Both come back from the calculator already
+     * validated and normalised.
+     *
+     * @param  array<string, mixed>  $data
+     */
+    private static function storedHeaderDiscount(array $data, DocumentTotals $totals): Money
+    {
+        return ($data['discount_type'] ?? 'flat') === 'percentage'
+            ? Money::of($data['discount'] ?? '0')
+            : $totals->headerDiscount;
+    }
+
+    /**
+     * The store this sale moves stock out of: the explicit choice, else the
+     * tenant's configured default store (which used to be saved and never
+     * read - audit P1), else the lowest-id active store.
+     *
+     * @param  array<string, mixed>  $data
+     */
+    private static function resolveStoreId(array $data, CompanySetting $settings): int
+    {
+        $storeId = $data['store_id'] ?? $settings->default_store_id
+            ?? Store::where('is_active', true)->orderBy('id')->value('id');
+
+        if (! $storeId) {
+            throw new InvalidArgumentException('No active store is configured.');
         }
 
-        return $value;
+        return (int) $storeId;
+    }
+
+    /**
+     * Negative-stock enforcement, skipped entirely when the tenant has opted
+     * into overselling via CompanySetting::allow_negative_stock.
+     *
+     * Item::lockForStockOut() locks the item rows in ascending id order before
+     * anything is read (C10), so two terminals selling the last unit at the
+     * same moment serialise instead of both passing the check (audit P1
+     * "Negative-stock check reads without a lock"). Quantities are compared
+     * exactly as Quantity values: the old float comparison rejected valid
+     * operations and printed errors like "0.19999999999999998".
+     *
+     * @param  array<int, array<string, mixed>>  $preparedLines
+     */
+    private static function assertStockAvailable(array $preparedLines, DocumentTotals $totals, int $storeId, CompanySetting $settings): void
+    {
+        if ($settings->allow_negative_stock) {
+            return;
+        }
+
+        $requestedByItem = [];
+
+        foreach ($preparedLines as $index => $prepared) {
+            $item = $prepared['item'];
+
+            if (! $item->is_stockable) {
+                continue;
+            }
+
+            // Several lines can name the same item; the caps are checked
+            // against the whole bill's demand, not line by line.
+            $requestedByItem[$item->id] = ($requestedByItem[$item->id] ?? Quantity::zero())
+                ->plus($totals->lines[$index]->baseQuantity);
+        }
+
+        if ($requestedByItem === []) {
+            return;
+        }
+
+        $locked = Item::lockForStockOut(array_keys($requestedByItem))->keyBy('id');
+        $shortages = [];
+
+        foreach ($requestedByItem as $itemId => $requested) {
+            $item = $locked[$itemId];
+            $available = $item->currentStock($storeId);
+
+            if ($available->isLessThan($requested)) {
+                $shortages[] = "{$item->name} (available {$available->formatQuantity()}, requested {$requested->formatQuantity()})";
+            }
+        }
+
+        if ($shortages !== []) {
+            throw new InvalidArgumentException('Insufficient stock for: '.implode(', ', $shortages));
+        }
+    }
+
+    /**
+     * Soft sanity guard only (not a hard business rule, per design) - catches
+     * an obvious data-entry mistake (e.g. an extra digit) without blocking a
+     * legitimate high-commission scenario.
+     *
+     * @param  array<string, mixed>  $data
+     */
+    private static function validatedCommission(array $data, Money $total): Money
+    {
+        $commission = Money::of($data['commission_amount'] ?? '0');
+
+        if ($commission->isNegative()) {
+            throw new InvalidArgumentException('Commission amount cannot be negative.');
+        }
+
+        if ($commission->isPositive() && $total->isPositive() && $commission->isGreaterThan($total->multipliedBy(5))) {
+            throw new InvalidArgumentException('Commission amount is implausibly large relative to the sale total.');
+        }
+
+        return $commission;
+    }
+
+    /**
+     * Resolves the payment mode's cash/bank split. A partial payment must add
+     * up to the settlement due to the paisa: the old `abs(diff) > 0.01`
+     * tolerance accepted a one-paisa mismatch and left it on the customer's
+     * ledger forever (audit P0-4).
+     *
+     * @param  array<string, mixed>  $data
+     * @return array{0: string, 1: Money|null, 2: Money|null, 3: int|null}
+     */
+    private static function resolvePayment(array $data, Money $settlementDue): array
+    {
+        $paymentMode = $data['payment_mode'];
+        $bankAccountId = $data['bank_account_id'] ?? null;
+
+        if (in_array($paymentMode, ['bank', 'partial'], true) && ! $bankAccountId) {
+            throw new InvalidArgumentException('A bank account is required for bank or partial payment.');
+        }
+
+        $cashAmount = Money::ofNullable($data['cash_amount'] ?? null);
+        $bankAmount = Money::ofNullable($data['bank_amount'] ?? null);
+
+        if ($paymentMode === 'partial') {
+            DocumentCalculator::assertExactSplit(
+                $settlementDue,
+                $cashAmount ?? Money::zero(),
+                $bankAmount ?? Money::zero(),
+            );
+        }
+
+        return [$paymentMode, $cashAmount, $bankAmount, $bankAccountId];
+    }
+
+    /**
+     * The money side of the sale, unchanged in structure from before this
+     * rewrite (the audit verified the account choices as correct) - only the
+     * amounts differ, now exact Money strings rather than rounded floats.
+     *
+     * @return array<int, array{account_id: int, debit: string, credit: string, narration: string}>
+     */
+    private static function voucherLines(
+        Customer $customer,
+        DocumentTotals $totals,
+        string $paymentMode,
+        ?Money $cashAmount,
+        ?Money $bankAmount,
+        ?int $bankAccountId,
+        ?int $tdsAccountId,
+        ?Agent $agent,
+        Money $commissionAmount,
+    ): array {
+        $zero = Money::zero()->toString();
+        $voucherLines = [];
+
+        $voucherLines[] = ['account_id' => $customer->account_id, 'debit' => $totals->total->toString(), 'credit' => $zero, 'narration' => 'Sale total'];
+
+        $salesAccountId = Account::where('code', 'INI20')->firstOrFail()->id;
+        $revenue = $totals->taxableAmount->plus($totals->nontaxableAmount);
+        $voucherLines[] = ['account_id' => $salesAccountId, 'debit' => $zero, 'credit' => $revenue->toString(), 'narration' => 'Sales revenue'];
+
+        if ($totals->vatAmount->isPositive()) {
+            $vatPayableId = Account::where('code', 'LIA20')->firstOrFail()->id;
+            $voucherLines[] = ['account_id' => $vatPayableId, 'debit' => $zero, 'credit' => $totals->vatAmount->toString(), 'narration' => 'VAT payable'];
+        }
+
+        if ($totals->tdsAmount->isPositive()) {
+            $voucherLines[] = ['account_id' => $tdsAccountId, 'debit' => $totals->tdsAmount->toString(), 'credit' => $zero, 'narration' => 'TDS withheld'];
+            $voucherLines[] = ['account_id' => $customer->account_id, 'debit' => $zero, 'credit' => $totals->tdsAmount->toString(), 'narration' => 'TDS withheld'];
+        }
+
+        // Commission is a real expense the business owes the agent, not a
+        // customer-side adjustment like TDS above - posted as two extra, fully
+        // independent lines rather than netted against the customer's
+        // settlement amount.
+        if ($agent && $commissionAmount->isPositive()) {
+            $commissionExpenseId = Account::where('code', 'EXE22')->firstOrFail()->id;
+            $voucherLines[] = ['account_id' => $commissionExpenseId, 'debit' => $commissionAmount->toString(), 'credit' => $zero, 'narration' => 'Sales commission'];
+            $voucherLines[] = ['account_id' => $agent->account_id, 'debit' => $zero, 'credit' => $commissionAmount->toString(), 'narration' => 'Commission payable to agent'];
+        }
+
+        if ($paymentMode !== 'credit') {
+            $cashAccountId = Account::where('code', 'AS1')->firstOrFail()->id;
+            $settlementDue = $totals->settlementDue;
+
+            if ($paymentMode === 'cash') {
+                $voucherLines[] = ['account_id' => $cashAccountId, 'debit' => $settlementDue->toString(), 'credit' => $zero, 'narration' => 'Cash received'];
+            } elseif ($paymentMode === 'bank') {
+                $voucherLines[] = ['account_id' => $bankAccountId, 'debit' => $settlementDue->toString(), 'credit' => $zero, 'narration' => 'Bank receipt'];
+            } else {
+                if ($cashAmount && $cashAmount->isPositive()) {
+                    $voucherLines[] = ['account_id' => $cashAccountId, 'debit' => $cashAmount->toString(), 'credit' => $zero, 'narration' => 'Cash received'];
+                }
+                if ($bankAmount && $bankAmount->isPositive()) {
+                    $voucherLines[] = ['account_id' => $bankAccountId, 'debit' => $bankAmount->toString(), 'credit' => $zero, 'narration' => 'Bank receipt'];
+                }
+            }
+
+            $voucherLines[] = ['account_id' => $customer->account_id, 'debit' => $zero, 'credit' => $settlementDue->toString(), 'narration' => 'Settlement'];
+        }
+
+        return $voucherLines;
     }
 
     /**
      * Resolves a line's optional item_unit_id against the item's already-
      * loaded `units` relation, returning [item_unit_id, conversion_factor].
-     * A null/missing item_unit_id resolves to [null, 1.0] - the item's own
-     * base unit, with a conversion factor that's a pure no-op - so every
+     * A null/missing item_unit_id resolves to [null, Quantity 1] - the item's
+     * own base unit, with a conversion factor that's a pure no-op - so every
      * existing caller that never sends item_unit_id gets byte-for-byte the
-     * same behavior as before this feature existed. Mirrors Purchase::
-     * resolveItemUnit() exactly.
+     * same behavior as before this feature existed.
      *
-     * @return array{0: int|null, 1: float}
+     * @return array{0: int|null, 1: Quantity}
      */
     private static function resolveItemUnit(Item $item, mixed $itemUnitId): array
     {
         if ($itemUnitId === null || $itemUnitId === '') {
-            return [null, 1.0];
+            return [null, Quantity::of(1)];
         }
 
         $itemUnit = $item->units->firstWhere('id', (int) $itemUnitId);
@@ -500,63 +749,90 @@ class Sale extends Model
             throw new InvalidArgumentException("Unit [{$itemUnitId}] does not belong to item [{$item->id}].");
         }
 
-        return [$itemUnit->id, (float) $itemUnit->conversion_factor];
+        return [$itemUnit->id, Quantity::of($itemUnit->conversion_factor)];
     }
 
     /**
-     * Full-invoice cancellation only (no partial-line returns in this
-     * pass). Posts a brand-new SaleReturn voucher mirroring every line of
-     * the original voucher (debit/credit swapped) - the original voucher
-     * is never edited, matching the immutability rule every voucher in
-     * this app follows. Flags every stock movement this sale generated as
-     * cancelled rather than writing inverse movement rows.
+     * Full-invoice cancellation only (no partial-line returns in this pass).
+     *
+     * Per CONTRACTS C5: everything happens inside one transaction, the sale
+     * row and its blockers are re-read with lockForUpdate() and re-checked
+     * there (so a double click or two users cannot both pass the status check
+     * - audit P0-16), and the reversal goes through JournalVoucher::reverse(),
+     * which posts it in the dedicated Reversal series. That is what stops a
+     * cancellation from consuming an invoice number and leaving a permanent
+     * gap in the printed series (P0-15), and what refuses to cancel a bill
+     * whose fiscal year has already been filed and closed.
+     *
+     * Stock movements this sale generated are flagged cancelled rather than
+     * reversed with inverse rows, matching how every other module in this app
+     * undoes a stock effect.
      */
     public function cancel(User $actor, string $reason): void
     {
-        if ($this->status === 'cancelled') {
-            throw new InvalidArgumentException('This sale has already been cancelled.');
+        $reason = trim($reason);
+
+        if ($reason === '') {
+            throw new InvalidArgumentException('A reason is required to cancel a sale.');
         }
 
-        // A 'rejected' return request never posted anything real, so it must
-        // not block cancellation (same reasoning as excluding 'cancelled');
-        // a 'pending' one deliberately still blocks - it represents a live
-        // decision someone still has to make against this exact sale.
-        if (SaleReturnLine::whereIn('sale_line_id', $this->lines()->pluck('id'))
-            ->whereHas('salesReturn', fn ($query) => $query->whereNotIn('status', ['cancelled', 'rejected']))
-            ->exists()) {
-            throw new InvalidArgumentException('Cannot cancel a sale that has partial returns against it.');
-        }
-
-        if ($this->receiptAllocations()->whereHas('receipt', fn ($query) => $query->where('status', '!=', 'cancelled'))->exists()) {
-            throw new InvalidArgumentException('Cannot cancel a sale that has a payment received against it.');
+        if (mb_strlen($reason) > 500) {
+            throw new InvalidArgumentException('The cancellation reason may not be longer than 500 characters.');
         }
 
         DB::transaction(function () use ($actor, $reason) {
-            $original = $this->journalVoucher()->with('lines')->firstOrFail();
+            /** @var self $sale */
+            $sale = static::whereKey($this->getKey())->lockForUpdate()->firstOrFail();
 
-            $mirroredLines = $original->lines->map(fn (JournalVoucherLine $line) => [
-                'account_id' => $line->account_id,
-                'debit' => (float) $line->credit,
-                'credit' => (float) $line->debit,
-                'narration' => $line->narration,
-            ])->all();
+            if ($sale->status === 'cancelled') {
+                throw new InvalidArgumentException('This sale has already been cancelled.');
+            }
 
-            JournalVoucher::post(
-                [
-                    'voucher_type' => VoucherType::SaleReturn->value,
-                    'date' => now()->toDateString(),
-                    'narration' => "Cancellation of sale #{$this->id}: {$reason}",
-                ],
-                $mirroredLines,
+            // A 'rejected' return request never posted anything real, so it
+            // must not block cancellation (same reasoning as excluding
+            // 'cancelled'); a 'pending' one deliberately still blocks - it
+            // represents a live decision someone still has to make against
+            // this exact sale.
+            if (SaleReturnLine::whereIn('sale_line_id', $sale->lines()->pluck('id'))
+                ->whereHas('salesReturn', fn ($query) => $query->whereNotIn('status', ['cancelled', 'rejected']))
+                ->exists()) {
+                throw new InvalidArgumentException('Cannot cancel a sale that has partial returns against it.');
+            }
+
+            if ($sale->receiptAllocations()->whereHas('receipt', fn ($query) => $query->where('status', '!=', 'cancelled'))->exists()) {
+                throw new InvalidArgumentException('Cannot cancel a sale that has a payment received against it.');
+            }
+
+            $reversal = JournalVoucher::reverse(
+                $sale->journalVoucher()->firstOrFail(),
                 $actor,
+                "Cancellation of sale {$sale->invoice_number}: {$reason}",
             );
 
             ItemStockMovement::query()
                 ->where('reference_type', (new SaleLine)->getMorphClass())
-                ->whereIn('reference_id', $this->lines()->pluck('id'))
+                ->whereIn('reference_id', $sale->lines()->pluck('id'))
                 ->update(['cancelled' => true]);
 
-            $this->update(['status' => 'cancelled']);
+            $sale->update([
+                'status' => 'cancelled',
+                'cancelled_at' => now(),
+                'cancelled_by' => $actor->id,
+                'cancel_reason' => $reason,
+                'reversal_journal_voucher_id' => $reversal->id,
+            ]);
+
+            $this->setRawAttributes($sale->getAttributes(), true);
         });
+    }
+
+    /**
+     * Turns a calculator failure into the same InvalidArgumentException shape
+     * every caller of post() already handles, while keeping the machine
+     * `reason` code available for the controller's 422 mapping (C8).
+     */
+    public static function billingReason(InvalidArgumentException $exception): ?string
+    {
+        return $exception instanceof BillingException ? $exception->reason : null;
     }
 }

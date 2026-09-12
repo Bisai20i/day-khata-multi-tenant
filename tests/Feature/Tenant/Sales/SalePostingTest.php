@@ -9,11 +9,15 @@ use App\Models\Customer;
 use App\Models\FiscalYear;
 use App\Models\Item;
 use App\Models\ItemStockMovement;
+use App\Models\JournalVoucher;
 use App\Models\JournalVoucherLine;
+use App\Models\Purchase;
 use App\Models\Role;
 use App\Models\Sale;
+use App\Models\Supplier;
 use App\Models\Tenant;
 use App\Models\User;
+use App\Support\Money\Money;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 
 uses(RefreshDatabase::class);
@@ -104,7 +108,7 @@ test('a cash sale posts a balanced voucher, nets the customer account to zero, a
         expect($movement->movement_type)->toBe(StockMovementType::Sale)
             ->and((float) $movement->quantity)->toBe(2.0)
             ->and($movement->cancelled)->toBeFalse()
-            ->and($item->fresh()->currentStock())->toBe(-2.0);
+            ->and($item->fresh()->currentStock()->toString())->toBe('-2.0000');
     });
 
     $tenant->delete();
@@ -235,7 +239,7 @@ test('the TDS leg only appears when a TDS amount is set, and reduces the settlem
     $tenant->delete();
 });
 
-test('cancelling a sale posts a mirrored SaleReturn voucher, flags stock movements cancelled, and rejects double-cancellation', function () {
+test('cancelling a sale posts a Reversal voucher, flags stock movements cancelled, and rejects double-cancellation', function () {
     $tenant = provisionSaleTestTenant('sale-cancel.tenant-test');
 
     $tenant->run(function () {
@@ -253,15 +257,27 @@ test('cancelling a sale posts a mirrored SaleReturn voucher, flags stock movemen
             $admin,
         );
 
-        expect($item->fresh()->currentStock())->toBe(-3.0);
+        expect($item->fresh()->currentStock()->toString())->toBe('-3.0000');
 
         $sale->cancel($admin, 'Recorded in error');
 
-        $returnVoucher = \App\Models\JournalVoucher::where('voucher_type', VoucherType::SaleReturn)->firstOrFail();
-        expect((float) $returnVoucher->lines->sum('debit'))->toBe((float) $returnVoucher->lines->sum('credit'))
+        // The reversal goes into its own Reversal series (CONTRACTS C4/C5), so
+        // it never consumes an invoice number and leaves no gap in the printed
+        // sale series (audit P0-15).
+        $reversal = JournalVoucher::where('voucher_type', VoucherType::Reversal)->firstOrFail();
+        // Exact, not `(float) sum()`: float summing is what accepted an
+        // unbalanced voucher in the first place (audit P0-2).
+        $reversalDebit = Money::sum($reversal->lines->map(fn ($line) => Money::of($line->debit)));
+        $reversalCredit = Money::sum($reversal->lines->map(fn ($line) => Money::of($line->credit)));
+
+        expect($reversalDebit->toString())->toBe($reversalCredit->toString())
             ->and(saleTestAccountNetBalance($customer->account_id))->toBe(0.0)
             ->and($sale->fresh()->status)->toBe('cancelled')
-            ->and($item->fresh()->currentStock())->toBe(0.0);
+            ->and($sale->fresh()->reversal_journal_voucher_id)->toBe($reversal->id)
+            ->and($sale->fresh()->cancel_reason)->toBe('Recorded in error')
+            ->and($sale->fresh()->cancelled_by)->toBe($admin->id)
+            ->and($sale->fresh()->cancelled_at)->not->toBeNull()
+            ->and($item->fresh()->currentStock()->toString())->toBe('0.0000');
 
         expect(fn () => $sale->cancel($admin, 'Again'))->toThrow(InvalidArgumentException::class);
     });
@@ -269,7 +285,7 @@ test('cancelling a sale posts a mirrored SaleReturn voucher, flags stock movemen
     $tenant->delete();
 });
 
-test('a percentage header discount is computed against the vatable subtotal and persists its raw value and type', function () {
+test('a percentage header discount is computed against the document subtotal and persists its raw value and type', function () {
     $tenant = provisionSaleTestTenant('sale-header-discount-percentage.tenant-test');
 
     $tenant->run(function () {
@@ -291,10 +307,12 @@ test('a percentage header discount is computed against the vatable subtotal and 
             $admin,
         );
 
-        // 20% of a 200 vatable subtotal = 40 discount.
+        // 20% of a 200 subtotal = 40 discount, all of it on the vatable
+        // group since there is no exempt line to share it with.
         expect((float) $sale->taxable_amount)->toBe(160.0)
             ->and((float) $sale->discount)->toBe(20.0)
-            ->and($sale->discount_type)->toBe('percentage');
+            ->and($sale->discount_type)->toBe('percentage')
+            ->and($sale->discount_amount)->toBe('40.00');
     });
 
     $tenant->delete();
@@ -376,8 +394,8 @@ test('a sale that would drive stock negative is rejected by default', function (
 
         // Only 5 in stock (a real prior purchase, not a raw stock movement,
         // so this exercises Item::currentStock() the same way the app does).
-        \App\Models\Purchase::post(
-            ['supplier_id' => \App\Models\Supplier::factory()->create()->id, 'date' => '2026-06-01', 'payment_mode' => 'cash'],
+        Purchase::post(
+            ['supplier_id' => Supplier::factory()->create()->id, 'date' => '2026-06-01', 'payment_mode' => 'cash'],
             [['item_id' => $item->id, 'quantity' => 5, 'rate' => 50]],
             $admin,
         );
@@ -391,7 +409,7 @@ test('a sale that would drive stock negative is rejected by default', function (
         ))->toThrow(InvalidArgumentException::class, 'Short Stock Widget');
 
         // Stock is untouched - the rejected sale posted nothing at all.
-        expect($item->fresh()->currentStock())->toBe(5.0);
+        expect($item->fresh()->currentStock()->toString())->toBe('5.0000');
     });
 
     $tenant->delete();
@@ -415,7 +433,7 @@ test('a sale that would drive stock negative is allowed once allow_negative_stoc
         );
 
         expect($sale->exists)->toBeTrue()
-            ->and($item->fresh()->currentStock())->toBe(-10.0);
+            ->and($item->fresh()->currentStock()->toString())->toBe('-10.0000');
     });
 
     $tenant->delete();
@@ -430,8 +448,8 @@ test('a sale within available stock is unaffected by the negative-stock guard', 
         $customer = Customer::factory()->create();
         $item = Item::factory()->create(['is_vatable' => false, 'is_stockable' => true]);
 
-        \App\Models\Purchase::post(
-            ['supplier_id' => \App\Models\Supplier::factory()->create()->id, 'date' => '2026-06-01', 'payment_mode' => 'cash'],
+        Purchase::post(
+            ['supplier_id' => Supplier::factory()->create()->id, 'date' => '2026-06-01', 'payment_mode' => 'cash'],
             [['item_id' => $item->id, 'quantity' => 10, 'rate' => 50]],
             $admin,
         );
@@ -443,7 +461,7 @@ test('a sale within available stock is unaffected by the negative-stock guard', 
         );
 
         expect($sale->exists)->toBeTrue()
-            ->and($item->fresh()->currentStock())->toBe(6.0);
+            ->and($item->fresh()->currentStock()->toString())->toBe('6.0000');
     });
 
     $tenant->delete();

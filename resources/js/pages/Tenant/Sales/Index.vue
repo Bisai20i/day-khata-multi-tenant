@@ -13,6 +13,8 @@ import NepaliDateInput from '@/components/ui/NepaliDateInput.vue';
 import Combobox from '@/components/ui/Combobox.vue';
 import { useToast } from '@/composables/useToast';
 import { navGroups } from '@/lib/nav-items.js';
+import { formatMoney } from '@/lib/money';
+import { formatBsDate } from '@/lib/format';
 import Create from './Create.vue';
 
 const props = defineProps({
@@ -26,9 +28,20 @@ const props = defineProps({
     },
     customers: { type: Array, default: () => [] },
     items: { type: Array, default: () => [] },
-    accounts: { type: Array, default: () => [] },
+    bankAccounts: { type: Array, default: () => [] },
+    tdsAccounts: { type: Array, default: () => [] },
     stores: { type: Array, default: () => [] },
     agents: { type: Array, default: () => [] },
+    invoiceSettings: {
+        type: Object,
+        default: () => ({
+            default_vat_rate: '13.00',
+            default_store_id: null,
+            sale_full_enabled: true,
+            sale_abbreviated_enabled: true,
+            sale_pan_enabled: true,
+        }),
+    },
 });
 
 const customerOptions = computed(() => props.customers.map((customer) => ({ value: customer.id, label: customer.name })));
@@ -129,16 +142,12 @@ const paymentModeLabels = {
     credit: 'Credit',
 };
 
-const voucherPrefixes = {
-    sale: 'SL',
-    sale_abbreviated: 'SLA',
-};
-
-function voucherLabel(sale) {
-    const voucher = sale.journal_voucher;
-    if (!voucher) return '—';
-    const prefix = voucherPrefixes[voucher.voucher_type] ?? 'SL';
-    return `${prefix}-${voucher.voucher_number}`;
+// The invoice number is whatever was stored on the row when the bill was
+// issued (CONTRACTS C7). This page used to rebuild it from a hardcoded
+// SL/SLA map, so a PAN bill showed SL-n on screen and SLP-n on paper, and
+// changing a prefix in Settings silently renumbered every past invoice.
+function invoiceLabel(sale) {
+    return sale.invoice_number ?? '—';
 }
 
 const cancelling = ref(null);
@@ -164,12 +173,17 @@ function submitCancel() {
 }
 
 const columns = [
-    { accessorKey: 'date', header: 'Date' },
+    {
+        id: 'date',
+        header: 'Date (BS)',
+        numeric: false,
+        cell: ({ row }) => formatBsDate(row.original.date),
+    },
     {
         id: 'voucher',
         header: 'Invoice #',
         numeric: false,
-        cell: ({ row }) => voucherLabel(row.original),
+        cell: ({ row }) => invoiceLabel(row.original),
     },
     {
         id: 'invoice_type',
@@ -199,7 +213,7 @@ const columns = [
         id: 'total',
         header: 'Total',
         numeric: true,
-        cell: ({ row }) => Number(row.original.total).toFixed(2),
+        cell: ({ row }) => formatMoney(row.original.total),
     },
     {
         id: 'status',
@@ -261,9 +275,11 @@ const columns = [
             <Create
                 :customers="customers"
                 :items="items"
-                :accounts="accounts"
+                :bank-accounts="bankAccounts"
+                :tds-accounts="tdsAccounts"
                 :stores="stores"
                 :agents="agents"
+                :invoice-settings="invoiceSettings"
                 :initial-draft="initialDraft"
                 @cancel="closeCreateForm"
                 @posted="closeCreateForm"

@@ -47,6 +47,14 @@ class HandleInertiaRequests extends Middleware
             'flash' => [
                 'status' => fn (): ?string => $request->session()->get('status'),
                 'importResult' => fn (): ?array => $request->session()->get('importResult'),
+                // CONTRACTS C11: a controller that just posted a document
+                // flashes ['type', 'id', 'print_url'] here, so the page can
+                // open exactly that document's print view. Pages used to guess
+                // the newest id out of the list they were redirected to, which
+                // printed the wrong bill for a back-dated sale or a second
+                // till, and threw outright once the list became a paginator
+                // (audit P0-6).
+                'created' => fn (): ?array => $request->session()->get('created'),
             ],
         ];
     }
