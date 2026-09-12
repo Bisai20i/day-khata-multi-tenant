@@ -110,6 +110,8 @@ export function navGroups(isAdmin) {
                 { label: 'Bank Book', href: '/reports/bank-book', icon: FileBarChart },
                 { label: 'Aged Receivables', href: '/reports/aged-receivables', icon: FileBarChart },
                 { label: 'Aged Payables', href: '/reports/aged-payables', icon: FileBarChart },
+                { label: 'Debtors', href: '/reports/debtors', icon: FileBarChart },
+                { label: 'Creditors', href: '/reports/creditors', icon: FileBarChart },
             ],
         },
         {
@@ -117,6 +119,8 @@ export function navGroups(isAdmin) {
             items: [
                 { label: 'Sales VAT Book', href: '/reports/sales-vat-book', icon: FileBarChart },
                 { label: 'Purchase VAT Book', href: '/reports/purchase-vat-book', icon: FileBarChart },
+                { label: 'Sales Return Register', href: '/reports/sales-return-register', icon: FileBarChart },
+                { label: 'Purchase Return Register', href: '/reports/purchase-return-register', icon: FileBarChart },
                 { label: 'VAT Summary', href: '/reports/vat-summary', icon: FileBarChart },
             ],
         },

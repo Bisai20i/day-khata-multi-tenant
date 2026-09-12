@@ -1,6 +1,7 @@
 <?php
 
 use App\Enums\FiscalYearStatus;
+use App\Models\Backup;
 use App\Models\FiscalYear;
 use App\Models\Role;
 use App\Models\Tenant;
@@ -152,4 +153,47 @@ test('it rolls over every active tenant independently in a single run', function
 
     $stale->delete();
     $current->delete();
+});
+
+test('the automatic roll-over takes a backup first, records its own close reason, and stays idempotent', function () {
+    freezeAutoStartFiscalYearToday();
+
+    $tenant = provisionAutoStartTestTenant('autostart-backup.tenant-test');
+
+    $tenant->run(function () {
+        createAdminActor();
+
+        FiscalYear::create([
+            'name' => '2082/83',
+            'start_date' => '2025-07-17',
+            'end_date' => '2026-07-16',
+            'status' => FiscalYearStatus::Open,
+        ]);
+    });
+
+    $this->artisan('fiscal-year:auto-start')->assertSuccessful();
+
+    $tenant->run(function () {
+        $closed = FiscalYear::query()->where('name', '2082/83')->firstOrFail();
+
+        expect($closed->status)->toBe(FiscalYearStatus::Closed)
+            ->and($closed->close_reason)->toContain('2083/84')
+            ->and($closed->close_reason)->toContain('fiscal-year:auto-start');
+
+        // Closing a year is not undoable, so a completed backup is taken
+        // before any of it is posted.
+        expect(Backup::where('status', 'completed')->count())->toBe(1);
+    });
+
+    // A second run on the same day must change nothing: the open year now
+    // covers the current period, so the command returns early.
+    $this->artisan('fiscal-year:auto-start')->assertSuccessful();
+
+    $tenant->run(function () {
+        expect(FiscalYear::count())->toBe(2)
+            ->and(FiscalYear::query()->where('status', FiscalYearStatus::Open)->count())->toBe(1)
+            ->and(Backup::count())->toBe(1);
+    });
+
+    $tenant->delete();
 });
