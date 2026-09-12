@@ -14,24 +14,24 @@ Modify: `resources/js/components/ui/Input.vue`.
 
 ## Tasks
 
-- [ ] 1. `money.js` per C8 using scaled `BigInt` (money = paisa, quantity = 1/10000). Parsing never goes
+- [x] 1. `money.js` per C8 using scaled `BigInt` (money = paisa, quantity = 1/10000). Parsing never goes
   through `Number()`; accept strings with optional sign and `.`, accept JS numbers only via
   `String(number)` when it has no exponent. HalfUp = ties away from zero (matches brick/math and PHP).
   Multiplication 4dp x 4dp keeps full precision before the single rounding.
-- [ ] 2. `calculateDocument(lines, header)` identical to C3, same error `reason` codes, same key names in the
+- [x] 2. `calculateDocument(lines, header)` identical to C3, same error `reason` codes, same key names in the
   returned totals (`gross`, `discount_amount`, `line_total`, `base_quantity`, `vatable_subtotal`, ...
   `settlement_due`).
-- [ ] 3. `allocateMoney`, `percentOf`, `multiplyMoney`, add/subtract/sum/compare/equals helpers,
+- [x] 3. `allocateMoney`, `percentOf`, `multiplyMoney`, add/subtract/sum/compare/equals helpers,
   `formatMoney` (Indian grouping), `formatQuantity`, `formatRate` per C1 formatting rules.
-- [ ] 4. `format.js`: `formatBsDate(isoDate)` built on the existing `resources/js/lib/nepali-calendar.js`
+- [x] 4. `format.js`: `formatBsDate(isoDate)` built on the existing `resources/js/lib/nepali-calendar.js`
   (read it first), `todayInKathmandu()` returning `YYYY-MM-DD` using `Intl.DateTimeFormat` with
   `timeZone: 'Asia/Kathmandu'` (no UTC `toISOString()`).
-- [ ] 5. `Input.vue`: set `inheritAttrs: false` (via `defineOptions`) and bind `$attrs` onto the native
+- [x] 5. `Input.vue`: set `inheritAttrs: false` (via `defineOptions`) and bind `$attrs` onto the native
   `<input>` so `step`, `min`, `max`, `inputmode`, `name`, `autocomplete`, `aria-*` and listeners reach it,
   while keeping the existing `class` prop merging on the input and the icon wrapper intact. Check every
   current usage (`grep -rn "<Input" resources/js`) still renders the same. This single change unblocks
   decimal entry app-wide (audit P0-7).
-- [ ] 6. `tests/js/money.test.mjs` (`node:test` + `node:assert`, no packages): run every golden vector from
+- [x] 6. `tests/js/money.test.mjs` (`node:test` + `node:assert`, no packages): run every golden vector from
   `tests/fixtures/billing-vectors.json`, plus the JS-specific traps: `(1.005).toFixed(2)`-style inputs,
   `0.1 + 0.2` style sums, negative ties (`-0.125` to `-0.13`), `-0.00` never produced, Indian grouping,
   4dp x 4dp at `DECIMAL(15,4)` extremes (beyond 2^53). `tests/js/format.test.mjs` for the date helpers.
