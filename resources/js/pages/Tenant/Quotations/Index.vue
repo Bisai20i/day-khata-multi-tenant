@@ -3,6 +3,7 @@ import { computed, h, reactive, ref, watch } from 'vue';
 import { Link, router, usePage } from '@inertiajs/vue3';
 import { ArrowRightCircle, Pencil, Plus, Printer, Search, Trash2, X } from '@lucide/vue';
 import AppLayout from '@/layouts/AppLayout.vue';
+import { useLayoutChrome } from '@/composables/useLayoutChrome';
 import Card from '@/components/ui/Card.vue';
 import Button from '@/components/ui/Button.vue';
 import Badge from '@/components/ui/Badge.vue';
@@ -12,10 +13,11 @@ import NepaliDateInput from '@/components/ui/NepaliDateInput.vue';
 import Combobox from '@/components/ui/Combobox.vue';
 import { useToast } from '@/composables/useToast';
 import { useConfirm } from '@/composables/useConfirm';
-import { navGroups } from '@/lib/nav-items.js';
 import { formatMoney } from '@/lib/money';
 import { formatBsDate } from '@/lib/format';
 import Create from './Create.vue';
+
+defineOptions({ layout: AppLayout });
 
 const props = defineProps({
     quotations: {
@@ -33,6 +35,7 @@ const props = defineProps({
 const page = usePage();
 const { toast } = useToast();
 const { confirm } = useConfirm();
+useLayoutChrome('Quotations');
 
 const customerOptions = computed(() => props.customers.map((customer) => ({ value: customer.id, label: customer.name })));
 
@@ -63,9 +66,6 @@ function clearFilters() {
 }
 
 const hasActiveFilters = computed(() => !!(props.filters.from || props.filters.to || props.filters.customer_id));
-
-const isAdmin = computed(() => page.props.auth?.user?.role?.slug === 'admin');
-const navItems = computed(() => navGroups(isAdmin.value));
 
 // Posting/editing/converting redirects back to this same route + component,
 // which Inertia re-renders in place without an onMounted re-run - watch the
@@ -259,7 +259,7 @@ const columns = [
 </script>
 
 <template>
-    <AppLayout title="Quotations" :nav-items="navItems">
+    <div>
         <template v-if="showCreateForm">
             <Create :customers="customers" :items="items" @cancel="closeForms" @saved="closeForms" />
         </template>
@@ -343,5 +343,5 @@ const columns = [
                 </div>
             </Card>
         </template>
-    </AppLayout>
+    </div>
 </template>

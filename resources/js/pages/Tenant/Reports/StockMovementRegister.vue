@@ -1,15 +1,17 @@
 <script setup>
 import { computed, h, ref } from 'vue';
-import { router, usePage } from '@inertiajs/vue3';
+import { router } from '@inertiajs/vue3';
 import AppLayout from '@/layouts/AppLayout.vue';
+import { useLayoutChrome } from '@/composables/useLayoutChrome';
 import Card from '@/components/ui/Card.vue';
 import NepaliDateInput from '@/components/ui/NepaliDateInput.vue';
 import Select from '@/components/ui/Select.vue';
 import Button from '@/components/ui/Button.vue';
 import DataTable from '@/components/ui/DataTable.vue';
-import { navGroups } from '@/lib/nav-items.js';
 import { formatQuantity, formatRate } from '@/lib/money';
 import { formatBsDate } from '@/lib/format';
+
+defineOptions({ layout: AppLayout });
 
 const props = defineProps({
     movements: { type: Array, default: () => [] },
@@ -21,9 +23,7 @@ const props = defineProps({
     storeId: { type: [Number, null], default: null },
 });
 
-const page = usePage();
-const isAdmin = computed(() => page.props.auth?.user?.role?.slug === 'admin');
-const navItems = computed(() => navGroups(isAdmin.value));
+useLayoutChrome('Stock Movement Register');
 
 const from = ref(props.from);
 const to = ref(props.to);
@@ -92,7 +92,7 @@ const columns = [
 </script>
 
 <template>
-    <AppLayout title="Stock Movement Register" :nav-items="navItems">
+    <div>
         <div class="mb-4 flex items-center justify-between">
             <h2 class="text-base font-bold text-text-strong">Stock Movement Register</h2>
         </div>
@@ -124,5 +124,5 @@ const columns = [
         <Card variant="panel">
             <DataTable :columns="columns" :data="movements" :page-size="25" empty-message="No stock movements in this range" />
         </Card>
-    </AppLayout>
+    </div>
 </template>

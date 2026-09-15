@@ -1,14 +1,16 @@
 <script setup>
 import { computed, ref } from 'vue';
-import { router, usePage } from '@inertiajs/vue3';
+import { router } from '@inertiajs/vue3';
 import AppLayout from '@/layouts/AppLayout.vue';
+import { useLayoutChrome } from '@/composables/useLayoutChrome';
 import Card from '@/components/ui/Card.vue';
 import NepaliDateInput from '@/components/ui/NepaliDateInput.vue';
 import Select from '@/components/ui/Select.vue';
 import DataTable from '@/components/ui/DataTable.vue';
-import { navGroups } from '@/lib/nav-items.js';
 import { formatMoney, formatQuantity, formatRate } from '@/lib/money';
 import { formatBsDate } from '@/lib/format';
+
+defineOptions({ layout: AppLayout });
 
 const props = defineProps({
     from: { type: String, required: true },
@@ -19,9 +21,7 @@ const props = defineProps({
     storeId: { type: [Number, null], default: null },
 });
 
-const page = usePage();
-const isAdmin = computed(() => page.props.auth?.user?.role?.slug === 'admin');
-const navItems = computed(() => navGroups(isAdmin.value));
+useLayoutChrome('Stock Summary');
 
 const fromInput = ref(props.from);
 const toInput = ref(props.to);
@@ -57,7 +57,7 @@ const columns = [
 </script>
 
 <template>
-    <AppLayout title="Stock Summary" :nav-items="navItems">
+    <div>
         <p class="mb-4 text-[12.5px] text-text-muted">
             {{ rangeLabel }}. with every store combined, transfers between your own stores are left out of
             Qty In and Qty Out; relocating goods is not stock entering or leaving the business.
@@ -94,5 +94,5 @@ const columns = [
                 Total valuation: {{ formatMoney(grandTotalValuation) }}
             </div>
         </div>
-    </AppLayout>
+    </div>
 </template>

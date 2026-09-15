@@ -1,13 +1,15 @@
 <script setup>
 import { computed } from 'vue';
-import { Link, usePage } from '@inertiajs/vue3';
+import { Link } from '@inertiajs/vue3';
 import { Archive, ArrowLeft } from '@lucide/vue';
 import AppLayout from '@/layouts/AppLayout.vue';
+import { useLayoutChrome } from '@/composables/useLayoutChrome';
 import Card from '@/components/ui/Card.vue';
 import Badge from '@/components/ui/Badge.vue';
-import { navGroups } from '@/lib/nav-items.js';
 import { formatMoney, sumMoney, isZeroMoney } from '@/lib/money.js';
 import { formatBsDate } from '@/lib/format.js';
+
+defineOptions({ layout: AppLayout });
 
 const props = defineProps({
     fiscalYear: { type: Object, required: true },
@@ -15,10 +17,6 @@ const props = defineProps({
     voucher: { type: Object, required: true },
     lines: { type: Array, default: () => [] },
 });
-
-const page = usePage();
-const isAdmin = computed(() => page.props.auth?.user?.role?.slug === 'admin');
-const navItems = computed(() => navGroups(isAdmin.value));
 
 const voucherTypeLabels = {
     opening_balance: 'Opening Balance',
@@ -43,6 +41,8 @@ const voucherLabel = computed(() => {
     return `${label} #${props.voucher.voucherNumber}`;
 });
 
+useLayoutChrome(() => voucherLabel.value);
+
 const totalDebit = computed(() => sumMoney(props.lines.map((line) => line.debit ?? '0.00')));
 const totalCredit = computed(() => sumMoney(props.lines.map((line) => line.credit ?? '0.00')));
 
@@ -52,7 +52,7 @@ function money(value) {
 </script>
 
 <template>
-    <AppLayout :title="voucherLabel" :nav-items="navItems">
+    <div>
         <div class="mb-4 flex items-center justify-between">
             <div>
                 <Link
@@ -109,5 +109,5 @@ function money(value) {
                 <div><span class="text-text-muted">Total Credit:</span> <span class="font-semibold">{{ money(totalCredit) }}</span></div>
             </div>
         </Card>
-    </AppLayout>
+    </div>
 </template>

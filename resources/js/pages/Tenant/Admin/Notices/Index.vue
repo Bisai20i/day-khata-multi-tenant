@@ -1,7 +1,8 @@
 <script setup>
-import { computed, h, ref, watch } from 'vue';
+import { h, ref, watch } from 'vue';
 import { router, useForm, usePage } from '@inertiajs/vue3';
 import AppLayout from '@/layouts/AppLayout.vue';
+import { useLayoutChrome } from '@/composables/useLayoutChrome';
 import Card from '@/components/ui/Card.vue';
 import Button from '@/components/ui/Button.vue';
 import Badge from '@/components/ui/Badge.vue';
@@ -12,7 +13,8 @@ import NepaliDateInput from '@/components/ui/NepaliDateInput.vue';
 import RowActions from '@/components/ui/RowActions.vue';
 import { useToast } from '@/composables/useToast';
 import { useConfirm } from '@/composables/useConfirm';
-import { navGroups } from '@/lib/nav-items.js';
+
+defineOptions({ layout: AppLayout });
 
 defineProps({
     notices: {
@@ -24,6 +26,7 @@ defineProps({
 const page = usePage();
 const { toast } = useToast();
 const { confirm } = useConfirm();
+useLayoutChrome('Notices');
 
 // Create/edit/delete all redirect back to this same route/component -
 // Inertia patches the already-mounted instance rather than remounting it,
@@ -36,10 +39,6 @@ watch(
     },
     { immediate: true },
 );
-
-const isAdmin = computed(() => page.props.auth?.user?.role?.slug === 'admin');
-
-const navItems = computed(() => navGroups(isAdmin.value));
 
 const showModal = ref(false);
 const editing = ref(null);
@@ -125,7 +124,7 @@ const columns = [
 </script>
 
 <template>
-    <AppLayout title="Notices" :nav-items="navItems">
+    <div>
         <div class="mb-4 flex items-center justify-between">
             <h2 class="text-base font-bold text-text-strong">Notices</h2>
             <Button variant="primary" tone="purple" @click="openCreate">New notice</Button>
@@ -197,5 +196,5 @@ const columns = [
                 </Button>
             </template>
         </Modal>
-    </AppLayout>
+    </div>
 </template>

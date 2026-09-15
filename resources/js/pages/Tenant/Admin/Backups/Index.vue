@@ -1,8 +1,9 @@
 <script setup>
-import { computed, h, watch } from 'vue';
+import { h, watch } from 'vue';
 import { router, usePage } from '@inertiajs/vue3';
 import { Download, Trash2 } from '@lucide/vue';
 import AppLayout from '@/layouts/AppLayout.vue';
+import { useLayoutChrome } from '@/composables/useLayoutChrome';
 import Card from '@/components/ui/Card.vue';
 import Button from '@/components/ui/Button.vue';
 import Badge from '@/components/ui/Badge.vue';
@@ -10,7 +11,8 @@ import DataTable from '@/components/ui/DataTable.vue';
 import Tooltip from '@/components/ui/Tooltip.vue';
 import { useToast } from '@/composables/useToast';
 import { useConfirm } from '@/composables/useConfirm';
-import { navGroups } from '@/lib/nav-items.js';
+
+defineOptions({ layout: AppLayout });
 
 defineProps({
     backups: {
@@ -22,9 +24,7 @@ defineProps({
 const page = usePage();
 const { toast } = useToast();
 const { confirm } = useConfirm();
-
-const isAdmin = computed(() => page.props.auth?.user?.role?.slug === 'admin');
-const navItems = computed(() => navGroups(isAdmin.value));
+useLayoutChrome('Backups');
 
 // Create/delete both redirect back to this same route/component, which
 // Inertia re-renders in place rather than remounting it - watch the flash
@@ -140,7 +140,7 @@ const columns = [
 </script>
 
 <template>
-    <AppLayout title="Backups" :nav-items="navItems">
+    <div>
         <div class="mb-4 flex items-center justify-between">
             <h2 class="text-base font-bold text-text-strong">Backups</h2>
             <Button variant="primary" tone="purple" @click="createBackup">Create backup now</Button>
@@ -149,5 +149,5 @@ const columns = [
         <Card variant="panel">
             <DataTable :columns="columns" :data="backups" :page-size="10" />
         </Card>
-    </AppLayout>
+    </div>
 </template>

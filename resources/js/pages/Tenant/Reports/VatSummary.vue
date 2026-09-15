@@ -1,21 +1,21 @@
 <script setup>
 import { computed, ref } from 'vue';
-import { router, usePage } from '@inertiajs/vue3';
+import { router } from '@inertiajs/vue3';
 import AppLayout from '@/layouts/AppLayout.vue';
+import { useLayoutChrome } from '@/composables/useLayoutChrome';
 import Card from '@/components/ui/Card.vue';
 import NepaliDateInput from '@/components/ui/NepaliDateInput.vue';
 import Select from '@/components/ui/Select.vue';
 import Button from '@/components/ui/Button.vue';
 import { FileSpreadsheet } from '@lucide/vue';
-import { navGroups } from '@/lib/nav-items.js';
 import { formatMoney, compareMoney, subtractMoney } from '@/lib/money';
 import { formatBsDate } from '@/lib/format';
 
-const emptySide = () => ({ gross: '0.00', capital: '0.00', cancelled: '0.00', returns: '0.00', net: '0.00' });
+defineOptions({ layout: AppLayout });
 
 const props = defineProps({
-    outputVat: { type: Object, default: emptySide },
-    inputVat: { type: Object, default: emptySide },
+    outputVat: { type: Object, default: () => ({ gross: '0.00', capital: '0.00', cancelled: '0.00', returns: '0.00', net: '0.00' }) },
+    inputVat: { type: Object, default: () => ({ gross: '0.00', capital: '0.00', cancelled: '0.00', returns: '0.00', net: '0.00' }) },
     netVatPayable: { type: String, default: '0.00' },
     reconciliation: { type: Object, default: () => ({ applicable: false }) },
     stores: { type: Array, default: () => [] },
@@ -24,9 +24,7 @@ const props = defineProps({
     storeId: { type: [Number, null], default: null },
 });
 
-const page = usePage();
-const isAdmin = computed(() => page.props.auth?.user?.role?.slug === 'admin');
-const navItems = computed(() => navGroups(isAdmin.value));
+useLayoutChrome('VAT Summary');
 
 const from = ref(props.from);
 const to = ref(props.to);
@@ -72,7 +70,7 @@ const reconciles = computed(
 </script>
 
 <template>
-    <AppLayout title="VAT Summary" :nav-items="navItems">
+    <div>
         <div class="mb-4 flex items-center justify-between">
             <h2 class="text-base font-bold text-text-strong">VAT Summary</h2>
             <Button as="a" :href="exportUrl" variant="secondary" tone="purple">
@@ -204,5 +202,5 @@ const reconciles = computed(
                 hand-written journal voucher. Check the Day Book for this period before filing.
             </p>
         </Card>
-    </AppLayout>
+    </div>
 </template>

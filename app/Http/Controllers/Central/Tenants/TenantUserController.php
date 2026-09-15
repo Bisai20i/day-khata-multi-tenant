@@ -29,21 +29,29 @@ class TenantUserController extends Controller
                 ->with('status', "This tenant's database doesn't exist yet - use \"Re-provision database\" first.");
         }
 
-        $users = $tenant->run(fn () => User::with('role')->orderBy('name')->get());
-
-        return Inertia::render('Central/Tenants/Users', [
-            'tenant' => [
-                'id' => $tenant->id,
-                'company_name' => $tenant->company_name,
-            ],
-            'users' => $users->map(fn (User $user): array => [
+        // Mapped to plain arrays inside the closure, not after: Inertia
+        // doesn't serialize props until the response is converted, which
+        // happens after run() has already ended tenancy. A User model
+        // escaping the closure still carries the 'tenant' connection name,
+        // and reading created_at (a date cast) outside would then reach for
+        // a connection reconnectToCentral() already purged - see
+        // TenantCompanySettingController::edit() for the same fix.
+        $users = $tenant->run(fn () => User::with('role')->orderBy('name')->get()
+            ->map(fn (User $user): array => [
                 'id' => $user->id,
                 'name' => $user->name,
                 'email' => $user->email,
                 'role' => $user->role?->name,
                 'is_active' => $user->is_active,
                 'created_at' => $user->created_at?->toDateString(),
-            ]),
+            ]));
+
+        return Inertia::render('Central/Tenants/Users', [
+            'tenant' => [
+                'id' => $tenant->id,
+                'company_name' => $tenant->company_name,
+            ],
+            'users' => $users,
         ]);
     }
 }

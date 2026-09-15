@@ -3,6 +3,7 @@ import { computed, h, ref, watch } from 'vue';
 import { Link, router, useForm, usePage } from '@inertiajs/vue3';
 import { Archive, Lock, Unlock } from '@lucide/vue';
 import AppLayout from '@/layouts/AppLayout.vue';
+import { useLayoutChrome } from '@/composables/useLayoutChrome';
 import Card from '@/components/ui/Card.vue';
 import Button from '@/components/ui/Button.vue';
 import Input from '@/components/ui/Input.vue';
@@ -14,8 +15,9 @@ import Badge from '@/components/ui/Badge.vue';
 import Tooltip from '@/components/ui/Tooltip.vue';
 import { useToast } from '@/composables/useToast';
 import { useConfirm } from '@/composables/useConfirm';
-import { navGroups } from '@/lib/nav-items.js';
 import { formatBsDate, todayInKathmandu } from '@/lib/format.js';
+
+defineOptions({ layout: AppLayout });
 
 const props = defineProps({
     fiscalYears: {
@@ -27,10 +29,9 @@ const props = defineProps({
 const page = usePage();
 const { toast } = useToast();
 const { confirm } = useConfirm();
+useLayoutChrome('Fiscal Years');
 
 const isAdmin = computed(() => page.props.auth?.user?.role?.slug === 'admin');
-
-const navItems = computed(() => navGroups(isAdmin.value));
 
 // Flash status is watched (not just read on mount) because create/close both
 // redirect back to this same route + component, which Inertia re-renders in
@@ -355,7 +356,7 @@ const columns = [
 </script>
 
 <template>
-    <AppLayout title="Fiscal Years" :nav-items="navItems">
+    <div>
         <div class="mb-4 flex items-center justify-between">
             <h2 class="text-base font-bold text-text-strong">Fiscal Years</h2>
             <Button variant="primary" tone="purple" @click="openCreate">New fiscal year</Button>
@@ -493,5 +494,5 @@ const columns = [
                 </Button>
             </template>
         </Modal>
-    </AppLayout>
+    </div>
 </template>

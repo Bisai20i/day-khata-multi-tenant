@@ -16,6 +16,7 @@ import {
     X,
 } from '@lucide/vue';
 import AppLayout from '@/layouts/AppLayout.vue';
+import { useLayoutChrome } from '@/composables/useLayoutChrome';
 import Card from '@/components/ui/Card.vue';
 import Button from '@/components/ui/Button.vue';
 import Badge from '@/components/ui/Badge.vue';
@@ -26,7 +27,6 @@ import Modal from '@/components/ui/Modal.vue';
 import Tooltip from '@/components/ui/Tooltip.vue';
 import NepaliDateInput from '@/components/ui/NepaliDateInput.vue';
 import { useToast } from '@/composables/useToast';
-import { navGroups } from '@/lib/nav-items.js';
 import {
     addMoney,
     calculateDocument,
@@ -69,6 +69,8 @@ import { todayInKathmandu } from '@/lib/format';
  * caching) so a refresh or accidental tab close doesn't lose an in-progress
  * sale.
  */
+defineOptions({ layout: AppLayout });
+
 const props = defineProps({
     customers: { type: Array, default: () => [] },
     items: { type: Array, default: () => [] },
@@ -90,9 +92,7 @@ const props = defineProps({
 
 const page = usePage();
 const { toast } = useToast();
-
-const isAdmin = computed(() => page.props.auth?.user?.role?.slug === 'admin');
-const navItems = computed(() => navGroups(isAdmin.value));
+const layoutChrome = useLayoutChrome('POS');
 
 const PENDING_RECEIPT_KEY = 'pos-last-receipt';
 const PENDING_CUSTOMER_KEY = 'pos-pending-customer';
@@ -1102,6 +1102,7 @@ const isFullscreen = ref(false);
 
 function toggleFullscreen() {
     isFullscreen.value = !isFullscreen.value;
+    layoutChrome.fullscreen = isFullscreen.value;
 
     if (isFullscreen.value) {
         document.documentElement.requestFullscreen?.().catch(() => {
@@ -1116,6 +1117,7 @@ function toggleFullscreen() {
 function onFullscreenChange() {
     if (!document.fullscreenElement) {
         isFullscreen.value = false;
+        layoutChrome.fullscreen = false;
     }
 }
 
@@ -1130,11 +1132,16 @@ onMounted(() => {
 onUnmounted(() => {
     window.removeEventListener('keydown', onGlobalKeydown);
     document.removeEventListener('fullscreenchange', onFullscreenChange);
+    // AppLayout is now a persistent layout (stays mounted across
+    // navigations), so its fullscreen flag must be reset explicitly on the
+    // way out - otherwise leaving POS while in focus mode would leave the
+    // next page's sidebar/navbar hidden too.
+    layoutChrome.fullscreen = false;
 });
 </script>
 
 <template>
-    <AppLayout title="POS" :nav-items="navItems" :fullscreen="isFullscreen">
+    <div>
         <div class="flex flex-col gap-3">
             <!-- Cart tabs + toolbar -->
             <div class="flex items-center gap-2 overflow-x-auto pb-1">
@@ -1725,5 +1732,5 @@ onUnmounted(() => {
                 <Button variant="primary" tone="purple" type="button" @click="shortcutsOpen = false">Close</Button>
             </template>
         </Modal>
-    </AppLayout>
+    </div>
 </template>

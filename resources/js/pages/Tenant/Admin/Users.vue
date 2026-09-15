@@ -3,6 +3,7 @@ import { computed, h, ref, watch } from 'vue';
 import { useForm, usePage } from '@inertiajs/vue3';
 import { Pencil } from '@lucide/vue';
 import AppLayout from '@/layouts/AppLayout.vue';
+import { useLayoutChrome } from '@/composables/useLayoutChrome';
 import Card from '@/components/ui/Card.vue';
 import Button from '@/components/ui/Button.vue';
 import Input from '@/components/ui/Input.vue';
@@ -12,7 +13,8 @@ import DataTable from '@/components/ui/DataTable.vue';
 import Badge from '@/components/ui/Badge.vue';
 import Tooltip from '@/components/ui/Tooltip.vue';
 import { useToast } from '@/composables/useToast';
-import { navGroups } from '@/lib/nav-items.js';
+
+defineOptions({ layout: AppLayout });
 
 const props = defineProps({
     users: {
@@ -27,10 +29,7 @@ const props = defineProps({
 
 const page = usePage();
 const { toast } = useToast();
-
-const isAdmin = computed(() => page.props.auth?.user?.role?.slug === 'admin');
-
-const navItems = computed(() => navGroups(isAdmin.value));
+useLayoutChrome('Manage Users');
 
 // Flash status is watched (not just read on mount) because create/edit both
 // redirect back to this same route + component, which Inertia re-renders
@@ -157,7 +156,7 @@ const columns = [
 </script>
 
 <template>
-    <AppLayout title="Manage Users" :nav-items="navItems">
+    <div>
         <div class="mb-4 flex items-center justify-between">
             <h2 class="text-base font-bold text-text-strong">Employees</h2>
             <Button variant="primary" tone="purple" @click="openCreate">New employee</Button>
@@ -230,5 +229,5 @@ const columns = [
                 </Button>
             </template>
         </Modal>
-    </AppLayout>
+    </div>
 </template>

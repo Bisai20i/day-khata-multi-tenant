@@ -1,13 +1,16 @@
 <script setup>
 import { h, ref } from 'vue';
 import { Link, router } from '@inertiajs/vue3';
-import { Building2, Filter, History, LayoutDashboard, Settings as SettingsIcon, ShieldCheck, X } from '@lucide/vue';
+import { Filter, X } from '@lucide/vue';
 import AppLayout from '@/layouts/AppLayout.vue';
+import { useLayoutChrome } from '@/composables/useLayoutChrome';
 import Card from '@/components/ui/Card.vue';
 import Button from '@/components/ui/Button.vue';
 import Badge from '@/components/ui/Badge.vue';
 import Select from '@/components/ui/Select.vue';
 import DataTable from '@/components/ui/DataTable.vue';
+
+defineOptions({ layout: AppLayout });
 
 const props = defineProps({
     logs: {
@@ -23,13 +26,7 @@ const props = defineProps({
     actionOptions: { type: Array, default: () => [] },
 });
 
-const navItems = [
-    { label: 'Dashboard', href: '/admin', icon: LayoutDashboard },
-    { label: 'Tenants', href: '/tenants', icon: Building2 },
-    { label: 'Activity log', href: '/activity-log', icon: History },
-    { label: 'Settings', href: '/settings', icon: SettingsIcon },
-    { label: 'Platform admins', href: '/platform-admins', icon: ShieldCheck },
-];
+useLayoutChrome('Activity Log');
 
 const tenantId = ref(props.filters.tenant_id ?? null);
 const action = ref(props.filters.action ?? null);
@@ -88,7 +85,7 @@ const columns = [
 </script>
 
 <template>
-    <AppLayout title="Activity Log" :nav-items="navItems">
+    <div>
         <div class="mb-4 flex items-center justify-between">
             <h2 class="text-base font-bold text-text-strong">Activity Log</h2>
         </div>
@@ -158,5 +155,5 @@ const columns = [
                 </div>
             </div>
         </Card>
-    </AppLayout>
+    </div>
 </template>

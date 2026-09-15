@@ -1,18 +1,14 @@
 <script setup>
 import { useForm, Link } from '@inertiajs/vue3';
-import { ArrowLeft, Building2, History, LayoutDashboard, Plus, Settings as SettingsIcon, ShieldCheck } from '@lucide/vue';
+import { ArrowLeft, Plus } from '@lucide/vue';
 import AppLayout from '@/layouts/AppLayout.vue';
+import { useLayoutChrome } from '@/composables/useLayoutChrome';
 import Card from '@/components/ui/Card.vue';
 import Input from '@/components/ui/Input.vue';
 import Button from '@/components/ui/Button.vue';
 
-const navItems = [
-    { label: 'Dashboard', href: '/admin', icon: LayoutDashboard },
-    { label: 'Tenants', href: '/tenants', icon: Building2 },
-    { label: 'Activity log', href: '/activity-log', icon: History },
-    { label: 'Settings', href: '/settings', icon: SettingsIcon },
-    { label: 'Platform admins', href: '/platform-admins', icon: ShieldCheck },
-];
+defineOptions({ layout: AppLayout });
+useLayoutChrome('New Tenant');
 
 const form = useForm({
     company_name: '',
@@ -29,7 +25,7 @@ function submit() {
 </script>
 
 <template>
-    <AppLayout title="New Tenant" :nav-items="navItems">
+    <div>
         <Link href="/tenants" class="mb-2 inline-flex items-center gap-1 text-sm font-semibold text-primary">
             <ArrowLeft class="size-4" />
             All tenants
@@ -86,5 +82,5 @@ function submit() {
                 </Button>
             </form>
         </Card>
-    </AppLayout>
+    </div>
 </template>

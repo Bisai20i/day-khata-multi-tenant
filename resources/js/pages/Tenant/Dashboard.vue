@@ -1,6 +1,6 @@
 <script setup>
 import { computed, ref } from 'vue';
-import { Link, usePage } from '@inertiajs/vue3';
+import { Link } from '@inertiajs/vue3';
 import {
     Users,
     Truck,
@@ -20,10 +20,12 @@ import {
     Percent,
 } from '@lucide/vue';
 import AppLayout from '@/layouts/AppLayout.vue';
+import { useLayoutChrome } from '@/composables/useLayoutChrome';
 import Card from '@/components/ui/Card.vue';
 import Button from '@/components/ui/Button.vue';
-import { navGroups } from '@/lib/nav-items.js';
 import { formatMoney, formatQuantity, compareMoney, parseMoney } from '@/lib/money.js';
+
+defineOptions({ layout: AppLayout });
 
 const props = defineProps({
     notices: {
@@ -99,10 +101,7 @@ function dismissNotice(id) {
     dismissedNoticeIds.value = new Set(dismissedNoticeIds.value).add(id);
 }
 
-const page = usePage();
-const isAdmin = computed(() => page.props.auth?.user?.role?.slug === 'admin');
-
-const navItems = computed(() => navGroups(isAdmin.value));
+useLayoutChrome('Dashboard');
 
 const kpiCards = computed(() => [
     { key: 'customers', label: 'Customers', icon: Users, total: props.kpis.customers.total, thisWeek: props.kpis.customers.thisWeek },
@@ -179,7 +178,7 @@ function formatAmount(amount) {
 </script>
 
 <template>
-    <AppLayout title="Dashboard" :nav-items="navItems">
+    <div>
         <div v-if="visibleNotices.length" class="mb-5 flex flex-col gap-2">
             <div
                 v-for="notice in visibleNotices"
@@ -502,5 +501,5 @@ function formatAmount(amount) {
                 </ol>
             </Card>
         </div>
-    </AppLayout>
+    </div>
 </template>

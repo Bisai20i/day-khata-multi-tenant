@@ -1,11 +1,14 @@
 <script setup>
 import { h } from 'vue';
 import { Link } from '@inertiajs/vue3';
-import { ArrowLeft, Building2, History, LayoutDashboard, Settings as SettingsIcon, ShieldCheck } from '@lucide/vue';
+import { ArrowLeft } from '@lucide/vue';
 import AppLayout from '@/layouts/AppLayout.vue';
+import { useLayoutChrome } from '@/composables/useLayoutChrome';
 import Card from '@/components/ui/Card.vue';
 import Badge from '@/components/ui/Badge.vue';
 import DataTable from '@/components/ui/DataTable.vue';
+
+defineOptions({ layout: AppLayout });
 
 const props = defineProps({
     tenant: {
@@ -18,13 +21,7 @@ const props = defineProps({
     },
 });
 
-const navItems = [
-    { label: 'Dashboard', href: '/admin', icon: LayoutDashboard },
-    { label: 'Tenants', href: '/tenants', icon: Building2 },
-    { label: 'Activity log', href: '/activity-log', icon: History },
-    { label: 'Settings', href: '/settings', icon: SettingsIcon },
-    { label: 'Platform admins', href: '/platform-admins', icon: ShieldCheck },
-];
+useLayoutChrome(() => `${props.tenant.company_name} — Users`);
 
 const columns = [
     { accessorKey: 'name', header: 'Name' },
@@ -49,7 +46,7 @@ const columns = [
 </script>
 
 <template>
-    <AppLayout :title="`${tenant.company_name} — Users`" :nav-items="navItems">
+    <div>
         <Link :href="`/tenants/${tenant.id}`" class="mb-2 inline-flex items-center gap-1 text-sm font-semibold text-primary">
             <ArrowLeft class="size-4" />
             Back to {{ tenant.company_name }}
@@ -62,5 +59,5 @@ const columns = [
         <Card variant="panel">
             <DataTable :columns="columns" :data="users" :page-size="10" empty-message="This tenant has no users yet" />
         </Card>
-    </AppLayout>
+    </div>
 </template>

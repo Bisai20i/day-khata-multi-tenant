@@ -2,6 +2,7 @@
 import { computed, h, ref, watch } from 'vue';
 import { router, useForm, usePage } from '@inertiajs/vue3';
 import AppLayout from '@/layouts/AppLayout.vue';
+import { useLayoutChrome } from '@/composables/useLayoutChrome';
 import Card from '@/components/ui/Card.vue';
 import Button from '@/components/ui/Button.vue';
 import Badge from '@/components/ui/Badge.vue';
@@ -13,7 +14,8 @@ import RowActions from '@/components/ui/RowActions.vue';
 import { useToast } from '@/composables/useToast';
 import { formatMoney } from '@/lib/money';
 import { useConfirm } from '@/composables/useConfirm';
-import { navGroups } from '@/lib/nav-items.js';
+
+defineOptions({ layout: AppLayout });
 
 const props = defineProps({
     varieties: {
@@ -29,6 +31,7 @@ const props = defineProps({
 const page = usePage();
 const { toast } = useToast();
 const { confirm } = useConfirm();
+useLayoutChrome('Item Varieties');
 
 // Create/edit/delete all redirect back to this same route/component - Inertia
 // patches the already-mounted instance rather than remounting it, so a plain
@@ -42,10 +45,6 @@ watch(
     },
     { immediate: true },
 );
-
-const isAdmin = computed(() => page.props.auth?.user?.role?.slug === 'admin');
-
-const navItems = computed(() => navGroups(isAdmin.value));
 
 const itemOptions = computed(() => props.items.map((item) => ({ value: item.id, label: item.name })));
 
@@ -145,7 +144,7 @@ const columns = [
 </script>
 
 <template>
-    <AppLayout title="Item Varieties" :nav-items="navItems">
+    <div>
         <div class="mb-4 flex items-center justify-between">
             <h2 class="text-base font-bold text-text-strong">Item Varieties</h2>
             <Button variant="primary" tone="purple" @click="openCreate">New variety</Button>
@@ -209,5 +208,5 @@ const columns = [
                 </Button>
             </template>
         </Modal>
-    </AppLayout>
+    </div>
 </template>

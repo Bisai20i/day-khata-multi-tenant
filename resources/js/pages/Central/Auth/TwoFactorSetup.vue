@@ -1,13 +1,15 @@
 <script setup>
 import { ref, watch } from 'vue';
 import { useForm, usePage } from '@inertiajs/vue3';
-import { Building2, LayoutDashboard, Settings as SettingsIcon, ShieldCheck } from '@lucide/vue';
 import AppLayout from '@/layouts/AppLayout.vue';
+import { useLayoutChrome } from '@/composables/useLayoutChrome';
 import Card from '@/components/ui/Card.vue';
 import Input from '@/components/ui/Input.vue';
 import Button from '@/components/ui/Button.vue';
 import Badge from '@/components/ui/Badge.vue';
 import { useToast } from '@/composables/useToast';
+
+defineOptions({ layout: AppLayout });
 
 const props = defineProps({
     enabled: { type: Boolean, required: true },
@@ -18,6 +20,7 @@ const props = defineProps({
 
 const page = usePage();
 const { toast } = useToast();
+useLayoutChrome('Two-Factor Authentication');
 
 // This page is reached via redirect()/Inertia::render() to the same route
 // repeatedly (generate -> confirm -> disable), so Inertia patches the
@@ -32,13 +35,6 @@ watch(
     },
     { immediate: true },
 );
-
-const navItems = [
-    { label: 'Dashboard', href: '/admin', icon: LayoutDashboard },
-    { label: 'Tenants', href: '/tenants', icon: Building2 },
-    { label: 'Settings', href: '/settings', icon: SettingsIcon },
-    { label: 'Platform admins', href: '/platform-admins', icon: ShieldCheck },
-];
 
 const generateForm = useForm({});
 const confirmForm = useForm({ code: '' });
@@ -64,8 +60,7 @@ const acknowledgedRecoveryCodes = ref(false);
 </script>
 
 <template>
-    <AppLayout title="Two-Factor Authentication" :nav-items="navItems">
-        <Card variant="panel" title="Two-Factor Authentication" class="max-w-lg">
+    <Card variant="panel" title="Two-Factor Authentication" class="max-w-lg">
             <!-- Just confirmed: show the one-time recovery codes. -->
             <template v-if="recoveryCodes && !acknowledgedRecoveryCodes">
                 <p class="mb-3 text-sm text-text-base">
@@ -154,5 +149,4 @@ const acknowledgedRecoveryCodes = ref(false);
                 </Button>
             </template>
         </Card>
-    </AppLayout>
 </template>

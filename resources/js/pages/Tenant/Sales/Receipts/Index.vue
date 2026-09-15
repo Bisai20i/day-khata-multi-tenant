@@ -3,16 +3,18 @@ import { computed, h, ref, watch } from 'vue';
 import { Link, useForm, usePage } from '@inertiajs/vue3';
 import { Plus } from '@lucide/vue';
 import AppLayout from '@/layouts/AppLayout.vue';
+import { useLayoutChrome } from '@/composables/useLayoutChrome';
 import Card from '@/components/ui/Card.vue';
 import Button from '@/components/ui/Button.vue';
 import Input from '@/components/ui/Input.vue';
 import Modal from '@/components/ui/Modal.vue';
 import DataTable from '@/components/ui/DataTable.vue';
 import { useToast } from '@/composables/useToast';
-import { navGroups } from '@/lib/nav-items.js';
 import { formatMoney, sumMoney } from '@/lib/money';
 import { formatBsDate } from '@/lib/format';
 import Create from './Create.vue';
+
+defineOptions({ layout: AppLayout });
 
 const props = defineProps({
     receipts: {
@@ -26,8 +28,7 @@ const props = defineProps({
 
 const page = usePage();
 const { toast } = useToast();
-
-const navItems = computed(() => navGroups(page.props.auth?.user?.role?.slug === 'admin'));
+useLayoutChrome('Receipts');
 
 // Store/cancel both redirect back to this same route + component, which
 // Inertia re-renders in place without an onMounted re-run - watch flash
@@ -123,7 +124,7 @@ const columns = [
 </script>
 
 <template>
-    <AppLayout title="Receipts" :nav-items="navItems">
+    <div>
         <template v-if="showCreateForm">
             <Create
                 :customers="customers"
@@ -197,5 +198,5 @@ const columns = [
                 </Button>
             </template>
         </Modal>
-    </AppLayout>
+    </div>
 </template>

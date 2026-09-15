@@ -1,14 +1,16 @@
 <script setup>
 import { computed, ref, watch } from 'vue';
-import { router, usePage } from '@inertiajs/vue3';
+import { router } from '@inertiajs/vue3';
 import AppLayout from '@/layouts/AppLayout.vue';
+import { useLayoutChrome } from '@/composables/useLayoutChrome';
 import Card from '@/components/ui/Card.vue';
 import Select from '@/components/ui/Select.vue';
 import Button from '@/components/ui/Button.vue';
 import NepaliDateInput from '@/components/ui/NepaliDateInput.vue';
-import { navGroups } from '@/lib/nav-items.js';
 import { formatMoney, compareMoney } from '@/lib/money.js';
 import { formatBsDate } from '@/lib/format.js';
+
+defineOptions({ layout: AppLayout });
 
 const props = defineProps({
     fiscalYears: { type: Array, default: () => [] },
@@ -24,9 +26,7 @@ const props = defineProps({
     netProfit: { type: String, default: '0.00' },
 });
 
-const page = usePage();
-const isAdmin = computed(() => page.props.auth?.user?.role?.slug === 'admin');
-const navItems = computed(() => navGroups(isAdmin.value));
+useLayoutChrome('Income Statement');
 
 const fiscalYearOptions = computed(() =>
     props.fiscalYears.map((fiscalYear) => ({
@@ -62,7 +62,7 @@ const absGrossProfit = computed(() => (isGrossProfit.value ? props.grossProfit :
 </script>
 
 <template>
-    <AppLayout title="Income Statement" :nav-items="navItems">
+    <div>
         <div class="mb-4 flex flex-wrap items-center justify-between gap-3">
             <h2 class="text-base font-bold text-text-strong">Income Statement</h2>
         </div>
@@ -167,5 +167,5 @@ const absGrossProfit = computed(() => (isGrossProfit.value ? props.grossProfit :
                 </div>
             </Card>
         </template>
-    </AppLayout>
+    </div>
 </template>

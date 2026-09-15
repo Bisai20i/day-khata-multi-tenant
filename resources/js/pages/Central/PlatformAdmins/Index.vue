@@ -1,13 +1,16 @@
 <script setup>
 import { computed, h } from 'vue';
 import { Link, usePage } from '@inertiajs/vue3';
-import { Building2, History, LayoutDashboard, Pencil, Settings as SettingsIcon, ShieldCheck, UserPlus } from '@lucide/vue';
+import { Pencil, UserPlus } from '@lucide/vue';
 import AppLayout from '@/layouts/AppLayout.vue';
+import { useLayoutChrome } from '@/composables/useLayoutChrome';
 import Card from '@/components/ui/Card.vue';
 import Button from '@/components/ui/Button.vue';
 import Badge from '@/components/ui/Badge.vue';
 import DataTable from '@/components/ui/DataTable.vue';
 import Tooltip from '@/components/ui/Tooltip.vue';
+
+defineOptions({ layout: AppLayout });
 
 defineProps({
     admins: {
@@ -19,14 +22,7 @@ defineProps({
 const page = usePage();
 
 const isOwner = computed(() => page.props.auth?.platformAdmin?.role === 'owner');
-
-const navItems = computed(() => [
-    { label: 'Dashboard', href: '/admin', icon: LayoutDashboard },
-    { label: 'Tenants', href: '/tenants', icon: Building2 },
-    { label: 'Activity log', href: '/activity-log', icon: History },
-    { label: 'Settings', href: '/settings', icon: SettingsIcon },
-    { label: 'Platform admins', href: '/platform-admins', icon: ShieldCheck },
-]);
+useLayoutChrome('Platform Admins');
 
 const roleBadgeVariant = { owner: 'success', support: 'neutral' };
 
@@ -79,7 +75,7 @@ const columns = computed(() => {
 </script>
 
 <template>
-    <AppLayout title="Platform Admins" :nav-items="navItems">
+    <div>
         <div class="mb-4 flex items-center justify-between">
             <h2 class="text-base font-bold text-text-strong">Platform Admins</h2>
             <Button v-if="isOwner" :as="Link" href="/platform-admins/create" variant="primary" tone="purple">
@@ -91,5 +87,5 @@ const columns = computed(() => {
         <Card variant="panel">
             <DataTable :columns="columns" :data="admins" :page-size="10" />
         </Card>
-    </AppLayout>
+    </div>
 </template>

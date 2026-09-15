@@ -1,21 +1,9 @@
 <script setup>
 import { h, onMounted, reactive, ref } from 'vue';
 import { Link, router, usePage } from '@inertiajs/vue3';
-import {
-    Building2,
-    CirclePause,
-    CirclePlay,
-    Eye,
-    History,
-    LayoutDashboard,
-    LogIn,
-    Plus,
-    Search,
-    Settings as SettingsIcon,
-    ShieldCheck,
-    X,
-} from '@lucide/vue';
+import { CirclePause, CirclePlay, Eye, LogIn, Plus, Search, X } from '@lucide/vue';
 import AppLayout from '@/layouts/AppLayout.vue';
+import { useLayoutChrome } from '@/composables/useLayoutChrome';
 import Card from '@/components/ui/Card.vue';
 import Button from '@/components/ui/Button.vue';
 import Badge from '@/components/ui/Badge.vue';
@@ -24,6 +12,8 @@ import Select from '@/components/ui/Select.vue';
 import Tooltip from '@/components/ui/Tooltip.vue';
 import DataTable from '@/components/ui/DataTable.vue';
 import { useToast } from '@/composables/useToast';
+
+defineOptions({ layout: AppLayout });
 
 const props = defineProps({
     tenants: {
@@ -39,20 +29,13 @@ const props = defineProps({
 
 const page = usePage();
 const { toast } = useToast();
+useLayoutChrome('Tenants');
 
 onMounted(() => {
     if (page.props.flash?.status) {
         toast({ message: page.props.flash.status, variant: 'success' });
     }
 });
-
-const navItems = [
-    { label: 'Dashboard', href: '/admin', icon: LayoutDashboard },
-    { label: 'Tenants', href: '/tenants', icon: Building2 },
-    { label: 'Activity log', href: '/activity-log', icon: History },
-    { label: 'Settings', href: '/settings', icon: SettingsIcon },
-    { label: 'Platform admins', href: '/platform-admins', icon: ShieldCheck },
-];
 
 const search = ref(props.filters.search ?? '');
 const status = ref(props.filters.status ?? null);
@@ -203,7 +186,7 @@ const columns = [
 </script>
 
 <template>
-    <AppLayout title="Tenants" :nav-items="navItems">
+    <div>
         <div class="mb-4 flex items-center justify-between">
             <h2 class="text-base font-bold text-text-strong">Tenants</h2>
             <Button :as="Link" href="/tenants/create" variant="primary" tone="purple">
@@ -283,5 +266,5 @@ const columns = [
                 </div>
             </div>
         </Card>
-    </AppLayout>
+    </div>
 </template>

@@ -1,14 +1,16 @@
 <script setup>
 import { computed, ref, watch } from 'vue';
-import { router, usePage } from '@inertiajs/vue3';
+import { router } from '@inertiajs/vue3';
 import AppLayout from '@/layouts/AppLayout.vue';
+import { useLayoutChrome } from '@/composables/useLayoutChrome';
 import Card from '@/components/ui/Card.vue';
 import Select from '@/components/ui/Select.vue';
 import Button from '@/components/ui/Button.vue';
 import NepaliDateInput from '@/components/ui/NepaliDateInput.vue';
-import { navGroups } from '@/lib/nav-items.js';
 import { formatMoney } from '@/lib/money.js';
 import { formatBsDate } from '@/lib/format.js';
+
+defineOptions({ layout: AppLayout });
 
 const props = defineProps({
     fiscalYears: { type: Array, default: () => [] },
@@ -25,9 +27,7 @@ const props = defineProps({
     inBalance: { type: Boolean, default: true },
 });
 
-const page = usePage();
-const isAdmin = computed(() => page.props.auth?.user?.role?.slug === 'admin');
-const navItems = computed(() => navGroups(isAdmin.value));
+useLayoutChrome('Trial Balance');
 
 const fiscalYearOptions = computed(() =>
     props.fiscalYears.map((fiscalYear) => ({
@@ -59,7 +59,7 @@ function apply() {
 </script>
 
 <template>
-    <AppLayout title="Trial Balance" :nav-items="navItems">
+    <div>
         <div class="mb-4 flex flex-wrap items-center justify-between gap-3">
             <h2 class="text-base font-bold text-text-strong">Trial Balance</h2>
         </div>
@@ -169,5 +169,5 @@ function apply() {
                 </div>
             </template>
         </Card>
-    </AppLayout>
+    </div>
 </template>

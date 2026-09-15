@@ -1,15 +1,17 @@
 <script setup>
 import { computed, h, ref } from 'vue';
-import { router, usePage } from '@inertiajs/vue3';
+import { router } from '@inertiajs/vue3';
 import AppLayout from '@/layouts/AppLayout.vue';
+import { useLayoutChrome } from '@/composables/useLayoutChrome';
 import Card from '@/components/ui/Card.vue';
 import NepaliDateInput from '@/components/ui/NepaliDateInput.vue';
 import Select from '@/components/ui/Select.vue';
 import Button from '@/components/ui/Button.vue';
 import DataTable from '@/components/ui/DataTable.vue';
-import { navGroups } from '@/lib/nav-items.js';
 import { formatMoney } from '@/lib/money';
 import { formatBsDate } from '@/lib/format';
+
+defineOptions({ layout: AppLayout });
 
 const props = defineProps({
     sales: { type: Array, default: () => [] },
@@ -23,9 +25,7 @@ const props = defineProps({
     storeId: { type: [Number, null], default: null },
 });
 
-const page = usePage();
-const isAdmin = computed(() => page.props.auth?.user?.role?.slug === 'admin');
-const navItems = computed(() => navGroups(isAdmin.value));
+useLayoutChrome('TDS Report');
 
 const from = ref(props.from);
 const to = ref(props.to);
@@ -86,7 +86,7 @@ const purchaseColumns = columnsFor('Supplier', 'Bill #');
 </script>
 
 <template>
-    <AppLayout title="TDS Report" :nav-items="navItems">
+    <div>
         <div class="mb-4 flex items-center justify-between">
             <h2 class="text-base font-bold text-text-strong">TDS Report</h2>
         </div>
@@ -139,5 +139,5 @@ const purchaseColumns = columnsFor('Supplier', 'Bill #');
                 <div class="w-32 text-right">{{ formatMoney(grandTotal) }}</div>
             </div>
         </Card>
-    </AppLayout>
+    </div>
 </template>

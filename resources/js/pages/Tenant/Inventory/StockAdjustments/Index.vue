@@ -3,6 +3,7 @@ import { computed, h, ref, watch } from 'vue';
 import { router, useForm, usePage } from '@inertiajs/vue3';
 import { Ban, Plus, Printer } from '@lucide/vue';
 import AppLayout from '@/layouts/AppLayout.vue';
+import { useLayoutChrome } from '@/composables/useLayoutChrome';
 import Card from '@/components/ui/Card.vue';
 import Button from '@/components/ui/Button.vue';
 import Input from '@/components/ui/Input.vue';
@@ -12,10 +13,11 @@ import Tooltip from '@/components/ui/Tooltip.vue';
 import Combobox from '@/components/ui/Combobox.vue';
 import NepaliDateInput from '@/components/ui/NepaliDateInput.vue';
 import { useToast } from '@/composables/useToast';
-import { navGroups } from '@/lib/nav-items.js';
 import { formatMoney, formatQuantity } from '@/lib/money.js';
 import { formatBsDate, todayInKathmandu } from '@/lib/format.js';
 import Create from './Create.vue';
+
+defineOptions({ layout: AppLayout });
 
 const props = defineProps({
     stockAdjustments: { type: Array, default: () => [] },
@@ -32,9 +34,7 @@ const props = defineProps({
 
 const page = usePage();
 const { toast } = useToast();
-
-const isAdmin = computed(() => page.props.auth?.user?.role?.slug === 'admin');
-const navItems = computed(() => navGroups(isAdmin.value));
+useLayoutChrome('Stock Adjustments');
 
 // Posting/cancelling redirects back to this same route + component, which
 // Inertia re-renders in place without an onMounted re-run - watch the flash
@@ -251,7 +251,7 @@ const columns = [
 </script>
 
 <template>
-    <AppLayout title="Stock Adjustments" :nav-items="navItems">
+    <div>
         <template v-if="showCreateForm">
             <Create
                 :items="items"
@@ -419,5 +419,5 @@ const columns = [
                 </template>
             </template>
         </Modal>
-    </AppLayout>
+    </div>
 </template>

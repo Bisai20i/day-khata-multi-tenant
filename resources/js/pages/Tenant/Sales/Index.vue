@@ -3,6 +3,7 @@ import { computed, h, onMounted, reactive, ref, watch } from 'vue';
 import { Link, router, useForm, usePage } from '@inertiajs/vue3';
 import { Ban, Plus, Printer, Search, X } from '@lucide/vue';
 import AppLayout from '@/layouts/AppLayout.vue';
+import { useLayoutChrome } from '@/composables/useLayoutChrome';
 import Card from '@/components/ui/Card.vue';
 import Button from '@/components/ui/Button.vue';
 import Input from '@/components/ui/Input.vue';
@@ -12,10 +13,11 @@ import Tooltip from '@/components/ui/Tooltip.vue';
 import NepaliDateInput from '@/components/ui/NepaliDateInput.vue';
 import Combobox from '@/components/ui/Combobox.vue';
 import { useToast } from '@/composables/useToast';
-import { navGroups } from '@/lib/nav-items.js';
 import { formatMoney } from '@/lib/money';
 import { formatBsDate } from '@/lib/format';
 import Create from './Create.vue';
+
+defineOptions({ layout: AppLayout });
 
 const props = defineProps({
     sales: {
@@ -76,9 +78,7 @@ const hasActiveFilters = computed(() => !!(props.filters.from || props.filters.t
 
 const page = usePage();
 const { toast } = useToast();
-
-const isAdmin = computed(() => page.props.auth?.user?.role?.slug === 'admin');
-const navItems = computed(() => navGroups(isAdmin.value));
+useLayoutChrome('Sales');
 
 // Posting/cancelling a sale redirects back to this same route + component,
 // which Inertia re-renders in place without an onMounted re-run - watch the
@@ -270,7 +270,7 @@ const columns = [
 </script>
 
 <template>
-    <AppLayout title="Sales" :nav-items="navItems">
+    <div>
         <template v-if="showCreateForm">
             <Create
                 :customers="customers"
@@ -381,5 +381,5 @@ const columns = [
                 </Button>
             </template>
         </Modal>
-    </AppLayout>
+    </div>
 </template>

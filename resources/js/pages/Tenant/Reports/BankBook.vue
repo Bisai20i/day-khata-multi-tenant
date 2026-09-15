@@ -1,15 +1,17 @@
 <script setup>
 import { computed, ref, watch } from 'vue';
-import { router, usePage } from '@inertiajs/vue3';
+import { router } from '@inertiajs/vue3';
 import AppLayout from '@/layouts/AppLayout.vue';
+import { useLayoutChrome } from '@/composables/useLayoutChrome';
 import Card from '@/components/ui/Card.vue';
 import NepaliDateInput from '@/components/ui/NepaliDateInput.vue';
 import Select from '@/components/ui/Select.vue';
 import Button from '@/components/ui/Button.vue';
 import DataTable from '@/components/ui/DataTable.vue';
-import { navGroups } from '@/lib/nav-items.js';
 import { formatMoney, isZeroMoney } from '@/lib/money.js';
 import { formatBsDate } from '@/lib/format.js';
+
+defineOptions({ layout: AppLayout });
 
 const props = defineProps({
     fiscalYears: { type: Array, default: () => [] },
@@ -23,9 +25,7 @@ const props = defineProps({
     to: { type: [String, null], default: null },
 });
 
-const page = usePage();
-const isAdmin = computed(() => page.props.auth?.user?.role?.slug === 'admin');
-const navItems = computed(() => navGroups(isAdmin.value));
+useLayoutChrome('Bank Book');
 
 const fiscalYearOptions = computed(() =>
     props.fiscalYears.map((fiscalYear) => ({
@@ -102,7 +102,7 @@ const columns = [
 </script>
 
 <template>
-    <AppLayout title="Bank Book" :nav-items="navItems">
+    <div>
         <div class="mb-4 flex items-center justify-between">
             <h2 class="text-base font-bold text-text-strong">Bank Book</h2>
         </div>
@@ -147,5 +147,5 @@ const columns = [
                 <DataTable :columns="columns" :data="entries" :page-size="25" empty-message="No activity in this range" />
             </template>
         </Card>
-    </AppLayout>
+    </div>
 </template>

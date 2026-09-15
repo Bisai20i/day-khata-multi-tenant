@@ -1,13 +1,15 @@
 <script setup>
-import { computed, watch } from 'vue';
+import { watch } from 'vue';
 import { useForm, usePage } from '@inertiajs/vue3';
 import { Check, KeyRound } from '@lucide/vue';
 import AppLayout from '@/layouts/AppLayout.vue';
+import { useLayoutChrome } from '@/composables/useLayoutChrome';
 import Card from '@/components/ui/Card.vue';
 import Button from '@/components/ui/Button.vue';
 import Input from '@/components/ui/Input.vue';
 import { useToast } from '@/composables/useToast';
-import { navGroups } from '@/lib/nav-items.js';
+
+defineOptions({ layout: AppLayout });
 
 const props = defineProps({
     user: {
@@ -18,10 +20,7 @@ const props = defineProps({
 
 const page = usePage();
 const { toast } = useToast();
-
-const isAdmin = computed(() => page.props.auth?.user?.role?.slug === 'admin');
-
-const navItems = computed(() => navGroups(isAdmin.value));
+useLayoutChrome('My Profile');
 
 // Profile-info and change-password submit to two different routes, so both
 // get their own form/error set - a mistyped current password shouldn't
@@ -57,7 +56,7 @@ function submitPassword() {
 </script>
 
 <template>
-    <AppLayout title="My Profile" :nav-items="navItems">
+    <div>
         <div class="mb-4 flex items-center justify-between">
             <h2 class="text-base font-bold text-text-strong">My Profile</h2>
         </div>
@@ -150,5 +149,5 @@ function submitPassword() {
                 </form>
             </Card>
         </div>
-    </AppLayout>
+    </div>
 </template>

@@ -1,16 +1,18 @@
 <script setup>
 import { computed, h, ref } from 'vue';
-import { router, usePage } from '@inertiajs/vue3';
+import { router } from '@inertiajs/vue3';
 import AppLayout from '@/layouts/AppLayout.vue';
+import { useLayoutChrome } from '@/composables/useLayoutChrome';
 import Card from '@/components/ui/Card.vue';
 import NepaliDateInput from '@/components/ui/NepaliDateInput.vue';
 import Select from '@/components/ui/Select.vue';
 import Button from '@/components/ui/Button.vue';
 import DataTable from '@/components/ui/DataTable.vue';
 import { FileSpreadsheet } from '@lucide/vue';
-import { navGroups } from '@/lib/nav-items.js';
 import { formatMoney } from '@/lib/money';
 import { formatBsDate } from '@/lib/format';
+
+defineOptions({ layout: AppLayout });
 
 const props = defineProps({
     rows: { type: Array, default: () => [] },
@@ -31,9 +33,7 @@ const props = defineProps({
     storeId: { type: [Number, null], default: null },
 });
 
-const page = usePage();
-const isAdmin = computed(() => page.props.auth?.user?.role?.slug === 'admin');
-const navItems = computed(() => navGroups(isAdmin.value));
+useLayoutChrome('Sales VAT Book');
 
 const from = ref(props.from);
 const to = ref(props.to);
@@ -100,7 +100,7 @@ const columns = [
 </script>
 
 <template>
-    <AppLayout title="Sales VAT Book" :nav-items="navItems">
+    <div>
         <div class="mb-4 flex items-center justify-between">
             <h2 class="text-base font-bold text-text-strong">Sales VAT Book</h2>
             <Button as="a" :href="exportUrl" variant="secondary" tone="purple">
@@ -145,5 +145,5 @@ const columns = [
                 <div><span class="text-text-muted">Total:</span> <span class="font-semibold">{{ formatMoney(totals.total) }}</span></div>
             </div>
         </Card>
-    </AppLayout>
+    </div>
 </template>

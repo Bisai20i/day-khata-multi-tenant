@@ -1,8 +1,9 @@
 <script setup>
-import { computed, h, ref, watch } from 'vue';
+import { h, ref, watch } from 'vue';
 import { useForm, usePage } from '@inertiajs/vue3';
 import { Plus, Printer } from '@lucide/vue';
 import AppLayout from '@/layouts/AppLayout.vue';
+import { useLayoutChrome } from '@/composables/useLayoutChrome';
 import Card from '@/components/ui/Card.vue';
 import Button from '@/components/ui/Button.vue';
 import Input from '@/components/ui/Input.vue';
@@ -10,10 +11,11 @@ import Modal from '@/components/ui/Modal.vue';
 import DataTable from '@/components/ui/DataTable.vue';
 import Tooltip from '@/components/ui/Tooltip.vue';
 import { useToast } from '@/composables/useToast';
-import { navGroups } from '@/lib/nav-items.js';
 import { formatMoney } from '@/lib/money';
 import { formatBsDate } from '@/lib/format';
 import Create from './Create.vue';
+
+defineOptions({ layout: AppLayout });
 
 defineProps({
     capitalSales: { type: Array, default: () => [] },
@@ -25,9 +27,7 @@ defineProps({
 
 const page = usePage();
 const { toast } = useToast();
-
-const isAdmin = computed(() => page.props.auth?.user?.role?.slug === 'admin');
-const navItems = computed(() => navGroups(isAdmin.value));
+useLayoutChrome('Capital Sales');
 
 // Store/cancel both redirect back to this same route + component, which
 // Inertia re-renders in place without an onMounted re-run - watch flash
@@ -172,7 +172,7 @@ const columns = [
 </script>
 
 <template>
-    <AppLayout title="Capital Sales" :nav-items="navItems">
+    <div>
         <template v-if="showCreateForm">
             <Create
                 :customers="customers"
@@ -222,5 +222,5 @@ const columns = [
                 </Button>
             </template>
         </Modal>
-    </AppLayout>
+    </div>
 </template>

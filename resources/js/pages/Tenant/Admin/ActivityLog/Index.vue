@@ -1,13 +1,15 @@
 <script setup>
 import { computed, ref } from 'vue';
-import { Link, router, usePage } from '@inertiajs/vue3';
+import { Link, router } from '@inertiajs/vue3';
 import AppLayout from '@/layouts/AppLayout.vue';
+import { useLayoutChrome } from '@/composables/useLayoutChrome';
 import Card from '@/components/ui/Card.vue';
 import Button from '@/components/ui/Button.vue';
 import Select from '@/components/ui/Select.vue';
 import NepaliDateInput from '@/components/ui/NepaliDateInput.vue';
 import Badge from '@/components/ui/Badge.vue';
-import { navGroups } from '@/lib/nav-items.js';
+
+defineOptions({ layout: AppLayout });
 
 const props = defineProps({
     logs: {
@@ -21,9 +23,7 @@ const props = defineProps({
     },
 });
 
-const page = usePage();
-const isAdmin = computed(() => page.props.auth?.user?.role?.slug === 'admin');
-const navItems = computed(() => navGroups(isAdmin.value));
+useLayoutChrome('Activity Log');
 
 const subjectTypeOptions = computed(() => props.subjectTypes.map((option) => ({ value: option.value, label: option.label })));
 
@@ -62,7 +62,7 @@ function subjectLabel(subjectType) {
 </script>
 
 <template>
-    <AppLayout title="Activity Log" :nav-items="navItems">
+    <div>
         <div class="mb-4 flex items-center justify-between">
             <h2 class="text-base font-bold text-text-strong">Activity Log</h2>
         </div>
@@ -163,5 +163,5 @@ function subjectLabel(subjectType) {
                 </div>
             </div>
         </Card>
-    </AppLayout>
+    </div>
 </template>

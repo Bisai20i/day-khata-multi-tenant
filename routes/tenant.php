@@ -86,7 +86,6 @@ Route::middleware([
         require base_path('routes/tenant-quotations.php');
         require base_path('routes/tenant-receipts.php');
         require base_path('routes/tenant-payments.php');
-        require base_path('routes/tenant-settings.php');
         require base_path('routes/tenant-item-varieties.php');
         require base_path('routes/tenant-backups.php');
         require base_path('routes/tenant-notices.php');

@@ -2,6 +2,7 @@
 import { computed, h, ref, watch } from 'vue';
 import { useForm, usePage } from '@inertiajs/vue3';
 import AppLayout from '@/layouts/AppLayout.vue';
+import { useLayoutChrome } from '@/composables/useLayoutChrome';
 import Card from '@/components/ui/Card.vue';
 import Button from '@/components/ui/Button.vue';
 import Input from '@/components/ui/Input.vue';
@@ -12,10 +13,11 @@ import NepaliDateInput from '@/components/ui/NepaliDateInput.vue';
 import DataTable from '@/components/ui/DataTable.vue';
 import { useToast } from '@/composables/useToast';
 import { useConfirm } from '@/composables/useConfirm';
-import { navGroups } from '@/lib/nav-items.js';
 import { formatMoney } from '@/lib/money.js';
 import { todayInKathmandu } from '@/lib/format.js';
 import Create from './Create.vue';
+
+defineOptions({ layout: AppLayout });
 
 const props = defineProps({
     fixedAssets: { type: Array, default: () => [] },
@@ -27,9 +29,9 @@ const props = defineProps({
 const page = usePage();
 const { toast } = useToast();
 const { confirm } = useConfirm();
+useLayoutChrome('Fixed Assets');
 
 const isAdmin = computed(() => page.props.auth?.user?.role?.slug === 'admin');
-const navItems = computed(() => navGroups(isAdmin.value));
 
 // Store/dispose/post-depreciation all redirect back to this same route +
 // component, which Inertia re-renders in place without an onMounted re-run
@@ -161,7 +163,7 @@ const columns = [
 </script>
 
 <template>
-    <AppLayout title="Fixed Assets" :nav-items="navItems">
+    <div>
         <template v-if="showCreateForm">
             <Create :accounts="accounts" :suppliers="suppliers" :pools="pools" @cancel="showCreateForm = false" @posted="showCreateForm = false" />
         </template>
@@ -229,5 +231,5 @@ const columns = [
                 </Button>
             </template>
         </Modal>
-    </AppLayout>
+    </div>
 </template>

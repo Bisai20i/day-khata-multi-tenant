@@ -9,29 +9,27 @@ import Tooltip from '@/components/ui/Tooltip.vue';
 import Toaster from '@/components/ui/Toaster.vue';
 import ConfirmDialog from '@/components/ui/ConfirmDialog.vue';
 import logoMark from '@/assets/brand/logo-mark.png';
-
-const props = defineProps({
-    title: {
-        type: String,
-        default: '',
-    },
-    navItems: {
-        type: Array,
-        default: () => [],
-    },
-    /**
-     * Hides the sidebar and top navbar so a page's own content fills the
-     * whole viewport - used by Pos.vue's focus-mode toggle to get close to
-     * the legacy POS's distraction-free, full-page app shell without a
-     * separate layout. Defaults to false so every other page is unaffected.
-     */
-    fullscreen: {
-        type: Boolean,
-        default: false,
-    },
-});
+import { navGroups, centralNavItems } from '@/lib/nav-items';
+import { useLayoutChrome } from '@/composables/useLayoutChrome';
 
 const page = usePage();
+
+// title comes from useLayoutChrome (set by whichever page is currently
+// mounted inside our slot); fullscreen hides the sidebar/navbar entirely,
+// used by Pos.vue's focus-mode toggle to get close to the legacy POS's
+// distraction-free, full-page app shell without a separate layout.
+const chrome = useLayoutChrome();
+
+// Central pages authenticate as a platform admin, tenant pages as a tenant
+// user - whichever the current guard resolved decides which nav list this
+// visit gets. Previously each of the ~80 pages built + passed this down as
+// a `nav-items` prop; now AppLayout (persistent across navigations, see
+// useLayoutChrome's docblock) derives it itself from the shared page props.
+const navItems = computed(() => {
+    if (page.props.auth?.platformAdmin) return centralNavItems;
+    if (page.props.auth?.user) return navGroups(page.props.auth.user.role?.slug === 'admin');
+    return [];
+});
 
 /**
  * Either context's authenticated principal: a central platform admin or a
@@ -40,64 +38,70 @@ const page = usePage();
  */
 const currentPrincipal = computed(() => page.props.auth?.platformAdmin ?? page.props.auth?.user ?? null);
 
-// Tenant pages pass grouped navItems ([{ label, items }]); Central pages still
-// pass a flat legacy list ([{ label, href, icon }]). Normalize both into
-// groups here so the template only ever renders one shape.
-const groups = computed(() => {
-    if (props.navItems.length > 0 && Array.isArray(props.navItems[0]?.items)) {
-        return props.navItems;
+// Tenant pages pass grouped navItems ([{ label, items }] and/or
+// [{ label, categories: [{ label, items }] }]); Central pages still pass a
+// flat legacy list ([{ label, href, icon }]). Normalize into sections here so
+// the template only ever renders one shape: every section has either `items`
+// (flat leaf pages) or `categories` (a collapsible middle tier), never both.
+const sections = computed(() => {
+    if (navItems.value.length > 0 && (Array.isArray(navItems.value[0]?.items) || Array.isArray(navItems.value[0]?.categories))) {
+        return navItems.value;
     }
-    return [{ label: null, items: props.navItems }];
+    return [{ label: null, items: navItems.value }];
 });
 
 function isActive(href) {
     return page.url === href || (href !== '/' && page.url.startsWith(`${href}/`));
 }
 
-// A group is a toggleable accordion only once it has something worth hiding;
-// a single-item group (e.g. Overview -> Dashboard) stays a plain link.
-function isCollapsible(group) {
-    return Boolean(group.label) && group.items.length > 1;
+// A category is a toggleable accordion only once it has something worth
+// hiding; a single-item category stays a plain link.
+function isCollapsible(category) {
+    return Boolean(category.label) && category.items.length > 1;
 }
 
-function groupHasActiveItem(group) {
-    return group.items.some((item) => isActive(item.href));
+function categoryHasActiveItem(category) {
+    return category.items.some((item) => isActive(item.href));
 }
 
-const OPEN_GROUPS_STORAGE_KEY = 'day-khata:sidebar-open-groups';
+const OPEN_CATEGORIES_STORAGE_KEY = 'day-khata:sidebar-open-categories';
 
-function readStoredOpenGroups() {
+function readStoredOpenCategories() {
     try {
-        return JSON.parse(localStorage.getItem(OPEN_GROUPS_STORAGE_KEY)) ?? {};
+        return JSON.parse(localStorage.getItem(OPEN_CATEGORIES_STORAGE_KEY)) ?? {};
     } catch {
         return {};
     }
 }
 
 /**
- * Open/closed state per collapsible group, keyed by label. AppLayout is
- * re-mounted on every Inertia page visit (each page wraps its own content in
- * <AppLayout>, it isn't a persistent Inertia layout), so this is seeded once
- * per mount: a group the user previously left open stays open across
- * navigations via localStorage, and any group not yet in storage defaults to
- * open only if it contains the page currently being viewed.
+ * Open/closed state per collapsible category, keyed by
+ * `${section.label}::${category.label}` (categories can share a label across
+ * different sections, e.g. none today but this keeps them independent).
+ * Seeded once here at module-level mount: a category the user previously
+ * left open stays open across navigations via localStorage, and any
+ * category not yet in storage defaults to open only if it contains the page
+ * currently being viewed. Sections with flat `items` (no categories) have
+ * nothing to seed.
  */
-const storedOpenGroups = readStoredOpenGroups();
-const openGroups = reactive({});
-for (const group of groups.value) {
-    if (isCollapsible(group)) {
-        openGroups[group.label] = group.label in storedOpenGroups ? storedOpenGroups[group.label] : groupHasActiveItem(group);
+const storedOpenCategories = readStoredOpenCategories();
+const openCategories = reactive({});
+for (const section of sections.value) {
+    for (const category of section.categories ?? []) {
+        const key = `${section.label}::${category.label}`;
+        openCategories[key] = key in storedOpenCategories ? storedOpenCategories[key] : categoryHasActiveItem(category);
     }
 }
 
-function isGroupOpen(group) {
-    return !isCollapsible(group) || Boolean(openGroups[group.label]);
+function isCategoryOpen(section, category) {
+    return !isCollapsible(category) || Boolean(openCategories[`${section.label}::${category.label}`]);
 }
 
-function toggleGroup(label) {
-    openGroups[label] = !openGroups[label];
+function toggleCategory(section, category) {
+    const key = `${section.label}::${category.label}`;
+    openCategories[key] = !openCategories[key];
     try {
-        localStorage.setItem(OPEN_GROUPS_STORAGE_KEY, JSON.stringify(openGroups));
+        localStorage.setItem(OPEN_CATEGORIES_STORAGE_KEY, JSON.stringify(openCategories));
     } catch {
         // Storage unavailable (private browsing, disabled) - state just won't persist.
     }
@@ -122,11 +126,18 @@ const QUICK_ACTIONS = [
     { label: 'New Item', href: '/items', icon: Package, group: 'Quick Actions' },
 ];
 
-// Every sidebar destination, flattened out of `groups` (already normalized
+// Every sidebar destination, flattened out of `sections` (already normalized
 // and admin-filtered by the page that built the `navItems` prop) into the
-// same { label, href, icon, group } shape as the quick actions above.
+// same { label, href, icon, group } shape as the quick actions above. Each
+// command's `group` is its category label when the section has categories,
+// falling back to the section label for flat sections - so search results
+// keep a sensible, specific group heading either way.
 const navCommands = computed(() =>
-    groups.value.flatMap((group) => group.items.map((item) => ({ label: item.label, href: item.href, icon: item.icon, group: group.label ?? 'Navigate' }))),
+    sections.value.flatMap((section) =>
+        (section.categories ?? [{ label: section.label, items: section.items }]).flatMap((category) =>
+            category.items.map((item) => ({ label: item.label, href: item.href, icon: item.icon, group: category.label ?? 'Navigate' })),
+        ),
+    ),
 );
 
 const allCommands = computed(() => [...QUICK_ACTIONS, ...navCommands.value]);
@@ -181,10 +192,10 @@ function selectActiveCommand() {
 </script>
 
 <template>
-    <Head :title="title" />
+    <Head :title="chrome.title" />
 
     <div class="flex h-screen overflow-hidden bg-bg-page">
-        <aside v-if="!fullscreen" class="flex w-[264px] shrink-0 flex-col border-r border-border bg-bg-surface">
+        <aside v-if="!chrome.fullscreen" class="flex w-[264px] shrink-0 flex-col border-r border-border bg-bg-surface">
             <div class="flex h-[72px] shrink-0 items-center gap-2.5 border-b border-border px-5">
                 <img :src="logoMark" alt="Day Khata" class="size-[30px] shrink-0 object-contain" />
                 <div class="min-w-0 leading-tight">
@@ -199,26 +210,55 @@ function selectActiveCommand() {
             </div>
 
             <nav class="flex min-h-0 flex-1 flex-col gap-[18px] overflow-y-auto px-3 py-4">
-                <div v-for="(group, index) in groups" :key="group.label ?? index" class="flex flex-col gap-1">
-                    <button
-                        v-if="isCollapsible(group)"
-                        type="button"
-                        class="flex cursor-pointer items-center justify-between px-2.5 pb-1 text-[10px] font-bold tracking-wide text-text-faint uppercase transition-colors hover:text-text-muted"
-                        @click="toggleGroup(group.label)"
-                    >
-                        <span>{{ group.label }}</span>
-                        <ChevronRight class="size-3 shrink-0 transition-transform duration-150" :class="{ 'rotate-90': openGroups[group.label] }" />
-                    </button>
-                    <p
-                        v-else-if="group.label"
-                        class="px-2.5 pb-1 text-[10px] font-bold tracking-wide text-text-faint uppercase"
-                    >
-                        {{ group.label }}
+                <div v-for="(section, index) in sections" :key="section.label ?? index" class="flex flex-col gap-1">
+                    <p v-if="section.label" class="px-2.5 pb-1 text-[10px] font-bold tracking-wide text-text-faint uppercase">
+                        {{ section.label }}
                     </p>
 
-                    <template v-if="isGroupOpen(group)">
+                    <!-- Sections with a `categories` middle tier: each category is its
+                         own collapsible accordion (the 3rd tier legacy had). -->
+                    <template v-if="section.categories">
+                        <div v-for="category in section.categories" :key="category.label" class="flex flex-col gap-1">
+                            <button
+                                v-if="isCollapsible(category)"
+                                type="button"
+                                class="flex cursor-pointer items-center justify-between px-2.5 pt-1 pb-1 text-[11.5px] font-semibold text-text-muted transition-colors hover:text-text-strong"
+                                @click="toggleCategory(section, category)"
+                            >
+                                <span>{{ category.label }}</span>
+                                <ChevronRight
+                                    class="size-3 shrink-0 transition-transform duration-150"
+                                    :class="{ 'rotate-90': openCategories[`${section.label}::${category.label}`] }"
+                                />
+                            </button>
+                            <p v-else-if="category.label" class="px-2.5 pt-1 pb-1 text-[11.5px] font-semibold text-text-muted">
+                                {{ category.label }}
+                            </p>
+
+                            <template v-if="isCategoryOpen(section, category)">
+                                <Link
+                                    v-for="item in category.items"
+                                    :key="item.href"
+                                    :href="item.href"
+                                    class="flex items-center gap-2.5 py-2.5 pr-2.5 pl-4 text-sm font-semibold transition-colors"
+                                    :class="
+                                        isActive(item.href)
+                                            ? 'bg-primary-tint text-primary'
+                                            : 'text-text-muted hover:bg-bg-subtle hover:text-text-strong'
+                                    "
+                                >
+                                    <component :is="item.icon" v-if="item.icon" class="size-[17px] shrink-0" />
+                                    {{ item.label }}
+                                </Link>
+                            </template>
+                        </div>
+                    </template>
+
+                    <!-- Flat sections (too small to be worth a category tier): pages
+                         listed directly under the section label. -->
+                    <template v-else>
                         <Link
-                            v-for="item in group.items"
+                            v-for="item in section.items"
                             :key="item.href"
                             :href="item.href"
                             class="flex items-center gap-2.5 px-2.5 py-2.5 text-sm font-semibold transition-colors"
@@ -251,8 +291,8 @@ function selectActiveCommand() {
         </aside>
 
         <div class="flex min-h-0 min-w-0 flex-1 flex-col">
-            <header v-if="!fullscreen" class="flex h-16 shrink-0 items-center justify-between border-b border-border bg-bg-surface px-6">
-                <h1 class="text-sm font-bold text-text-strong">{{ title }}</h1>
+            <header v-if="!chrome.fullscreen" class="flex h-16 shrink-0 items-center justify-between border-b border-border bg-bg-surface px-6">
+                <h1 class="text-sm font-bold text-text-strong">{{ chrome.title }}</h1>
 
                 <div v-if="page.props.auth?.user" class="mx-auto flex max-w-[340px] flex-1 items-center">
                     <PopoverRoot v-model:open="searchOpen">
@@ -366,7 +406,7 @@ function selectActiveCommand() {
                 </div>
             </header>
 
-            <main :class="['min-h-0 flex-1 overflow-y-auto bg-bg-page', fullscreen ? 'p-4' : 'p-6']">
+            <main :class="['min-h-0 flex-1 overflow-y-auto bg-bg-page', chrome.fullscreen ? 'p-4' : 'p-6']">
                 <slot />
             </main>
         </div>

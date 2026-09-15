@@ -1,7 +1,8 @@
 <script setup>
-import { computed, h, ref, watch } from 'vue';
+import { h, ref, watch } from 'vue';
 import { router, useForm, usePage } from '@inertiajs/vue3';
 import AppLayout from '@/layouts/AppLayout.vue';
+import { useLayoutChrome } from '@/composables/useLayoutChrome';
 import Card from '@/components/ui/Card.vue';
 import Button from '@/components/ui/Button.vue';
 import Badge from '@/components/ui/Badge.vue';
@@ -11,7 +12,8 @@ import DataTable from '@/components/ui/DataTable.vue';
 import RowActions from '@/components/ui/RowActions.vue';
 import { useToast } from '@/composables/useToast';
 import { useConfirm } from '@/composables/useConfirm';
-import { navGroups } from '@/lib/nav-items.js';
+
+defineOptions({ layout: AppLayout });
 
 defineProps({
     agents: {
@@ -23,10 +25,7 @@ defineProps({
 const page = usePage();
 const { toast } = useToast();
 const { confirm } = useConfirm();
-
-const isAdmin = computed(() => page.props.auth?.user?.role?.slug === 'admin');
-
-const navItems = computed(() => navGroups(isAdmin.value));
+useLayoutChrome('Sales Agents');
 
 // Flash status is watched (not just read on mount) because create/edit/delete
 // all redirect back to this same route + component, which Inertia re-renders
@@ -139,7 +138,7 @@ const columns = [
 </script>
 
 <template>
-    <AppLayout title="Sales Agents" :nav-items="navItems">
+    <div>
         <div class="mb-4 flex items-center justify-between">
             <h2 class="text-base font-bold text-text-strong">Sales Agents</h2>
             <Button variant="primary" tone="purple" @click="openCreate">New agent</Button>
@@ -190,5 +189,5 @@ const columns = [
                 </Button>
             </template>
         </Modal>
-    </AppLayout>
+    </div>
 </template>

@@ -1,13 +1,15 @@
 <script setup>
 import { computed } from 'vue';
-import { router, usePage } from '@inertiajs/vue3';
+import { router } from '@inertiajs/vue3';
 import AppLayout from '@/layouts/AppLayout.vue';
+import { useLayoutChrome } from '@/composables/useLayoutChrome';
 import Card from '@/components/ui/Card.vue';
 import Select from '@/components/ui/Select.vue';
 import DataTable from '@/components/ui/DataTable.vue';
-import { navGroups } from '@/lib/nav-items.js';
 import { formatMoney } from '@/lib/money';
 import { formatBsDate } from '@/lib/format';
+
+defineOptions({ layout: AppLayout });
 
 const props = defineProps({
     account: {
@@ -28,9 +30,7 @@ const props = defineProps({
     },
 });
 
-const page = usePage();
-const isAdmin = computed(() => page.props.auth?.user?.role?.slug === 'admin');
-const navItems = computed(() => navGroups(isAdmin.value));
+useLayoutChrome(() => `Ledger — ${props.account.name}`);
 
 // Only the types a manual ledger reader is likely to meet need a friendly
 // label; anything else falls back to its own value, so a new VoucherType never
@@ -113,7 +113,7 @@ const columns = [
 </script>
 
 <template>
-    <AppLayout :title="`Ledger — ${account.name}`" :nav-items="navItems">
+    <div>
         <div class="mb-4 flex flex-wrap items-center justify-between gap-3">
             <div>
                 <h2 class="text-base font-bold text-text-strong">
@@ -131,5 +131,5 @@ const columns = [
             </p>
             <DataTable v-else :columns="columns" :data="entries" :page-size="25" empty-message="No activity in this fiscal year" />
         </Card>
-    </AppLayout>
+    </div>
 </template>

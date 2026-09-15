@@ -1,12 +1,15 @@
 <script setup>
 import { computed } from 'vue';
 import { useForm, Link } from '@inertiajs/vue3';
-import { ArrowLeft, Building2, Check, History, LayoutDashboard, Settings as SettingsIcon, ShieldCheck } from '@lucide/vue';
+import { ArrowLeft, Check } from '@lucide/vue';
 import AppLayout from '@/layouts/AppLayout.vue';
+import { useLayoutChrome } from '@/composables/useLayoutChrome';
 import Card from '@/components/ui/Card.vue';
 import Input from '@/components/ui/Input.vue';
 import Select from '@/components/ui/Select.vue';
 import Button from '@/components/ui/Button.vue';
+
+defineOptions({ layout: AppLayout });
 
 const props = defineProps({
     admin: {
@@ -15,13 +18,7 @@ const props = defineProps({
     },
 });
 
-const navItems = [
-    { label: 'Dashboard', href: '/admin', icon: LayoutDashboard },
-    { label: 'Tenants', href: '/tenants', icon: Building2 },
-    { label: 'Activity log', href: '/activity-log', icon: History },
-    { label: 'Settings', href: '/settings', icon: SettingsIcon },
-    { label: 'Platform admins', href: '/platform-admins', icon: ShieldCheck },
-];
+useLayoutChrome(() => `Edit ${props.admin.name}`);
 
 const roleOptions = [
     { value: 'owner', label: 'Owner' },
@@ -59,7 +56,7 @@ function submit() {
 </script>
 
 <template>
-    <AppLayout :title="`Edit ${admin.name}`" :nav-items="navItems">
+    <div>
         <Link href="/platform-admins" class="mb-2 inline-flex items-center gap-1 text-sm font-semibold text-primary">
             <ArrowLeft class="size-4" />
             All platform admins
@@ -115,5 +112,5 @@ function submit() {
                 </div>
             </form>
         </Card>
-    </AppLayout>
+    </div>
 </template>

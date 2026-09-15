@@ -1,15 +1,17 @@
 <script setup>
 import { computed, ref } from 'vue';
-import { router, usePage } from '@inertiajs/vue3';
+import { router } from '@inertiajs/vue3';
 import AppLayout from '@/layouts/AppLayout.vue';
+import { useLayoutChrome } from '@/composables/useLayoutChrome';
 import Card from '@/components/ui/Card.vue';
 import NepaliDateInput from '@/components/ui/NepaliDateInput.vue';
 import Select from '@/components/ui/Select.vue';
 import Button from '@/components/ui/Button.vue';
 import DataTable from '@/components/ui/DataTable.vue';
-import { navGroups } from '@/lib/nav-items.js';
 import { formatMoney, formatQuantity } from '@/lib/money';
 import { formatBsDate } from '@/lib/format';
+
+defineOptions({ layout: AppLayout });
 
 const props = defineProps({
     items: { type: Array, default: () => [] },
@@ -20,9 +22,7 @@ const props = defineProps({
     storeId: { type: [Number, null], default: null },
 });
 
-const page = usePage();
-const isAdmin = computed(() => page.props.auth?.user?.role?.slug === 'admin');
-const navItems = computed(() => navGroups(isAdmin.value));
+useLayoutChrome('Item-wise Sales');
 
 const from = ref(props.from);
 const to = ref(props.to);
@@ -65,7 +65,7 @@ const columns = [
 </script>
 
 <template>
-    <AppLayout title="Item-wise Sales" :nav-items="navItems">
+    <div>
         <div class="mb-4 flex items-center justify-between">
             <h2 class="text-base font-bold text-text-strong">Item-wise Sales</h2>
         </div>
@@ -101,5 +101,5 @@ const columns = [
                 <div><span class="text-text-muted">Total value:</span> <span class="font-semibold">{{ formatMoney(totals.total_value) }}</span></div>
             </div>
         </Card>
-    </AppLayout>
+    </div>
 </template>

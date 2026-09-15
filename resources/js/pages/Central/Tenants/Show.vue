@@ -4,31 +4,30 @@ import { Link, router, useForm, usePage } from '@inertiajs/vue3';
 import {
     AlertTriangle,
     ArrowLeft,
-    Building2,
     Check,
     CircleCheck,
     CirclePause,
     CirclePlay,
-    History,
-    LayoutDashboard,
     LogIn,
     Pencil,
     Plus,
     RotateCw,
-    Settings as SettingsIcon,
-    ShieldCheck,
+    Settings,
     Trash2,
     Users,
     X,
     XCircle,
 } from '@lucide/vue';
 import AppLayout from '@/layouts/AppLayout.vue';
+import { useLayoutChrome } from '@/composables/useLayoutChrome';
 import Card from '@/components/ui/Card.vue';
 import Badge from '@/components/ui/Badge.vue';
 import Button from '@/components/ui/Button.vue';
 import Input from '@/components/ui/Input.vue';
 import Modal from '@/components/ui/Modal.vue';
 import { useToast } from '@/composables/useToast';
+
+defineOptions({ layout: AppLayout });
 
 const props = defineProps({
     tenant: {
@@ -40,20 +39,13 @@ const props = defineProps({
 const page = usePage();
 const { toast } = useToast();
 const isOwner = computed(() => page.props.auth?.platformAdmin?.role === 'owner');
+useLayoutChrome(() => props.tenant.company_name);
 
 onMounted(() => {
     if (page.props.flash?.status) {
         toast({ message: page.props.flash.status, variant: 'success' });
     }
 });
-
-const navItems = [
-    { label: 'Dashboard', href: '/admin', icon: LayoutDashboard },
-    { label: 'Tenants', href: '/tenants', icon: Building2 },
-    { label: 'Activity log', href: '/activity-log', icon: History },
-    { label: 'Settings', href: '/settings', icon: SettingsIcon },
-    { label: 'Platform admins', href: '/platform-admins', icon: ShieldCheck },
-];
 
 const showDeleteModal = ref(false);
 const deleteConfirmName = ref('');
@@ -158,7 +150,7 @@ function removeDomain(domain) {
 </script>
 
 <template>
-    <AppLayout :title="tenant.company_name" :nav-items="navItems">
+    <div>
         <Link href="/tenants" class="mb-2 inline-flex items-center gap-1 text-sm font-semibold text-primary">
             <ArrowLeft class="size-4" />
             All tenants
@@ -229,6 +221,11 @@ function removeDomain(domain) {
                         <Button :as="Link" :href="`/tenants/${tenant.id}/users`" variant="secondary" tone="blue">
                             <Users class="size-4" />
                             View users
+                        </Button>
+
+                        <Button :as="Link" :href="`/tenants/${tenant.id}/settings`" variant="secondary" tone="blue">
+                            <Settings class="size-4" />
+                            Settings
                         </Button>
 
                         <Button v-if="tenant.status === 'active'" variant="secondary" tone="purple" :loading="suspending" @click="suspend">
@@ -335,5 +332,5 @@ function removeDomain(domain) {
                 </Button>
             </template>
         </Modal>
-    </AppLayout>
+    </div>
 </template>

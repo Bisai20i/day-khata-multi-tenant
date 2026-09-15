@@ -31,6 +31,7 @@ Route::get('/', function (Request $request) {
 require base_path('routes/central-auth.php');
 require base_path('routes/central-tenants.php');
 require base_path('routes/central-tenant-users.php');
+require base_path('routes/central-tenant-settings.php');
 require base_path('routes/central-activity-log.php');
 require base_path('routes/central-settings.php');
 require base_path('routes/central-platform-admins.php');

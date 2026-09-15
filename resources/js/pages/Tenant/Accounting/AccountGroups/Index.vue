@@ -3,6 +3,7 @@ import { computed, h, onMounted, ref } from 'vue';
 import { router, useForm, usePage } from '@inertiajs/vue3';
 import { Plus } from '@lucide/vue';
 import AppLayout from '@/layouts/AppLayout.vue';
+import { useLayoutChrome } from '@/composables/useLayoutChrome';
 import Card from '@/components/ui/Card.vue';
 import Button from '@/components/ui/Button.vue';
 import Input from '@/components/ui/Input.vue';
@@ -12,7 +13,8 @@ import DataTable from '@/components/ui/DataTable.vue';
 import RowActions from '@/components/ui/RowActions.vue';
 import { useToast } from '@/composables/useToast';
 import { useConfirm } from '@/composables/useConfirm';
-import { navGroups } from '@/lib/nav-items.js';
+
+defineOptions({ layout: AppLayout });
 
 const props = defineProps({
     heads: {
@@ -27,8 +29,7 @@ const props = defineProps({
 
 const page = usePage();
 const isAdmin = computed(() => page.props.auth?.user?.role?.slug === 'admin');
-
-const navItems = computed(() => navGroups(isAdmin.value));
+useLayoutChrome('Account Groups');
 
 const { toast } = useToast();
 const { confirm } = useConfirm();
@@ -130,7 +131,7 @@ const columns = [
 </script>
 
 <template>
-    <AppLayout title="Account Groups" :nav-items="navItems">
+    <div>
         <div class="mb-4 flex items-center justify-between">
             <h2 class="text-base font-bold text-text-strong">Account Groups</h2>
             <Button v-if="isAdmin" variant="primary" tone="purple" @click="openCreate">
@@ -170,5 +171,5 @@ const columns = [
                 </Button>
             </template>
         </Modal>
-    </AppLayout>
+    </div>
 </template>

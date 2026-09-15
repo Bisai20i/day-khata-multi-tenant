@@ -1,12 +1,15 @@
 <script setup>
 import { ref, watch } from 'vue';
 import { router, useForm, usePage } from '@inertiajs/vue3';
-import { Building2, Check, History, LayoutDashboard, Send, Settings as SettingsIcon, ShieldCheck } from '@lucide/vue';
+import { Check, Send } from '@lucide/vue';
 import AppLayout from '@/layouts/AppLayout.vue';
+import { useLayoutChrome } from '@/composables/useLayoutChrome';
 import Card from '@/components/ui/Card.vue';
 import Button from '@/components/ui/Button.vue';
 import Input from '@/components/ui/Input.vue';
 import { useToast } from '@/composables/useToast';
+
+defineOptions({ layout: AppLayout });
 
 const props = defineProps({
     settings: {
@@ -17,6 +20,7 @@ const props = defineProps({
 
 const page = usePage();
 const { toast } = useToast();
+useLayoutChrome('Platform Settings');
 
 // Update/test-email both redirect back to this same route, and Inertia
 // patches the already-mounted instance rather than remounting it - watch
@@ -29,14 +33,6 @@ watch(
     },
     { immediate: true },
 );
-
-const navItems = [
-    { label: 'Dashboard', href: '/admin', icon: LayoutDashboard },
-    { label: 'Tenants', href: '/tenants', icon: Building2 },
-    { label: 'Activity log', href: '/activity-log', icon: History },
-    { label: 'Settings', href: '/settings', icon: SettingsIcon },
-    { label: 'Platform admins', href: '/platform-admins', icon: ShieldCheck },
-];
 
 const form = useForm({
     mail_mailer: props.settings.mail_mailer ?? '',
@@ -69,7 +65,7 @@ function sendTestEmail() {
 </script>
 
 <template>
-    <AppLayout title="Platform Settings" :nav-items="navItems">
+    <div>
         <div class="mb-4 flex items-center justify-between">
             <h2 class="text-base font-bold text-text-strong">Platform Settings</h2>
         </div>
@@ -186,5 +182,5 @@ function sendTestEmail() {
                 </Button>
             </div>
         </form>
-    </AppLayout>
+    </div>
 </template>

@@ -1,14 +1,16 @@
 <script setup>
-import { computed, h } from 'vue';
-import { Link, usePage } from '@inertiajs/vue3';
+import { h } from 'vue';
+import { Link } from '@inertiajs/vue3';
 import { Archive } from '@lucide/vue';
 import AppLayout from '@/layouts/AppLayout.vue';
+import { useLayoutChrome } from '@/composables/useLayoutChrome';
 import Card from '@/components/ui/Card.vue';
 import DataTable from '@/components/ui/DataTable.vue';
 import Badge from '@/components/ui/Badge.vue';
-import { navGroups } from '@/lib/nav-items.js';
 import { formatMoney } from '@/lib/money.js';
 import { formatBsDate } from '@/lib/format.js';
+
+defineOptions({ layout: AppLayout });
 
 const props = defineProps({
     fiscalYear: { type: Object, required: true },
@@ -16,9 +18,7 @@ const props = defineProps({
     vouchers: { type: Array, default: () => [] },
 });
 
-const page = usePage();
-const isAdmin = computed(() => page.props.auth?.user?.role?.slug === 'admin');
-const navItems = computed(() => navGroups(isAdmin.value));
+useLayoutChrome(() => `Archived: ${props.fiscalYear.name}`);
 
 const voucherTypeLabels = {
     opening_balance: 'Opening Balance',
@@ -80,7 +80,7 @@ const columns = [
 </script>
 
 <template>
-    <AppLayout :title="`Archived: ${fiscalYear.name}`" :nav-items="navItems">
+    <div>
         <div class="mb-4 flex items-center justify-between">
             <div>
                 <h2 class="text-base font-bold text-text-strong">{{ fiscalYear.name }}</h2>
@@ -108,5 +108,5 @@ const columns = [
         <Card variant="panel">
             <DataTable :columns="columns" :data="vouchers" :page-size="25" empty-message="No vouchers in this archive" />
         </Card>
-    </AppLayout>
+    </div>
 </template>

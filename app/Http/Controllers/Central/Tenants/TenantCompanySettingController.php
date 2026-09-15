@@ -1,6 +1,6 @@
 <?php
 
-namespace App\Http\Controllers\Tenant\Admin;
+namespace App\Http\Controllers\Central\Tenants;
 
 use App\Enums\FiscalYearStatus;
 use App\Enums\VoucherType;
@@ -9,6 +9,7 @@ use App\Models\CompanySetting;
 use App\Models\FiscalYear;
 use App\Models\JournalVoucher;
 use App\Models\Store;
+use App\Models\Tenant;
 use App\Models\VoucherSequence;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
@@ -19,7 +20,17 @@ use Inertia\Inertia;
 use Inertia\Response;
 use InvalidArgumentException;
 
-class SettingsController extends Controller
+/**
+ * Manages a tenant's own CompanySetting singleton from the central (platform
+ * admin) panel - tenants have no access to their own settings any more (see
+ * the now-deleted App\Http\Controllers\Tenant\Admin\SettingsController and
+ * routes/tenant-settings.php). Every read/write here runs against the
+ * target tenant's own database via Tenant::run() (same pattern as
+ * TenantUserController::index()), which switches the DB connection and
+ * initializes tenancy - so tenant()/tenant('id') helpers still resolve
+ * correctly - for the duration of the closure.
+ */
+class TenantCompanySettingController extends Controller
 {
     /**
      * The 'public' disk is never made tenant-aware (see config/tenancy.php's
@@ -53,18 +64,47 @@ class SettingsController extends Controller
         'purchase_return_prefix' => ['label' => 'Debit note (purchase return)', 'type' => VoucherType::PurchaseReturn],
     ];
 
-    public function edit(): Response
+    public function edit(Tenant $tenant): Response|RedirectResponse
     {
-        $settings = CompanySetting::current();
+        // See TenantController::impersonate() for why this is checked
+        // explicitly rather than caught as an exception from run() itself.
+        if (! $tenant->databaseExists()) {
+            return redirect()
+                ->route('central.tenants.show', $tenant)
+                ->with('status', "This tenant's database doesn't exist yet - use \"Re-provision database\" first.");
+        }
 
-        return Inertia::render('Tenant/Admin/Settings/Edit', [
+        // Every value returned here must be a plain array, not an Eloquent
+        // model/collection: Inertia doesn't serialize props until the router
+        // converts the response (see PropsResolver), which happens after
+        // this run() closure returns and tenancy has already ended. A model
+        // fetched on the 'tenant' connection still carries that connection
+        // name, so serializing it later (e.g. its timestamps) would reach
+        // for a connection reconnectToCentral() already purged, throwing
+        // "Database connection [tenant] not configured."
+        [$settings, $stores, $invoiceNumbering] = $tenant->run(function () {
+            $settings = CompanySetting::current();
+            $invoiceNumbering = $this->invoiceNumbering($settings);
+
+            return [
+                $settings->toArray(),
+                Store::where('is_active', true)->orderBy('name')->get(['id', 'name'])->toArray(),
+                $invoiceNumbering,
+            ];
+        });
+
+        return Inertia::render('Central/Tenants/Settings/Edit', [
+            'tenant' => [
+                'id' => $tenant->id,
+                'company_name' => $tenant->company_name,
+            ],
             'settings' => $settings,
-            'stores' => Store::where('is_active', true)->orderBy('name')->get(['id', 'name']),
-            'invoiceNumbering' => $this->invoiceNumbering($settings),
+            'stores' => $stores,
+            'invoiceNumbering' => $invoiceNumbering,
         ]);
     }
 
-    public function update(Request $request): RedirectResponse
+    public function update(Request $request, Tenant $tenant): RedirectResponse
     {
         $data = $request->validate([
             'company_name' => ['required', 'string', 'max:255'],
@@ -94,9 +134,9 @@ class SettingsController extends Controller
 
         $this->assertPrefixesAreDistinct($data);
 
-        CompanySetting::current()->update($data);
+        $tenant->run(fn () => CompanySetting::current()->update($data));
 
-        return redirect()->route('tenant.settings.edit')->with('status', 'Settings updated.');
+        return redirect()->route('central.tenants.settings.edit', $tenant)->with('status', 'Settings updated.');
     }
 
     /**
@@ -110,49 +150,59 @@ class SettingsController extends Controller
      * duplicates a printed number or leaves a hole in a legally gapless
      * series.
      */
-    public function setStartingNumber(Request $request): RedirectResponse
+    public function setStartingNumber(Request $request, Tenant $tenant): RedirectResponse
     {
         $data = $request->validate([
             'voucher_type' => ['required', Rule::in($this->numberedVoucherTypeValues())],
             'next_number' => ['required', 'integer', 'min:1', 'max:99999999'],
         ]);
 
-        $fiscalYear = FiscalYear::query()->where('status', FiscalYearStatus::Open)->first();
+        $error = $tenant->run(function () use ($data) {
+            $fiscalYear = FiscalYear::query()->where('status', FiscalYearStatus::Open)->first();
 
-        if (! $fiscalYear) {
-            return back()->withErrors(['next_number' => 'No fiscal year is open, so there is nothing to number yet.']);
+            if (! $fiscalYear) {
+                return 'No fiscal year is open, so there is nothing to number yet.';
+            }
+
+            try {
+                VoucherSequence::setStartingNumber($fiscalYear, VoucherType::from($data['voucher_type']), $data['next_number']);
+            } catch (InvalidArgumentException $e) {
+                return $e->getMessage();
+            }
+
+            return null;
+        });
+
+        if ($error !== null) {
+            return back()->withErrors(['next_number' => $error]);
         }
 
-        try {
-            VoucherSequence::setStartingNumber($fiscalYear, VoucherType::from($data['voucher_type']), $data['next_number']);
-        } catch (InvalidArgumentException $e) {
-            return back()->withErrors(['next_number' => $e->getMessage()]);
-        }
-
-        return redirect()->route('tenant.settings.edit')->with('status', 'Starting number updated.');
+        return redirect()->route('central.tenants.settings.edit', $tenant)->with('status', 'Starting number updated.');
     }
 
     /**
      * Kept separate from update() so uploading a logo doesn't require
      * re-submitting (and re-validating) the whole settings form.
      */
-    public function uploadLogo(Request $request): RedirectResponse
+    public function uploadLogo(Request $request, Tenant $tenant): RedirectResponse
     {
         $request->validate([
             'logo' => ['required', 'image', 'max:2048'],
         ]);
 
-        $settings = CompanySetting::current();
+        $tenant->run(function () use ($request, $tenant): void {
+            $settings = CompanySetting::current();
 
-        if ($settings->logo_path) {
-            Storage::disk(self::LOGO_DISK)->delete($settings->logo_path);
-        }
+            if ($settings->logo_path) {
+                Storage::disk(self::LOGO_DISK)->delete($settings->logo_path);
+            }
 
-        $path = $request->file('logo')->store('tenant-logos/'.tenant('id'), self::LOGO_DISK);
+            $path = $request->file('logo')->store('tenant-logos/'.$tenant->id, self::LOGO_DISK);
 
-        $settings->update(['logo_path' => $path]);
+            $settings->update(['logo_path' => $path]);
+        });
 
-        return redirect()->route('tenant.settings.edit')->with('status', 'Logo updated.');
+        return redirect()->route('central.tenants.settings.edit', $tenant)->with('status', 'Logo updated.');
     }
 
     /**
@@ -185,7 +235,9 @@ class SettingsController extends Controller
 
     /**
      * The next number each series will issue in the open fiscal year, plus
-     * whether that number can still be changed.
+     * whether that number can still be changed. Must run inside the
+     * tenant's own Tenant::run() closure (see callers) - it queries
+     * FiscalYear/JournalVoucher/VoucherSequence, all tenant-scoped models.
      *
      * @return array<int, array{voucher_type: string, label: string, prefix: string, next_number: int, can_set: bool, fiscal_year: string|null}>
      */

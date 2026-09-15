@@ -1,7 +1,8 @@
 <script setup>
-import { computed, h, ref, watch } from 'vue';
+import { h, ref, watch } from 'vue';
 import { router, useForm, usePage } from '@inertiajs/vue3';
 import AppLayout from '@/layouts/AppLayout.vue';
+import { useLayoutChrome } from '@/composables/useLayoutChrome';
 import Card from '@/components/ui/Card.vue';
 import Button from '@/components/ui/Button.vue';
 import Input from '@/components/ui/Input.vue';
@@ -10,7 +11,8 @@ import DataTable from '@/components/ui/DataTable.vue';
 import RowActions from '@/components/ui/RowActions.vue';
 import { useToast } from '@/composables/useToast';
 import { useConfirm } from '@/composables/useConfirm';
-import { navGroups } from '@/lib/nav-items.js';
+
+defineOptions({ layout: AppLayout });
 
 defineProps({
     customers: {
@@ -22,10 +24,7 @@ defineProps({
 const page = usePage();
 const { toast } = useToast();
 const { confirm } = useConfirm();
-
-const isAdmin = computed(() => page.props.auth?.user?.role?.slug === 'admin');
-
-const navItems = computed(() => navGroups(isAdmin.value));
+useLayoutChrome('Customers');
 
 // Flash status is watched (not just read on mount) because create/edit/delete
 // all redirect back to this same route + component, which Inertia re-renders
@@ -180,7 +179,7 @@ const columns = [
 </script>
 
 <template>
-    <AppLayout title="Customers" :nav-items="navItems">
+    <div>
         <div class="mb-4 flex items-center justify-between">
             <h2 class="text-base font-bold text-text-strong">Customers</h2>
             <div class="flex items-center gap-2">
@@ -311,5 +310,5 @@ const columns = [
                 </template>
             </template>
         </Modal>
-    </AppLayout>
+    </div>
 </template>
