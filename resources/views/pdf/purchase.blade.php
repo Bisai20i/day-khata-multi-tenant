@@ -52,6 +52,7 @@
                 <th>Item</th>
                 <th style="width: 10%;">Unit</th>
                 <th class="text-right" style="width: 10%;">Qty</th>
+                <th class="text-right" style="width: 8%;">Free</th>
                 <th class="text-right" style="width: 12%;">Rate</th>
                 <th class="text-right" style="width: 12%;">Discount</th>
                 <th class="text-right" style="width: 14%;">Amount</th>
@@ -61,9 +62,23 @@
             @foreach($purchase->lines as $index => $line)
                 <tr>
                     <td class="text-center">{{ $index + 1 }}</td>
-                    <td>{{ $line->item->name }}</td>
+                    <td>
+                        {{ $line->item->name }}
+                        @if($line->note)
+                            <div style="font-size: 9px; color: #666;">{{ $line->note }}</div>
+                        @endif
+                    </td>
                     <td>{{ $line->unitName() ?? '-' }}</td>
                     <td class="text-right">{{ \App\Support\Money\Quantity::of($line->quantity)->formatQuantity() }}</td>
+                    <td class="text-right">
+                        {{-- bonus_quantity (item 3/9): free units, stocked but never
+                             billed - shown only when this line has any. --}}
+                        @if(\App\Support\Money\Quantity::of($line->bonus_quantity)->isPositive())
+                            {{ \App\Support\Money\Quantity::of($line->bonus_quantity)->formatQuantity() }}
+                        @else
+                            -
+                        @endif
+                    </td>
                     <td class="text-right">{{ \App\Support\Money\Quantity::of($line->rate)->formatRate() }}</td>
                     <td class="text-right">
                         @if($line->discount_type === 'percentage')

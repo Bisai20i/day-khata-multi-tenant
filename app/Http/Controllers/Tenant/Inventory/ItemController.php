@@ -12,6 +12,7 @@ use App\Models\ItemSubcategory;
 use App\Models\ItemUnit;
 use Closure;
 use Illuminate\Database\QueryException;
+use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\UploadedFile;
@@ -195,6 +196,9 @@ class ItemController extends Controller
             'purchase_rate' => ['nullable', 'numeric', 'min:0', 'decimal:0,4'],
             'sale_rate' => ['nullable', 'numeric', 'min:0', 'decimal:0,4'],
             'mrp' => ['nullable', 'numeric', 'min:0', 'decimal:0,4'],
+            // Per-unit barcode (item 6): a "Box of 12" scans differently
+            // than a single piece.
+            'barcode' => ['nullable', 'string', 'max:100', Rule::unique('item_units', 'barcode')->ignore($itemUnit?->id)],
             'is_active' => ['boolean'],
         ], [
             'conversion_factor.min' => 'The conversion must be at least 1: the item\'s own unit is its smallest unit, so an alternate unit holds one or more of them.',
@@ -416,7 +420,13 @@ class ItemController extends Controller
             // EXE8. Restricted to Expense and Fixed Asset accounts, because
             // those are the only two things buying an item can be.
             'account_id' => ['nullable', $this->postingAccountRule()],
-            'name' => ['required', 'string', 'max:255'],
+            // Case-insensitive (audit section 4 polish, "item name
+            // uniqueness"): "Coke 500ml" and "coke 500ml" are the same
+            // product to a clerk typing a bill, and a plain unique rule on
+            // MySQL's default collation would already reject one of them but
+            // silently allow it on SQLite - this closure makes the rule
+            // portable and explicit.
+            'name' => ['required', 'string', 'max:255', $this->uniqueNameRule($item)],
             'description' => ['nullable', 'string'],
             'unit' => ['required', 'string', 'max:50'],
             'hs_code' => ['nullable', 'string', 'max:30'],
@@ -425,6 +435,9 @@ class ItemController extends Controller
             'expiry_date' => ['nullable', 'date'],
             'purchase_rate' => ['nullable', 'numeric', 'min:0', 'decimal:0,4'],
             'sale_rate' => ['nullable', 'numeric', 'min:0', 'decimal:0,4'],
+            // Base-unit MRP (item 6), alongside the per-alternate-unit
+            // item_units.mrp that already existed.
+            'mrp' => ['nullable', 'numeric', 'min:0', 'decimal:0,4'],
             'image' => ['nullable', 'image', 'max:2048'],
             'is_vatable' => ['boolean'],
             'is_stockable' => ['boolean'],
@@ -451,6 +464,82 @@ class ItemController extends Controller
 
             if (! $onHand->isZero()) {
                 $fail("\"{$item->name}\" still has {$onHand->formatQuantity()} {$item->unit} in stock. Clear the stock first, or leave the item active.");
+            }
+        };
+    }
+
+    /**
+     * Bulk "mark vatable" (item 6): flips every named item to vatable in one
+     * request, for a tenant that just discovered a whole category should
+     * have been charging VAT all along instead of editing each one by hand.
+     */
+    public function markVatable(Request $request): RedirectResponse
+    {
+        $data = $request->validate([
+            'item_ids' => ['required', 'array', 'min:1'],
+            'item_ids.*' => ['integer', 'distinct', 'exists:items,id'],
+        ]);
+
+        $updated = Item::whereIn('id', $data['item_ids'])->update(['is_vatable' => true]);
+
+        return redirect()->route('tenant.items.index')->with('status', "Marked {$updated} item(s) vatable.");
+    }
+
+    /**
+     * Per-unit barcode scan (item 6): a scanner fires this on Sales/Create,
+     * Pos.vue and Purchases/Create (cross-file wiring, those pages are owned
+     * elsewhere - see this task's final report) with whatever code it read.
+     * `item_units.barcode` is checked first, since it is the more specific
+     * match (a "Box of 12" and its own single piece can scan two different
+     * codes for the same item); `items.barcode` - the base unit's own code -
+     * is the fallback. `item_unit_id` in the response is null for a
+     * base-unit match, exactly like every document line that has not picked
+     * an alternate unit.
+     */
+    public function lookupBarcode(Request $request): JsonResponse
+    {
+        $code = trim((string) $request->query('code', ''));
+
+        if ($code === '') {
+            return response()->json(['message' => 'A barcode is required.'], 422);
+        }
+
+        $unit = ItemUnit::query()->where('barcode', $code)->with('item.units')->first();
+
+        if ($unit) {
+            return response()->json([
+                'item' => $unit->item,
+                'item_unit_id' => $unit->id,
+            ]);
+        }
+
+        $item = Item::query()->where('barcode', $code)->with('units')->first();
+
+        if ($item) {
+            return response()->json([
+                'item' => $item,
+                'item_unit_id' => null,
+            ]);
+        }
+
+        return response()->json(['message' => 'No item or unit matches this barcode.'], 404);
+    }
+
+    /**
+     * A plain `Rule::unique` is case-sensitive on SQLite's default BINARY
+     * collation (though not on MySQL's default utf8mb4_unicode_ci), so this
+     * closure checks LOWER(name) directly instead, portable across both.
+     */
+    private function uniqueNameRule(?Item $item): Closure
+    {
+        return function (string $attribute, mixed $value, Closure $fail) use ($item): void {
+            $exists = Item::query()
+                ->whereRaw('LOWER(name) = ?', [strtolower((string) $value)])
+                ->when($item !== null, fn ($query) => $query->whereKeyNot($item->id))
+                ->exists();
+
+            if ($exists) {
+                $fail('An item with this name already exists.');
             }
         };
     }

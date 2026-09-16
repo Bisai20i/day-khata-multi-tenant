@@ -54,14 +54,22 @@ class StockAdjustmentController extends Controller
 
         return Inertia::render('Tenant/Inventory/StockAdjustments/Index', [
             'stockAdjustments' => StockAdjustment::query()
-                ->with(['lines.item:id,name,unit'])
+                // lines.itemUnit (item 7): the alternate unit a line was
+                // entered in, if any - the list shows the quantity as
+                // entered, not silently in base units.
+                ->with(['lines.item:id,name,unit', 'lines.itemUnit:id,name'])
                 ->when($from !== null && $from !== '', fn ($query) => $query->whereDate('date', '>=', $from))
                 ->when($to !== null && $to !== '', fn ($query) => $query->whereDate('date', '<=', $to))
                 ->orderByDesc('date')
                 ->orderByDesc('id')
                 ->get(),
             'filters' => ['from' => $from, 'to' => $to],
-            'items' => Item::query()->where('is_stockable', true)->orderBy('name')->get(['id', 'name', 'unit']),
+            // Alternate-unit entry (item 7): each item brings its own active
+            // units so the create form can offer a picker, same shape
+            // PurchaseController::index() already sends.
+            'items' => Item::query()->where('is_stockable', true)->orderBy('name')
+                ->with(['units' => fn ($q) => $q->where('is_active', true)->orderBy('name')])
+                ->get(['id', 'name', 'unit']),
             'stores' => Store::where('is_active', true)->orderBy('name')->get(),
             // See PurchaseController::index()'s identical prop for the
             // rationale - the one closed year currently reopened for
@@ -86,6 +94,11 @@ class StockAdjustmentController extends Controller
             'reason' => ['nullable', 'string', 'max:255'],
             'lines' => ['required', 'array', 'min:1'],
             'lines.*.item_id' => ['required', 'exists:items,id'],
+            // Null/omitted means the item's own base unit (item 7) - see
+            // SaleController::store()'s identical rule for the rationale.
+            // StockAdjustment::post()/resolveItemUnit() owns the cross-item
+            // ownership check.
+            'lines.*.item_unit_id' => ['nullable', 'integer', 'exists:item_units,id'],
             'lines.*.direction' => ['required', 'in:in,out'],
             'lines.*.reason_type' => ['required', 'in:damage,lost,correction,found,opening,other'],
             // `decimal:0,4` rejects an over-precise quantity here with a
@@ -138,7 +151,7 @@ class StockAdjustmentController extends Controller
      */
     public function print(StockAdjustment $stock_adjustment): HttpResponse
     {
-        $stock_adjustment->load(['store', 'lines.item']);
+        $stock_adjustment->load(['store', 'lines.item', 'lines.itemUnit']);
 
         $pdf = Pdf::loadView('pdf.stock-adjustment', [
             'stockAdjustment' => $stock_adjustment,

@@ -3,6 +3,7 @@
 use App\Enums\FiscalYearStatus;
 use App\Enums\VoucherType;
 use App\Models\Account;
+use App\Models\AccountGroup;
 use App\Models\CapitalPurchase;
 use App\Models\FiscalYear;
 use App\Models\JournalVoucher;
@@ -376,6 +377,100 @@ test('cancelling a capital purchase reverses it in the Reversal series and fills
         expect($reversedLines)->toEqual($originalLines);
 
         expect(fn () => $purchase->cancel($actor, 'Again'))->toThrow(InvalidArgumentException::class);
+    });
+
+    $tenant->delete();
+});
+
+test('a capital purchase line optionally registers its own fixed asset from the same voucher', function () {
+    $tenant = provisionCapitalPurchaseTestTenant('capital-purchase-asset-register.tenant-test');
+
+    $tenant->run(function () {
+        capitalPurchaseOpenFiscalYear();
+        $actor = capitalPurchaseTestActor();
+
+        $fixedAssetsGroup = AccountGroup::factory()->create(['name' => 'Fixed Assets']);
+        $assetAccount = Account::factory()->underGroup()->create(['account_group_id' => $fixedAssetsGroup->id]);
+
+        $purchase = CapitalPurchase::post(
+            ['type' => 'capital', 'date' => '2026-06-01', 'payment_mode' => 'cash'],
+            [[
+                'account_id' => $assetAccount->id,
+                'amount' => '85000',
+                'create_asset' => true,
+                'asset_name' => 'Delivery Van',
+                'depreciation_category' => 'Pool B',
+                'depreciation_method' => 'wdv',
+                'depreciation_rate' => '20',
+                'salvage_value' => '5000',
+            ]],
+            $actor,
+        );
+
+        $line = $purchase->lines()->sole();
+        expect($line->fixed_asset_id)->not->toBeNull();
+
+        $asset = $line->fixedAsset;
+        expect($asset->asset_name)->toBe('Delivery Van')
+            ->and($asset->cost)->toBe('85000.00')
+            ->and($asset->purchase_date->toDateString())->toBe('2026-06-01')
+            ->and($asset->salvage_value)->toBe('5000.00')
+            ->and($asset->account_id)->toBe($assetAccount->id)
+            // Reuses THIS capital purchase's own voucher: no second voucher
+            // is posted for the same cost.
+            ->and($asset->journal_voucher_id)->toBe($purchase->journal_voucher_id)
+            ->and(JournalVoucher::where('voucher_type', VoucherType::CapitalPurchase)->count())->toBe(1);
+    });
+
+    $tenant->delete();
+});
+
+test('a capital purchase line cannot register a fixed asset against an account outside Fixed Assets', function () {
+    $tenant = provisionCapitalPurchaseTestTenant('capital-purchase-asset-wrong-group.tenant-test');
+
+    $tenant->run(function () {
+        capitalPurchaseOpenFiscalYear();
+        $actor = capitalPurchaseTestActor();
+        $account = Account::factory()->create();
+
+        expect(fn () => CapitalPurchase::post(
+            ['type' => 'capital', 'date' => '2026-06-01', 'payment_mode' => 'cash'],
+            [[
+                'account_id' => $account->id,
+                'amount' => '1000',
+                'create_asset' => true,
+                'asset_name' => 'Whatever',
+                'depreciation_category' => 'Pool B',
+                'depreciation_method' => 'wdv',
+                'depreciation_rate' => '20',
+            ]],
+            $actor,
+        ))->toThrow(InvalidArgumentException::class, 'Fixed Assets');
+    });
+
+    $tenant->delete();
+});
+
+test('a "service" purchase line never registers a fixed asset even if requested', function () {
+    $tenant = provisionCapitalPurchaseTestTenant('capital-purchase-asset-service.tenant-test');
+
+    $tenant->run(function () {
+        capitalPurchaseOpenFiscalYear();
+        $actor = capitalPurchaseTestActor();
+        $account = Account::factory()->create();
+
+        $purchase = CapitalPurchase::post(
+            ['type' => 'service', 'date' => '2026-06-01', 'payment_mode' => 'cash'],
+            [[
+                'account_id' => $account->id,
+                'amount' => '1000',
+                'create_asset' => true,
+                'asset_name' => 'Should not register',
+            ]],
+            $actor,
+        );
+
+        expect($purchase->lines()->sole()->fixed_asset_id)->toBeNull();
     });
 
     $tenant->delete();

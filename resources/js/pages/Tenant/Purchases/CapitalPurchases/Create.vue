@@ -16,6 +16,8 @@ const props = defineProps({
     accounts: { type: Array, default: () => [] },
     stores: { type: Array, default: () => [] },
     defaultVatRate: { type: String, default: '13.00' },
+    depreciationCategories: { type: Array, default: () => [] },
+    depreciationMethods: { type: Array, default: () => [] },
 });
 
 const emit = defineEmits(['cancel', 'posted']);
@@ -41,8 +43,23 @@ const paymentModeOptions = [
     { value: 'credit', label: 'Credit' },
 ];
 
+const depreciationCategoryOptions = computed(() => props.depreciationCategories.map((c) => ({ value: c, label: c })));
+const depreciationMethodOptions = computed(() => props.depreciationMethods.map((m) => ({ value: m, label: m.toUpperCase() })));
+
 function emptyLine() {
-    return { account_id: null, amount: '', narration: '', vatable: true };
+    return {
+        account_id: null,
+        amount: '',
+        narration: '',
+        vatable: true,
+        // Asset register (item 5): opt-in per line, capital purchases only.
+        create_asset: false,
+        asset_name: '',
+        depreciation_category: null,
+        depreciation_method: null,
+        depreciation_rate: '',
+        salvage_value: '',
+    };
 }
 
 const form = useForm({
@@ -151,6 +168,14 @@ function submit() {
             amount: orZero(line.amount),
             vatable: line.vatable === true,
             narration: line.narration || undefined,
+            // Only meaningful on a "capital" purchase; the server also
+            // re-checks type === 'capital' before honouring it.
+            create_asset: data.type === 'capital' && line.create_asset === true,
+            asset_name: line.create_asset ? line.asset_name || undefined : undefined,
+            depreciation_category: line.create_asset ? line.depreciation_category || undefined : undefined,
+            depreciation_method: line.create_asset ? line.depreciation_method || undefined : undefined,
+            depreciation_rate: line.create_asset ? orZero(line.depreciation_rate) : undefined,
+            salvage_value: line.create_asset ? orZero(line.salvage_value) : undefined,
         })),
     })).post('/capital-purchases', {
         preserveScroll: true,
@@ -259,33 +284,83 @@ function submit() {
                     <span></span>
                 </div>
 
-                <div v-for="(line, index) in form.lines" :key="index" class="mb-2 grid grid-cols-[1fr_130px_70px_1fr_28px] items-start gap-2">
-                    <div>
-                        <Combobox
-                            :model-value="line.account_id"
-                            :options="accountOptions"
-                            placeholder="Select account"
-                            @update:model-value="(v) => (line.account_id = v)"
-                        />
-                        <p v-if="form.errors[`lines.${index}.account_id`]" class="mt-1 text-xs text-danger">
-                            {{ form.errors[`lines.${index}.account_id`] }}
+                <div v-for="(line, index) in form.lines" :key="index" class="mb-2 border-b-[1.5px] border-border/40 pb-2">
+                    <div class="grid grid-cols-[1fr_130px_70px_1fr_28px] items-start gap-2">
+                        <div>
+                            <Combobox
+                                :model-value="line.account_id"
+                                :options="accountOptions"
+                                placeholder="Select account"
+                                @update:model-value="(v) => (line.account_id = v)"
+                            />
+                            <p v-if="form.errors[`lines.${index}.account_id`]" class="mt-1 text-xs text-danger">
+                                {{ form.errors[`lines.${index}.account_id`] }}
+                            </p>
+                        </div>
+                        <Input v-model="line.amount" type="number" min="0.01" step="0.01" inputmode="decimal" placeholder="0.00" required />
+                        <label class="flex h-[34px] items-center gap-1.5 text-xs text-text-muted">
+                            <input v-model="line.vatable" type="checkbox" class="size-4 border-[1.5px] border-border" />
+                            Taxable
+                        </label>
+                        <Input v-model="line.narration" type="text" placeholder="Optional" />
+                        <button
+                            v-if="form.lines.length > 1"
+                            type="button"
+                            class="mt-2 flex h-7 w-7 items-center justify-center text-text-muted transition-colors duration-150 hover:text-danger"
+                            aria-label="Remove line"
+                            @click="removeLine(index)"
+                        >
+                            <X class="h-3.5 w-3.5" />
+                        </button>
+                    </div>
+
+                    <!-- Asset register (item 5): a "capital" line may optionally create its
+                         own tracked, depreciating FixedAsset using this line's cost and date. -->
+                    <div v-if="form.type === 'capital'" class="mt-1.5 pl-1">
+                        <label class="flex items-center gap-1.5 text-xs text-text-muted">
+                            <input v-model="line.create_asset" type="checkbox" class="size-4 border-[1.5px] border-border" />
+                            Register as a fixed asset
+                        </label>
+
+                        <div v-if="line.create_asset" class="mt-2 grid grid-cols-4 gap-2">
+                            <div>
+                                <label class="mb-1 block text-[11px] font-semibold text-text-base">Asset Name <span class="text-danger">*</span></label>
+                                <Input v-model="line.asset_name" type="text" placeholder="e.g. Delivery van" required />
+                                <p v-if="form.errors[`lines.${index}.asset_name`]" class="mt-1 text-xs text-danger">
+                                    {{ form.errors[`lines.${index}.asset_name`] }}
+                                </p>
+                            </div>
+                            <div>
+                                <label class="mb-1 block text-[11px] font-semibold text-text-base">Category <span class="text-danger">*</span></label>
+                                <Select
+                                    :model-value="line.depreciation_category"
+                                    :options="depreciationCategoryOptions"
+                                    placeholder="Pool"
+                                    @update:model-value="(v) => (line.depreciation_category = v)"
+                                />
+                            </div>
+                            <div>
+                                <label class="mb-1 block text-[11px] font-semibold text-text-base">Method <span class="text-danger">*</span></label>
+                                <Select
+                                    :model-value="line.depreciation_method"
+                                    :options="depreciationMethodOptions"
+                                    placeholder="Method"
+                                    @update:model-value="(v) => (line.depreciation_method = v)"
+                                />
+                            </div>
+                            <div>
+                                <label class="mb-1 block text-[11px] font-semibold text-text-base">Rate (%) <span class="text-danger">*</span></label>
+                                <Input v-model="line.depreciation_rate" type="number" min="0" max="100" step="0.01" inputmode="decimal" required />
+                            </div>
+                            <div class="col-span-2">
+                                <label class="mb-1 block text-[11px] font-semibold text-text-base">Salvage Value</label>
+                                <Input v-model="line.salvage_value" type="number" min="0" step="0.01" inputmode="decimal" placeholder="0.00" />
+                            </div>
+                        </div>
+                        <p class="mt-1 text-[11px] text-text-muted">
+                            The account for this line must be filed under "Fixed Assets".
                         </p>
                     </div>
-                    <Input v-model="line.amount" type="number" min="0.01" step="0.01" inputmode="decimal" placeholder="0.00" required />
-                    <label class="flex h-[34px] items-center gap-1.5 text-xs text-text-muted">
-                        <input v-model="line.vatable" type="checkbox" class="size-4 border-[1.5px] border-border" />
-                        Taxable
-                    </label>
-                    <Input v-model="line.narration" type="text" placeholder="Optional" />
-                    <button
-                        v-if="form.lines.length > 1"
-                        type="button"
-                        class="mt-2 flex h-7 w-7 items-center justify-center text-text-muted transition-colors duration-150 hover:text-danger"
-                        aria-label="Remove line"
-                        @click="removeLine(index)"
-                    >
-                        <X class="h-3.5 w-3.5" />
-                    </button>
                 </div>
 
                 <Button variant="secondary" tone="purple" type="button" class="mt-1" @click="addLine">

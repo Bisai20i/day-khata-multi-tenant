@@ -11,8 +11,8 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\MorphMany;
 
 #[Fillable([
-    'purchase_id', 'item_id', 'item_unit_id', 'account_id', 'quantity', 'unit_conversion_factor',
-    'rate', 'discount', 'discount_type', 'vatable', 'line_total', 'net_value', 'vat_amount', 'tds_amount',
+    'purchase_id', 'item_id', 'item_unit_id', 'account_id', 'quantity', 'bonus_quantity', 'unit_conversion_factor',
+    'rate', 'discount', 'discount_type', 'vatable', 'note', 'line_total', 'net_value', 'vat_amount', 'tds_amount',
 ])]
 class PurchaseLine extends Model
 {
@@ -23,6 +23,10 @@ class PurchaseLine extends Model
     {
         return [
             'quantity' => Decimal::class.':4',
+            // Extra units the supplier handed over at no charge (item 3).
+            // Never part of the billed quantity/rate math - only added to
+            // the stock movement's quantity at posting time.
+            'bonus_quantity' => Decimal::class.':4',
             'unit_conversion_factor' => Decimal::class.':4',
             'rate' => Decimal::class.':4',
             'discount' => Decimal::class.':2',

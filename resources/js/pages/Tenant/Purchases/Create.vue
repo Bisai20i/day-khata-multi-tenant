@@ -10,12 +10,16 @@ import Combobox from '@/components/ui/Combobox.vue';
 import Modal from '@/components/ui/Modal.vue';
 import NepaliDateInput from '@/components/ui/NepaliDateInput.vue';
 import { useToast } from '@/composables/useToast';
-import { addMoney, calculateDocument, formatMoney, moneyEquals, parseMoney } from '@/lib/money';
+import { addMoney, calculateDocument, formatMoney, moneyEquals, parseMoney, percentOf } from '@/lib/money';
 import { todayInKathmandu } from '@/lib/format';
 
 const props = defineProps({
     suppliers: { type: Array, default: () => [] },
     items: { type: Array, default: () => [] },
+    // For the quick add-item modal (item 9): a category is required to
+    // create an item, so this form offers the same short list Items/
+    // Index.vue uses rather than sending the clerk away to that page.
+    itemCategories: { type: Array, default: () => [] },
     // Two narrow pickers instead of the whole chart of accounts: money can only
     // leave through an asset account, and TDS can only be withheld into a
     // liability, so the server sends each list already filtered.
@@ -84,7 +88,20 @@ const itemsById = computed(() => new Map(props.items.map((i) => [i.id, i])));
 function emptyLine() {
     // item_unit_id '' means "the item's own base unit" - see Sales/
     // Create.vue's identical emptyLine() for the full rationale.
-    return { item_id: null, item_unit_id: '', quantity: '', rate: '', discount: '', discount_type: 'flat' };
+    // bonus_quantity (item 9): free units received alongside the paid ones -
+    // stocked at (quantity + bonus) x factor but never billed (item 3), so
+    // it is not part of previewLines/calculateDocument at all. note (item 9)
+    // is a free-text per-line remark stored as-is on purchase_lines.note.
+    return {
+        item_id: null,
+        item_unit_id: '',
+        quantity: '',
+        bonus_quantity: '',
+        rate: '',
+        discount: '',
+        discount_type: 'flat',
+        note: '',
+    };
 }
 
 // Mirrors Sales/Create.vue's unitOptionsFor() exactly, adapted for this
@@ -152,9 +169,18 @@ function defaultFormData() {
         discount: '',
         discount_type: 'flat',
         vat_rate: String(props.settings.default_vat_rate ?? '13'),
+        // PAN / non-VAT purchase mode: every line lands in the exempt column
+        // and no VAT is charged at all. Re-defaulted from the supplier's own
+        // is_vat_registered flag the moment a supplier is picked
+        // (selectSupplier), which is the only sane default - an unregistered
+        // supplier cannot legally issue a VAT bill.
+        force_non_taxable: false,
         cash_amount: '',
         bank_amount: '',
         tds_account_id: null,
+        // A rate takes precedence over a typed amount: the server recomputes
+        // (taxable + nontaxable) x rate itself and stores both.
+        tds_rate: '',
         tds_amount: '',
         narration: '',
         // Blank fiscal_year_id posts into whichever year is currently
@@ -177,8 +203,77 @@ function removeLine(index) {
     form.lines.splice(index, 1);
 }
 
+// --- Scan-to-add barcode (item 9) --------------------------------------
+// Calls ItemController::lookupBarcode() (GET /items/lookup-barcode), which
+// checks item_units.barcode first (a specific alternate unit) then falls
+// back to items.barcode (the base unit, item_unit_id: null). Response
+// shape and the 404 contract are documented in the T13 items 5-6 pass's
+// cross-file request note. Only items already loaded into this page's own
+// itemsById are addable - a match the browser has never seen (e.g. an
+// inactive item) is reported through barcodeError rather than silently
+// skipped.
+const barcodeCode = ref('');
+const barcodeError = ref(null);
+const barcodeScanning = ref(false);
+
+async function scanBarcode() {
+    const code = barcodeCode.value.trim();
+    if (code === '') {
+        return;
+    }
+
+    barcodeError.value = null;
+    barcodeScanning.value = true;
+
+    try {
+        const response = await fetch(`/items/lookup-barcode?code=${encodeURIComponent(code)}`, {
+            headers: { Accept: 'application/json' },
+        });
+        const body = await response.json();
+
+        if (!response.ok) {
+            barcodeError.value = body.message ?? 'No item matches that barcode.';
+            return;
+        }
+
+        const matchedItem = itemsById.value.get(body.item.id);
+        if (!matchedItem) {
+            barcodeError.value = `"${body.item.name}" is not available on this purchase (it may be inactive).`;
+            return;
+        }
+
+        const target = form.lines.find((line) => line.item_id === null) ?? emptyLine();
+        if (!form.lines.includes(target)) {
+            form.lines.push(target);
+        }
+        target.item_id = matchedItem.id;
+        target.item_unit_id = body.item_unit_id ?? '';
+        selectLineUnit(target, target.item_unit_id);
+        if (target.quantity === '') {
+            target.quantity = '1';
+        }
+    } catch {
+        barcodeError.value = 'Could not reach the server. Try again.';
+    } finally {
+        barcodeScanning.value = false;
+        barcodeCode.value = '';
+    }
+}
+
 function isVatable(line) {
     return itemsById.value.get(line.item_id)?.is_vatable ?? false;
+}
+
+const suppliersById = computed(() => new Map(props.suppliers.map((s) => [s.id, s])));
+
+// Picking a supplier re-defaults the PAN / non-VAT toggle from that
+// supplier's registration: a supplier who is not VAT registered can only
+// issue a PAN bill, so claiming VAT credit on their bill would be a false
+// claim. The toggle stays editable afterwards - a registered supplier can
+// still hand over a PAN bill for an exempt purchase.
+function selectSupplier(supplierId) {
+    form.supplier_id = supplierId;
+    form.force_non_taxable = supplierId == null ? false : suppliersById.value.get(supplierId)?.is_vat_registered === false;
 }
 
 // The ONE source of truth for what this bill adds up to, step for step
@@ -186,24 +281,58 @@ function isVatable(line) {
 // preview summed unrounded floats and never rounded the VAT at all, so a single
 // line of 1,001.50 previewed VAT 130.19 while the server booked 130.20
 // (audit P0-8). Nothing here parses money through Number().
-const preview = computed(() =>
-    calculateDocument(
-        form.lines.map((line) => ({
-            quantity: line.quantity === '' ? '0' : line.quantity,
-            rate: line.rate === '' ? '0' : line.rate,
-            discount: line.discount === '' ? '0' : line.discount,
-            discount_type: line.discount_type,
-            vatable: isVatable(line),
-            conversion_factor: conversionFactorFor(line),
-        })),
-        {
-            vat_rate: form.vat_rate === '' ? '0' : form.vat_rate,
-            discount: form.discount === '' ? '0' : form.discount,
-            discount_type: form.discount_type,
-            tds_amount: form.tds_amount === '' ? '0' : form.tds_amount,
-        },
-    ),
+const previewLines = computed(() =>
+    form.lines.map((line) => ({
+        quantity: line.quantity === '' ? '0' : line.quantity,
+        rate: line.rate === '' ? '0' : line.rate,
+        discount: line.discount === '' ? '0' : line.discount,
+        discount_type: line.discount_type,
+        vatable: isVatable(line),
+        conversion_factor: conversionFactorFor(line),
+    })),
 );
+
+// The header as the calculator sees it BEFORE any TDS: TDS never changes the
+// bill's taxable, non-taxable, VAT or grand total, only what is left to pay,
+// so the base pass below is what the TDS rate is applied to. Same two-pass
+// shape as Purchase::post() on the server, deliberately.
+function previewHeader(tdsAmount) {
+    return {
+        vat_rate: form.vat_rate === '' ? '0' : form.vat_rate,
+        discount: form.discount === '' ? '0' : form.discount,
+        discount_type: form.discount_type,
+        force_non_taxable: form.force_non_taxable,
+        tds_amount: tdsAmount,
+    };
+}
+
+const basePreview = computed(() => calculateDocument(previewLines.value, previewHeader('0')));
+
+// (taxable + nontaxable) x rate, one rounding, exactly as Money::percent()
+// does it on the server. A typed amount is used as-is when no rate is given.
+// percentOf throws on a rate the money module refuses (more than 2 decimals):
+// that shows up as a plain 0.00 preview, and the server's decimal:0,2 rule is
+// what reports it as a field error on submit.
+const tdsPreviewAmount = computed(() => {
+    if (form.tds_rate === '' || form.tds_rate === null) {
+        return form.tds_amount === '' ? '0' : form.tds_amount;
+    }
+
+    if (!basePreview.value.ok) {
+        return '0';
+    }
+
+    try {
+        return percentOf(
+            addMoney(basePreview.value.totals.taxable_amount, basePreview.value.totals.nontaxable_amount),
+            form.tds_rate,
+        );
+    } catch {
+        return '0';
+    }
+});
+
+const preview = computed(() => calculateDocument(previewLines.value, previewHeader(tdsPreviewAmount.value)));
 
 const totals = computed(() => (preview.value.ok ? preview.value.totals : null));
 // An incomplete bill (no lines filled in yet) is not an error worth shouting
@@ -295,7 +424,11 @@ function submit(print = false) {
         vat_rate: data.vat_rate === '' ? '0' : data.vat_rate,
         cash_amount: data.payment_mode === 'partial' ? (data.cash_amount === '' ? '0' : data.cash_amount) : undefined,
         bank_amount: data.payment_mode === 'partial' ? (data.bank_amount === '' ? '0' : data.bank_amount) : undefined,
-        tds_amount: data.tds_amount === '' ? '0' : data.tds_amount,
+        // The rate wins on the server too, so the typed amount is not sent
+        // alongside it: two sources for one figure is how a bill ends up
+        // withholding something nobody chose.
+        tds_rate: data.tds_rate === '' ? undefined : data.tds_rate,
+        tds_amount: data.tds_rate === '' ? (data.tds_amount === '' ? '0' : data.tds_amount) : undefined,
         // The total the user is looking at. The server recomputes and refuses
         // the save if it lands anywhere else (CONTRACTS C8).
         expected_total: preview.value.totals.total,
@@ -305,9 +438,11 @@ function submit(print = false) {
             item_id: line.item_id,
             item_unit_id: line.item_unit_id || null,
             quantity: line.quantity,
+            bonus_quantity: line.bonus_quantity === '' ? '0' : line.bonus_quantity,
             rate: line.rate,
             discount: line.discount === '' ? '0' : line.discount,
             discount_type: line.discount_type,
+            note: line.note === '' ? null : line.note,
         })),
     })).post('/purchases', {
         preserveScroll: true,
@@ -379,14 +514,92 @@ function applyPendingSupplier() {
             (s) => s.name === pending.name && (pending.mobile_no ? s.mobile_no === pending.mobile_no : true),
         );
         const match = matches.sort((a, b) => b.id - a.id)[0];
-        if (match) form.supplier_id = match.id;
+        if (match) selectSupplier(match.id);
         toast({ message: 'Supplier added.', variant: 'success' });
     } catch {
         // malformed sessionStorage payload - nothing to recover, ignore.
     }
 }
 
-onMounted(() => applyPendingSupplier());
+// --- Inline "quick add item" (item 9) -----------------------------------
+// Same sessionStorage draft-bridge technique as the "+ New supplier" modal
+// above: ItemController::store() always redirects to the Items index (it
+// has no JSON mode), so this form's own in-progress lines are stashed
+// before the post and restored once Index.vue re-mounts this component
+// back at /purchases.
+const PENDING_ITEM_KEY = 'purchases-create-pending-item';
+
+const itemModalOpen = ref(false);
+const itemForm = useForm({ item_category_id: null, name: '', unit: '', purchase_rate: '', sale_rate: '' });
+const itemCategoryOptions = computed(() => props.itemCategories.map((c) => ({ value: c.id, label: c.name })));
+
+function openItemModal() {
+    itemForm.reset();
+    itemForm.clearErrors();
+    itemModalOpen.value = true;
+}
+
+function closeItemModal() {
+    itemModalOpen.value = false;
+    itemForm.reset();
+    itemForm.clearErrors();
+}
+
+function submitItem() {
+    const pendingItem = { name: itemForm.name };
+
+    itemForm.transform((data) => ({
+        ...data,
+        purchase_rate: data.purchase_rate === '' ? null : data.purchase_rate,
+        sale_rate: data.sale_rate === '' ? null : data.sale_rate,
+    })).post('/items', {
+        onSuccess: () => {
+            try {
+                sessionStorage.setItem(DRAFT_KEY, JSON.stringify(form.data()));
+                sessionStorage.setItem(PENDING_ITEM_KEY, JSON.stringify(pendingItem));
+            } catch {
+                // Storage unavailable - the modal still worked, the draft just
+                // won't survive the bounce back to /purchases.
+            }
+            itemModalOpen.value = false;
+            router.visit('/purchases');
+        },
+    });
+}
+
+// Mirrors applyPendingSupplier() exactly, matched case-insensitively since
+// ItemController::uniqueNameRule() itself is case-insensitive (item 6).
+function applyPendingItem() {
+    let raw;
+    try {
+        raw = sessionStorage.getItem(PENDING_ITEM_KEY);
+    } catch {
+        return;
+    }
+    if (!raw) return;
+
+    try {
+        sessionStorage.removeItem(PENDING_ITEM_KEY);
+        const pending = JSON.parse(raw);
+        const matches = props.items.filter((i) => i.name.toLowerCase() === String(pending.name).toLowerCase());
+        const match = matches.sort((a, b) => b.id - a.id)[0];
+        if (match) {
+            const target = form.lines.find((line) => line.item_id === null) ?? emptyLine();
+            if (!form.lines.includes(target)) {
+                form.lines.push(target);
+            }
+            selectLineItem(target, match.id);
+        }
+        toast({ message: 'Item added.', variant: 'success' });
+    } catch {
+        // malformed sessionStorage payload - nothing to recover, ignore.
+    }
+}
+
+onMounted(() => {
+    applyPendingSupplier();
+    applyPendingItem();
+});
 </script>
 
 <template>
@@ -449,7 +662,7 @@ onMounted(() => applyPendingSupplier());
                             :options="supplierOptions"
                             placeholder="Select supplier"
                             class="flex-1"
-                            @update:model-value="(v) => (form.supplier_id = v)"
+                            @update:model-value="selectSupplier"
                         />
                         <Button variant="secondary" tone="purple" type="button" class="!px-2.5" @click="openSupplierModal">
                             <Plus class="h-3.5 w-3.5" />
@@ -519,10 +732,30 @@ onMounted(() => applyPendingSupplier());
             </div>
 
             <div>
-                <div class="mb-2 grid grid-cols-[1fr_90px_100px_100px_90px_40px_90px_28px] gap-2 text-[10px] font-bold tracking-[.8px] text-text-muted uppercase">
+                <div class="mb-3 flex items-end gap-2">
+                    <div class="flex-1">
+                        <label class="mb-1 block text-sm font-semibold text-text-base">Scan barcode</label>
+                        <Input
+                            v-model="barcodeCode"
+                            type="text"
+                            placeholder="Scan or paste a barcode, then press Enter"
+                            @keydown.enter.prevent="scanBarcode"
+                        />
+                    </div>
+                    <Button variant="secondary" tone="purple" type="button" :disabled="barcodeScanning" @click="scanBarcode">
+                        Add
+                    </Button>
+                    <Button variant="secondary" tone="purple" type="button" @click="openItemModal">
+                        <Plus class="h-3.5 w-3.5" /> New item
+                    </Button>
+                </div>
+                <p v-if="barcodeError" class="mb-2 text-sm text-danger">{{ barcodeError }}</p>
+
+                <div class="mb-2 grid grid-cols-[1fr_90px_100px_80px_100px_90px_40px_90px_28px] gap-2 text-[10px] font-bold tracking-[.8px] text-text-muted uppercase">
                     <span>Item</span>
                     <span>Unit</span>
                     <span>Qty</span>
+                    <span>Free</span>
                     <span>Rate</span>
                     <span>Discount</span>
                     <span></span>
@@ -530,54 +763,63 @@ onMounted(() => applyPendingSupplier());
                     <span></span>
                 </div>
 
-                <div v-for="(line, index) in form.lines" :key="index" class="mb-2 grid grid-cols-[1fr_90px_100px_100px_90px_40px_90px_28px] items-start gap-2">
-                    <div>
-                        <Combobox
-                            :model-value="line.item_id"
-                            :options="itemOptions"
-                            placeholder="Select item"
-                            @update:model-value="(v) => selectLineItem(line, v)"
+                <div v-for="(line, index) in form.lines" :key="index" class="mb-2 border-b border-border pb-2 last:border-b-0">
+                    <div class="grid grid-cols-[1fr_90px_100px_80px_100px_90px_40px_90px_28px] items-start gap-2">
+                        <div>
+                            <Combobox
+                                :model-value="line.item_id"
+                                :options="itemOptions"
+                                placeholder="Select item"
+                                @update:model-value="(v) => selectLineItem(line, v)"
+                            />
+                            <p v-if="form.errors[`lines.${index}.item_id`]" class="mt-1 text-xs text-danger">
+                                {{ form.errors[`lines.${index}.item_id`] }}
+                            </p>
+                        </div>
+                        <div>
+                            <Select
+                                v-if="itemsById.get(line.item_id)?.units?.length"
+                                :model-value="line.item_unit_id"
+                                :options="unitOptionsFor(itemsById.get(line.item_id))"
+                                @update:model-value="(v) => selectLineUnit(line, v)"
+                            />
+                            <span v-else class="block pt-2 text-xs text-text-muted">{{ itemsById.get(line.item_id)?.unit ?? '—' }}</span>
+                        </div>
+                        <Input v-model="line.quantity" type="number" min="0" step="0.0001" placeholder="0" required />
+                        <Input v-model="line.bonus_quantity" type="number" min="0" step="0.0001" placeholder="0" />
+                        <Input v-model="line.rate" type="number" min="0" step="0.0001" placeholder="0.0000" required />
+                        <Input
+                            v-model="line.discount"
+                            type="number"
+                            min="0"
+                            :max="line.discount_type === 'percentage' ? 100 : undefined"
+                            :placeholder="line.discount_type === 'percentage' ? '%' : 'Rs'"
                         />
-                        <p v-if="form.errors[`lines.${index}.item_id`]" class="mt-1 text-xs text-danger">
-                            {{ form.errors[`lines.${index}.item_id`] }}
+                        <button
+                            type="button"
+                            class="flex h-9 w-full items-center justify-center border-[1.5px] border-border bg-bg-subtle text-[10px] font-bold text-text-muted hover:border-primary hover:text-primary"
+                            title="Click to switch between % and Rs discount"
+                            @click="toggleLineDiscountType(index)"
+                        >
+                            {{ line.discount_type === 'percentage' ? '%' : 'Rs' }}
+                        </button>
+                        <span class="pt-2 text-right text-sm font-semibold text-text-strong">{{ lineTotalText(index) }}</span>
+                        <button
+                            v-if="form.lines.length > 1"
+                            type="button"
+                            class="mt-2 flex h-7 w-7 items-center justify-center text-text-muted transition-colors duration-150 hover:text-danger"
+                            aria-label="Remove line"
+                            @click="removeLine(index)"
+                        >
+                            <X class="h-3.5 w-3.5" />
+                        </button>
+                    </div>
+                    <div class="mt-1">
+                        <Input v-model="line.note" type="text" placeholder="Note (optional)" class="text-xs" />
+                        <p v-if="form.errors[`lines.${index}.note`]" class="mt-1 text-xs text-danger">
+                            {{ form.errors[`lines.${index}.note`] }}
                         </p>
                     </div>
-                    <div>
-                        <Select
-                            v-if="itemsById.get(line.item_id)?.units?.length"
-                            :model-value="line.item_unit_id"
-                            :options="unitOptionsFor(itemsById.get(line.item_id))"
-                            @update:model-value="(v) => selectLineUnit(line, v)"
-                        />
-                        <span v-else class="block pt-2 text-xs text-text-muted">{{ itemsById.get(line.item_id)?.unit ?? '—' }}</span>
-                    </div>
-                    <Input v-model="line.quantity" type="number" min="0" step="0.0001" placeholder="0" required />
-                    <Input v-model="line.rate" type="number" min="0" step="0.0001" placeholder="0.0000" required />
-                    <Input
-                        v-model="line.discount"
-                        type="number"
-                        min="0"
-                        :max="line.discount_type === 'percentage' ? 100 : undefined"
-                        :placeholder="line.discount_type === 'percentage' ? '%' : 'Rs'"
-                    />
-                    <button
-                        type="button"
-                        class="flex h-9 w-full items-center justify-center border-[1.5px] border-border bg-bg-subtle text-[10px] font-bold text-text-muted hover:border-primary hover:text-primary"
-                        title="Click to switch between % and Rs discount"
-                        @click="toggleLineDiscountType(index)"
-                    >
-                        {{ line.discount_type === 'percentage' ? '%' : 'Rs' }}
-                    </button>
-                    <span class="pt-2 text-right text-sm font-semibold text-text-strong">{{ lineTotalText(index) }}</span>
-                    <button
-                        v-if="form.lines.length > 1"
-                        type="button"
-                        class="mt-2 flex h-7 w-7 items-center justify-center text-text-muted transition-colors duration-150 hover:text-danger"
-                        aria-label="Remove line"
-                        @click="removeLine(index)"
-                    >
-                        <X class="h-3.5 w-3.5" />
-                    </button>
                 </div>
 
                 <Button variant="secondary" tone="purple" type="button" class="mt-1" @click="addLine">
@@ -608,24 +850,57 @@ onMounted(() => applyPendingSupplier());
                 </div>
                 <div>
                     <label class="mb-1 block text-sm font-semibold text-text-base">VAT Rate (%)</label>
-                    <Input v-model="form.vat_rate" type="number" min="0" step="0.01" />
+                    <Input v-model="form.vat_rate" type="number" min="0" max="100" step="0.01" :disabled="form.force_non_taxable" />
+                    <p v-if="form.errors.vat_rate" class="mt-1 text-sm text-danger">{{ form.errors.vat_rate }}</p>
                 </div>
                 <div>
                     <label class="mb-1 block text-sm font-semibold text-text-base">Narration</label>
                     <Input v-model="form.narration" type="text" placeholder="Optional" />
+                </div>
+                <div class="col-span-3 flex items-center gap-2">
+                    <input
+                        id="force_non_taxable"
+                        v-model="form.force_non_taxable"
+                        type="checkbox"
+                        class="size-4 border-[1.5px] border-border"
+                    />
+                    <label for="force_non_taxable" class="text-sm font-semibold text-text-base">
+                        PAN bill (no VAT)
+                    </label>
+                    <span class="text-xs text-text-faint">
+                        Every line is treated as exempt and no VAT is charged. Pre-ticked for a supplier who is
+                        not VAT registered.
+                    </span>
                 </div>
                 <div>
                     <label class="mb-1 block text-sm font-semibold text-text-base">TDS Account</label>
                     <Combobox
                         :model-value="form.tds_account_id"
                         :options="tdsAccountOptions"
-                        placeholder="Optional"
+                        placeholder="TDS Payable (default)"
                         @update:model-value="(v) => (form.tds_account_id = v)"
                     />
+                    <p v-if="form.errors.tds_account_id" class="mt-1 text-sm text-danger">{{ form.errors.tds_account_id }}</p>
+                </div>
+                <div>
+                    <label class="mb-1 block text-sm font-semibold text-text-base">TDS Rate (%)</label>
+                    <Input v-model="form.tds_rate" type="number" min="0" max="100" step="0.01" placeholder="Optional" />
+                    <p v-if="form.errors.tds_rate" class="mt-1 text-sm text-danger">{{ form.errors.tds_rate }}</p>
                 </div>
                 <div>
                     <label class="mb-1 block text-sm font-semibold text-text-base">TDS Amount</label>
-                    <Input v-model="form.tds_amount" type="number" min="0" step="0.01" placeholder="0.00" />
+                    <Input
+                        v-model="form.tds_amount"
+                        type="number"
+                        min="0"
+                        step="0.01"
+                        placeholder="0.00"
+                        :disabled="form.tds_rate !== ''"
+                    />
+                    <p v-if="form.tds_rate !== ''" class="mt-1 text-xs text-text-faint">
+                        Computed from the rate: {{ money(totals?.tds_amount) }}
+                    </p>
+                    <p v-if="form.errors.tds_amount" class="mt-1 text-sm text-danger">{{ form.errors.tds_amount }}</p>
                 </div>
             </div>
 
@@ -643,6 +918,8 @@ onMounted(() => applyPendingSupplier());
                 <span class="font-bold text-text-strong">Grand Total</span>
                 <span class="text-right font-bold text-text-strong">{{ money(totals?.total) }}</span>
                 <template v-if="totals && totals.tds_amount !== '0.00'">
+                    <span class="text-text-muted">TDS Withheld</span>
+                    <span class="text-right font-semibold text-text-strong">-{{ money(totals.tds_amount) }}</span>
                     <span class="text-text-muted">Amount Due (after TDS)</span>
                     <span class="text-right font-semibold text-text-strong">{{ money(totals.settlement_due) }}</span>
                 </template>
@@ -678,6 +955,50 @@ onMounted(() => applyPendingSupplier());
             <Button variant="secondary" tone="purple" type="button" @click="closeSupplierModal">Cancel</Button>
             <Button variant="primary" tone="purple" type="button" :disabled="supplierForm.processing" @click="submitSupplier">
                 Create supplier
+            </Button>
+        </template>
+    </Modal>
+
+    <!-- Quick "+ New item" (item 9) -->
+    <Modal :open="itemModalOpen" title="New item" size="compact" @update:open="(v) => (v ? null : closeItemModal())">
+        <form class="flex flex-col gap-4" @submit.prevent="submitItem">
+            <div>
+                <label class="mb-1 block text-sm font-semibold text-text-base">Name</label>
+                <Input v-model="itemForm.name" type="text" placeholder="e.g. Coke 500ml" required />
+                <p v-if="itemForm.errors.name" class="mt-1 text-sm text-danger">{{ itemForm.errors.name }}</p>
+            </div>
+            <div>
+                <label class="mb-1 block text-sm font-semibold text-text-base">Category</label>
+                <Combobox
+                    :model-value="itemForm.item_category_id"
+                    :options="itemCategoryOptions"
+                    placeholder="Select category"
+                    @update:model-value="(v) => (itemForm.item_category_id = v)"
+                />
+                <p v-if="itemForm.errors.item_category_id" class="mt-1 text-sm text-danger">{{ itemForm.errors.item_category_id }}</p>
+            </div>
+            <div>
+                <label class="mb-1 block text-sm font-semibold text-text-base">Unit</label>
+                <Input v-model="itemForm.unit" type="text" placeholder="e.g. pcs" required />
+                <p v-if="itemForm.errors.unit" class="mt-1 text-sm text-danger">{{ itemForm.errors.unit }}</p>
+            </div>
+            <div class="grid grid-cols-2 gap-4">
+                <div>
+                    <label class="mb-1 block text-sm font-semibold text-text-base">Purchase Rate</label>
+                    <Input v-model="itemForm.purchase_rate" type="number" min="0" step="0.0001" placeholder="Optional" />
+                    <p v-if="itemForm.errors.purchase_rate" class="mt-1 text-sm text-danger">{{ itemForm.errors.purchase_rate }}</p>
+                </div>
+                <div>
+                    <label class="mb-1 block text-sm font-semibold text-text-base">Sale Rate</label>
+                    <Input v-model="itemForm.sale_rate" type="number" min="0" step="0.0001" placeholder="Optional" />
+                    <p v-if="itemForm.errors.sale_rate" class="mt-1 text-sm text-danger">{{ itemForm.errors.sale_rate }}</p>
+                </div>
+            </div>
+        </form>
+        <template #footer>
+            <Button variant="secondary" tone="purple" type="button" @click="closeItemModal">Cancel</Button>
+            <Button variant="primary" tone="purple" type="button" :disabled="itemForm.processing" @click="submitItem">
+                Create item
             </Button>
         </template>
     </Modal>

@@ -130,7 +130,7 @@ class StockAdjustment extends Model
      * picker never overrides it.
      *
      * @param  array{date: string, note?: string|null, store_id?: int|null, fiscal_year_id?: int, reason?: string|null, is_opening_import?: bool}  $data
-     * @param  array<int, array{item_id: int, direction: string, reason_type: string, quantity: mixed, unit_cost_rate?: mixed, remarks?: string|null}>  $lines
+     * @param  array<int, array{item_id: int, item_unit_id?: int|null, direction: string, reason_type: string, quantity: mixed, unit_cost_rate?: mixed, remarks?: string|null}>  $lines
      */
     public static function post(array $data, array $lines, User $actor): self
     {
@@ -162,7 +162,7 @@ class StockAdjustment extends Model
                 throw new InvalidArgumentException('No active store is configured.');
             }
 
-            $items = Item::whereIn('id', collect($lines)->pluck('item_id'))->get()->keyBy('id');
+            $items = Item::with('units')->whereIn('id', collect($lines)->pluck('item_id'))->get()->keyBy('id');
 
             $preparedLines = [];
             $requestedOut = [];
@@ -172,11 +172,20 @@ class StockAdjustment extends Model
                     throw new InvalidArgumentException("Unknown item [{$line['item_id']}].");
                 }
 
+                $item = $items[$line['item_id']];
+                // Alternate-unit entry: a clerk counts "2 Box" instead of
+                // converting to 24 pieces by hand. `quantity` stays "as
+                // entered" (mirrors purchase_lines.quantity); everything that
+                // touches stock uses $baseQuantity instead (CONTRACTS C10).
+                [$itemUnitId, $conversionFactor] = static::resolveItemUnit($item, $line['item_unit_id'] ?? null);
+
                 $quantity = Quantity::of($line['quantity']);
 
                 if (! $quantity->isPositive()) {
                     throw new InvalidArgumentException('Quantity must be greater than zero.');
                 }
+
+                $baseQuantity = $quantity->multipliedBy($conversionFactor);
 
                 $direction = $line['direction'] ?? null;
 
@@ -196,8 +205,6 @@ class StockAdjustment extends Model
                     $direction = 'in';
                 }
 
-                $item = $items[$line['item_id']];
-
                 // A written-off item has no cost impact - forced server-side,
                 // not merely at the form layer.
                 if ($reason->isZeroValue()) {
@@ -207,18 +214,21 @@ class StockAdjustment extends Model
                     $unitCostRate = Quantity::ofNullable($line['unit_cost_rate'] ?? null);
                     $lineValue = $unitCostRate === null
                         ? Money::zero()
-                        : Money::round($quantity->toBigDecimal()->multipliedBy($unitCostRate->toBigDecimal()));
+                        : Money::round($baseQuantity->toBigDecimal()->multipliedBy($unitCostRate->toBigDecimal()));
                 }
 
                 if ($direction === 'out') {
-                    $requestedOut[$item->id] = ($requestedOut[$item->id] ?? Quantity::zero())->plus($quantity);
+                    $requestedOut[$item->id] = ($requestedOut[$item->id] ?? Quantity::zero())->plus($baseQuantity);
                 }
 
                 $preparedLines[] = [
                     'item' => $item,
+                    'item_unit_id' => $itemUnitId,
+                    'unit_conversion_factor' => $conversionFactor,
                     'direction' => $direction,
                     'reason' => $reason,
                     'quantity' => $quantity,
+                    'base_quantity' => $baseQuantity,
                     'unit_cost_rate' => $unitCostRate,
                     'line_value' => $lineValue,
                     'remarks' => $line['remarks'] ?? null,
@@ -242,6 +252,8 @@ class StockAdjustment extends Model
             foreach ($preparedLines as $line) {
                 $adjustmentLine = $adjustment->lines()->create([
                     'item_id' => $line['item']->id,
+                    'item_unit_id' => $line['item_unit_id'],
+                    'unit_conversion_factor' => $line['unit_conversion_factor'],
                     'direction' => $line['direction'],
                     'reason_type' => $line['reason']->value,
                     'quantity' => $line['quantity'],
@@ -272,7 +284,7 @@ class StockAdjustment extends Model
 
                 $line['item']->recordStockMovement(
                     $movementType,
-                    $line['quantity'],
+                    $line['base_quantity'],
                     $data['date'],
                     $storeId,
                     $adjustmentLine,
@@ -458,5 +470,28 @@ class StockAdjustment extends Model
                 );
             }
         }
+    }
+
+    /**
+     * Resolves a line's optional item_unit_id against the item's already-
+     * loaded `units` relation - mirrors Purchase::resolveItemUnit() exactly
+     * (see that method's docblock for the full rationale, including why a
+     * null/missing item_unit_id is a guaranteed behavior-preserving no-op).
+     *
+     * @return array{0: int|null, 1: string}
+     */
+    private static function resolveItemUnit(Item $item, mixed $itemUnitId): array
+    {
+        if ($itemUnitId === null || $itemUnitId === '') {
+            return [null, '1'];
+        }
+
+        $itemUnit = $item->units->firstWhere('id', (int) $itemUnitId);
+
+        if (! $itemUnit) {
+            throw new InvalidArgumentException("Unit [{$itemUnitId}] does not belong to item [{$item->id}].");
+        }
+
+        return [$itemUnit->id, (string) $itemUnit->conversion_factor];
     }
 }

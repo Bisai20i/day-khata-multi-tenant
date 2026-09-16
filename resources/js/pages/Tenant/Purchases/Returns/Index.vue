@@ -12,7 +12,7 @@ import DataTable from '@/components/ui/DataTable.vue';
 import NepaliDateInput from '@/components/ui/NepaliDateInput.vue';
 import Combobox from '@/components/ui/Combobox.vue';
 import { useToast } from '@/composables/useToast';
-import { formatMoney } from '@/lib/money';
+import { formatMoney, isZeroMoney } from '@/lib/money';
 import { formatBsDate } from '@/lib/format';
 import Create from './Create.vue';
 
@@ -27,6 +27,13 @@ const props = defineProps({
         type: Object,
         default: () => ({ from: null, to: null, supplier_id: null }),
     },
+    // Exact SQL sums over the whole filtered set, computed server-side
+    // (PurchaseReturnController::filteredTotals()) - never a page's worth of
+    // client-side addition (item 8, "totals row").
+    totals: {
+        type: Object,
+        default: () => ({ taxable_amount: '0.00', nontaxable_amount: '0.00', vat_amount: '0.00', total: '0.00' }),
+    },
     // One searched, paginated page of returnable purchases - the form used to
     // receive every posted purchase in the tenant with all of their lines.
     searchablePurchases: {
@@ -36,7 +43,12 @@ const props = defineProps({
     purchaseSearch: { type: String, default: null },
     suppliers: { type: Array, default: () => [] },
     refundAccounts: { type: Array, default: () => [] },
+    // Asset accounts a cash + bank refund on an unlinked return can land in.
+    bankAccounts: { type: Array, default: () => [] },
     stores: { type: Array, default: () => [] },
+    // Stockable items for the unlinked return form (item 4).
+    items: { type: Array, default: () => [] },
+    defaultVatRate: { type: String, default: '13.00' },
 });
 
 const supplierOptions = computed(() => props.suppliers.map((supplier) => ({ value: supplier.id, label: supplier.name })));
@@ -69,6 +81,24 @@ function clearFilters() {
 
 const hasActiveFilters = computed(() => !!(props.filters.from || props.filters.to || props.filters.supplier_id));
 
+// The export covers the same filtered set the page is showing, all rows and
+// not just this page (item 8, PurchaseReturnController::export()).
+const exportUrl = computed(() => {
+    const params = new URLSearchParams();
+
+    for (const [key, value] of Object.entries({
+        from: filterState.from || undefined,
+        to: filterState.to || undefined,
+        supplier_id: filterState.supplier_id || undefined,
+    })) {
+        if (value !== undefined && value !== null && value !== '') params.append(key, value);
+    }
+
+    const query = params.toString();
+
+    return query ? `/purchase-returns/export?${query}` : '/purchase-returns/export';
+});
+
 const page = usePage();
 const { toast } = useToast();
 useLayoutChrome('Purchase Returns');
@@ -83,11 +113,42 @@ watch(
 
 const showCreateForm = ref(false);
 
+// An unlinked return's line names its item directly; a linked one reads it off
+// the original purchase line (item 4).
 function itemSummary(purchaseReturn) {
     return purchaseReturn.lines
-        .map((line) => line.purchase_line?.item?.name)
+        .map((line) => line.purchase_line?.item?.name ?? line.item?.name)
         .filter(Boolean)
         .join(', ');
+}
+
+/**
+ * An unlinked return settles at posting time into cash, bank or both, so it
+ * has no single refund account to name (item 4).
+ */
+function unlinkedRefundSummary(purchaseReturn) {
+    if (!purchaseReturn.is_unlinked) {
+        return '-';
+    }
+
+    const parts = [];
+
+    if (purchaseReturn.cash_amount && !isZeroMoney(purchaseReturn.cash_amount)) {
+        parts.push(`Cash ${formatMoney(purchaseReturn.cash_amount)}`);
+    }
+
+    if (purchaseReturn.bank_amount && !isZeroMoney(purchaseReturn.bank_amount)) {
+        parts.push(`Bank ${formatMoney(purchaseReturn.bank_amount)}`);
+    }
+
+    return parts.length > 0 ? parts.join(' + ') : '-';
+}
+
+/** "#12 - Supplier" for a linked return, "No bill - Supplier" for an unlinked one. */
+function purchaseSummary(purchaseReturn) {
+    const supplier = purchaseReturn.purchase?.supplier?.name ?? purchaseReturn.supplier?.name ?? '-';
+
+    return purchaseReturn.purchase?.id ? `#${purchaseReturn.purchase.id} - ${supplier}` : `No bill - ${supplier}`;
 }
 
 const cancelling = ref(null);
@@ -129,7 +190,7 @@ const columns = [
         id: 'purchase',
         header: 'Purchase',
         numeric: false,
-        cell: ({ row }) => `#${row.original.purchase?.id} — ${row.original.purchase?.supplier?.name ?? '—'}`,
+        cell: ({ row }) => purchaseSummary(row.original),
     },
     {
         id: 'items',
@@ -147,7 +208,7 @@ const columns = [
         id: 'refund',
         header: 'Refund via',
         numeric: false,
-        cell: ({ row }) => row.original.refund_account?.name ?? '—',
+        cell: ({ row }) => row.original.refund_account?.name ?? unlinkedRefundSummary(row.original),
     },
     {
         id: 'total',
@@ -203,7 +264,11 @@ const columns = [
                 :searchable-purchases="searchablePurchases"
                 :purchase-search="purchaseSearch"
                 :refund-accounts="refundAccounts"
+                :bank-accounts="bankAccounts"
                 :stores="stores"
+                :suppliers="suppliers"
+                :items="items"
+                :default-vat-rate="defaultVatRate"
                 @cancel="showCreateForm = false"
                 @posted="showCreateForm = false"
             />
@@ -240,11 +305,35 @@ const columns = [
                         <X class="size-4" />
                         Clear
                     </Button>
+                    <a :href="exportUrl">
+                        <Button variant="secondary" tone="purple" type="button">Export</Button>
+                    </a>
                 </div>
             </Card>
 
             <Card variant="panel">
                 <DataTable :columns="columns" :data="returns.data" :page-size="Math.max(returns.data.length, 1)" empty-message="No purchase returns yet" />
+
+                <!-- Server-computed SQL sums for the whole filtered set, not
+                     just this page (item 8, "totals row"). -->
+                <div class="mt-3 grid grid-cols-4 gap-3 border-t-[1.5px] border-border pt-3 text-sm">
+                    <div>
+                        <p class="text-[10px] font-bold tracking-[.8px] text-text-muted uppercase">Taxable (filtered)</p>
+                        <p class="font-bold text-text-strong">{{ formatMoney(totals.taxable_amount) }}</p>
+                    </div>
+                    <div>
+                        <p class="text-[10px] font-bold tracking-[.8px] text-text-muted uppercase">Non-taxable (filtered)</p>
+                        <p class="font-bold text-text-strong">{{ formatMoney(totals.nontaxable_amount) }}</p>
+                    </div>
+                    <div>
+                        <p class="text-[10px] font-bold tracking-[.8px] text-text-muted uppercase">VAT (filtered)</p>
+                        <p class="font-bold text-text-strong">{{ formatMoney(totals.vat_amount) }}</p>
+                    </div>
+                    <div>
+                        <p class="text-[10px] font-bold tracking-[.8px] text-text-muted uppercase">Total (filtered)</p>
+                        <p class="font-bold text-text-strong">{{ formatMoney(totals.total) }}</p>
+                    </div>
+                </div>
 
                 <div v-if="returns.data.length > 0" class="mt-3 flex flex-wrap items-center justify-between gap-3">
                     <p class="text-xs text-text-muted">Showing {{ returns.from }}–{{ returns.to }} of {{ returns.total }}</p>
@@ -293,7 +382,7 @@ const columns = [
         >
             <div v-if="cancelling" class="flex flex-col gap-4">
                 <p class="text-sm text-text-muted">
-                    This posts a reversing voucher for the return against purchase #{{ cancelling.purchase?.id }}
+                    This posts a reversing voucher for {{ purchaseSummary(cancelling) }}
                     ({{ formatMoney(cancelling.total) }}). This cannot be undone.
                 </p>
                 <div>

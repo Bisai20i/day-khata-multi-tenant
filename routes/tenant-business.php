@@ -115,6 +115,13 @@ Route::name('tenant.')->group(function () {
         // See BarcodeLabelController's docblock - not nested under a single
         // {item} since one print request can cover several items at once.
         Route::get('/barcode-labels/print', [BarcodeLabelController::class, 'print'])->name('barcode-labels.print');
+        // Bulk "mark vatable" (item 6 of T13) - not nested under {item} for
+        // the same reason as barcode-labels.print above.
+        Route::post('/mark-vatable', [ItemController::class, 'markVatable'])->name('mark-vatable');
+        // Per-unit barcode scan (item 6 of T13): Sales/Create, Pos.vue and
+        // Purchases/Create call this to resolve a scanned code to an item +
+        // (optionally) a specific alternate unit.
+        Route::get('/lookup-barcode', [ItemController::class, 'lookupBarcode'])->name('lookup-barcode');
     });
 
     // Nested under an item rather than its own top-level resource - see

@@ -249,7 +249,7 @@ test('a TDS leg is only posted when a TDS amount is withheld', function () {
     $tenant->delete();
 });
 
-test('posting with a TDS amount but no TDS account is rejected', function () {
+test('posting with a TDS amount but no TDS account and no seeded default is rejected', function () {
     $tenant = provisionPurchasePostingTestTenant('purchase-tds-missing-account.tenant-test');
 
     $tenant->run(function () {
@@ -257,6 +257,11 @@ test('posting with a TDS amount but no TDS account is rejected', function () {
         $actor = purchasePostingTestActor();
         $supplier = Supplier::factory()->create();
         $item = Item::factory()->create(['is_vatable' => false]);
+
+        // TDS now falls back to the seeded "TDS Payable" account (LIA21) when
+        // the form did not pick one (T13 item 1), so this case is only an
+        // error for a chart of accounts that has no such account at all.
+        Account::where('code', 'LIA21')->delete();
 
         expect(fn () => Purchase::post(
             ['supplier_id' => $supplier->id, 'date' => '2026-06-01', 'payment_mode' => 'credit', 'tds_amount' => 100],

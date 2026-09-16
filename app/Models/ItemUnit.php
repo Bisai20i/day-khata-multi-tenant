@@ -24,8 +24,13 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
  * actually posted (only the stock-quantity side is unit-aware, per the
  * "money math stays in the entered unit/rate" design decision - see this
  * model's sibling docs in Sale::post()/Purchase::post()).
+ *
+ * `barcode` (added later, audit section 3 "Purchase") is this specific
+ * unit's own scannable code - e.g. a "Box of 12" prints and scans a
+ * different barcode than a single piece. Nullable and unique; scanning it
+ * on a document form selects both the item and this unit.
  */
-#[Fillable(['item_id', 'name', 'conversion_factor', 'purchase_rate', 'sale_rate', 'mrp', 'is_active'])]
+#[Fillable(['item_id', 'name', 'barcode', 'conversion_factor', 'purchase_rate', 'sale_rate', 'mrp', 'is_active'])]
 class ItemUnit extends Model
 {
     use HasFactory;

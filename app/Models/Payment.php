@@ -5,6 +5,7 @@ namespace App\Models;
 use App\Casts\Decimal;
 use App\Enums\VoucherType;
 use App\Support\Money\Money;
+use App\Support\SettlementNarration;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
@@ -162,6 +163,14 @@ class Payment extends Model
                     'amount' => $allocation['amount'],
                 ]);
             }
+
+            // Every line of this voucher carries the same compact narration
+            // (item 10), so the supplier's ledger reads "PMT-7 - Cash
+            // Settlement" instead of a bare "Settlement"/"Amount paid".
+            $documentNumber = "PMT-{$voucher->voucher_number}";
+            $voucher->lines()->update([
+                'narration' => SettlementNarration::line($documentNumber, $data['payment_mode']),
+            ]);
 
             return $payment;
         });

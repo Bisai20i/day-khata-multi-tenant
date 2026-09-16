@@ -21,6 +21,9 @@ Route::name('tenant.')->group(function () {
     Route::prefix('purchases')->name('purchases.')->group(function () {
         Route::get('/', [PurchaseController::class, 'index'])->name('index');
         Route::post('/', [PurchaseController::class, 'store'])->name('store');
+        // Excel export (item 8) - ahead of {purchase}/print in the file only
+        // for readability, the two never collide (different segment counts).
+        Route::get('/export', [PurchaseController::class, 'export'])->name('export');
         // Cancelling reverses a posted voucher and takes stock back out, so
         // it is an admin action everywhere in this app (CONTRACTS C5).
         Route::post('/{purchase}/cancel', [PurchaseController::class, 'cancel'])
@@ -32,6 +35,7 @@ Route::name('tenant.')->group(function () {
     Route::prefix('capital-purchases')->name('capital-purchases.')->group(function () {
         Route::get('/', [CapitalPurchaseController::class, 'index'])->name('index');
         Route::post('/', [CapitalPurchaseController::class, 'store'])->name('store');
+        Route::get('/export', [CapitalPurchaseController::class, 'export'])->name('export');
         Route::post('/{capitalPurchase}/cancel', [CapitalPurchaseController::class, 'cancel'])
             ->middleware('role:admin')
             ->name('cancel');

@@ -137,7 +137,11 @@ function linesSummary(adjustment) {
         .map((line) => {
             const sign = line.direction === 'in' ? '+' : '-';
             const reason = reasonLabels[line.reason_type] ?? line.reason_type;
-            return `${line.item?.name ?? '—'} (${sign}${formatQuantity(line.quantity)} ${reason})`;
+            // Shows the unit the line was entered in (item 7) - the alternate
+            // unit when one was picked, otherwise the item's own base unit -
+            // so "2" never reads ambiguously against a base-unit quantity.
+            const unit = line.item_unit?.name ?? line.item?.unit ?? '';
+            return `${line.item?.name ?? '—'} (${sign}${formatQuantity(line.quantity)} ${unit} ${reason})`;
         })
         .join(', ');
 }

@@ -18,10 +18,18 @@ defineOptions({ layout: AppLayout });
 
 defineProps({
     capitalPurchases: { type: Array, default: () => [] },
+    // Exact SQL sum over every capital purchase (item 8, "totals row") -
+    // never a page's worth of client-side addition.
+    totals: {
+        type: Object,
+        default: () => ({ total: '0.00' }),
+    },
     suppliers: { type: Array, default: () => [] },
     accounts: { type: Array, default: () => [] },
     stores: { type: Array, default: () => [] },
     defaultVatRate: { type: String, default: '13.00' },
+    depreciationCategories: { type: Array, default: () => [] },
+    depreciationMethods: { type: Array, default: () => [] },
 });
 
 const page = usePage();
@@ -154,6 +162,8 @@ const columns = [
                 :accounts="accounts"
                 :stores="stores"
                 :default-vat-rate="defaultVatRate"
+                :depreciation-categories="depreciationCategories"
+                :depreciation-methods="depreciationMethods"
                 @cancel="showCreateForm = false"
                 @posted="showCreateForm = false"
             />
@@ -162,14 +172,26 @@ const columns = [
         <template v-else>
             <div class="mb-4 flex items-center justify-between">
                 <h2 class="text-base font-bold text-text-strong">Capital Purchases</h2>
-                <Button variant="primary" tone="purple" @click="showCreateForm = true">
-                    <Plus class="size-4" />
-                    New capital purchase
-                </Button>
+                <div class="flex items-center gap-2">
+                    <a href="/capital-purchases/export">
+                        <Button variant="secondary" tone="purple" type="button">Export</Button>
+                    </a>
+                    <Button variant="primary" tone="purple" @click="showCreateForm = true">
+                        <Plus class="size-4" />
+                        New capital purchase
+                    </Button>
+                </div>
             </div>
 
             <Card variant="panel">
                 <DataTable :columns="columns" :data="capitalPurchases" :page-size="10" empty-message="No capital purchases yet" />
+
+                <!-- Server-computed SQL sum over every capital purchase
+                     (item 8, "totals row"). -->
+                <div class="mt-3 border-t-[1.5px] border-border pt-3 text-sm">
+                    <p class="text-[10px] font-bold tracking-[.8px] text-text-muted uppercase">Total</p>
+                    <p class="font-bold text-text-strong">{{ formatMoney(totals.total) }}</p>
+                </div>
             </Card>
         </template>
 

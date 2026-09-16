@@ -43,8 +43,12 @@
                     <td class="text-center">{{ $index + 1 }}</td>
                     <td>
                         {{ $line->item->name }}
-                        @if($line->item->unit)
-                            <span style="color: #888;">({{ $line->item->unit }})</span>
+                        {{-- The unit the line was entered in (item 7): the
+                             alternate unit when one was picked, otherwise the
+                             item's own base unit - see
+                             StockAdjustmentLine::unitName(). --}}
+                        @if($line->unitName())
+                            <span style="color: #888;">({{ $line->unitName() }})</span>
                         @endif
                     </td>
                     <td class="text-center">{{ ucfirst($line->direction) }}</td>

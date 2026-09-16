@@ -89,6 +89,11 @@ const form = useForm({
     mobile_no: '',
     email: '',
     tpin: '',
+    // Drives the default state of the PAN / non-VAT toggle on a purchase
+    // against this supplier: an unregistered supplier cannot issue a VAT
+    // bill, so claiming VAT credit on their bill would be a false claim.
+    // New suppliers open as registered, matching the column default.
+    is_vat_registered: true,
 });
 
 function openCreate() {
@@ -106,6 +111,9 @@ function openEdit(supplier) {
     form.mobile_no = supplier.mobile_no ?? '';
     form.email = supplier.email ?? '';
     form.tpin = supplier.tpin ?? '';
+    // Rows written before this column existed read back as true (the column
+    // default), which is the behaviour those suppliers already had.
+    form.is_vat_registered = supplier.is_vat_registered ?? true;
     modalOpen.value = true;
 }
 
@@ -156,6 +164,14 @@ const columns = [
         header: 'TPIN',
         numeric: false,
         cell: ({ row }) => row.original.tpin ?? '—',
+    },
+    {
+        id: 'is_vat_registered',
+        header: 'VAT Reg.',
+        numeric: false,
+        // Rows written before this column existed read back as true, the
+        // behaviour they already had.
+        cell: ({ row }) => (row.original.is_vat_registered === false ? 'No (PAN)' : 'Yes'),
     },
     {
         id: 'ledger_code',
@@ -220,6 +236,22 @@ const columns = [
                     <label for="tpin" class="mb-1 block text-sm font-semibold text-text-base">TPIN</label>
                     <Input id="tpin" v-model="form.tpin" type="text" placeholder="e.g. 123456789" />
                     <p v-if="form.errors.tpin" class="mt-1 text-sm text-danger">{{ form.errors.tpin }}</p>
+                </div>
+
+                <div>
+                    <div class="flex items-center gap-2">
+                        <input
+                            id="is_vat_registered"
+                            v-model="form.is_vat_registered"
+                            type="checkbox"
+                            class="size-4 border-[1.5px] border-border"
+                        />
+                        <label for="is_vat_registered" class="text-sm font-semibold text-text-base">VAT registered</label>
+                    </div>
+                    <p class="mt-1 text-xs text-text-faint">
+                        Unticked, a purchase from this supplier opens as a PAN bill with no VAT.
+                    </p>
+                    <p v-if="form.errors.is_vat_registered" class="mt-1 text-sm text-danger">{{ form.errors.is_vat_registered }}</p>
                 </div>
             </form>
 

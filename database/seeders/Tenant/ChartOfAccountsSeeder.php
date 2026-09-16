@@ -108,6 +108,7 @@ class ChartOfAccountsSeeder extends Seeder
             ['group' => 'Purchase Accounts', 'code' => 'EXE81', 'name' => 'Purchase Return'],
             ['group' => 'Purchase Accounts', 'code' => 'EXE9', 'name' => 'Opening Stock'],
             ['group' => 'Current Liabilities', 'code' => 'LIA20', 'name' => 'Vat Payable'],
+            ['group' => 'Current Liabilities', 'code' => 'LIA21', 'name' => 'TDS Payable'],
             ['group' => 'Current Assets', 'code' => 'ASA23', 'name' => 'Vat Receivable'],
             ['group' => 'Fixed Assets', 'code' => 'AS31', 'name' => 'Accumulated Depreciation'],
             ['group' => 'Indirect Expenses', 'code' => 'EXE20', 'name' => 'Depreciation Expense'],

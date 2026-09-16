@@ -13,7 +13,7 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
  * VAT is then computed from the vatable lines only, instead of being typed on
  * the document as a whole (audit P0-20).
  */
-#[Fillable(['capital_purchase_id', 'account_id', 'narration', 'amount', 'vatable'])]
+#[Fillable(['capital_purchase_id', 'account_id', 'fixed_asset_id', 'narration', 'amount', 'vatable'])]
 class CapitalPurchaseLine extends Model
 {
     /**
@@ -41,5 +41,16 @@ class CapitalPurchaseLine extends Model
     public function account(): BelongsTo
     {
         return $this->belongsTo(Account::class);
+    }
+
+    /**
+     * The FixedAsset this line optionally created (item 5) - null on every
+     * line that did not.
+     *
+     * @return BelongsTo<FixedAsset, $this>
+     */
+    public function fixedAsset(): BelongsTo
+    {
+        return $this->belongsTo(FixedAsset::class);
     }
 }

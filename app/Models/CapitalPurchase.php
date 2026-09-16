@@ -3,11 +3,14 @@
 namespace App\Models;
 
 use App\Casts\Decimal;
+use App\Enums\DepreciationMethod;
+use App\Enums\DepreciationPool;
 use App\Enums\VoucherType;
 use App\Support\Billing\BillingException;
 use App\Support\Billing\DocumentCalculator;
 use App\Support\Billing\DocumentTotals;
 use App\Support\Money\Money;
+use App\Support\SettlementNarration;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
@@ -214,6 +217,16 @@ class CapitalPurchase extends Model
                     'narration' => $line['narration'] ?? null,
                     'amount' => $lineTotal->toString(),
                     'vatable' => $totals->lines[$index]->vatable,
+                    // Capital purchase asset register (item 5): a "capital"
+                    // line may optionally create its own FixedAsset row,
+                    // reusing THIS purchase's own account and journal
+                    // voucher rather than posting a second, separate one.
+                    'create_asset' => $type === 'capital' && (bool) ($line['create_asset'] ?? false),
+                    'asset_name' => $line['asset_name'] ?? null,
+                    'depreciation_category' => $line['depreciation_category'] ?? null,
+                    'depreciation_method' => $line['depreciation_method'] ?? null,
+                    'depreciation_rate' => $line['depreciation_rate'] ?? null,
+                    'salvage_value' => $line['salvage_value'] ?? null,
                 ];
 
                 $voucherLines[] = [
@@ -331,11 +344,89 @@ class CapitalPurchase extends Model
             ]);
 
             foreach ($preparedLines as $line) {
-                $capitalPurchase->lines()->create($line);
+                $capitalPurchaseLine = $capitalPurchase->lines()->create([
+                    'account_id' => $line['account_id'],
+                    'narration' => $line['narration'],
+                    'amount' => $line['amount'],
+                    'vatable' => $line['vatable'],
+                ]);
+
+                if ($line['create_asset']) {
+                    $asset = static::createAssetForLine($line, $voucher, $data, $actor);
+                    $capitalPurchaseLine->update(['fixed_asset_id' => $asset->id]);
+                }
             }
+
+            // Every line of this voucher carries the same compact narration
+            // (item 10), so the supplier's ledger reads "CP-3 - Bank
+            // Settlement" instead of a bare "Capital purchase from X"/
+            // "Settlement".
+            $documentNumber = 'CP-'.$voucher->voucher_number;
+            $voucher->lines()->update([
+                'narration' => SettlementNarration::line($documentNumber, $paymentMode),
+            ]);
 
             return $capitalPurchase;
         });
+    }
+
+    /**
+     * Creates a FixedAsset row for one "create asset" capital purchase line
+     * (item 5). Deliberately does NOT call FixedAsset::post(): that method
+     * creates its own ledger account and posts its own balanced voucher,
+     * which would book this same cost a second time. Instead it reuses the
+     * line's own account (which must already be filed under Fixed Assets -
+     * exactly the account this capital purchase already debited for the
+     * line's cost) and THIS capital purchase's own journal voucher, so the
+     * asset's depreciation schedule starts from a cost that is already,
+     * correctly, on the books exactly once.
+     *
+     * @param  array{account_id: int, amount: string, asset_name: ?string, depreciation_category: ?string, depreciation_method: ?string, depreciation_rate: mixed, salvage_value: mixed}  $line
+     * @param  array{date: string}  $data
+     */
+    private static function createAssetForLine(array $line, JournalVoucher $voucher, array $data, User $actor): FixedAsset
+    {
+        $account = Account::with('group')->findOrFail($line['account_id']);
+
+        if (($account->group?->name ?? null) !== 'Fixed Assets') {
+            throw new InvalidArgumentException(
+                "Cannot create a fixed asset from account \"{$account->name}\": it is not filed under Fixed Assets."
+            );
+        }
+
+        if (empty($line['asset_name'])) {
+            throw new InvalidArgumentException('An asset name is required to create a fixed asset from this line.');
+        }
+
+        $pool = DepreciationPool::from($line['depreciation_category']);
+        $method = DepreciationMethod::from($line['depreciation_method']);
+        $cost = Money::of($line['amount']);
+        $salvageValue = Money::ofNullable($line['salvage_value']) ?? Money::zero();
+        $rate = Money::of($line['depreciation_rate']);
+
+        if ($salvageValue->isGreaterThan($cost)) {
+            throw new InvalidArgumentException('The salvage value cannot be more than the asset cost.');
+        }
+
+        $asset = FixedAsset::create([
+            'asset_code' => 'FA-PENDING-'.uniqid(),
+            'asset_name' => $line['asset_name'],
+            'account_id' => $account->id,
+            'category' => $pool->value,
+            'purchase_date' => $data['date'],
+            'cost' => $cost->toString(),
+            'salvage_value' => $salvageValue->toString(),
+            'depreciation_method' => $method->value,
+            'depreciation_rate' => $rate->toString(),
+            'accumulated_depreciation' => '0.00',
+            'status' => 'active',
+            'journal_voucher_id' => $voucher->id,
+            'created_by' => $actor->id,
+        ]);
+
+        $asset->update(['asset_code' => 'FA-'.str_pad((string) $asset->id, 5, '0', STR_PAD_LEFT)]);
+
+        return $asset;
     }
 
     /**

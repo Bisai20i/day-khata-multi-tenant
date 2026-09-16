@@ -30,6 +30,7 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
     'expiry_date',
     'purchase_rate',
     'sale_rate',
+    'mrp',
     'image_path',
     'is_vatable',
     'is_stockable',
@@ -49,6 +50,9 @@ class Item extends Model
             'expiry_date' => 'date',
             'purchase_rate' => Decimal::class.':4',
             'sale_rate' => Decimal::class.':4',
+            // Base-unit MRP, alongside the per-alternate-unit item_units.mrp
+            // that already existed.
+            'mrp' => Decimal::class.':4',
             'is_vatable' => 'boolean',
             'is_stockable' => 'boolean',
             'is_active' => 'boolean',

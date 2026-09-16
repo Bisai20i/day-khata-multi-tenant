@@ -151,6 +151,7 @@ const form = useForm({
     expiry_date: '',
     purchase_rate: '',
     sale_rate: '',
+    mrp: '',
     image: null,
     is_vatable: false,
     is_stockable: true,
@@ -169,6 +170,7 @@ form.transform((data) => ({
     expiry_date: data.expiry_date === '' ? null : data.expiry_date,
     purchase_rate: data.purchase_rate === '' ? null : data.purchase_rate,
     sale_rate: data.sale_rate === '' ? null : data.sale_rate,
+    mrp: data.mrp === '' ? null : data.mrp,
 }));
 
 // Local-only preview for the image picker - shows the item's existing
@@ -222,6 +224,7 @@ function openEdit(item) {
     form.expiry_date = item.expiry_date ? item.expiry_date.slice(0, 10) : '';
     form.purchase_rate = item.purchase_rate ?? '';
     form.sale_rate = item.sale_rate ?? '';
+    form.mrp = item.mrp ?? '';
     form.image = null;
     imagePreviewUrl.value = item.image_path ? `/storage/${item.image_path}` : '';
     form.is_vatable = !!item.is_vatable;
@@ -279,6 +282,7 @@ const unitForm = useForm({
     purchase_rate: '',
     sale_rate: '',
     mrp: '',
+    barcode: '',
     is_active: true,
 });
 
@@ -287,6 +291,7 @@ unitForm.transform((data) => ({
     purchase_rate: data.purchase_rate === '' ? null : data.purchase_rate,
     sale_rate: data.sale_rate === '' ? null : data.sale_rate,
     mrp: data.mrp === '' ? null : data.mrp,
+    barcode: data.barcode === '' ? null : data.barcode,
 }));
 
 function resetUnitForm() {
@@ -319,6 +324,7 @@ function editUnit(unit) {
     unitForm.purchase_rate = unit.purchase_rate ?? '';
     unitForm.sale_rate = unit.sale_rate ?? '';
     unitForm.mrp = unit.mrp ?? '';
+    unitForm.barcode = unit.barcode ?? '';
     unitForm.is_active = !!unit.is_active;
 }
 
@@ -405,7 +411,58 @@ function expiryStatus(item) {
     return null;
 }
 
+// Bulk "mark vatable" (item 6): a plain array of selected item ids, not a
+// Set - Vue's reactivity tracks array mutation fine here and it serializes
+// straight into the request body with no extra conversion.
+const selectedItemIds = ref([]);
+
+function isSelected(item) {
+    return selectedItemIds.value.includes(item.id);
+}
+
+function toggleSelected(item) {
+    selectedItemIds.value = isSelected(item)
+        ? selectedItemIds.value.filter((id) => id !== item.id)
+        : [...selectedItemIds.value, item.id];
+}
+
+function toggleSelectAll() {
+    selectedItemIds.value = selectedItemIds.value.length === props.items.length ? [] : props.items.map((item) => item.id);
+}
+
+const markVatableForm = useForm({ item_ids: [] });
+
+function markSelectedVatable() {
+    if (selectedItemIds.value.length === 0) return;
+
+    markVatableForm.item_ids = [...selectedItemIds.value];
+    markVatableForm.post('/items/mark-vatable', {
+        preserveScroll: true,
+        onSuccess: () => {
+            selectedItemIds.value = [];
+        },
+    });
+}
+
 const columns = [
+    {
+        id: 'select',
+        header: () =>
+            h('input', {
+                type: 'checkbox',
+                class: 'size-4 border-[1.5px] border-border',
+                checked: props.items.length > 0 && selectedItemIds.value.length === props.items.length,
+                onChange: toggleSelectAll,
+            }),
+        numeric: false,
+        cell: ({ row }) =>
+            h('input', {
+                type: 'checkbox',
+                class: 'size-4 border-[1.5px] border-border',
+                checked: isSelected(row.original),
+                onChange: () => toggleSelected(row.original),
+            }),
+    },
     {
         id: 'image',
         header: '',
@@ -528,6 +585,15 @@ const columns = [
         <div class="mb-4 flex items-center justify-between">
             <h2 class="text-base font-bold text-text-strong">Items</h2>
             <div class="flex items-center gap-2">
+                <Button
+                    v-if="selectedItemIds.length > 0"
+                    variant="secondary"
+                    tone="purple"
+                    :disabled="markVatableForm.processing"
+                    @click="markSelectedVatable"
+                >
+                    Mark {{ selectedItemIds.length }} vatable
+                </Button>
                 <Button variant="secondary" tone="purple" @click="openImport">Bulk import</Button>
                 <Button variant="primary" tone="purple" @click="openCreate">New item</Button>
             </div>
@@ -657,6 +723,12 @@ const columns = [
                         <label for="sale_rate" class="mb-1 block text-sm font-semibold text-text-base">Sale rate</label>
                         <Input id="sale_rate" v-model="form.sale_rate" type="number" step="0.01" min="0" placeholder="0.00" />
                         <p v-if="form.errors.sale_rate" class="mt-1 text-sm text-danger">{{ form.errors.sale_rate }}</p>
+                    </div>
+
+                    <div>
+                        <label for="mrp" class="mb-1 block text-sm font-semibold text-text-base">MRP (base unit)</label>
+                        <Input id="mrp" v-model="form.mrp" type="number" step="0.01" min="0" placeholder="Optional" />
+                        <p v-if="form.errors.mrp" class="mt-1 text-sm text-danger">{{ form.errors.mrp }}</p>
                     </div>
                 </div>
 
@@ -811,6 +883,7 @@ const columns = [
                                 <th class="px-2 py-1.5">Purchase rate</th>
                                 <th class="px-2 py-1.5">Sale rate</th>
                                 <th class="px-2 py-1.5">MRP</th>
+                                <th class="px-2 py-1.5">Barcode</th>
                                 <th class="px-2 py-1.5">Active</th>
                                 <th class="px-2 py-1.5"></th>
                             </tr>
@@ -822,6 +895,7 @@ const columns = [
                                 <td class="px-2 py-1.5">{{ unit.purchase_rate != null ? formatRate(unit.purchase_rate) : '—' }}</td>
                                 <td class="px-2 py-1.5">{{ unit.sale_rate != null ? formatRate(unit.sale_rate) : '—' }}</td>
                                 <td class="px-2 py-1.5">{{ unit.mrp != null ? formatRate(unit.mrp) : '—' }}</td>
+                                <td class="px-2 py-1.5">{{ unit.barcode ?? '—' }}</td>
                                 <td class="px-2 py-1.5">
                                     <Badge :variant="unit.is_active ? 'success' : 'neutral'" pill>
                                         {{ unit.is_active ? 'Active' : 'Inactive' }}
@@ -863,6 +937,11 @@ const columns = [
                         <label for="unit_mrp" class="mb-1 block text-sm font-semibold text-text-base">MRP</label>
                         <Input id="unit_mrp" v-model="unitForm.mrp" type="number" step="0.01" min="0" placeholder="Optional" />
                         <p v-if="unitForm.errors.mrp" class="mt-1 text-sm text-danger">{{ unitForm.errors.mrp }}</p>
+                    </div>
+                    <div>
+                        <label for="unit_barcode" class="mb-1 block text-sm font-semibold text-text-base">Barcode</label>
+                        <Input id="unit_barcode" v-model="unitForm.barcode" type="text" placeholder="Scan or type a barcode for this unit" />
+                        <p v-if="unitForm.errors.barcode" class="mt-1 text-sm text-danger">{{ unitForm.errors.barcode }}</p>
                     </div>
                     <div class="flex items-end gap-2 pb-2.5">
                         <input id="unit_is_active" v-model="unitForm.is_active" type="checkbox" class="size-4 border-[1.5px] border-border" />

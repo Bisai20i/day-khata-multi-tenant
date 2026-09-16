@@ -27,8 +27,17 @@ const props = defineProps({
         type: Object,
         default: () => ({ from: null, to: null, supplier_id: null }),
     },
+    // Exact SQL sums over the whole filtered set, computed server-side
+    // (PurchaseController::filteredTotals()) - never a page's worth of
+    // client-side addition (item 8, "totals row").
+    totals: {
+        type: Object,
+        default: () => ({ taxable_amount: '0.00', nontaxable_amount: '0.00', vat_amount: '0.00', total: '0.00' }),
+    },
     suppliers: { type: Array, default: () => [] },
     items: { type: Array, default: () => [] },
+    // For Create.vue's quick add-item modal (item 9).
+    itemCategories: { type: Array, default: () => [] },
     bankAccounts: { type: Array, default: () => [] },
     tdsAccounts: { type: Array, default: () => [] },
     stores: { type: Array, default: () => [] },
@@ -65,6 +74,24 @@ function clearFilters() {
 }
 
 const hasActiveFilters = computed(() => !!(props.filters.from || props.filters.to || props.filters.supplier_id));
+
+// The export covers the same filtered set the page is showing, all rows and
+// not just this page (item 8, PurchaseController::export()).
+const exportUrl = computed(() => {
+    const params = new URLSearchParams();
+
+    for (const [key, value] of Object.entries({
+        from: filterState.from || undefined,
+        to: filterState.to || undefined,
+        supplier_id: filterState.supplier_id || undefined,
+    })) {
+        if (value !== undefined && value !== null && value !== '') params.append(key, value);
+    }
+
+    const query = params.toString();
+
+    return query ? `/purchases/export?${query}` : '/purchases/export';
+});
 
 const page = usePage();
 const { toast } = useToast();
@@ -240,6 +267,7 @@ const columns = [
             <Create
                 :suppliers="suppliers"
                 :items="items"
+                :item-categories="itemCategories"
                 :bank-accounts="bankAccounts"
                 :tds-accounts="tdsAccounts"
                 :stores="stores"
@@ -282,11 +310,35 @@ const columns = [
                         <X class="size-4" />
                         Clear
                     </Button>
+                    <a :href="exportUrl">
+                        <Button variant="secondary" tone="purple" type="button">Export</Button>
+                    </a>
                 </div>
             </Card>
 
             <Card variant="panel">
                 <DataTable :columns="columns" :data="purchases.data" :page-size="Math.max(purchases.data.length, 1)" empty-message="No purchases yet" />
+
+                <!-- Server-computed SQL sums for the whole filtered set, not
+                     just this page (item 8, "totals row"). -->
+                <div class="mt-3 grid grid-cols-4 gap-3 border-t-[1.5px] border-border pt-3 text-sm">
+                    <div>
+                        <p class="text-[10px] font-bold tracking-[.8px] text-text-muted uppercase">Taxable (filtered)</p>
+                        <p class="font-bold text-text-strong">{{ formatMoney(totals.taxable_amount) }}</p>
+                    </div>
+                    <div>
+                        <p class="text-[10px] font-bold tracking-[.8px] text-text-muted uppercase">Non-taxable (filtered)</p>
+                        <p class="font-bold text-text-strong">{{ formatMoney(totals.nontaxable_amount) }}</p>
+                    </div>
+                    <div>
+                        <p class="text-[10px] font-bold tracking-[.8px] text-text-muted uppercase">VAT (filtered)</p>
+                        <p class="font-bold text-text-strong">{{ formatMoney(totals.vat_amount) }}</p>
+                    </div>
+                    <div>
+                        <p class="text-[10px] font-bold tracking-[.8px] text-text-muted uppercase">Total (filtered)</p>
+                        <p class="font-bold text-text-strong">{{ formatMoney(totals.total) }}</p>
+                    </div>
+                </div>
 
                 <div v-if="purchases.data.length > 0" class="mt-3 flex flex-wrap items-center justify-between gap-3">
                     <p class="text-xs text-text-muted">Showing {{ purchases.from }}–{{ purchases.to }} of {{ purchases.total }}</p>

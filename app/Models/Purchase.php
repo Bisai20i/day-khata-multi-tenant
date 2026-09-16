@@ -10,6 +10,7 @@ use App\Support\Billing\DocumentTotals;
 use App\Support\ClosedFiscalYearGuard;
 use App\Support\Money\Money;
 use App\Support\Money\Quantity;
+use App\Support\SettlementNarration;
 use Brick\Math\RoundingMode;
 use Illuminate\Auth\Access\AuthorizationException;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
@@ -44,8 +45,8 @@ use InvalidArgumentException;
 #[Fillable([
     'supplier_id', 'store_id', 'journal_voucher_id', 'bill_number', 'bill_number_key', 'pan_number',
     'chalani_number', 'date', 'payment_mode', 'bank_account_id', 'discount', 'discount_type', 'taxable_amount',
-    'nontaxable_amount', 'vat_rate', 'vat_amount', 'total', 'cash_amount',
-    'bank_amount', 'tds_account_id', 'tds_amount', 'narration', 'status',
+    'nontaxable_amount', 'vat_rate', 'force_non_taxable', 'vat_amount', 'total', 'cash_amount',
+    'bank_amount', 'tds_account_id', 'tds_rate', 'tds_amount', 'narration', 'status',
     'created_by', 'cancelled_at', 'cancelled_by', 'cancel_reason', 'reversal_journal_voucher_id',
 ])]
 class Purchase extends Model
@@ -62,10 +63,12 @@ class Purchase extends Model
             'taxable_amount' => Decimal::class.':2',
             'nontaxable_amount' => Decimal::class.':2',
             'vat_rate' => Decimal::class.':2',
+            'force_non_taxable' => 'boolean',
             'vat_amount' => Decimal::class.':2',
             'total' => Decimal::class.':2',
             'cash_amount' => Decimal::class.':2',
             'bank_amount' => Decimal::class.':2',
+            'tds_rate' => Decimal::class.':2',
             'tds_amount' => Decimal::class.':2',
         ];
     }
@@ -255,8 +258,8 @@ class Purchase extends Model
      * sale-purchase-ux.md. Omitted, this defaults to FiscalYear::current()
      * exactly as before.
      *
-     * @param  array{supplier_id: int, bill_number?: string, pan_number?: string, chalani_number?: string|null, date: string, payment_mode: string, bank_account_id?: int, store_id?: int|null, discount?: mixed, discount_type?: string, vat_rate?: mixed, cash_amount?: mixed, bank_amount?: mixed, tds_account_id?: int, tds_amount?: mixed, expected_total?: string|null, narration?: string, fiscal_year_id?: int, reason?: string|null}  $data
-     * @param  array<int, array{item_id: int, item_unit_id?: int|null, quantity: mixed, rate: mixed, discount?: mixed, discount_type?: string}>  $lines
+     * @param  array{supplier_id: int, bill_number?: string, pan_number?: string, chalani_number?: string|null, date: string, payment_mode: string, bank_account_id?: int, store_id?: int|null, discount?: mixed, discount_type?: string, vat_rate?: mixed, force_non_taxable?: bool, cash_amount?: mixed, bank_amount?: mixed, tds_account_id?: int, tds_rate?: mixed, tds_amount?: mixed, expected_total?: string|null, narration?: string, fiscal_year_id?: int, reason?: string|null}  $data
+     * @param  array<int, array{item_id: int, item_unit_id?: int|null, quantity: mixed, bonus_quantity?: mixed, rate: mixed, discount?: mixed, discount_type?: string, note?: string|null}>  $lines
      */
     public static function post(array $data, array $lines, User $actor): self
     {
@@ -283,7 +286,7 @@ class Purchase extends Model
             $company = CompanySetting::current();
             $storeId = static::resolveStoreId($data['store_id'] ?? null, $company);
 
-            /** @var list<array{item: Item, item_unit_id: int|null}> $context */
+            /** @var list<array{item: Item, item_unit_id: int|null, bonus_quantity: Quantity, note: string|null}> $context */
             $context = [];
             $calculatorLines = [];
 
@@ -291,7 +294,18 @@ class Purchase extends Model
                 $item = Item::with('units')->findOrFail($line['item_id']);
                 [$itemUnitId, $conversionFactor] = static::resolveItemUnit($item, $line['item_unit_id'] ?? null);
 
-                $context[] = ['item' => $item, 'item_unit_id' => $itemUnitId];
+                $context[] = [
+                    'item' => $item,
+                    'item_unit_id' => $itemUnitId,
+                    // Bonus / free quantity (item 3): extra units the
+                    // supplier hands over at no charge. Never seen by
+                    // DocumentCalculator - the money side is unaffected -
+                    // only added to the stock movement's quantity below, so
+                    // the average cost per base unit falls exactly as it
+                    // should for more units at the same rupees.
+                    'bonus_quantity' => Quantity::ofNullable($line['bonus_quantity'] ?? null) ?? Quantity::zero(),
+                    'note' => $line['note'] ?? null,
+                ];
                 $calculatorLines[] = [
                     'quantity' => $line['quantity'],
                     'rate' => $line['rate'],
@@ -302,13 +316,45 @@ class Purchase extends Model
                 ];
             }
 
+            // PAN / non-VAT purchase mode (item 2): every line lands in the
+            // exempt column of the Purchase VAT book, exactly like a PAN
+            // sale. Defaults from the supplier's own is_vat_registered flag
+            // when the form does not say otherwise, so a purchase against an
+            // unregistered supplier opens already in this mode.
+            $forceNonTaxable = array_key_exists('force_non_taxable', $data)
+                ? (bool) $data['force_non_taxable']
+                : ! $supplier->is_vat_registered;
+
             $totals = DocumentCalculator::calculate($calculatorLines, [
                 'vat_rate' => $data['vat_rate'] ?? $company->default_vat_rate ?? '13',
                 'discount' => $data['discount'] ?? '0',
                 'discount_type' => $data['discount_type'] ?? 'flat',
-                'tds_amount' => $data['tds_amount'] ?? '0',
+                'force_non_taxable' => $forceNonTaxable,
+                // TDS (item 1): a rate takes precedence over a typed amount
+                // and is resolved below, once the taxable/non-taxable base is
+                // known - DocumentCalculator itself only ever takes an
+                // amount, never a rate (CONTRACTS C3).
+                'tds_amount' => '0',
                 'expected_total' => $data['expected_total'] ?? null,
             ]);
+
+            $tdsAmount = static::resolveTdsAmount($data, $totals->taxableAmount->plus($totals->nontaxableAmount));
+
+            if (! $tdsAmount->isEqualTo(Money::zero())) {
+                // Re-run with the resolved TDS amount so settlement_due comes
+                // back correct. Nothing else about the bill depends on TDS
+                // (taxable/nontaxable/vat/total are all already final), so
+                // this second pass cannot disagree with the first on
+                // anything but tds_amount/settlement_due.
+                $totals = DocumentCalculator::calculate($calculatorLines, [
+                    'vat_rate' => $totals->vatRate,
+                    'discount' => $data['discount'] ?? '0',
+                    'discount_type' => $data['discount_type'] ?? 'flat',
+                    'force_non_taxable' => $forceNonTaxable,
+                    'tds_amount' => $tdsAmount->toString(),
+                    'expected_total' => $data['expected_total'] ?? null,
+                ]);
+            }
 
             $netValues = static::lineNetValues($totals);
             $vatShares = static::sharesOf($totals->vatAmount, array_map(
@@ -335,12 +381,19 @@ class Purchase extends Model
 
             $voucherLines[] = ['account_id' => $supplier->account_id, 'debit' => '0', 'credit' => $totals->total->toString()];
 
+            $tdsAccountId = null;
+
             if ($totals->tdsAmount->isPositive()) {
-                if (empty($data['tds_account_id'])) {
-                    throw new InvalidArgumentException('A TDS account is required when a TDS amount is withheld.');
+                $tdsAccountId = static::resolveTdsAccountId($data);
+
+                if ($tdsAccountId === null) {
+                    throw new InvalidArgumentException(
+                        'A TDS account is required when TDS is withheld, and this chart of accounts has no '
+                        .'"TDS Payable" (LIA21) account to fall back on.'
+                    );
                 }
 
-                $voucherLines[] = ['account_id' => $data['tds_account_id'], 'debit' => '0', 'credit' => $totals->tdsAmount->toString()];
+                $voucherLines[] = ['account_id' => $tdsAccountId, 'debit' => '0', 'credit' => $totals->tdsAmount->toString()];
                 $voucherLines[] = ['account_id' => $supplier->account_id, 'debit' => $totals->tdsAmount->toString(), 'credit' => '0'];
             }
 
@@ -375,11 +428,17 @@ class Purchase extends Model
                 'taxable_amount' => $totals->taxableAmount,
                 'nontaxable_amount' => $totals->nontaxableAmount,
                 'vat_rate' => $totals->vatRate,
+                'force_non_taxable' => $forceNonTaxable,
                 'vat_amount' => $totals->vatAmount,
                 'total' => $totals->total,
                 'cash_amount' => $cashAmount,
                 'bank_amount' => $bankAmount,
-                'tds_account_id' => $data['tds_account_id'] ?? null,
+                // The account TDS actually landed on, not the one that was
+                // asked for: a bill withheld into the seeded default must say
+                // so, or the ledger and the bill disagree about where the
+                // money went.
+                'tds_account_id' => $tdsAccountId,
+                'tds_rate' => $data['tds_rate'] ?? null,
                 'tds_amount' => $totals->tdsAmount,
                 'narration' => $data['narration'] ?? null,
                 'status' => 'posted',
@@ -389,16 +448,20 @@ class Purchase extends Model
             foreach ($totals->lines as $index => $line) {
                 $item = $context[$index]['item'];
 
+                $bonusQuantity = $context[$index]['bonus_quantity'];
+
                 $purchaseLine = $purchase->lines()->create([
                     'item_id' => $item->id,
                     'item_unit_id' => $context[$index]['item_unit_id'],
                     'account_id' => $accountIds[$index],
                     'quantity' => $line->quantity,
+                    'bonus_quantity' => $bonusQuantity,
                     'unit_conversion_factor' => $line->conversionFactor,
                     'rate' => $line->rate,
                     'discount' => $line->discountValue,
                     'discount_type' => $line->discountType,
                     'vatable' => $line->vatable,
+                    'note' => $context[$index]['note'],
                     'line_total' => $line->lineTotal,
                     'net_value' => $netValues[$index],
                     'vat_amount' => $vatShares[$index],
@@ -406,17 +469,37 @@ class Purchase extends Model
                 ]);
 
                 if ($item->is_stockable) {
+                    // Stock records the FULL physical quantity received
+                    // (paid + bonus) in base units; the movement's value
+                    // stays the paid-only net value, so
+                    // Item::recordStockMovement()'s automatic value/quantity
+                    // division prices every base unit - paid or bonus -
+                    // identically and correctly lower (item 3).
+                    $stockBaseQuantity = $line->quantity->plus($bonusQuantity)->multipliedBy($line->conversionFactor);
+
                     $item->recordStockMovement(
                         StockMovementType::Purchase,
-                        $line->baseQuantity,
+                        $stockBaseQuantity,
                         $data['date'],
                         $storeId,
                         $purchaseLine,
-                        static::unitCostRate($netValues[$index], $line->baseQuantity),
+                        null,
                         $netValues[$index],
                     );
                 }
             }
+
+            // Every line of this voucher carries the same compact narration
+            // (item 10), so the supplier's ledger reads "PO-42 - Cash
+            // Settlement" instead of a bare "Purchase from X"/"Settlement"
+            // and tells a purchase from a payment at a glance. Applied AFTER
+            // posting - the document number is derived from this same
+            // voucher's number, which does not exist before JournalVoucher::
+            // post() returns.
+            $documentNumber = "{$company->purchase_prefix}-{$voucher->voucher_number}";
+            $voucher->lines()->update([
+                'narration' => SettlementNarration::line($documentNumber, $data['payment_mode']),
+            ]);
 
             if ($isCorrection) {
                 ClosedFiscalYearGuard::logCorrection($targetFiscalYear, $reason, "Purchase #{$purchase->id} from {$supplier->name}");
@@ -556,6 +639,57 @@ class Purchase extends Model
                 .'Cancel that purchase first if this one replaces it.'
             );
         }
+    }
+
+    /**
+     * TDS (item 1): a rate takes precedence over a typed amount, computed
+     * exactly as `(taxable + nontaxable) x rate` in one HalfUp rounding
+     * (Money::percent), never as a float multiplication.
+     *
+     * The cap at the base is NOT applied by silently clamping here: a rate
+     * is validated at 0 to 100 on the way in, so the product can never
+     * exceed the base, and a rate that somehow does (a direct model call
+     * from an import or a console script) is handed to DocumentCalculator
+     * as-is so it throws `tds_exceeds_base` instead of quietly withholding
+     * a different amount than the one asked for (CONTRACTS C3 step 8).
+     *
+     * Falls back to a directly-typed tds_amount when no rate is given, which
+     * keeps every existing caller working unchanged.
+     *
+     * @param  array<string, mixed>  $data
+     */
+    private static function resolveTdsAmount(array $data, Money $base): Money
+    {
+        $rate = $data['tds_rate'] ?? null;
+
+        if ($rate !== null && $rate !== '') {
+            // A percentage is a plain 2-decimal string (CONTRACTS C1), so the
+            // rate is normalised through the strict parser first: that is what
+            // turns a JSON float like 1.5 into "1.50" without (string) ever
+            // touching it, and what refuses "1.555" instead of rounding it.
+            return $base->percent(Money::of($rate)->toString());
+        }
+
+        return Money::of($data['tds_amount'] ?? '0');
+    }
+
+    /**
+     * Where TDS is withheld to when the form did not pick an account: the
+     * seeded "TDS Payable" liability (LIA21). A tenant whose chart predates
+     * that account, or who removed it, still gets the explicit error rather
+     * than a silently misfiled credit.
+     *
+     * @param  array<string, mixed>  $data
+     */
+    private static function resolveTdsAccountId(array $data): ?int
+    {
+        if (! empty($data['tds_account_id'])) {
+            return (int) $data['tds_account_id'];
+        }
+
+        $defaultId = Account::where('code', 'LIA21')->value('id');
+
+        return $defaultId === null ? null : (int) $defaultId;
     }
 
     private static function normalisedBillNumber(mixed $billNumber): ?string

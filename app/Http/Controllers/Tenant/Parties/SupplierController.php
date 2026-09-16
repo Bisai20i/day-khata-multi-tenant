@@ -163,6 +163,10 @@ class SupplierController extends Controller
             'mobile_no' => ['nullable', 'string', 'max:20', Rule::unique('suppliers')->ignore($supplier)],
             'email' => ['nullable', 'email', 'max:255'],
             'tpin' => ['nullable', 'string', 'max:50'],
+            // PAN / non-VAT purchase mode default (item 2): a supplier who
+            // is not VAT registered can only issue a PAN bill, so a purchase
+            // against them opens with the toggle already checked.
+            'is_vat_registered' => ['boolean'],
         ]);
     }
 }

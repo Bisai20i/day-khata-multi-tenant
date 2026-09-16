@@ -8,7 +8,7 @@ import Input from '@/components/ui/Input.vue';
 import Select from '@/components/ui/Select.vue';
 import Combobox from '@/components/ui/Combobox.vue';
 import NepaliDateInput from '@/components/ui/NepaliDateInput.vue';
-import { formatMoney, multiplyMoney, sumMoney } from '@/lib/money.js';
+import { formatMoney, multiplyMoney, parseQuantity, sumMoney } from '@/lib/money.js';
 import { todayInKathmandu } from '@/lib/format.js';
 
 const props = defineProps({
@@ -33,6 +33,40 @@ const fiscalYearOptions = computed(() =>
 
 const itemOptions = computed(() => props.items.map((i) => ({ value: i.id, label: `${i.name} (${i.unit})` })));
 const storeOptions = computed(() => props.stores.map((s) => ({ value: s.id, label: s.name })));
+const itemsById = computed(() => new Map(props.items.map((i) => [i.id, i])));
+
+// Alternate-unit entry (item 7): mirrors Purchases/Create.vue's
+// unitOptionsFor()/selectLineItem()/conversionFactorFor() exactly - '' means
+// the item's own base unit, the only value StockAdjustment::resolveItemUnit()
+// also treats that way.
+function unitOptionsFor(item) {
+    if (!item) return [];
+
+    return [{ value: '', label: item.unit }, ...(item.units ?? []).map((u) => ({ value: u.id, label: u.name }))];
+}
+
+function selectLineItem(line, itemId) {
+    line.item_id = itemId;
+    line.item_unit_id = '';
+}
+
+function selectLineUnit(line, unitId) {
+    line.item_unit_id = unitId;
+}
+
+// The stored conversion factor for the unit this line is entered in, as the
+// decimal string the money module expects. '1' means the item's base unit -
+// used so the client-side preview totals the same base quantity the server
+// will (CONTRACTS C10, single rounding).
+function conversionFactorFor(line) {
+    if (line.item_unit_id === '' || line.item_unit_id === null) {
+        return '1';
+    }
+
+    const unit = itemsById.value.get(line.item_id)?.units?.find((u) => u.id === line.item_unit_id);
+
+    return unit?.conversion_factor != null ? String(unit.conversion_factor) : '1';
+}
 
 const directionOptions = [
     { value: 'in', label: 'In (add stock)' },
@@ -51,7 +85,37 @@ const reasonOptions = [
 const zeroValueReasons = ['damage', 'lost'];
 
 function emptyLine() {
-    return { item_id: null, direction: 'in', reason_type: 'correction', quantity: '', unit_cost_rate: '', remarks: '' };
+    // item_unit_id '' means the item's own base unit (item 7) - same
+    // convention as Purchases/Create.vue's emptyLine().
+    return { item_id: null, item_unit_id: '', direction: 'in', reason_type: 'correction', quantity: '', unit_cost_rate: '', remarks: '' };
+}
+
+/**
+ * Exact `quantity x conversion factor`, at 4dp, rounded HalfUp - the same
+ * base quantity StockAdjustment::post()/resolveItemUnit() will compute
+ * server-side (CONTRACTS C10, single rounding). Kept local to this file
+ * (not money.js, which this task does not own) as a small BigInt product +
+ * one rescale, no float arithmetic. Returns null when either side does not
+ * yet parse (e.g. an empty quantity field mid-entry).
+ */
+function baseQuantityFor(line) {
+    const quantity = parseQuantity(String(line.quantity ?? '').trim());
+    const factor = parseQuantity(conversionFactorFor(line));
+
+    if (!quantity.ok || !factor.ok) return null;
+
+    const qInt = BigInt(quantity.value.replace('.', ''));
+    const fInt = BigInt(factor.value.replace('.', ''));
+    const product = qInt * fInt; // scale 8 (4dp x 4dp)
+
+    const divisor = 10000n; // rescale scale 8 -> scale 4
+    const wholePart = product / divisor;
+    const remainder = product % divisor;
+    const rounded = remainder * 2n >= divisor ? wholePart + 1n : wholePart;
+
+    const digits = rounded.toString().padStart(5, '0');
+
+    return digits.slice(0, -4) + '.' + digits.slice(-4);
 }
 
 const form = useForm({
@@ -106,13 +170,19 @@ function isZeroValue(line) {
 function lineValue(line) {
     if (isZeroValue(line)) return '0.00';
 
-    const quantity = String(line.quantity ?? '').trim();
     const rate = String(line.unit_cost_rate ?? '').trim();
 
-    if (quantity === '' || rate === '') return '0.00';
+    if (rate === '') return '0.00';
+
+    // Priced against the BASE quantity, not the entered one, when an
+    // alternate unit is picked - mirrors StockAdjustment::post()'s
+    // `base_quantity x unit_cost_rate` exactly (item 7).
+    const baseQuantity = baseQuantityFor(line);
+
+    if (baseQuantity === null) return '0.00';
 
     try {
-        return multiplyMoney(rate, quantity);
+        return multiplyMoney(rate, baseQuantity);
     } catch {
         return '0.00';
     }
@@ -137,6 +207,7 @@ function submit() {
         // basis" rather than "free".
         lines: data.lines.map((line) => ({
             item_id: line.item_id,
+            item_unit_id: line.item_unit_id || null,
             direction: line.reason_type === 'opening' ? 'in' : line.direction,
             reason_type: line.reason_type,
             quantity: String(line.quantity ?? '').trim(),
@@ -217,8 +288,9 @@ function submit() {
             </div>
 
             <div>
-                <div class="mb-2 grid grid-cols-[1fr_130px_140px_100px_110px_1fr_28px] gap-2 text-[10px] font-bold tracking-[.8px] text-text-muted uppercase">
+                <div class="mb-2 grid grid-cols-[1fr_100px_130px_140px_100px_110px_1fr_28px] gap-2 text-[10px] font-bold tracking-[.8px] text-text-muted uppercase">
                     <span>Item</span>
+                    <span>Unit</span>
                     <span>Direction</span>
                     <span>Reason</span>
                     <span>Quantity</span>
@@ -230,17 +302,29 @@ function submit() {
                 <div
                     v-for="(line, index) in form.lines"
                     :key="index"
-                    class="mb-2 grid grid-cols-[1fr_130px_140px_100px_110px_1fr_28px] items-start gap-2"
+                    class="mb-2 grid grid-cols-[1fr_100px_130px_140px_100px_110px_1fr_28px] items-start gap-2"
                 >
                     <div>
                         <Combobox
                             :model-value="line.item_id"
                             :options="itemOptions"
                             placeholder="Select item"
-                            @update:model-value="(v) => (line.item_id = v)"
+                            @update:model-value="(v) => selectLineItem(line, v)"
                         />
                         <p v-if="form.errors[`lines.${index}.item_id`]" class="mt-1 text-xs text-danger">
                             {{ form.errors[`lines.${index}.item_id`] }}
+                        </p>
+                    </div>
+                    <div>
+                        <Select
+                            v-if="itemsById.get(line.item_id)?.units?.length"
+                            :model-value="line.item_unit_id"
+                            :options="unitOptionsFor(itemsById.get(line.item_id))"
+                            @update:model-value="(v) => selectLineUnit(line, v)"
+                        />
+                        <span v-else class="block pt-2 text-xs text-text-muted">{{ itemsById.get(line.item_id)?.unit ?? '—' }}</span>
+                        <p v-if="form.errors[`lines.${index}.item_unit_id`]" class="mt-1 text-xs text-danger">
+                            {{ form.errors[`lines.${index}.item_unit_id`] }}
                         </p>
                     </div>
                     <Select v-model="line.direction" :options="directionOptions" :disabled="line.reason_type === 'opening'" />
