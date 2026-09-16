@@ -37,6 +37,7 @@ import {
     moneyEquals,
     parseMoney,
     parseQuantity,
+    rateExcludingVat,
     subtractMoney,
 } from '@/lib/money';
 import { todayInKathmandu } from '@/lib/format';
@@ -78,6 +79,10 @@ const props = defineProps({
     bankAccounts: { type: Array, default: () => [] },
     tdsAccounts: { type: Array, default: () => [] },
     stores: { type: Array, default: () => [] },
+    // The tenant's protected walk-in customer (audit section 3 "Sales") -
+    // every fresh cart defaults to it below, since a counter sale usually
+    // has nobody to name; still freely changeable per cart.
+    walkInCustomerId: { type: Number, default: null },
     invoiceSettings: {
         type: Object,
         default: () => ({
@@ -204,7 +209,9 @@ let nextCartId = 1;
 
 function freshCartData() {
     return {
-        customer_id: null,
+        // Defaults every new cart to the walk-in customer (audit section 3
+        // "Sales") - still freely changeable per cart.
+        customer_id: props.walkInCustomerId ?? null,
         store_id: null,
         invoice_type: invoiceTypeOptions.value[0]?.value ?? 'full',
         chalani_number: '',
@@ -379,11 +386,17 @@ function hasQuantityInCart(itemId) {
 // Sum of an item's quantity across every open cart tab (not just the active
 // one) - mirrors legacy's cross-draft stock check, since a cashier can be
 // holding the same item in several parallel carts at once.
+//
+// Free units count: they leave the shelf exactly like paid ones, which is
+// also how Sale::post()'s negative-stock check adds them up server-side
+// (audit section 3 "Sales"). Warning on the paid quantity alone would let a
+// cart that empties the shelf pass silently and then fail at posting.
 function totalQuantityAcrossCarts(itemId) {
     return carts.value.reduce((sum, cart, index) => {
         const line = cartLines(cart, index).find((l) => l.item_id === itemId);
+        const withBonus = addQuantity(line?.quantity ?? '0', line?.bonus_quantity ?? '0');
 
-        return addQuantity(sum, line?.quantity ?? '0') ?? sum;
+        return addQuantity(sum, withBonus ?? line?.quantity ?? '0') ?? sum;
     }, '0.0000');
 }
 
@@ -437,8 +450,12 @@ function addToCart(item) {
     // Pre-fill from the item's own sale_rate when it has one, so the
     // cashier isn't forced to type a rate for every line by hand - still
     // freely editable, this is just a starting point.
+    // `bonus_quantity` is the free-of-charge quantity handed over with the
+    // line (audit section 3 "Sales"): it moves stock but is never priced, so
+    // the preview below never sees it. `mrp` is a browser-only entry aid that
+    // fills `rate` and is never submitted (see applyLineMrp()).
     const rate = item.sale_rate != null ? String(item.sale_rate) : '';
-    form.lines.push({ item_id: item.id, quantity: '1', rate, discount: '', discountType: 'fixed' });
+    form.lines.push({ item_id: item.id, quantity: '1', bonus_quantity: '', mrp: '', rate, discount: '', discountType: 'fixed' });
     activeTarget.value = { type: 'rate', index: form.lines.length - 1 };
     warnIfOverstock(item.id);
 }
@@ -469,6 +486,50 @@ function decrementQty(index) {
 
 function focusTarget(type, index) {
     activeTarget.value = { type, index };
+}
+
+/**
+ * MRP / VAT-inclusive entry (audit section 3 "Sales").
+ *
+ * The cashier types the sticker price and the line's rate becomes
+ * `MRP / 1.13` for a vatable item at 13%, so a Rs 113 MRP bills as rate 100
+ * plus 13 VAT rather than having VAT charged a second time on top of it.
+ *
+ * The division happens inside the money module (rateExcludingVat: scaled
+ * BigInt, one HalfUp rounding to 4dp) - nothing here touches Number(),
+ * parseFloat or toFixed. Only the resulting RATE is submitted; the server
+ * never receives the MRP and re-derives nothing from it.
+ *
+ * Takes the typed value as an argument because the template binds
+ * :model-value + @update:model-value rather than v-model: a plain @input
+ * listener would run before the model had been written back.
+ */
+function applyLineMrp(line, mrp) {
+    line.mrp = mrp;
+
+    if (mrp === '' || mrp === null || mrp === undefined) {
+        return;
+    }
+
+    // A PAN invoice carries no VAT at all, and an exempt item never did: for
+    // both, the MRP is the rate (a division by 1).
+    const vatRate = !isPanInvoice.value && itemsById.value[line.item_id]?.is_vatable ? effectiveVatRate.value : '0';
+    const result = rateExcludingVat(mrp, vatRate);
+
+    // A half-typed MRP leaves the rate alone - the cashier is still typing.
+    if (result.ok) {
+        line.rate = result.value;
+    }
+}
+
+/**
+ * A quantity box as the server wants it: the typed string untouched, or '0'
+ * when the box is empty or was never present (a cart restored from an older
+ * localStorage payload has no bonus field at all). Never a number - the
+ * string goes straight into Quantity::of() server-side (C1).
+ */
+function enteredQuantity(value) {
+    return value === '' || value === null || value === undefined ? '0' : String(value);
 }
 
 // --- Totals: one preview, identical to the server's calculator -------------
@@ -644,10 +705,17 @@ function quickPayReset() {
 }
 
 // --- On-screen numpad ------------------------------------------------------
-// Targets whichever field was last focused/tapped: a cart line's quantity or
-// rate, or the cash-paid box. Typing directly into those Input fields still
-// works too - the numpad just writes into the same reactive value.
+// Targets whichever field was last focused/tapped: a cart line's quantity,
+// free units or rate, or the cash-paid box. Typing directly into those Input
+// fields still works too - the numpad just writes into the same reactive
+// value, which is why `type` is the line's own field name.
+//
+// The MRP box is deliberately NOT a numpad target: it is not a stored field,
+// it only feeds applyLineMrp(), and writing into it here would set a number
+// nothing ever reads while leaving the rate untouched.
 const activeTarget = ref(null);
+
+const LINE_TARGET_LABELS = { quantity: 'Quantity', bonus_quantity: 'Free units', rate: 'Rate' };
 
 const activeTargetLabel = computed(() => {
     const t = activeTarget.value;
@@ -655,7 +723,7 @@ const activeTargetLabel = computed(() => {
     if (t.type === 'cash') return 'Cash paid';
     const line = form.lines[t.index];
     const name = line ? (itemsById.value[line.item_id]?.name ?? 'Item') : 'Item';
-    return `${name} — ${t.type === 'quantity' ? 'Quantity' : 'Rate'}`;
+    return `${name} — ${LINE_TARGET_LABELS[t.type] ?? 'Rate'}`;
 });
 
 function currentTargetValue() {
@@ -742,7 +810,11 @@ function confirmSplit() {
     newCart.customer_id = form.customer_id;
     newCart.store_id = form.store_id;
     newCart.invoice_type = form.invoice_type;
-    newCart.lines = [{ ...line, quantity: qty }];
+    // The free units stay with the line they were entered on: splitting a
+    // paid quantity in two must not hand the customer twice the bonus stock,
+    // and splitting bonus units proportionally would need a division nobody
+    // asked for. The cashier can retype the bonus on either cart.
+    newCart.lines = [{ ...line, quantity: qty, bonus_quantity: '' }];
     carts.value.push(newCart);
 
     closeSplitModal();
@@ -771,6 +843,11 @@ function mergeCartInto(sourceIndex) {
         );
         if (existing) {
             existing.quantity = addQuantity(existing.quantity, sourceLine.quantity) ?? existing.quantity;
+            // Free units add up exactly like paid ones: both carts' bonus
+            // stock leaves the shelf on the one merged bill.
+            // (addQuantity reads an empty or missing box as 0.)
+            existing.bonus_quantity =
+                addQuantity(existing.bonus_quantity, sourceLine.bonus_quantity) ?? existing.bonus_quantity;
         } else {
             form.lines.push({ ...sourceLine });
         }
@@ -945,6 +1022,9 @@ function completeSale() {
         lines: data.lines.map((line) => ({
             item_id: line.item_id,
             quantity: line.quantity,
+            // Free units: an explicit '0' when the box is empty, never
+            // `undefined`. `mrp` is not sent - it only ever filled `rate`.
+            bonus_quantity: enteredQuantity(line.bonus_quantity),
             rate: line.rate,
             discount: line.discount === '' ? '0' : line.discount,
             discount_type: line.discountType === 'percent' ? 'percentage' : 'flat',
@@ -1405,6 +1485,42 @@ onUnmounted(() => {
                                 </button>
                                 <span class="ml-auto shrink-0 text-xs font-bold text-text-strong">
                                     {{ lineTotal(index) === null ? '—' : formatMoney(lineTotal(index)) }}
+                                </span>
+                            </div>
+                            <!-- MRP and free units, kept off the main row so
+                                 the quantity/rate/discount cluster the numpad
+                                 targets is unchanged.
+
+                                 MRP is VAT-inclusive entry (audit section 3
+                                 "Sales"): typing it fills Rate above with
+                                 MRP / 1.13 for a vatable item. Browser-only,
+                                 never submitted. Bonus units move stock and
+                                 are never billed, so the line total above and
+                                 the bill total below ignore them. -->
+                            <div class="flex items-center gap-1.5">
+                                <Input
+                                    :model-value="line.mrp"
+                                    type="number"
+                                    min="0"
+                                    step="0.0001"
+                                    placeholder="MRP"
+                                    title="VAT-inclusive price: fills Rate with MRP / (1 + VAT%)"
+                                    class="w-20 text-center"
+                                    @update:model-value="(v) => applyLineMrp(line, v)"
+                                />
+                                <Input
+                                    v-model="line.bonus_quantity"
+                                    type="number"
+                                    min="0"
+                                    step="0.0001"
+                                    placeholder="Free"
+                                    title="Free units given with this line - moves stock, never billed"
+                                    class="w-16 text-center"
+                                    @focusin="focusTarget('bonus_quantity', index)"
+                                    @blur="warnIfOverstock(line.item_id)"
+                                />
+                                <span v-if="form.errors[`lines.${index}.bonus_quantity`]" class="text-xs text-danger">
+                                    {{ form.errors[`lines.${index}.bonus_quantity`] }}
                                 </span>
                             </div>
                         </div>

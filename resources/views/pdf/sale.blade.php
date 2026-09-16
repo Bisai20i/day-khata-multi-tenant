@@ -31,6 +31,14 @@
     $buyerAddress = $sale->buyer_address ?? $sale->customer->address;
 
     $anyHsCode = $sale->lines->contains(fn ($line) => filled($line->item->hs_code));
+
+    // Bonus / free units (audit section 3 "Sales"). The column only appears on
+    // a bill that actually gave some away, so every bill printed until now
+    // still prints exactly as it did. The customer has to see the free pieces
+    // on the invoice: they left the shop, they are in the stock ledger, and
+    // they are what a later return is checked against - they are simply
+    // charged at nothing, which is why the Amount column is unaffected.
+    $anyBonus = $sale->lines->contains(fn ($line) => Quantity::of($line->bonus_quantity ?? '0')->isPositive());
 @endphp
 
 @section('title', $isAbbreviated ? 'Abbreviated Tax Invoice' : ($isPan ? 'PAN Invoice' : 'Tax Invoice'))
@@ -97,6 +105,9 @@
                 @endif
                 <th style="width: 8%;">Unit</th>
                 <th class="text-right" style="width: 10%;">Qty</th>
+                @if($anyBonus)
+                    <th class="text-right" style="width: 8%;">Free</th>
+                @endif
                 <th class="text-right" style="width: 12%;">Rate</th>
                 <th class="text-right" style="width: 12%;">Discount</th>
                 <th class="text-right" style="width: 14%;">Amount</th>
@@ -119,6 +130,11 @@
                          (up to 4 decimals) so qty x rate visibly equals the
                          line amount; both used to be cut to 2 decimals. --}}
                     <td class="text-right">{{ Quantity::of($line->quantity)->formatQuantity() }}</td>
+                    @if($anyBonus)
+                        {{-- Free units are handed over, not sold: the Rate and
+                             Amount columns stay the paid quantity's alone. --}}
+                        <td class="text-right">{{ Quantity::of($line->bonus_quantity ?? '0')->formatQuantity() }}</td>
+                    @endif
                     <td class="text-right">{{ Quantity::of($line->rate)->formatRate() }}</td>
                     <td class="text-right">
                         @if($line->discount_type === 'percentage' && Money::of($line->discount)->isPositive())

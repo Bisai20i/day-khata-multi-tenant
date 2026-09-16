@@ -106,6 +106,77 @@ test('an authenticated user can create, update, and delete a customer', function
     $tenant->delete();
 });
 
+test('a fresh tenant is seeded with a protected walk-in customer', function () {
+    $domain = 'customer-walk-in-seeded.tenant-test';
+    $tenant = provisionCustomerTestTenant($domain);
+
+    // TenantDatabaseSeeder runs automatically on tenant creation
+    // (TenancyServiceProvider's TenantCreated -> SeedDatabase job), so a
+    // fresh tenant already has the walk-in customer without any explicit
+    // seeding call here.
+    $tenant->run(function () {
+        $walkIn = Customer::walkIn();
+
+        expect($walkIn)->not->toBeNull();
+        expect($walkIn->name)->toBe('Walk-in customer');
+        expect($walkIn->is_walk_in)->toBeTrue();
+        expect($walkIn->account_id)->not->toBeNull();
+        expect($walkIn->account->subgroup->name)->toBe('Sundry Debtors');
+    });
+
+    $tenant->delete();
+});
+
+test('the walk-in customer cannot be deleted', function () {
+    $domain = 'customer-walk-in-protected.tenant-test';
+    $tenant = provisionCustomerTestTenant($domain);
+    $walkInId = null;
+
+    $tenant->run(function () use (&$walkInId) {
+        User::factory()->create(['email' => 'owner@example.com']);
+        $walkInId = Customer::walkIn()->id;
+    });
+
+    $this->post("http://{$domain}/login", [
+        'email' => 'owner@example.com',
+        'password' => 'password',
+    ]);
+
+    $destroy = $this->delete("http://{$domain}/customers/{$walkInId}");
+    $destroy->assertSessionHasErrors('customer');
+
+    $tenant->run(function () use ($walkInId) {
+        expect(Customer::find($walkInId))->not->toBeNull();
+    });
+
+    $tenant->delete();
+});
+
+test('a normal customer can still be deleted', function () {
+    $domain = 'customer-normal-deletable.tenant-test';
+    $tenant = provisionCustomerTestTenant($domain);
+    $customerId = null;
+
+    $tenant->run(function () use (&$customerId) {
+        User::factory()->create(['email' => 'owner@example.com']);
+        $customerId = Customer::factory()->create(['mobile_no' => '9844444444'])->id;
+    });
+
+    $this->post("http://{$domain}/login", [
+        'email' => 'owner@example.com',
+        'password' => 'password',
+    ]);
+
+    $destroy = $this->delete("http://{$domain}/customers/{$customerId}");
+    $destroy->assertRedirect("http://{$domain}/customers");
+
+    $tenant->run(function () use ($customerId) {
+        expect(Customer::find($customerId))->toBeNull();
+    });
+
+    $tenant->delete();
+});
+
 test('a duplicate customer mobile number is rejected', function () {
     $domain = 'customer-duplicate-mobile.tenant-test';
     $tenant = provisionCustomerTestTenant($domain);

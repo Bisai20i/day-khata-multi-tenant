@@ -6,8 +6,15 @@
 @section('title', $isCreditNote ? 'Credit Note' : 'Return Request')
 
 @section('doc-meta-extra')
-    <div><strong>Against Invoice:</strong> {{ $salesReturn->sale->invoice_number ?? '#'.$salesReturn->sale_id }}</div>
-    <div><strong>Invoice Date:</strong> {{ $salesReturn->sale->date->format('Y-m-d') }}</div>
+    {{-- An unlinked return (C7 "returns without a bill") has no parent sale
+         at all: it names no invoice, and every party/item detail below comes
+         off the return itself instead of off the sale. --}}
+    @if($salesReturn->sale)
+        <div><strong>Against Invoice:</strong> {{ $salesReturn->sale->invoice_number ?? '#'.$salesReturn->sale_id }}</div>
+        <div><strong>Invoice Date:</strong> {{ $salesReturn->sale->date->format('Y-m-d') }}</div>
+    @else
+        <div><strong>Against Invoice:</strong> No original bill</div>
+    @endif
     @if($salesReturn->status === 'cancelled')
         <div style="margin-top: 4px;"><span class="status-badge">Cancelled</span></div>
     @elseif(! $isCreditNote)
@@ -16,23 +23,43 @@
 @endsection
 
 @section('content')
+    @php
+        // Linked: the buyer snapshot frozen on the invoice (C7), falling back
+        // to the live customer for rows issued before those columns existed.
+        // Unlinked: the return's own customer, the only party it has.
+        $customer = $salesReturn->sale?->customer ?? $salesReturn->customer;
+        $creditToName = $salesReturn->sale?->buyer_name ?? $customer?->name;
+        $creditToAddress = $salesReturn->sale?->buyer_address ?? $customer?->address;
+        $creditToPan = $salesReturn->sale?->buyer_pan ?? $customer?->tpin;
+        $refundCash = \App\Support\Money\Money::ofNullable($salesReturn->refund_cash_amount);
+        $refundBank = \App\Support\Money\Money::ofNullable($salesReturn->refund_bank_amount);
+    @endphp
+
     <table class="party-table">
         <tr>
             <td>
                 <div class="party-label">Credit To</div>
-                <div class="party-name">{{ $salesReturn->sale->buyer_name ?? $salesReturn->sale->customer->name }}</div>
-                @if($salesReturn->sale->buyer_address ?? $salesReturn->sale->customer->address)
-                    <div>{{ $salesReturn->sale->buyer_address ?? $salesReturn->sale->customer->address }}</div>
+                <div class="party-name">{{ $creditToName }}</div>
+                @if($creditToAddress)
+                    <div>{{ $creditToAddress }}</div>
                 @endif
-                @if($salesReturn->sale->customer->mobile_no)
-                    <div>Mobile: {{ $salesReturn->sale->customer->mobile_no }}</div>
+                @if($customer?->mobile_no)
+                    <div>Mobile: {{ $customer->mobile_no }}</div>
                 @endif
-                @if($salesReturn->sale->buyer_pan ?? $salesReturn->sale->customer->tpin)
-                    <div>PAN/VAT: {{ $salesReturn->sale->buyer_pan ?? $salesReturn->sale->customer->tpin }}</div>
+                @if($creditToPan)
+                    <div>PAN/VAT: {{ $creditToPan }}</div>
                 @endif
             </td>
             <td class="text-right">
-                @if($salesReturn->refund_account_id && $salesReturn->refundAccount)
+                {{-- The refund split (audit section 4 polish): both legs are
+                     printed when the money went out through two accounts, so
+                     the note says exactly where each rupee came from. --}}
+                @if($refundCash && $refundCash->isPositive())
+                    <div>Refunded in cash: {{ $refundCash->format() }}</div>
+                @endif
+                @if($refundBank && $refundBank->isPositive() && $salesReturn->refundAccount)
+                    <div>Refunded via {{ $salesReturn->refundAccount->name }}: {{ $refundBank->format() }}</div>
+                @elseif(! $refundCash && ! $refundBank && $salesReturn->refund_account_id && $salesReturn->refundAccount)
                     <div>Refunded via: {{ $salesReturn->refundAccount->name }}</div>
                 @endif
             </td>
@@ -54,13 +81,21 @@
                 <tr>
                     <td class="text-center">{{ $index + 1 }}</td>
                     <td>
-                        {{ $line->saleLine->item->name }}
-                        @php($unit = $line->saleLine->itemUnit?->name ?? $line->saleLine->item->unit)
+                        @php($lineItem = $line->saleLine?->item ?? $line->item)
+                        {{ $lineItem?->name }}
+                        @php($unit = ($line->saleLine?->itemUnit ?? $line->itemUnit)?->name ?? $lineItem?->unit)
                         @if($unit)
                             <span style="color: #888;">({{ $unit }})</span>
                         @endif
                     </td>
-                    <td class="text-right">{{ \App\Support\Money\Quantity::of($line->quantity)->formatQuantity() }}</td>
+                    <td class="text-right">
+                        {{ \App\Support\Money\Quantity::of($line->quantity)->formatQuantity() }}
+                        {{-- Bonus units come back at zero value (audit section 3 "Sales"). --}}
+                        @php($bonus = \App\Support\Money\Quantity::of($line->bonus_quantity ?? '0'))
+                        @if($bonus->isPositive())
+                            <span style="color: #888;">+ {{ $bonus->formatQuantity() }} free</span>
+                        @endif
+                    </td>
                     <td class="text-right">{{ \App\Support\Money\Quantity::of($line->rate)->formatRate() }}</td>
                     <td class="text-right">{{ \App\Support\Money\Money::of($line->line_total)->format() }}</td>
                 </tr>

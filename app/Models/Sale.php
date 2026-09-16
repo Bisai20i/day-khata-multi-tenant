@@ -11,6 +11,7 @@ use App\Support\Billing\DocumentTotals;
 use App\Support\Billing\LineTotals;
 use App\Support\Money\Money;
 use App\Support\Money\Quantity;
+use App\Support\SettlementNarration;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
@@ -321,7 +322,7 @@ class Sale extends Model
                     'date' => $data['date'],
                     'narration' => $data['narration'] ?? "Sale to {$customer->name}",
                 ],
-                static::voucherLines($customer, $totals, $paymentMode, $cashAmount, $bankAmount, $bankAccountId, $tdsAccountId, $agent, $commissionAmount),
+                static::voucherLines($customer, $totals, $preparedLines, $paymentMode, $cashAmount, $bankAmount, $bankAccountId, $tdsAccountId, $agent, $commissionAmount),
                 $actor,
             );
 
@@ -360,6 +361,17 @@ class Sale extends Model
 
             static::persistLines($sale, $preparedLines, $totals, $storeId, $data['date']);
 
+            // Every line of this voucher carries the same compact narration
+            // (audit section 3 "Sales", "ledger narrations"), so the
+            // customer's ledger reads "SL-42 - Cash Settlement" instead of a
+            // bare "Sale total"/"Settlement" and tells a sale from a receipt
+            // at a glance. Applied AFTER posting because the invoice number
+            // itself is derived from this same voucher's number (C7) - there
+            // is no way to know it before JournalVoucher::post() returns.
+            $voucher->lines()->update([
+                'narration' => SettlementNarration::line($sale->invoice_number, $paymentMode),
+            ]);
+
             return $sale;
         });
     }
@@ -397,10 +409,23 @@ class Sale extends Model
                 'conversion_factor' => $conversionFactor,
             ];
 
+            // Bonus/free quantity (audit section 3 "Sales"): extra pieces
+            // handed over at no charge alongside the paid quantity.
+            // Deliberately kept OUT of $calculatorLines above - the money
+            // side (revenue, VAT, discounts) is computed on the paid
+            // quantity only; only the stock movement sees the bonus
+            // (persistLines()/assertStockAvailable() below).
+            $bonusQuantity = Quantity::of($line['bonus_quantity'] ?? '0');
+
+            if ($bonusQuantity->isNegative()) {
+                throw new InvalidArgumentException('Bonus quantity cannot be negative.');
+            }
+
             $preparedLines[] = [
                 'item' => $item,
                 'item_unit_id' => $itemUnitId,
                 'raw_discount' => $line['discount'] ?? '0',
+                'bonus_quantity' => $bonusQuantity,
             ];
         }
 
@@ -423,11 +448,13 @@ class Sale extends Model
             /** @var LineTotals $line */
             $line = $totals->lines[$index];
             $item = $prepared['item'];
+            $bonusQuantity = $prepared['bonus_quantity'];
 
             $saleLine = $sale->lines()->create([
                 'item_id' => $item->id,
                 'item_unit_id' => $prepared['item_unit_id'],
                 'quantity' => $line->quantity,
+                'bonus_quantity' => $bonusQuantity,
                 'unit_conversion_factor' => $line->conversionFactor,
                 'rate' => $line->rate,
                 'discount' => $line->discountValue,
@@ -438,9 +465,15 @@ class Sale extends Model
             ]);
 
             if ($item->is_stockable) {
+                // The bonus quantity leaves the shelf exactly like the paid
+                // quantity does - it is real physical stock, just priced at
+                // zero - so the stock movement moves both, converted to base
+                // units by the same factor (audit section 3 "Sales").
+                $bonusBaseQuantity = $bonusQuantity->multipliedBy($line->conversionFactor);
+
                 $item->recordStockMovement(
                     StockMovementType::Sale,
-                    $line->baseQuantity,
+                    $line->baseQuantity->plus($bonusBaseQuantity),
                     $date,
                     $storeId,
                     $saleLine,
@@ -576,10 +609,16 @@ class Sale extends Model
                 continue;
             }
 
+            $line = $totals->lines[$index];
+            $bonusBaseQuantity = $prepared['bonus_quantity']->multipliedBy($line->conversionFactor);
+
             // Several lines can name the same item; the caps are checked
-            // against the whole bill's demand, not line by line.
+            // against the whole bill's demand, not line by line. Bonus units
+            // leave the shelf too (audit section 3 "Sales"), so they count
+            // against available stock exactly like the paid quantity.
             $requestedByItem[$item->id] = ($requestedByItem[$item->id] ?? Quantity::zero())
-                ->plus($totals->lines[$index]->baseQuantity);
+                ->plus($line->baseQuantity)
+                ->plus($bonusBaseQuantity);
         }
 
         if ($requestedByItem === []) {
@@ -658,15 +697,82 @@ class Sale extends Model
     }
 
     /**
+     * Revenue grouped by which account it belongs to (audit section 3
+     * "Sales", "service revenue"): an item with its own posting account
+     * (`items.account_id`, the same field T08 gave the purchase side, per
+     * `Item::account()`'s docblock) credits that account instead of the
+     * default Sales Revenue account (`INI20`) - a service item ("Repair
+     * Service Income", say) then shows up on its own ledger rather than
+     * mixed into general merchandise sales.
+     *
+     * The header discount is removed from the whole document, not per line,
+     * so it has to be allocated back across the lines (same largest-
+     * remainder rule as C3 step 4) before grouping - otherwise the sum of
+     * the per-account credits would overstate revenue by the discount and
+     * the voucher would not balance. `Money::allocate()` refuses a negative
+     * weight, which a negative-quantity in-bill adjustment line would be, so
+     * that (rare) combination falls back to the single INI20 credit this
+     * class always used before this feature existed rather than throwing.
+     *
+     * @param  array<int, array<string, mixed>>  $preparedLines
+     * @return array<int, Money> keyed by account_id, zero entries dropped
+     */
+    private static function revenueByAccount(array $preparedLines, DocumentTotals $totals, int $fallbackAccountId): array
+    {
+        $hasDistinctAccounts = false;
+        $hasNegativeLine = false;
+
+        foreach ($preparedLines as $prepared) {
+            if ($prepared['item']->account_id !== null) {
+                $hasDistinctAccounts = true;
+            }
+        }
+
+        $lineTotals = [];
+
+        foreach ($totals->lines as $line) {
+            $lineTotals[] = $line->lineTotal;
+
+            if ($line->lineTotal->isNegative()) {
+                $hasNegativeLine = true;
+            }
+        }
+
+        if (! $hasDistinctAccounts || $hasNegativeLine) {
+            $revenue = $totals->taxableAmount->plus($totals->nontaxableAmount);
+
+            return $revenue->isZero() ? [] : [$fallbackAccountId => $revenue];
+        }
+
+        $discount = $totals->headerDiscount;
+        $netPerLine = $discount->isZero() ? $lineTotals : array_map(
+            static fn (Money $line, Money $share): Money => $line->minus($share),
+            $lineTotals,
+            $discount->allocate($lineTotals),
+        );
+
+        $byAccount = [];
+
+        foreach ($preparedLines as $index => $prepared) {
+            $accountId = $prepared['item']->account_id ?? $fallbackAccountId;
+            $byAccount[$accountId] = ($byAccount[$accountId] ?? Money::zero())->plus($netPerLine[$index]);
+        }
+
+        return array_filter($byAccount, static fn (Money $amount): bool => ! $amount->isZero());
+    }
+
+    /**
      * The money side of the sale, unchanged in structure from before this
      * rewrite (the audit verified the account choices as correct) - only the
      * amounts differ, now exact Money strings rather than rounded floats.
      *
+     * @param  array<int, array<string, mixed>>  $preparedLines
      * @return array<int, array{account_id: int, debit: string, credit: string, narration: string}>
      */
     private static function voucherLines(
         Customer $customer,
         DocumentTotals $totals,
+        array $preparedLines,
         string $paymentMode,
         ?Money $cashAmount,
         ?Money $bankAmount,
@@ -681,8 +787,10 @@ class Sale extends Model
         $voucherLines[] = ['account_id' => $customer->account_id, 'debit' => $totals->total->toString(), 'credit' => $zero, 'narration' => 'Sale total'];
 
         $salesAccountId = Account::where('code', 'INI20')->firstOrFail()->id;
-        $revenue = $totals->taxableAmount->plus($totals->nontaxableAmount);
-        $voucherLines[] = ['account_id' => $salesAccountId, 'debit' => $zero, 'credit' => $revenue->toString(), 'narration' => 'Sales revenue'];
+
+        foreach (static::revenueByAccount($preparedLines, $totals, $salesAccountId) as $accountId => $amount) {
+            $voucherLines[] = ['account_id' => $accountId, 'debit' => $zero, 'credit' => $amount->toString(), 'narration' => 'Sales revenue'];
+        }
 
         if ($totals->vatAmount->isPositive()) {
             $vatPayableId = Account::where('code', 'LIA20')->firstOrFail()->id;

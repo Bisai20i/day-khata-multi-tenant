@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Tenant\Sales;
 use App\Http\Controllers\Controller;
 use App\Models\CompanySetting;
 use App\Models\Customer;
+use App\Models\Item;
 use App\Models\PrintLog;
 use App\Models\Sale;
 use App\Models\SalesReturn;
@@ -18,6 +19,8 @@ use Illuminate\Contracts\Pagination\LengthAwarePaginator;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\Response as HttpResponse;
+use Illuminate\Support\Arr;
+use Illuminate\Validation\Rule;
 use Inertia\Inertia;
 use Inertia\Response;
 use InvalidArgumentException;
@@ -54,11 +57,18 @@ class SalesReturnController extends Controller
 
         $returns = SalesReturn::query()
             ->whereIn('status', ['posted', 'cancelled'])
-            ->with(['sale:id,customer_id,invoice_number', 'sale.customer:id,name', 'lines.saleLine.item:id,name,unit'])
+            ->with([
+                'sale:id,customer_id,invoice_number', 'sale.customer:id,name',
+                // An unlinked return has no parent sale to read a customer or
+                // an item off (C7 "returns without a bill"), so its own
+                // `customer_id` and per-line `item_id` are loaded alongside.
+                'customer:id,name', 'lines.saleLine.item:id,name,unit', 'lines.item:id,name,unit',
+            ])
             ->when($from, fn ($query, string $from) => $query->whereDate('date', '>=', $from))
             ->when($to, fn ($query, string $to) => $query->whereDate('date', '<=', $to))
-            ->when($customerId, fn ($query, int $customerId) => $query->whereHas(
-                'sale', fn ($query) => $query->where('customer_id', $customerId)
+            ->when($customerId, fn ($query, int $customerId) => $query->where(
+                fn ($query) => $query->whereHas('sale', fn ($sale) => $sale->where('customer_id', $customerId))
+                    ->orWhere('customer_id', $customerId)
             ))
             ->orderByDesc('date')
             ->orderByDesc('id')
@@ -84,8 +94,18 @@ class SalesReturnController extends Controller
             'sales' => $this->salePicker($request),
             'selectedSale' => Inertia::optional(fn () => $this->selectedSale($request)),
             'customers' => Customer::query()->orderBy('name')->get(['id', 'name']),
+            // Unlinked returns (C7 "returns without a bill") price a line
+            // the same way a fresh sale would, so the form needs the same
+            // item picker Sales/Create.vue gets.
+            'items' => Item::query()->where('is_active', true)->orderBy('name')
+                ->with(['units' => fn ($q) => $q->where('is_active', true)->orderBy('name')])
+                ->get(['id', 'name', 'unit', 'is_vatable', 'is_stockable', 'sale_rate']),
+            'walkInCustomerId' => Customer::walkIn()?->id,
             'refundAccounts' => SalesReturn::refundAccountQuery()->orderBy('name')->get(['id', 'code', 'name']),
             'stores' => Store::where('is_active', true)->orderBy('name')->get(),
+            'invoiceSettings' => [
+                'default_vat_rate' => CompanySetting::current()->default_vat_rate,
+            ],
         ]);
     }
 
@@ -159,6 +179,44 @@ class SalesReturnController extends Controller
 
         try {
             SalesReturn::post($this->header($data), $data['lines'], $request->user());
+        } catch (InvalidArgumentException|AuthorizationException $e) {
+            return $this->failed($e);
+        }
+
+        return redirect()->route('tenant.sales-returns.index')->with('status', 'Sales return posted.');
+    }
+
+    /**
+     * A return with no bill this system ever issued to point at (audit
+     * section 3 "Sales", "returns without a bill") - see SalesReturn::
+     * postUnlinked()'s docblock. Always posts directly: there is no original
+     * invoice for a later approval step to re-check anything against.
+     */
+    public function storeUnlinked(Request $request): RedirectResponse
+    {
+        $data = $request->validate([
+            'customer_id' => ['required', 'integer', 'exists:customers,id'],
+            'date' => ['required', 'date'],
+            'reason' => ['nullable', 'string', 'max:255'],
+            'store_id' => ['nullable', 'integer', 'exists:stores,id'],
+            'refund_account_id' => ['nullable', 'integer', Rule::in(SalesReturn::refundAccountQuery()->pluck('id')->all())],
+            'refund_cash_amount' => ['nullable', 'decimal:0,2', 'min:0'],
+            'refund_bank_amount' => ['nullable', 'decimal:0,2', 'min:0'],
+            'expected_total' => ['nullable', 'string'],
+            'lines' => ['required', 'array', 'min:1'],
+            'lines.*.item_id' => ['required', 'exists:items,id'],
+            'lines.*.item_unit_id' => ['nullable', 'integer', 'exists:item_units,id'],
+            'lines.*.quantity' => ['required', 'decimal:0,4', 'gt:0'],
+            'lines.*.rate' => ['required', 'decimal:0,4', 'min:0'],
+            'lines.*.bonus_quantity' => ['nullable', 'decimal:0,4', 'min:0'],
+        ]);
+
+        try {
+            SalesReturn::postUnlinked(
+                Arr::except($data, ['lines']),
+                $data['lines'],
+                $request->user(),
+            );
         } catch (InvalidArgumentException|AuthorizationException $e) {
             return $this->failed($e);
         }
@@ -242,7 +300,14 @@ class SalesReturnController extends Controller
      * other. The `decimal` rules keep an input from carrying more decimals
      * than its column can hold (P0-5).
      *
-     * @return array{sale_id: int, date: string, reason: ?string, refund_account_id: ?int, store_id: ?int, expected_total: ?string, lines: array<int, array{sale_line_id: int, quantity: string}>}
+     * `refund_cash_amount`/`refund_bank_amount` are the optional split
+     * refund (audit section 4 polish): both must be present-or-absent
+     * together as far as this layer cares, with the exact "they add up to
+     * the customer credit" rule enforced where the credit is actually known
+     * - SalesReturn::postRefund() via DocumentCalculator::assertExactSplit()
+     * (C3). Leaving both blank keeps the original single-account behaviour.
+     *
+     * @return array{sale_id: int, date: string, reason: ?string, refund_account_id: ?int, refund_cash_amount: ?string, refund_bank_amount: ?string, store_id: ?int, expected_total: ?string, lines: array<int, array{sale_line_id: int, quantity: string, bonus_quantity?: string}>}
      */
     private function validatedReturn(Request $request): array
     {
@@ -251,17 +316,22 @@ class SalesReturnController extends Controller
             'date' => ['required', 'date'],
             'reason' => ['nullable', 'string', 'max:255'],
             'refund_account_id' => ['nullable', 'integer', 'exists:accounts,id'],
+            'refund_cash_amount' => ['nullable', 'decimal:0,2', 'min:0'],
+            'refund_bank_amount' => ['nullable', 'decimal:0,2', 'min:0'],
             'store_id' => ['nullable', 'integer', 'exists:stores,id'],
             'expected_total' => ['nullable', 'string'],
             'lines' => ['required', 'array', 'min:1'],
             'lines.*.sale_line_id' => ['required', 'integer', 'distinct', 'exists:sale_lines,id'],
             'lines.*.quantity' => ['required', 'numeric', 'decimal:0,4', 'min:0.0001'],
+            // Bonus/free units returned alongside the paid quantity (audit
+            // section 3 "Sales"): restocks, credits nothing.
+            'lines.*.bonus_quantity' => ['nullable', 'decimal:0,4', 'min:0'],
         ]);
     }
 
     /**
      * @param  array<string, mixed>  $data
-     * @return array{sale_id: int, date: string, reason: ?string, refund_account_id: ?int, store_id: ?int, expected_total: ?string}
+     * @return array{sale_id: int, date: string, reason: ?string, refund_account_id: ?int, refund_cash_amount: ?string, refund_bank_amount: ?string, store_id: ?int, expected_total: ?string}
      */
     private function header(array $data): array
     {
@@ -270,6 +340,8 @@ class SalesReturnController extends Controller
             'date' => $data['date'],
             'reason' => $data['reason'] ?? null,
             'refund_account_id' => $data['refund_account_id'] ?? null,
+            'refund_cash_amount' => $data['refund_cash_amount'] ?? null,
+            'refund_bank_amount' => $data['refund_bank_amount'] ?? null,
             'store_id' => $data['store_id'] ?? null,
             'expected_total' => $data['expected_total'] ?? null,
         ];
@@ -305,6 +377,10 @@ class SalesReturnController extends Controller
     {
         $salesReturn->load([
             'sale.customer', 'lines.saleLine.item', 'lines.saleLine.itemUnit',
+            // An unlinked note names its own customer, items and units
+            // (C7 "returns without a bill"): there is no sale to inherit
+            // any of them from, so the view falls back to these.
+            'customer', 'lines.item', 'lines.itemUnit',
             'journalVoucher', 'refundAccount', 'fiscalYear',
         ]);
 

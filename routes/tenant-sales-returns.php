@@ -21,6 +21,11 @@ Route::name('tenant.')->group(function () {
     Route::prefix('sales-returns')->name('sales-returns.')->group(function () {
         Route::get('/', [SalesReturnController::class, 'index'])->name('index');
         Route::post('/', [SalesReturnController::class, 'store'])->name('store');
+        // A return with no bill this system ever issued to point at (audit
+        // section 3 "Sales", "returns without a bill") - see SalesReturn::
+        // postUnlinked(). Always posts directly, so it has no request/
+        // approve counterpart.
+        Route::post('/unlinked', [SalesReturnController::class, 'storeUnlinked'])->name('store-unlinked');
         // Request/approve/reject: the two-step "request first, post only on
         // approval" workflow (see SalesReturn::request()'s docblock) -
         // request() never posts anything, approve() posts exactly what a

@@ -31,6 +31,7 @@ import {
     parseMoney,
     parseQuantity,
     percentOf,
+    rateExcludingVat,
     subtractMoney,
     sumMoney,
 } from '../../resources/js/lib/money.js';
@@ -289,6 +290,48 @@ test('formatting follows the Indian convention', () => {
     assert.equal(formatRate('12.3456'), '12.3456');
     assert.equal(formatRate('12'), '12.00');
     assert.equal(formatRate('12.3400'), '12.34');
+});
+
+test('an MRP is turned back into a VAT-exclusive rate exactly', () => {
+    // The case the whole feature exists for: a Rs 113 sticker price at 13% is
+    // a rate of exactly 100, not 99.9999 and not 100.0001 (a float divide gives
+    // 99.99999999999999).
+    assert.deepEqual(rateExcludingVat('113', '13'), { ok: true, value: '100.0000' });
+    assert.deepEqual(rateExcludingVat('113.00', '13.00'), { ok: true, value: '100.0000' });
+    assert.deepEqual(rateExcludingVat(113, 13), { ok: true, value: '100.0000' });
+
+    // No VAT to strip: an exempt line, or any line on a PAN invoice.
+    assert.deepEqual(rateExcludingVat('113', '0'), { ok: true, value: '113.0000' });
+
+    // A quotient that does not land on 4 decimals rounds HalfUp exactly once:
+    // 100 / 1.13 = 88.495575..., and 565 / 1.13 = 500 exactly.
+    assert.deepEqual(rateExcludingVat('100', '13'), { ok: true, value: '88.4956' });
+    assert.deepEqual(rateExcludingVat('565', '13'), { ok: true, value: '500.0000' });
+    assert.deepEqual(rateExcludingVat('0', '13'), { ok: true, value: '0.0000' });
+
+    // 1.005 at 0% VAT would round to 1.0050 if it were allowed at all, but the
+    // scale guard rejects an MRP with more decimals than a rate column holds.
+    assert.deepEqual(rateExcludingVat('1.00005', '13'), { ok: false, reason: 'too_many_decimals' });
+    assert.deepEqual(rateExcludingVat('abc', '13'), { ok: false, reason: 'invalid_number' });
+    assert.deepEqual(rateExcludingVat('', '13'), { ok: false, reason: 'invalid_number' });
+    assert.deepEqual(rateExcludingVat('-113', '13'), { ok: false, reason: 'negative_rate' });
+    assert.deepEqual(rateExcludingVat('113', '-1'), { ok: false, reason: 'percentage_out_of_range' });
+    assert.deepEqual(rateExcludingVat('113', '101'), { ok: false, reason: 'percentage_out_of_range' });
+    assert.deepEqual(rateExcludingVat('113', '13.005'), { ok: false, reason: 'too_many_decimals' });
+});
+
+test('an MRP-derived rate reprices to the MRP through the document calculator', () => {
+    // The round trip the cashier actually sees: MRP 113 becomes rate 100, and
+    // one unit at that rate bills 100 + 13 VAT = 113, the sticker price.
+    const rate = rateExcludingVat('113', '13');
+    assert.equal(rate.ok, true);
+
+    const result = calculateDocument([{ quantity: '1', rate: rate.value, vatable: true }], { vat_rate: '13' });
+
+    assert.equal(result.ok, true);
+    assert.equal(result.totals.taxable_amount, '100.00');
+    assert.equal(result.totals.vat_amount, '13.00');
+    assert.equal(result.totals.total, '113.00');
 });
 
 // ---------------------------------------------------------------------------

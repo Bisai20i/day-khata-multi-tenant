@@ -24,9 +24,16 @@ use Illuminate\Support\Facades\Route;
 Route::name('tenant.')->group(function () {
     Route::prefix('sales')->name('sales.')->group(function () {
         Route::get('/', [SaleController::class, 'index'])->name('index');
+        Route::get('/export', [SaleController::class, 'export'])->name('export');
         Route::post('/', [SaleController::class, 'store'])->name('store');
         Route::post('/{sale}/cancel', [SaleController::class, 'cancel'])->middleware('role:admin')->name('cancel');
         Route::get('/{sale}/print', [SaleController::class, 'print'])->name('print');
+        // Sale::create()'s saved-note picker (audit section 4 polish, "note
+        // templates") - a simple, admin-free CRUD kept inside the Sales
+        // module rather than under Settings, per the task's own "or a
+        // simple page under Sales" option.
+        Route::post('/note-templates', [SaleController::class, 'storeNoteTemplate'])->name('note-templates.store');
+        Route::delete('/note-templates/{saleNoteTemplate}', [SaleController::class, 'destroyNoteTemplate'])->name('note-templates.destroy');
     });
 
     Route::prefix('capital-sales')->name('capital-sales.')->group(function () {

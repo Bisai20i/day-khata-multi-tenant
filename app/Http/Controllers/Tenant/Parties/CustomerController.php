@@ -50,6 +50,13 @@ class CustomerController extends Controller
 
     public function destroy(Customer $customer): RedirectResponse
     {
+        // The walk-in customer is a system default every POS sale and
+        // abbreviated invoice can fall back to (audit section 3 "Sales");
+        // deleting it would break that default for every future sale.
+        if ($customer->is_walk_in) {
+            return back()->withErrors(['customer' => 'The walk-in customer cannot be deleted.']);
+        }
+
         $customer->delete();
 
         return redirect()->route('tenant.customers.index')->with('status', 'Customer deleted.');

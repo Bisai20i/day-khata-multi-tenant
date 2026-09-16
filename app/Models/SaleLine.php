@@ -7,7 +7,7 @@ use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
-#[Fillable(['sale_id', 'item_id', 'item_unit_id', 'quantity', 'unit_conversion_factor', 'rate', 'discount', 'discount_type', 'discount_amount', 'vatable', 'line_total'])]
+#[Fillable(['sale_id', 'item_id', 'item_unit_id', 'quantity', 'bonus_quantity', 'unit_conversion_factor', 'rate', 'discount', 'discount_type', 'discount_amount', 'vatable', 'line_total'])]
 class SaleLine extends Model
 {
     /**
@@ -17,6 +17,11 @@ class SaleLine extends Model
     {
         return [
             'quantity' => Decimal::class.':4',
+            // The extra, free-of-charge quantity handed over alongside
+            // `quantity` (audit section 3 "Sales", "bonus/free quantity").
+            // Never priced: DocumentCalculator never sees it, only the stock
+            // movement does (Sale::post()).
+            'bonus_quantity' => Decimal::class.':4',
             'unit_conversion_factor' => Decimal::class.':4',
             'rate' => Decimal::class.':4',
             'discount' => Decimal::class.':2',

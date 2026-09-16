@@ -3,6 +3,7 @@
 use App\Enums\FiscalYearStatus;
 use App\Enums\StockMovementType;
 use App\Models\Account;
+use App\Models\AccountGroup;
 use App\Models\CompanySetting;
 use App\Models\Customer;
 use App\Models\FiscalYear;
@@ -423,7 +424,10 @@ test('a return with a refund account posts a refund settlement voucher and nets 
         $admin = salesReturnTestAdmin();
         $customer = Customer::factory()->create();
         $item = Item::factory()->create(['is_vatable' => true, 'is_stockable' => false]);
-        $bankAccount = Account::factory()->create();
+        $bankAccount = Account::factory()->create([
+            'account_group_id' => AccountGroup::where('name', 'Current Assets')->firstOrFail()->id,
+            'account_subgroup_id' => null,
+        ]);
 
         // Cash sale: fully settled at posting, so a full return leaves the
         // customer with a credit balance until refunded.

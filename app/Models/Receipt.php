@@ -6,6 +6,7 @@ use App\Casts\Decimal;
 use App\Enums\VoucherType;
 use App\Support\ClosedFiscalYearGuard;
 use App\Support\Money\Money;
+use App\Support\SettlementNarration;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
@@ -172,6 +173,15 @@ class Receipt extends Model
                 ],
                 $actor,
             );
+
+            // Every line of this voucher carries the same compact narration
+            // (audit section 3 "Sales", "ledger narrations"), so the
+            // customer's ledger reads "{voucher number} - Cash Settlement"
+            // instead of a bare "Amount received"/"Settlement" and tells a
+            // receipt apart from a sale at a glance.
+            $voucher->lines()->update([
+                'narration' => SettlementNarration::line($voucher->voucher_number, $paymentMode),
+            ]);
 
             $receipt = static::create([
                 'customer_id' => $customer->id,

@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers\Tenant\Sales;
 
+use App\Exports\SalesExport;
 use App\Http\Controllers\Controller;
 use App\Models\Account;
 use App\Models\Agent;
@@ -10,6 +11,7 @@ use App\Models\Customer;
 use App\Models\Item;
 use App\Models\PrintLog;
 use App\Models\Sale;
+use App\Models\SaleNoteTemplate;
 use App\Models\Store;
 use App\Support\AmountInWords;
 use App\Support\Billing\BillingException;
@@ -28,6 +30,7 @@ use Illuminate\Validation\ValidationException;
 use Inertia\Inertia;
 use Inertia\Response;
 use InvalidArgumentException;
+use Maatwebsite\Excel\Facades\Excel;
 
 class SaleController extends Controller
 {
@@ -40,43 +43,61 @@ class SaleController extends Controller
     private const PARTY_SUBGROUPS = ['Sundry Debtors', 'Sundry Creditors', 'Sales Agents'];
 
     /**
-     * Listing is server-side filtered (date range + customer) and paginated
-     * - same `when()`/`paginate()->withQueryString()` shape
-     * Central\Tenants\TenantController::index() established, so it stays
-     * consistent across the app rather than loading every sale unfiltered
-     * (a real usability problem once invoice history grows).
+     * Sortable columns for the list (audit section 4 polish, "list ...
+     * sorting"), whitelisted rather than taking `sort` straight off the
+     * request - the same reasoning as `storeRules()`'s `Rule::in()` pickers
+     * below: a raw column name from the browser must never reach `orderBy()`.
+     *
+     * @var array<string, string>
+     */
+    /**
+     * How many copies one "Save & Print N copies" job may produce. A cap
+     * exists because every copy is a rendered PDF page AND a print-log row:
+     * an accidental 500 would both hang the request and pollute the print
+     * log, and no counter in a shop needs more than a handful of sheets.
+     */
+    private const MAX_PRINT_COPIES = 5;
+
+    private const SORTABLE_COLUMNS = [
+        'date' => 'date',
+        'invoice_number' => 'invoice_number',
+        'total' => 'total',
+    ];
+
+    /**
+     * Listing is server-side filtered (date range + customer + invoice
+     * number search), sorted and paginated - same `when()`/
+     * `paginate()->withQueryString()` shape Central\Tenants\TenantController
+     * ::index() established, so it stays consistent across the app rather
+     * than loading every sale unfiltered (a real usability problem once
+     * invoice history grows).
      */
     public function index(Request $request): Response
     {
-        $from = $request->filled('from') ? $request->string('from')->toString() : null;
-        $to = $request->filled('to') ? $request->string('to')->toString() : null;
-        $customerId = $request->filled('customer_id') ? (int) $request->input('customer_id') : null;
-
+        $filters = $this->listFilters($request);
         $settings = CompanySetting::current();
 
-        $sales = Sale::query()
+        $sales = $this->filteredSalesQuery($filters)
             ->with(['customer:id,name', 'agent:id,name', 'lines.item:id,name,unit'])
-            ->when($from, fn ($query, string $from) => $query->whereDate('date', '>=', $from))
-            ->when($to, fn ($query, string $to) => $query->whereDate('date', '<=', $to))
-            ->when($customerId, fn ($query, int $customerId) => $query->where('customer_id', $customerId))
-            ->orderByDesc('date')
-            ->orderByDesc('id')
             ->paginate(25)
             ->withQueryString();
 
         return Inertia::render('Tenant/Sales/Index', [
             'sales' => $sales,
-            'filters' => [
-                'from' => $from,
-                'to' => $to,
-                'customer_id' => $customerId,
-            ],
+            'filters' => $filters,
+            // Exact SQL sums over the same filtered/searched set the page
+            // lists (never a page's worth of client-side addition), so the
+            // totals row always ties to what is actually on screen (audit
+            // section 4 polish, "list ... totals row").
+            'totals' => $this->filteredTotals($filters),
             'customers' => Customer::query()->orderBy('name')->get(['id', 'name', 'mobile_no']),
             'items' => $this->itemsForPicker(),
             'bankAccounts' => $this->settlementAccounts(),
             'tdsAccounts' => $this->settlementAccounts(),
             'stores' => Store::where('is_active', true)->orderBy('name')->get(['id', 'name']),
             'agents' => Agent::query()->where('is_active', true)->orderBy('name')->get(['id', 'name', 'commission_rate']),
+            'noteTemplates' => SaleNoteTemplate::query()->orderBy('text')->get(['id', 'text']),
+            'walkInCustomerId' => Customer::walkIn()?->id,
             'invoiceSettings' => [
                 'default_vat_rate' => $settings->default_vat_rate,
                 'default_store_id' => $settings->default_store_id,
@@ -85,6 +106,117 @@ class SaleController extends Controller
                 'sale_pan_enabled' => (bool) $settings->sale_pan_enabled,
             ],
         ]);
+    }
+
+    /**
+     * @return array{from: ?string, to: ?string, customer_id: ?int, search: ?string, sort: string, sort_dir: string}
+     */
+    private function listFilters(Request $request): array
+    {
+        $sort = $request->string('sort')->toString();
+        $sortDir = $request->string('sort_dir')->toString();
+
+        return [
+            'from' => $request->filled('from') ? $request->string('from')->toString() : null,
+            'to' => $request->filled('to') ? $request->string('to')->toString() : null,
+            'customer_id' => $request->filled('customer_id') ? (int) $request->input('customer_id') : null,
+            // Invoice number search (audit section 4 polish, "list ...
+            // search by invoice number") - a partial, case-insensitive match
+            // against the stored number (C7), never a re-derived one.
+            'search' => $request->filled('search') ? trim($request->string('search')->toString()) : null,
+            'sort' => array_key_exists($sort, self::SORTABLE_COLUMNS) ? $sort : 'date',
+            'sort_dir' => $sortDir === 'asc' ? 'asc' : 'desc',
+        ];
+    }
+
+    /**
+     * @param  array{from: ?string, to: ?string, customer_id: ?int, search: ?string, sort: string, sort_dir: string}  $filters
+     * @return Builder<Sale>
+     */
+    private function filteredSalesQuery(array $filters): Builder
+    {
+        $sortColumn = self::SORTABLE_COLUMNS[$filters['sort']];
+
+        return Sale::query()
+            ->when($filters['from'], fn ($query, string $from) => $query->whereDate('date', '>=', $from))
+            ->when($filters['to'], fn ($query, string $to) => $query->whereDate('date', '<=', $to))
+            ->when($filters['customer_id'], fn ($query, int $customerId) => $query->where('customer_id', $customerId))
+            ->when($filters['search'], fn ($query, string $search) => $query->where('invoice_number', 'like', "%{$search}%"))
+            ->orderBy($sortColumn, $filters['sort_dir'])
+            ->orderByDesc('id');
+    }
+
+    /**
+     * @param  array{from: ?string, to: ?string, customer_id: ?int, search: ?string, sort: string, sort_dir: string}  $filters
+     * @return array<string, string>
+     */
+    private function filteredTotals(array $filters): array
+    {
+        $row = $this->filteredSalesQuery($filters)->toBase()->selectRaw(
+            'COALESCE(SUM(taxable_amount), 0) as taxable_amount, '
+            .'COALESCE(SUM(nontaxable_amount), 0) as nontaxable_amount, '
+            .'COALESCE(SUM(vat_amount), 0) as vat_amount, '
+            .'COALESCE(SUM(total), 0) as total'
+        )->first();
+
+        return [
+            'taxable_amount' => Money::round($row->taxable_amount)->toString(),
+            'nontaxable_amount' => Money::round($row->nontaxable_amount)->toString(),
+            'vat_amount' => Money::round($row->vat_amount)->toString(),
+            'total' => Money::round($row->total)->toString(),
+        ];
+    }
+
+    /**
+     * Excel export of the same filtered/sorted/searched set index() shows
+     * (audit section 4 polish, "list export"), every row and never a
+     * paginated page's worth.
+     */
+    public function export(Request $request)
+    {
+        $filters = $this->listFilters($request);
+
+        $rows = $this->filteredSalesQuery($filters)
+            ->with(['customer:id,name', 'agent:id,name'])
+            ->get()
+            ->map(fn (Sale $sale): array => [
+                'date' => $sale->date->format('Y-m-d'),
+                'invoice_number' => $sale->invoice_number,
+                'invoice_type' => ucfirst($sale->invoice_type),
+                'customer' => $sale->customer?->name,
+                'agent' => $sale->agent?->name,
+                'payment_mode' => ucfirst($sale->payment_mode),
+                'status' => ucfirst($sale->status),
+                'taxable_amount' => $sale->taxable_amount,
+                'nontaxable_amount' => $sale->nontaxable_amount,
+                'vat_amount' => $sale->vat_amount,
+                'total' => $sale->total,
+            ]);
+
+        return Excel::download(new SalesExport($rows, $this->filteredTotals($filters)), 'sales.xlsx');
+    }
+
+    /**
+     * Saves a note template (audit section 4 polish, "note templates and
+     * per-line notes") - a tiny, admin-free CRUD any tenant user may grow,
+     * matching how items/customers/etc. are already managed in this app.
+     */
+    public function storeNoteTemplate(Request $request): RedirectResponse
+    {
+        $data = $request->validate([
+            'text' => ['required', 'string', 'max:500'],
+        ]);
+
+        SaleNoteTemplate::create($data);
+
+        return back()->with('status', 'Note template saved.');
+    }
+
+    public function destroyNoteTemplate(SaleNoteTemplate $saleNoteTemplate): RedirectResponse
+    {
+        $saleNoteTemplate->delete();
+
+        return back()->with('status', 'Note template deleted.');
     }
 
     /**
@@ -301,6 +433,10 @@ class SaleController extends Controller
             'lines.*.rate' => ['required', 'decimal:0,4', 'min:0'],
             'lines.*.discount' => ['nullable', 'decimal:0,2', 'min:0'],
             'lines.*.discount_type' => ['nullable', 'in:percentage,flat'],
+            // Bonus/free quantity (audit section 3 "Sales"): moves stock,
+            // never money - Sale::post() keeps it entirely out of
+            // DocumentCalculator's input.
+            'lines.*.bonus_quantity' => ['nullable', 'decimal:0,4', 'min:0'],
         ];
     }
 
@@ -333,13 +469,21 @@ class SaleController extends Controller
      * customer (C7, C9, audit P0-8 and the "Invoice and IRD compliance"
      * cluster). PrintLog::record() returns the copy number, so a reprint is
      * stamped as a copy rather than passing as a second original.
+     *
+     * "Save & Print N copies" (audit section 4 polish): `?copies=N` renders
+     * the bill N times into ONE streamed document, one copy per page, and
+     * records N separate print-log rows - so the first sheet of a brand new
+     * bill is the Original and sheets 2..N are stamped "Copy of Original"
+     * with their own numbers (C9). Recording one row per sheet, rather than
+     * one row for the whole job, is what keeps the print-log report an
+     * honest count of how many pieces of paper carry this invoice.
      */
     public function print(Request $request, Sale $sale): HttpResponse
     {
         $sale->load(['customer', 'agent', 'bankAccount', 'lines.item', 'lines.itemUnit', 'journalVoucher', 'fiscalYear']);
 
         $company = CompanySetting::current();
-        $copyNumber = PrintLog::record($sale, $request->user());
+        $copies = min(max($request->integer('copies', 1), 1), self::MAX_PRINT_COPIES);
 
         // Thermal paper sizes get a lightweight narrow-column receipt layout
         // instead of the full A4/A5 letterhead invoice - dompdf has no
@@ -348,7 +492,7 @@ class SaleController extends Controller
         // unbounded height for a continuous thermal roll.
         $isThermal = in_array($company->print_paper_size, ['58mm', '80mm'], true);
 
-        $pdf = Pdf::loadView($isThermal ? 'pdf.sale-receipt' : 'pdf.sale', [
+        $viewData = [
             'sale' => $sale,
             'company' => $company,
             'documentNumber' => $sale->invoice_number ?? "#{$sale->id}",
@@ -356,9 +500,19 @@ class SaleController extends Controller
             'dateAd' => $sale->date->format('Y-m-d'),
             'dateBs' => NepaliCalendar::formatBs($sale->date),
             'fiscalYearName' => $sale->fiscalYear?->name,
-            'copyNumber' => $copyNumber,
             'amountInWords' => AmountInWords::rupees(Money::of($sale->total)),
-        ]);
+        ];
+
+        $rendered = [];
+
+        for ($copy = 0; $copy < $copies; $copy++) {
+            $rendered[] = view(
+                $isThermal ? 'pdf.sale-receipt' : 'pdf.sale',
+                $viewData + ['copyNumber' => PrintLog::record($sale, $request->user())],
+            )->render();
+        }
+
+        $pdf = Pdf::loadHTML($this->stitchedCopies($rendered));
 
         if ($isThermal) {
             $width = $company->print_paper_size === '58mm' ? 164 : 227;
@@ -366,5 +520,61 @@ class SaleController extends Controller
         }
 
         return $pdf->stream("sale-{$sale->id}.pdf");
+    }
+
+    /**
+     * Joins several fully rendered copies of the same bill into one HTML
+     * document: the first copy keeps its `<head>` (and therefore every style
+     * rule and `@page` size the layout sets), and each later copy
+     * contributes only its `<body>` content after a hard page break. Merging
+     * the rendered HTML rather than the finished PDFs keeps this free of a
+     * PDF-merging dependency, and leaves each copy's own "Copy of Original"
+     * stamp exactly as its view rendered it.
+     *
+     * @param  list<string>  $documents
+     */
+    private function stitchedCopies(array $documents): string
+    {
+        $first = array_shift($documents) ?? '';
+
+        if ($documents === []) {
+            return $first;
+        }
+
+        $extra = '';
+
+        foreach ($documents as $document) {
+            $extra .= '<div style="page-break-before: always;"></div>'.$this->bodyContent($document);
+        }
+
+        $closingBody = strripos($first, '</body>');
+
+        return $closingBody === false
+            ? $first.$extra
+            : substr($first, 0, $closingBody).$extra.substr($first, $closingBody);
+    }
+
+    /**
+     * Everything between `<body ...>` and `</body>` of a rendered document,
+     * or the whole document when it has no body tag at all (nothing in this
+     * app renders that way today, but a fragment must still print rather
+     * than vanish).
+     */
+    private function bodyContent(string $document): string
+    {
+        $openTag = stripos($document, '<body');
+        $closingBody = strripos($document, '</body>');
+
+        if ($openTag === false || $closingBody === false) {
+            return $document;
+        }
+
+        $bodyStart = strpos($document, '>', $openTag);
+
+        if ($bodyStart === false || $bodyStart > $closingBody) {
+            return $document;
+        }
+
+        return substr($document, $bodyStart + 1, $closingBody - $bodyStart - 1);
     }
 }

@@ -397,6 +397,57 @@ export function percentOf(money, pct) {
 }
 
 /**
+ * The VAT-exclusive rate behind a VAT-inclusive price: the MRP entry on Sales/Create and the
+ * POS (audit section 3 "Sales", "MRP / VAT-inclusive entry"). A shopkeeper knows the sticker
+ * price of Rs 113 and wants the bill to carry rate 100 plus 13 VAT, not 113 plus 14.69.
+ *
+ *     rate = mrp / (1 + vat / 100) = mrp x 100 / (100 + vat)
+ *
+ * This is the module's ONLY division by a user-supplied value, and it is offered where
+ * recovering a discount percentage from a rupee amount deliberately is not (see the
+ * toggleLineDiscountType() comments on the sales screens). The difference is that this
+ * quotient is the number the bill is actually built from: the result is stored as the line's
+ * rate, so it goes through exactly one HalfUp rounding to 4dp here and is never rounded
+ * again, while a recovered percentage would silently re-round every later recalculation.
+ *
+ * Both sides of the fraction are exact integers (the price at quantity scale, 100 + vat at
+ * percent scale), so nothing rounds before the single `divideRoundHalfUp` below. The rate is
+ * an estimate of the seller's intent, not a reconciliation: rate x qty x (1 + vat) need not
+ * return to the MRP to the paisa for every quantity, which is exactly why the SERVER is sent
+ * the rate and never the MRP - the browser decides the rate once, the server prices the bill
+ * from it like any other typed rate.
+ *
+ * `vatRate` is 0 for a non-vatable line or a PAN invoice, where the rate is the MRP itself.
+ *
+ * @param {string|number} inclusiveRate the MRP, at most 4 decimals
+ * @param {string|number} vatRate percentage, 0 to 100, at most 2 decimals
+ * @returns {{ok: true, value: string}|{ok: false, reason: string}} `value` is a 4dp rate
+ *   string, e.g. `"100.0000"`.
+ */
+export function rateExcludingVat(inclusiveRate, vatRate) {
+    const price = parseScaled(inclusiveRate, QUANTITY_SCALE);
+    if (!price.ok) {
+        return price;
+    }
+    if (price.value < 0n) {
+        return { ok: false, reason: 'negative_rate' };
+    }
+
+    const percent = parseScaled(vatRate, PERCENT_SCALE);
+    if (!percent.ok) {
+        return percent;
+    }
+    if (percent.value < 0n || percent.value > ONE_HUNDRED_PERCENT) {
+        return { ok: false, reason: 'percentage_out_of_range' };
+    }
+
+    // (scale 4 x scale 2) / scale 2 lands back on scale 4 with one rounding.
+    const quotient = divideRoundHalfUp(price.value * ONE_HUNDRED_PERCENT, ONE_HUNDRED_PERCENT + percent.value);
+
+    return { ok: true, value: toScaledString(quotient, QUANTITY_SCALE) };
+}
+
+/**
  * Splits `amount` into parts proportional to `weights`, largest remainder at 0.01, so the
  * parts sum back to `amount` exactly. A negative amount allocates its absolute value and
  * negates every part. All-zero or negative weights throw.

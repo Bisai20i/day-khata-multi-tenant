@@ -169,10 +169,13 @@ const columns = [
         id: 'actions',
         header: 'Actions',
         numeric: false,
+        // The walk-in customer (CustomerController::destroy() also refuses
+        // this server-side) has no delete action at all, rather than one
+        // that always fails.
         cell: ({ row }) =>
             h(RowActions, {
                 onEdit: () => openEdit(row.original),
-                onDelete: () => destroyCustomer(row.original),
+                onDelete: row.original.is_walk_in ? undefined : () => destroyCustomer(row.original),
             }),
     },
 ];

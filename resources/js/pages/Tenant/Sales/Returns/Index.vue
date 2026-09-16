@@ -42,6 +42,11 @@ const props = defineProps({
     customers: { type: Array, default: () => [] },
     refundAccounts: { type: Array, default: () => [] },
     stores: { type: Array, default: () => [] },
+    // Forwarded to Create.vue's unlinked mode only - see its own props doc
+    // (audit section 3 "Sales", "returns without a bill").
+    items: { type: Array, default: () => [] },
+    walkInCustomerId: { type: Number, default: null },
+    invoiceSettings: { type: Object, default: () => ({ default_vat_rate: '13.00' }) },
 });
 
 const customerOptions = computed(() => props.customers.map((customer) => ({ value: customer.id, label: customer.name })));
@@ -274,13 +279,20 @@ const columns = [
         id: 'sale',
         header: 'Against invoice',
         numeric: false,
-        cell: ({ row }) => row.original.sale?.invoice_number ?? `#${row.original.sale_id}`,
+        // An unlinked note points at no invoice at all (C7 "returns without
+        // a bill"), so it says so rather than inventing a "#null".
+        cell: ({ row }) =>
+            row.original.is_unlinked
+                ? 'No original bill'
+                : (row.original.sale?.invoice_number ?? `#${row.original.sale_id}`),
     },
     {
         id: 'customer',
         header: 'Customer',
         numeric: false,
-        cell: ({ row }) => row.original.sale?.customer?.name ?? '—',
+        // Linked notes read the customer off the sale; an unlinked one
+        // carries its own.
+        cell: ({ row }) => row.original.sale?.customer?.name ?? row.original.customer?.name ?? '—',
     },
     {
         id: 'reason',
@@ -359,6 +371,10 @@ const columns = [
                 :sale-search="saleSearch"
                 :refund-accounts="refundAccounts"
                 :stores="stores"
+                :items="items"
+                :customers="customers"
+                :walk-in-customer-id="walkInCustomerId"
+                :invoice-settings="invoiceSettings"
                 :mode="createMode"
                 @cancel="createMode = null"
                 @posted="createMode = null"
@@ -372,6 +388,13 @@ const columns = [
                     <Button variant="secondary" tone="purple" @click="createMode = 'request'">
                         <Plus class="size-4" />
                         Request return
+                    </Button>
+                    <!-- Goods back with no bill this system ever issued
+                         (audit section 3 "Sales") - posts immediately, so it
+                         has no request/approve counterpart. -->
+                    <Button variant="secondary" tone="purple" @click="createMode = 'unlinked'">
+                        <Plus class="size-4" />
+                        Return without a bill
                     </Button>
                     <Button variant="primary" tone="purple" @click="createMode = 'post'">
                         <Plus class="size-4" />

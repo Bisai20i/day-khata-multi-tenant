@@ -26,7 +26,14 @@ const props = defineProps({
     },
     filters: {
         type: Object,
-        default: () => ({ from: null, to: null, customer_id: null }),
+        default: () => ({ from: null, to: null, customer_id: null, search: null, sort: 'date', sort_dir: 'desc' }),
+    },
+    // Exact SQL sums over the whole filtered set, computed server-side
+    // (SaleController::filteredTotals()) - never a page's worth of
+    // client-side addition (audit section 4 polish, "totals row").
+    totals: {
+        type: Object,
+        default: () => ({ taxable_amount: '0.00', nontaxable_amount: '0.00', vat_amount: '0.00', total: '0.00' }),
     },
     customers: { type: Array, default: () => [] },
     items: { type: Array, default: () => [] },
@@ -34,6 +41,10 @@ const props = defineProps({
     tdsAccounts: { type: Array, default: () => [] },
     stores: { type: Array, default: () => [] },
     agents: { type: Array, default: () => [] },
+    // Forwarded straight to Create.vue - see its own props doc (audit
+    // section 3 "Sales" walk-in customer, section 4 polish "note templates").
+    noteTemplates: { type: Array, default: () => [] },
+    walkInCustomerId: { type: Number, default: null },
     invoiceSettings: {
         type: Object,
         default: () => ({
@@ -52,21 +63,73 @@ const filterState = reactive({
     from: props.filters.from ?? '',
     to: props.filters.to ?? '',
     customer_id: props.filters.customer_id ?? null,
+    // Invoice number search (audit section 4 polish) - matched server-side
+    // against the stored number (C7).
+    search: props.filters.search ?? '',
 });
 const filtering = ref(false);
 
+/**
+ * Sorting is server-side, over the whole filtered set: the table's own
+ * header sort would only reorder the 25 rows of the current page, which on a
+ * list this long reads as a wrong answer.
+ */
+const sortColumns = [
+    { value: 'date', label: 'Date' },
+    { value: 'invoice_number', label: 'Invoice #' },
+    { value: 'total', label: 'Total' },
+];
+
+const sortState = reactive({
+    sort: props.filters.sort ?? 'date',
+    sort_dir: props.filters.sort_dir ?? 'desc',
+});
+
+function queryParams(overrides = {}) {
+    return {
+        from: filterState.from || undefined,
+        to: filterState.to || undefined,
+        customer_id: filterState.customer_id || undefined,
+        search: filterState.search || undefined,
+        sort: sortState.sort || undefined,
+        sort_dir: sortState.sort_dir || undefined,
+        ...overrides,
+    };
+}
+
+function reload() {
+    router.get(window.location.pathname, queryParams(), {
+        preserveState: true,
+        preserveScroll: true,
+        onStart: () => (filtering.value = true),
+        onFinish: () => (filtering.value = false),
+    });
+}
+
 function applyFilters() {
-    router.get(
-        window.location.pathname,
-        { from: filterState.from || undefined, to: filterState.to || undefined, customer_id: filterState.customer_id || undefined },
-        { preserveState: true, preserveScroll: true, onStart: () => (filtering.value = true), onFinish: () => (filtering.value = false) },
-    );
+    reload();
+}
+
+// Clicking the column you are already sorted by flips the direction, the way
+// a sortable table header behaves.
+function sortBy(column) {
+    if (sortState.sort === column) {
+        sortState.sort_dir = sortState.sort_dir === 'asc' ? 'desc' : 'asc';
+    } else {
+        sortState.sort = column;
+        sortState.sort_dir = column === 'date' ? 'desc' : 'asc';
+    }
+
+    reload();
 }
 
 function clearFilters() {
     filterState.from = '';
     filterState.to = '';
     filterState.customer_id = null;
+    filterState.search = '';
+    sortState.sort = 'date';
+    sortState.sort_dir = 'desc';
     router.get(
         window.location.pathname,
         {},
@@ -74,7 +137,36 @@ function clearFilters() {
     );
 }
 
-const hasActiveFilters = computed(() => !!(props.filters.from || props.filters.to || props.filters.customer_id));
+const hasActiveFilters = computed(
+    () => !!(props.filters.from || props.filters.to || props.filters.customer_id || props.filters.search),
+);
+
+// The export covers the same filtered, searched and sorted set the page is
+// showing, all rows and not just this page (SaleController::export()).
+const exportUrl = computed(() => {
+    const params = new URLSearchParams();
+
+    for (const [key, value] of Object.entries(queryParams())) {
+        if (value !== undefined && value !== null && value !== '') params.append(key, value);
+    }
+
+    const query = params.toString();
+
+    return query ? `/sales/export?${query}` : '/sales/export';
+});
+
+/**
+ * "Save & Print N copies" (audit section 4 polish): the print action carries
+ * how many copies to produce, and the server records one print-log row per
+ * copy, so copy 1 prints as the Original and 2..N as "Copy of Original"
+ * (C9).
+ */
+const printCopyOptions = [1, 2, 3, 4, 5];
+const printCopies = ref(1);
+
+function printUrl(sale) {
+    return printCopies.value > 1 ? `/sales/${sale.id}/print?copies=${printCopies.value}` : `/sales/${sale.id}/print`;
+}
 
 const page = usePage();
 const { toast } = useToast();
@@ -241,7 +333,7 @@ const columns = [
                     h(
                         'a',
                         {
-                            href: `/sales/${row.original.id}/print`,
+                            href: printUrl(row.original),
                             target: '_blank',
                             rel: 'noopener',
                             class: 'flex h-[26px] w-[26px] items-center justify-center bg-bg-subtle text-text-faint transition-colors duration-150 hover:bg-primary-tint hover:text-primary',
@@ -279,6 +371,8 @@ const columns = [
                 :tds-accounts="tdsAccounts"
                 :stores="stores"
                 :agents="agents"
+                :note-templates="noteTemplates"
+                :walk-in-customer-id="walkInCustomerId"
                 :invoice-settings="invoiceSettings"
                 :initial-draft="initialDraft"
                 @cancel="closeCreateForm"
@@ -309,6 +403,10 @@ const columns = [
                         <label class="mb-1 block text-xs font-semibold text-text-muted">Customer</label>
                         <Combobox v-model="filterState.customer_id" :options="customerOptions" placeholder="All customers" />
                     </div>
+                    <div class="min-w-[200px]">
+                        <label class="mb-1 block text-xs font-semibold text-text-muted">Invoice #</label>
+                        <Input v-model="filterState.search" type="text" placeholder="Search invoice number" @keydown.enter.prevent="applyFilters" />
+                    </div>
                     <Button variant="primary" tone="purple" :loading="filtering" @click="applyFilters">
                         <Search class="size-4" />
                         Filter
@@ -317,11 +415,62 @@ const columns = [
                         <X class="size-4" />
                         Clear
                     </Button>
+                    <a :href="exportUrl">
+                        <Button variant="secondary" tone="purple" type="button">Export</Button>
+                    </a>
+                </div>
+
+                <div class="mt-3 flex flex-wrap items-center gap-2 border-t-[1.5px] border-border pt-3">
+                    <span class="text-xs font-semibold text-text-muted">Sort by</span>
+                    <Button
+                        v-for="column in sortColumns"
+                        :key="column.value"
+                        :variant="filters.sort === column.value ? 'primary' : 'secondary'"
+                        tone="purple"
+                        type="button"
+                        @click="sortBy(column.value)"
+                    >
+                        {{ column.label }}
+                        <span v-if="filters.sort === column.value">{{ filters.sort_dir === 'asc' ? '↑' : '↓' }}</span>
+                    </Button>
                 </div>
             </Card>
 
             <Card variant="panel">
+                <div class="mb-3 flex flex-wrap items-center justify-end gap-2">
+                    <label class="text-xs font-semibold text-text-muted" for="print-copies">Print copies</label>
+                    <select
+                        id="print-copies"
+                        v-model="printCopies"
+                        class="border-[1.5px] border-border bg-white px-2 py-1 text-xs font-semibold text-text-base"
+                    >
+                        <option v-for="option in printCopyOptions" :key="option" :value="option">{{ option }}</option>
+                    </select>
+                    <span class="text-xs text-text-faint">Copy 1 prints as the original, the rest as copies.</span>
+                </div>
+
                 <DataTable :columns="columns" :data="sales.data" :page-size="Math.max(sales.data.length, 1)" empty-message="No sales yet" />
+
+                <!-- Server-computed SQL sums for the whole filtered set, not
+                     just this page (audit section 4 polish). -->
+                <div class="mt-3 grid grid-cols-4 gap-3 border-t-[1.5px] border-border pt-3 text-sm">
+                    <div>
+                        <p class="text-[10px] font-bold tracking-[.8px] text-text-muted uppercase">Taxable (filtered)</p>
+                        <p class="font-bold text-text-strong">{{ formatMoney(totals.taxable_amount) }}</p>
+                    </div>
+                    <div>
+                        <p class="text-[10px] font-bold tracking-[.8px] text-text-muted uppercase">Non-taxable (filtered)</p>
+                        <p class="font-bold text-text-strong">{{ formatMoney(totals.nontaxable_amount) }}</p>
+                    </div>
+                    <div>
+                        <p class="text-[10px] font-bold tracking-[.8px] text-text-muted uppercase">VAT (filtered)</p>
+                        <p class="font-bold text-text-strong">{{ formatMoney(totals.vat_amount) }}</p>
+                    </div>
+                    <div>
+                        <p class="text-[10px] font-bold tracking-[.8px] text-text-muted uppercase">Total (filtered)</p>
+                        <p class="font-bold text-text-strong">{{ formatMoney(totals.total) }}</p>
+                    </div>
+                </div>
 
                 <div v-if="sales.data.length > 0" class="mt-3 flex flex-wrap items-center justify-between gap-3">
                     <p class="text-xs text-text-muted">Showing {{ sales.from }}–{{ sales.to }} of {{ sales.total }}</p>

@@ -10,7 +10,17 @@ import Combobox from '@/components/ui/Combobox.vue';
 import Modal from '@/components/ui/Modal.vue';
 import NepaliDateInput from '@/components/ui/NepaliDateInput.vue';
 import { useToast } from '@/composables/useToast';
-import { calculateDocument, formatMoney, formatQuantity, formatRate, moneyEquals, parseMoney, percentOf, addMoney } from '@/lib/money';
+import {
+    calculateDocument,
+    formatMoney,
+    formatQuantity,
+    formatRate,
+    moneyEquals,
+    parseMoney,
+    percentOf,
+    addMoney,
+    rateExcludingVat,
+} from '@/lib/money';
 import { todayInKathmandu } from '@/lib/format';
 
 /**
@@ -31,6 +41,14 @@ const props = defineProps({
     tdsAccounts: { type: Array, default: () => [] },
     stores: { type: Array, default: () => [] },
     agents: { type: Array, default: () => [] },
+    // Saved boilerplate lines a cashier can drop into Narration below
+    // (audit section 4 polish, "note templates") - see SaleController
+    // ::storeNoteTemplate()/destroyNoteTemplate().
+    noteTemplates: { type: Array, default: () => [] },
+    // The tenant's protected walk-in customer (audit section 3 "Sales") -
+    // preselected below so a counter sale with nobody to name still has a
+    // valid customer_id without the cashier hunting for it.
+    walkInCustomerId: { type: Number, default: null },
     invoiceSettings: {
         type: Object,
         default: () => ({
@@ -72,6 +90,29 @@ const itemOptions = computed(() =>
 const itemsById = computed(() => Object.fromEntries(props.items.map((i) => [i.id, i])));
 const agentOptions = computed(() => props.agents.map((a) => ({ value: a.id, label: a.name })));
 const agentsById = computed(() => Object.fromEntries(props.agents.map((a) => [a.id, a])));
+// Saved-note dropdown (audit section 4 polish, "note templates"): picking one
+// just fills Narration below - the cashier is still free to edit it
+// afterwards, this never re-fires on its own.
+const noteTemplateOptions = computed(() => props.noteTemplates.map((t) => ({ value: t.id, label: t.text })));
+
+function applyNoteTemplate(templateId) {
+    const template = props.noteTemplates.find((t) => t.id === templateId);
+    if (template) form.narration = template.text;
+}
+
+const noteTemplateForm = useForm({ text: '' });
+
+/** Saves the current Narration text as a reusable template for next time. */
+function saveNoteTemplate() {
+    const text = form.narration.trim();
+    if (!text) return;
+
+    noteTemplateForm.text = text;
+    noteTemplateForm.post('/sales/note-templates', {
+        preserveScroll: true,
+        preserveState: true,
+    });
+}
 
 // Only the invoice types the tenant has switched on in Settings. The flags
 // were saved and never enforced anywhere until this pass; the server rejects
@@ -95,7 +136,23 @@ function emptyLine() {
     // item_unit_id '' means "the item's own base unit" (matches this app's
     // existing '' = None convention for optional Select fields, e.g. Items/
     // Index.vue's item_subcategory_id) - transformed to null on submit.
-    return { item_id: null, item_unit_id: '', quantity: '', rate: '', discount: '', discount_type: 'flat' };
+    //
+    // `bonus_quantity` is the free-of-charge quantity handed over with the
+    // line (audit section 3 "Sales"): it moves stock but is never priced, so
+    // it is submitted to the server and deliberately kept out of the preview
+    // below. `mrp` is the opposite - a browser-only entry aid that fills
+    // `rate` and is never submitted (see applyLineMrp() and submit()).
+    return { item_id: null, item_unit_id: '', quantity: '', bonus_quantity: '', mrp: '', rate: '', discount: '', discount_type: 'flat' };
+}
+
+/**
+ * A quantity box as the server wants it: the typed string untouched, or '0'
+ * when the box is empty. Never a number - the string goes straight into
+ * Quantity::of() server-side, which refuses anything a float could have
+ * distorted (C1).
+ */
+function enteredQuantity(value) {
+    return value === '' || value === null || value === undefined ? '0' : String(value);
 }
 
 // Options for a line's unit dropdown: the item's own base unit first
@@ -116,6 +173,9 @@ function unitOptionsFor(item) {
 // uses the entered rate, never the unit's.
 function selectLineUnit(line, unitId) {
     line.item_unit_id = unitId;
+    // An MRP is a price for ONE of whatever unit was selected, so the number
+    // in the box stops meaning anything the moment the unit changes.
+    line.mrp = '';
 
     if (unitId === '' || unitId === null) {
         const item = itemsById.value[line.item_id];
@@ -137,14 +197,53 @@ function selectLineUnit(line, unitId) {
 function selectLineItem(line, itemId) {
     line.item_id = itemId;
     line.item_unit_id = '';
+    line.mrp = '';
 
     const item = itemsById.value[itemId];
     line.rate = item?.sale_rate != null ? String(item.sale_rate) : '';
 }
 
+/**
+ * MRP / VAT-inclusive entry (audit section 3 "Sales").
+ *
+ * The shopkeeper types the sticker price and the line's rate is back-
+ * calculated exactly - `rate = MRP / 1.13` for a vatable line at 13% - so the
+ * printed bill shows rate 100 plus 13 VAT for an MRP of 113 instead of
+ * charging VAT on top of a price that already contained it.
+ *
+ * The division runs in the money module (rateExcludingVat, scaled BigInt,
+ * one HalfUp rounding to 4dp); nothing here touches Number() or parseFloat.
+ * Only the resulting RATE is ever submitted - the server re-derives nothing
+ * from the MRP and does not even receive it, so a rate typed by hand and a
+ * rate produced here are the same thing to the books.
+ *
+ * A non-vatable line (or any line on a PAN invoice, which carries no VAT at
+ * all) divides by 1: the MRP is the rate.
+ */
+function applyLineMrp(line, mrp) {
+    line.mrp = mrp;
+
+    if (mrp === '' || mrp === null || mrp === undefined) {
+        return;
+    }
+
+    const item = itemsById.value[line.item_id];
+    const vatRate = !isPanInvoice.value && item?.is_vatable ? effectiveVatRate.value : '0';
+    const result = rateExcludingVat(mrp, vatRate);
+
+    // A half-typed or malformed MRP just leaves the rate alone: the cashier is
+    // still typing, and the rate field stays theirs to edit either way.
+    if (result.ok) {
+        line.rate = result.value;
+    }
+}
+
 function defaultFormData() {
     return {
-        customer_id: null,
+        // Defaults to the walk-in customer (audit section 3 "Sales") - still
+        // freely changeable, this just saves the cashier a click on the
+        // common case of a counter sale nobody bothers to name.
+        customer_id: props.walkInCustomerId ?? null,
         store_id: props.invoiceSettings.default_store_id ?? null,
         invoice_type: invoiceTypeOptions.value[0]?.value ?? 'full',
         chalani_number: '',
@@ -331,6 +430,10 @@ function submit(print = false) {
             item_id: line.item_id,
             item_unit_id: line.item_unit_id || null,
             quantity: line.quantity,
+            // Free units: sent as an explicit '0' when the box is empty, and
+            // never as `undefined`. `mrp` is NOT sent - it only ever existed
+            // to fill `rate` above (see applyLineMrp()).
+            bonus_quantity: enteredQuantity(line.bonus_quantity),
             rate: line.rate,
             discount: line.discount === '' ? '0' : line.discount,
             discount_type: line.discount_type,
@@ -354,6 +457,10 @@ function submit(print = false) {
 // Legacy adds the next line on Enter; here Enter submitted the whole bill from
 // the Qty field (audit P1 "Workflow"). Enter now walks the line's fields left
 // to right and, past the last one, starts a new line.
+//
+// Bonus and MRP are deliberately not on this path: almost no line uses them,
+// and putting them in the Enter chain would cost every other line two extra
+// keystrokes. Both are still reachable by Tab or by clicking.
 const LINE_FIELDS = ['quantity', 'rate', 'discount'];
 const linesEl = ref(null);
 
@@ -512,10 +619,12 @@ onMounted(() => applyPendingCustomer());
             </div>
 
             <div ref="linesEl">
-                <div class="mb-2 grid grid-cols-[1fr_90px_100px_100px_90px_40px_100px_28px] gap-2 text-[10px] font-bold tracking-[.8px] text-text-muted uppercase">
+                <div class="mb-2 grid grid-cols-[1fr_80px_90px_80px_90px_90px_80px_40px_96px_28px] gap-2 text-[10px] font-bold tracking-[.8px] text-text-muted uppercase">
                     <span>Item</span>
                     <span>Unit</span>
                     <span>Quantity</span>
+                    <span>Bonus</span>
+                    <span>MRP</span>
                     <span>Rate</span>
                     <span>Discount</span>
                     <span></span>
@@ -523,7 +632,7 @@ onMounted(() => applyPendingCustomer());
                     <span></span>
                 </div>
 
-                <div v-for="(line, index) in form.lines" :key="index" class="mb-2 grid grid-cols-[1fr_90px_100px_100px_90px_40px_100px_28px] items-start gap-2">
+                <div v-for="(line, index) in form.lines" :key="index" class="mb-2 grid grid-cols-[1fr_80px_90px_80px_90px_90px_80px_40px_96px_28px] items-start gap-2">
                     <div>
                         <Combobox
                             :model-value="line.item_id"
@@ -572,6 +681,43 @@ onMounted(() => applyPendingCustomer());
                         <p v-if="form.errors[`lines.${index}.quantity`]" class="mt-1 text-xs text-danger">
                             {{ form.errors[`lines.${index}.quantity`] }}
                         </p>
+                    </div>
+                    <!-- Free / bonus units handed over with the line: they
+                         move stock but are never priced, so the preview and
+                         the bill total below ignore them entirely (audit
+                         section 3 "Sales"). -->
+                    <div>
+                        <Input
+                            v-model="line.bonus_quantity"
+                            type="number"
+                            min="0"
+                            step="0.0001"
+                            placeholder="0"
+                            title="Free units given with this line - moves stock, never billed"
+                        />
+                        <p v-if="form.errors[`lines.${index}.bonus_quantity`]" class="mt-1 text-xs text-danger">
+                            {{ form.errors[`lines.${index}.bonus_quantity`] }}
+                        </p>
+                    </div>
+                    <!-- MRP / VAT-inclusive entry: typing the sticker price
+                         fills Rate to the right with MRP / 1.13 for a vatable
+                         line (applyLineMrp()). Browser-only - the server is
+                         sent the rate, never the MRP. -->
+                    <div>
+                        <!-- Explicit :model-value + @update:model-value rather
+                             than v-model: the rate has to be recalculated from
+                             the value the cashier just typed, and a plain
+                             @input listener would fire before v-model had
+                             written it back. -->
+                        <Input
+                            :model-value="line.mrp"
+                            type="number"
+                            min="0"
+                            step="0.0001"
+                            placeholder="Incl. VAT"
+                            title="VAT-inclusive price: fills Rate with MRP / (1 + VAT%)"
+                            @update:model-value="(v) => applyLineMrp(line, v)"
+                        />
                     </div>
                     <div :data-line-field="`rate-${index}`">
                         <Input
@@ -726,7 +872,31 @@ onMounted(() => applyPendingCustomer());
 
             <div>
                 <label class="mb-1 block text-sm font-semibold text-text-base">Narration</label>
-                <Input v-model="form.narration" type="text" placeholder="Optional" />
+                <div class="flex gap-2">
+                    <Input v-model="form.narration" type="text" placeholder="Optional" class="flex-1" />
+                    <!-- Saved-note picker (audit section 4 polish, "note
+                         templates"): fills Narration above, still freely
+                         editable afterwards. -->
+                    <Select
+                        v-if="noteTemplateOptions.length"
+                        :model-value="null"
+                        :options="noteTemplateOptions"
+                        placeholder="Saved notes"
+                        class="w-48"
+                        @update:model-value="applyNoteTemplate"
+                    />
+                    <Button
+                        variant="secondary"
+                        tone="purple"
+                        type="button"
+                        class="!px-2.5"
+                        title="Save this narration as a reusable note"
+                        :disabled="!form.narration.trim() || noteTemplateForm.processing"
+                        @click="saveNoteTemplate"
+                    >
+                        <Plus class="h-3.5 w-3.5" />
+                    </Button>
+                </div>
             </div>
 
             <p v-if="previewError" class="border-[1.5px] border-danger bg-danger-bg px-3 py-2 text-sm text-danger">

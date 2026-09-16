@@ -62,6 +62,10 @@ class PosController extends Controller
             'bankAccounts' => $this->settlementAccounts(),
             'tdsAccounts' => $this->settlementAccounts(),
             'stores' => Store::where('is_active', true)->orderBy('name')->get(['id', 'name']),
+            // POS defaults every new cart to the walk-in customer (audit
+            // section 3 "Sales") - a quick counter sale usually has nobody
+            // to name.
+            'walkInCustomerId' => Customer::walkIn()?->id,
             'invoiceSettings' => [
                 'default_vat_rate' => $settings->default_vat_rate,
                 'default_store_id' => $settings->default_store_id,

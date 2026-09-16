@@ -5,15 +5,19 @@ namespace App\Models;
 use App\Casts\Decimal;
 use App\Enums\StockMovementType;
 use App\Enums\VoucherType;
+use App\Support\Billing\DocumentCalculator;
+use App\Support\Billing\LineTotals;
 use App\Support\ClosedFiscalYearGuard;
 use App\Support\Money\Money;
 use App\Support\Money\Quantity;
+use App\Support\SettlementNarration;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Collection as EloquentCollection;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 use InvalidArgumentException;
 
@@ -66,10 +70,10 @@ use InvalidArgumentException;
  * changing the cast would break them for no behavioural gain.
  */
 #[Fillable([
-    'sale_id', 'journal_voucher_id', 'fiscal_year_id', 'credit_note_number', 'date', 'store_id', 'reason',
-    'taxable_amount', 'nontaxable_amount', 'vat_amount', 'tds_amount', 'total', 'status',
-    'refund_account_id', 'refund_journal_voucher_id', 'rejection_reason', 'created_by',
-    'cancelled_at', 'cancelled_by', 'cancel_reason', 'reversal_journal_voucher_id',
+    'sale_id', 'customer_id', 'is_unlinked', 'journal_voucher_id', 'fiscal_year_id', 'credit_note_number',
+    'date', 'store_id', 'reason', 'taxable_amount', 'nontaxable_amount', 'vat_amount', 'vat_rate', 'tds_amount',
+    'total', 'status', 'refund_account_id', 'refund_cash_amount', 'refund_bank_amount', 'refund_journal_voucher_id',
+    'rejection_reason', 'created_by', 'cancelled_at', 'cancelled_by', 'cancel_reason', 'reversal_journal_voucher_id',
 ])]
 class SalesReturn extends Model
 {
@@ -106,21 +110,40 @@ class SalesReturn extends Model
     {
         return [
             'date' => 'date',
+            'is_unlinked' => 'boolean',
             'taxable_amount' => Decimal::class.':2',
             'nontaxable_amount' => Decimal::class.':2',
             'vat_amount' => Decimal::class.':2',
+            'vat_rate' => Decimal::class.':2',
             'tds_amount' => Decimal::class.':2',
             'total' => Decimal::class.':2',
+            'refund_cash_amount' => Decimal::class.':2',
+            'refund_bank_amount' => Decimal::class.':2',
             'cancelled_at' => 'datetime',
         ];
     }
 
     /**
+     * Null for an unlinked return (audit section 3 "Sales", "returns without
+     * a bill") - see postUnlinked()'s docblock.
+     *
      * @return BelongsTo<Sale, $this>
      */
     public function sale(): BelongsTo
     {
         return $this->belongsTo(Sale::class);
+    }
+
+    /**
+     * Who this return credits when it has no parent Sale to derive that
+     * from - null for a normal, linked return (read `sale->customer`
+     * instead).
+     *
+     * @return BelongsTo<Customer, $this>
+     */
+    public function customer(): BelongsTo
+    {
+        return $this->belongsTo(Customer::class);
     }
 
     /**
@@ -288,8 +311,8 @@ class SalesReturn extends Model
      * for a pending request's reserved quantity, so a later return can never
      * credit a paisa this one has claimed.
      *
-     * @param  array{sale_id: int, date: string, reason?: string|null, refund_account_id?: int|null, store_id?: int|null, expected_total?: string|null}  $data
-     * @param  array<int, array{sale_line_id: int, quantity: string|float}>  $lines
+     * @param  array{sale_id: int, date: string, reason?: string|null, refund_account_id?: int|null, refund_cash_amount?: string|null, refund_bank_amount?: string|null, store_id?: int|null, expected_total?: string|null}  $data
+     * @param  array<int, array{sale_line_id: int, quantity: string|float, bonus_quantity?: string|float}>  $lines
      */
     public static function request(array $data, array $lines, User $actor): self
     {
@@ -300,8 +323,8 @@ class SalesReturn extends Model
      * Shared body of post() and request(): everything except whether the
      * money side is written now or deferred to approve().
      *
-     * @param  array{sale_id: int, date: string, reason?: string|null, refund_account_id?: int|null, store_id?: int|null, expected_total?: string|null}  $data
-     * @param  array<int, array{sale_line_id: int, quantity: string|float}>  $lines
+     * @param  array{sale_id: int, date: string, reason?: string|null, refund_account_id?: int|null, refund_cash_amount?: string|null, refund_bank_amount?: string|null, store_id?: int|null, expected_total?: string|null}  $data
+     * @param  array<int, array{sale_line_id: int, quantity: string|float, bonus_quantity?: string|float}>  $lines
      */
     private static function record(array $data, array $lines, User $actor, bool $post): self
     {
@@ -319,6 +342,8 @@ class SalesReturn extends Model
             $date = static::validatedDate($data['date'], $sale, $actor);
             $storeId = static::resolveStoreId($data, $sale);
             $refundAccountId = static::validatedRefundAccountId($data['refund_account_id'] ?? null);
+            $refundCashAmount = static::validatedRefundSplitAmount($data['refund_cash_amount'] ?? null);
+            $refundBankAmount = static::validatedRefundSplitAmount($data['refund_bank_amount'] ?? null);
 
             $prepared = static::prepareLines($sale, $lines);
 
@@ -344,13 +369,26 @@ class SalesReturn extends Model
                 'total' => $prepared['total'],
                 'status' => $post ? 'posted' : 'pending',
                 'refund_account_id' => $refundAccountId,
+                'refund_cash_amount' => $refundCashAmount,
+                'refund_bank_amount' => $refundBankAmount,
                 'created_by' => $actor->id,
             ]);
+
+            // Every line of the credit-note voucher carries the same compact
+            // narration (audit section 3 "Sales", "ledger narrations") - a
+            // credit note has no settlement leg of its own, so it always
+            // reads "{number} - Credit" (SettlementNarration::forMode(null)).
+            if ($voucher) {
+                $voucher->lines()->update([
+                    'narration' => SettlementNarration::line($salesReturn->documentNumber(), null),
+                ]);
+            }
 
             foreach ($prepared['lines'] as $line) {
                 $returnLine = $salesReturn->lines()->create([
                     'sale_line_id' => $line['sale_line']->id,
                     'quantity' => $line['quantity'],
+                    'bonus_quantity' => $line['bonus_quantity'],
                     'rate' => $line['sale_line']->rate,
                     'line_total' => $line['net'],
                     'net_amount' => $line['net'],
@@ -364,11 +402,265 @@ class SalesReturn extends Model
             }
 
             if ($post) {
-                static::postRefund($salesReturn, $sale, $prepared, $date, $actor);
+                $sale->loadMissing('customer');
+                static::postRefund($salesReturn, $sale->customer->account_id, $prepared['total']->minus($prepared['tds']), $date, $actor);
             }
 
             return $salesReturn;
         });
+    }
+
+    /**
+     * A return with no bill this system ever issued to point at (audit
+     * section 3 "Sales", "returns without a bill"): a pre-cutover sale, a
+     * walk-in who lost their receipt, a return against a paper invoice from
+     * before this tenant went live. Each line names its item and an entered
+     * rate directly - there is no SaleLine to inherit one from - and is
+     * taxed at the company's CURRENT VAT rate (CompanySetting::
+     * default_vat_rate), never a rate frozen on some other document. Shares
+     * the same gapless credit-note series and `credit_note_number` format
+     * as a linked return (C7) - on paper it is still the same kind of
+     * document, so VAT books and the credit-note register read it exactly
+     * like any other posted return.
+     *
+     * Deliberately simpler than a linked return: no header discount, no TDS
+     * (there is no withholding relationship to reconstruct without a bill),
+     * and no per-line VAT breakdown is stored (the document-level `vat_
+     * amount` already carries the true total; a fabricated per-line split
+     * would only ever be a display nicety). Always posts directly - there
+     * is no original invoice for a later approve() to re-check quantities
+     * against, so the request()/approve() workflow does not apply here.
+     * Goods only ever move INTO stock on a return, so - unlike a sale -
+     * there is no negative-stock check to make.
+     *
+     * @param  array{customer_id: int, date: string, reason?: string|null, store_id?: int|null, refund_account_id?: int|null, refund_cash_amount?: string|null, refund_bank_amount?: string|null, expected_total?: string|null}  $data
+     * @param  array<int, array{item_id: int, item_unit_id?: int|null, quantity: string|float, rate: string|float, bonus_quantity?: string|float}>  $lines
+     */
+    public static function postUnlinked(array $data, array $lines, User $actor): self
+    {
+        return DB::transaction(function () use ($data, $lines, $actor) {
+            $customer = Customer::findOrFail($data['customer_id']);
+            $date = static::validatedUnlinkedDate($data['date'], $actor);
+            $storeId = static::resolveUnlinkedStoreId($data['store_id'] ?? null);
+            $refundAccountId = static::validatedRefundAccountId($data['refund_account_id'] ?? null);
+            $refundCashAmount = static::validatedRefundSplitAmount($data['refund_cash_amount'] ?? null);
+            $refundBankAmount = static::validatedRefundSplitAmount($data['refund_bank_amount'] ?? null);
+
+            $settings = CompanySetting::current();
+            $items = Item::with('units')->whereIn('id', collect($lines)->pluck('item_id'))->get()->keyBy('id');
+
+            [$calculatorLines, $preparedLines] = static::prepareUnlinkedLines($lines, $items);
+
+            $totals = DocumentCalculator::calculate($calculatorLines, [
+                'vat_rate' => $settings->default_vat_rate,
+                'expected_total' => $data['expected_total'] ?? null,
+            ]);
+
+            $voucherLines = [];
+            $salesAccountId = Account::where('code', 'INI20')->firstOrFail()->id;
+
+            $revenueEntries = array_map(
+                static fn (array $prepared, LineTotals $line): array => ['item' => $prepared['item'], 'net' => $line->lineTotal],
+                $preparedLines,
+                $totals->lines,
+            );
+
+            foreach (static::revenueByAccount($revenueEntries, $salesAccountId) as $accountId => $amount) {
+                $voucherLines[] = ['account_id' => $accountId, 'debit' => $amount->toString(), 'credit' => '0', 'narration' => 'Sales return'];
+            }
+
+            if ($totals->vatAmount->isPositive()) {
+                $voucherLines[] = [
+                    'account_id' => Account::where('code', 'LIA20')->firstOrFail()->id,
+                    'debit' => $totals->vatAmount->toString(),
+                    'credit' => '0',
+                    'narration' => 'VAT reversed',
+                ];
+            }
+
+            $voucherLines[] = [
+                'account_id' => $customer->account_id,
+                'debit' => '0',
+                'credit' => $totals->total->toString(),
+                'narration' => 'Sales return credit note',
+            ];
+
+            $voucher = JournalVoucher::post(
+                [
+                    'voucher_type' => VoucherType::SaleReturn->value,
+                    'date' => $date,
+                    'narration' => $data['reason'] ?? "Unlinked return from {$customer->name}",
+                ],
+                $voucherLines,
+                $actor,
+            );
+
+            $salesReturn = static::create([
+                'sale_id' => null,
+                'customer_id' => $customer->id,
+                'is_unlinked' => true,
+                'journal_voucher_id' => $voucher->id,
+                'fiscal_year_id' => $voucher->fiscal_year_id,
+                'credit_note_number' => static::creditNoteNumberFor($voucher),
+                'date' => $date,
+                'store_id' => $storeId,
+                'reason' => $data['reason'] ?? null,
+                'taxable_amount' => $totals->taxableAmount,
+                'nontaxable_amount' => $totals->nontaxableAmount,
+                'vat_amount' => $totals->vatAmount,
+                'vat_rate' => $totals->vatRate,
+                'tds_amount' => Money::zero(),
+                'total' => $totals->total,
+                'status' => 'posted',
+                'refund_account_id' => $refundAccountId,
+                'refund_cash_amount' => $refundCashAmount,
+                'refund_bank_amount' => $refundBankAmount,
+                'created_by' => $actor->id,
+            ]);
+
+            $voucher->lines()->update([
+                'narration' => SettlementNarration::line($salesReturn->documentNumber(), null),
+            ]);
+
+            foreach ($preparedLines as $index => $prepared) {
+                /** @var LineTotals $line */
+                $line = $totals->lines[$index];
+                $item = $prepared['item'];
+                $bonusQuantity = $prepared['bonus_quantity'];
+
+                $returnLine = $salesReturn->lines()->create([
+                    'item_id' => $item->id,
+                    'item_unit_id' => $prepared['item_unit_id'],
+                    'unit_conversion_factor' => $line->conversionFactor,
+                    'vatable' => $line->vatable,
+                    'quantity' => $line->quantity,
+                    'bonus_quantity' => $bonusQuantity,
+                    'rate' => $line->rate,
+                    'line_total' => $line->lineTotal,
+                    'net_amount' => $line->lineTotal,
+                    'vat_amount' => Money::zero(),
+                    'tds_amount' => Money::zero(),
+                ]);
+
+                if ($item->is_stockable) {
+                    $bonusBaseQuantity = $bonusQuantity->multipliedBy($line->conversionFactor);
+
+                    $item->recordStockMovement(
+                        StockMovementType::SaleReturn,
+                        $line->baseQuantity->plus($bonusBaseQuantity),
+                        $date,
+                        $storeId,
+                        $returnLine,
+                    );
+                }
+            }
+
+            static::postRefund($salesReturn, $customer->account_id, $totals->total, $date, $actor);
+
+            return $salesReturn;
+        });
+    }
+
+    /**
+     * Turns an unlinked-return request's lines into calculator input plus
+     * the item/unit context persistence needs afterwards - the same shape
+     * Sale::prepareLines() builds, since an unlinked return is priced
+     * exactly like a fresh sale of the same goods (just credited instead of
+     * charged).
+     *
+     * @param  array<int, array{item_id: int, item_unit_id?: int|null, quantity: string|float, rate: string|float, bonus_quantity?: string|float}>  $lines
+     * @param  Collection<int, Item>  $items
+     * @return array{0: array<int, array<string, mixed>>, 1: array<int, array<string, mixed>>}
+     */
+    private static function prepareUnlinkedLines(array $lines, $items): array
+    {
+        if ($lines === []) {
+            throw new InvalidArgumentException('A return needs at least one line.');
+        }
+
+        $calculatorLines = [];
+        $preparedLines = [];
+
+        foreach ($lines as $line) {
+            if (! $items->has($line['item_id'])) {
+                throw new InvalidArgumentException("Unknown item [{$line['item_id']}].");
+            }
+
+            $item = $items[$line['item_id']];
+            [$itemUnitId, $conversionFactor] = static::resolveUnlinkedItemUnit($item, $line['item_unit_id'] ?? null);
+
+            $calculatorLines[] = [
+                'quantity' => $line['quantity'],
+                'rate' => $line['rate'],
+                'vatable' => $item->is_vatable,
+                'conversion_factor' => $conversionFactor,
+            ];
+
+            $bonusQuantity = Quantity::of($line['bonus_quantity'] ?? '0');
+
+            if ($bonusQuantity->isNegative()) {
+                throw new InvalidArgumentException('Bonus return quantity cannot be negative.');
+            }
+
+            $preparedLines[] = [
+                'item' => $item,
+                'item_unit_id' => $itemUnitId,
+                'bonus_quantity' => $bonusQuantity,
+            ];
+        }
+
+        return [$calculatorLines, $preparedLines];
+    }
+
+    /**
+     * @return array{0: int|null, 1: Quantity}
+     */
+    private static function resolveUnlinkedItemUnit(Item $item, mixed $itemUnitId): array
+    {
+        if ($itemUnitId === null || $itemUnitId === '') {
+            return [null, Quantity::of(1)];
+        }
+
+        $itemUnit = $item->units->firstWhere('id', (int) $itemUnitId);
+
+        if (! $itemUnit) {
+            throw new InvalidArgumentException("Unit [{$itemUnitId}] does not belong to item [{$item->id}].");
+        }
+
+        return [$itemUnit->id, Quantity::of($itemUnit->conversion_factor)];
+    }
+
+    /**
+     * The store an unlinked return's goods come back into: the explicit
+     * choice, else the tenant's configured default store, else the
+     * lowest-id active store - same fallback chain Sale::resolveStoreId()
+     * uses (there is no parent document here to default to instead).
+     */
+    private static function resolveUnlinkedStoreId(mixed $storeId): int
+    {
+        $storeId = $storeId !== null && $storeId !== ''
+            ? (int) $storeId
+            : (CompanySetting::current()->default_store_id ?? Store::where('is_active', true)->orderBy('id')->value('id'));
+
+        if (! $storeId) {
+            throw new InvalidArgumentException('No active store is configured.');
+        }
+
+        return (int) $storeId;
+    }
+
+    /**
+     * An unlinked return is dated inside a fiscal year that is open (or
+     * deliberately reopened for correction) - same guard every dated
+     * posting in this app goes through (C4). There is no parent sale date
+     * to compare against, unlike validatedDate() above.
+     */
+    private static function validatedUnlinkedDate(string $date, User $actor): string
+    {
+        $date = substr(trim($date), 0, 10);
+        ClosedFiscalYearGuard::assertDateInOpenYear($date, $actor);
+
+        return $date;
     }
 
     /**
@@ -405,7 +697,7 @@ class SalesReturn extends Model
             $date = $salesReturn->date->format('Y-m-d');
             ClosedFiscalYearGuard::assertDateInOpenYear($date, $actor);
 
-            $storedLines = $salesReturn->lines()->with('saleLine')->orderBy('sale_line_id')->get();
+            $storedLines = $salesReturn->lines()->with('saleLine.item:id,account_id')->orderBy('sale_line_id')->get();
             $salesReturn->assertQuantitiesStillAvailable($sale, $storedLines);
 
             $prepared = [
@@ -414,6 +706,10 @@ class SalesReturn extends Model
                 'vat' => Money::of($salesReturn->vat_amount),
                 'tds' => Money::of($salesReturn->tds_amount),
                 'total' => Money::of($salesReturn->total),
+                'lines' => $storedLines->map(fn (SaleReturnLine $line): array => [
+                    'sale_line' => $line->saleLine,
+                    'net' => Money::of($line->net_amount),
+                ])->all(),
             ];
 
             $voucher = static::postCreditNote($sale, $prepared, $date, $salesReturn->reason, $actor);
@@ -425,6 +721,10 @@ class SalesReturn extends Model
                 'status' => 'posted',
             ]);
 
+            $voucher->lines()->update([
+                'narration' => SettlementNarration::line($salesReturn->documentNumber(), null),
+            ]);
+
             $movedStock = static::saleLinesThatMovedStock($storedLines->pluck('sale_line_id')->all());
 
             foreach ($storedLines as $line) {
@@ -433,14 +733,19 @@ class SalesReturn extends Model
                 }
 
                 static::recordReturnMovement(
-                    ['sale_line' => $line->saleLine, 'quantity' => Quantity::of($line->quantity)],
+                    [
+                        'sale_line' => $line->saleLine,
+                        'quantity' => Quantity::of($line->quantity),
+                        'bonus_quantity' => Quantity::of($line->bonus_quantity ?? '0'),
+                    ],
                     $line,
                     $date,
                     $salesReturn->store_id,
                 );
             }
 
-            static::postRefund($salesReturn, $sale, $prepared, $date, $actor);
+            $sale->loadMissing('customer');
+            static::postRefund($salesReturn, $sale->customer->account_id, $prepared['total']->minus($prepared['tds']), $date, $actor);
 
             return $salesReturn->fresh();
         });
@@ -569,6 +874,8 @@ class SalesReturn extends Model
         foreach ($saleLines as $saleLine) {
             $quantity = Quantity::of($saleLine->quantity);
             $returned = $credited[$saleLine->id]['quantity'];
+            $bonusQuantity = Quantity::of($saleLine->bonus_quantity ?? '0');
+            $bonusReturned = $credited[$saleLine->id]['bonus_quantity'];
 
             $lines[] = [
                 'sale_line_id' => $saleLine->id,
@@ -578,6 +885,11 @@ class SalesReturn extends Model
                 'rate' => Quantity::of($saleLine->rate)->toString(),
                 'returned' => $returned->toString(),
                 'remaining' => $quantity->minus($returned)->toString(),
+                // Bonus units (audit section 3 "Sales"): can be returned
+                // alongside the paid quantity above, at zero value.
+                'bonus_quantity' => $bonusQuantity->toString(),
+                'bonus_returned' => $bonusReturned->toString(),
+                'bonus_remaining' => $bonusQuantity->minus($bonusReturned)->toString(),
                 'vatable' => (bool) $saleLine->vatable,
                 'net' => $components[$saleLine->id]['net']->toString(),
                 'vat' => $components[$saleLine->id]['vat']->toString(),
@@ -603,9 +915,9 @@ class SalesReturn extends Model
      * a float with a 0.0001 tolerance (P0-4), so returning 0.3 - 0.1 - 0.2
      * of a 0.3 line lands exactly on zero and is accepted.
      *
-     * @param  array<int, array{sale_line_id: int, quantity: string|float}>  $lines
+     * @param  array<int, array{sale_line_id: int, quantity: string|float, bonus_quantity?: string|float}>  $lines
      * @param  int|null  $excludeReturnId  Ignore this return's own reserved quantity (re-validating an approval).
-     * @return array{lines: list<array{sale_line: SaleLine, quantity: Quantity, net: Money, vat: Money, tds: Money, moves_stock: bool}>, taxable: Money, nontaxable: Money, vat: Money, tds: Money, total: Money}
+     * @return array{lines: list<array{sale_line: SaleLine, quantity: Quantity, bonus_quantity: Quantity, net: Money, vat: Money, tds: Money, moves_stock: bool}>, taxable: Money, nontaxable: Money, vat: Money, tds: Money, total: Money}
      */
     private static function prepareLines(Sale $sale, array $lines, ?int $excludeReturnId = null): array
     {
@@ -614,6 +926,7 @@ class SalesReturn extends Model
         }
 
         $requested = [];
+        $requestedBonus = [];
 
         foreach ($lines as $line) {
             $saleLineId = (int) $line['sale_line_id'];
@@ -626,6 +939,21 @@ class SalesReturn extends Model
             $requested[$saleLineId] = isset($requested[$saleLineId])
                 ? $requested[$saleLineId]->plus($quantity)
                 : $quantity;
+
+            // Bonus units returned alongside this line's paid quantity
+            // (audit section 3 "Sales", "bonus/free quantity"): credits
+            // nothing (see the money loop below, which never reads this),
+            // only restocks - a return is always anchored on a positive paid
+            // quantity, a bonus-only return is out of scope for this pass.
+            $bonusQuantity = Quantity::of($line['bonus_quantity'] ?? '0');
+
+            if ($bonusQuantity->isNegative()) {
+                throw new InvalidArgumentException('Bonus return quantity cannot be negative.');
+            }
+
+            $requestedBonus[$saleLineId] = isset($requestedBonus[$saleLineId])
+                ? $requestedBonus[$saleLineId]->plus($bonusQuantity)
+                : $bonusQuantity;
         }
 
         ksort($requested);
@@ -633,7 +961,7 @@ class SalesReturn extends Model
         // Every line of the sale is locked, not just the returned ones: the
         // components below are split across all of them, so a concurrent
         // return against any line changes what this one may credit.
-        $saleLines = SaleLine::where('sale_id', $sale->id)->orderBy('id')->lockForUpdate()->get()->keyBy('id');
+        $saleLines = SaleLine::where('sale_id', $sale->id)->with('item:id,account_id')->orderBy('id')->lockForUpdate()->get()->keyBy('id');
 
         foreach (array_keys($requested) as $saleLineId) {
             if (! $saleLines->has($saleLineId)) {
@@ -660,6 +988,17 @@ class SalesReturn extends Model
             if ($quantity->isGreaterThan($remaining)) {
                 throw new InvalidArgumentException(
                     "Cannot return {$quantity->formatQuantity()} of line [{$saleLineId}]; only {$remaining->formatQuantity()} remains returnable."
+                );
+            }
+
+            $bonusQuantity = $requestedBonus[$saleLineId] ?? Quantity::zero();
+            $lineBonusQuantity = Quantity::of($saleLine->bonus_quantity ?? '0');
+            $alreadyReturnedBonus = $credited[$saleLineId]['bonus_quantity'];
+            $remainingBonus = $lineBonusQuantity->minus($alreadyReturnedBonus);
+
+            if ($bonusQuantity->isGreaterThan($remainingBonus)) {
+                throw new InvalidArgumentException(
+                    "Cannot return {$bonusQuantity->formatQuantity()} bonus units of line [{$saleLineId}]; only {$remainingBonus->formatQuantity()} remain returnable."
                 );
             }
 
@@ -692,6 +1031,7 @@ class SalesReturn extends Model
             $preparedLines[] = [
                 'sale_line' => $saleLine,
                 'quantity' => $quantity,
+                'bonus_quantity' => $bonusQuantity,
                 'net' => $net,
                 'vat' => $lineVat,
                 'tds' => $lineTds,
@@ -846,7 +1186,7 @@ class SalesReturn extends Model
      * class of error this whole change exists to remove.
      *
      * @param  array<int, int>  $saleLineIds
-     * @return array<int, array{quantity: Quantity, net: Money, vat: Money, tds: Money}>
+     * @return array<int, array{quantity: Quantity, bonus_quantity: Quantity, net: Money, vat: Money, tds: Money}>
      */
     private static function alreadyCredited(array $saleLineIds, ?int $excludeReturnId = null): array
     {
@@ -855,6 +1195,7 @@ class SalesReturn extends Model
         foreach ($saleLineIds as $saleLineId) {
             $credited[$saleLineId] = [
                 'quantity' => Quantity::zero(),
+                'bonus_quantity' => Quantity::zero(),
                 'net' => Money::zero(),
                 'vat' => Money::zero(),
                 'tds' => Money::zero(),
@@ -869,6 +1210,7 @@ class SalesReturn extends Model
 
         foreach ($rows as $row) {
             $credited[$row->sale_line_id]['quantity'] = $credited[$row->sale_line_id]['quantity']->plus(Quantity::of($row->quantity));
+            $credited[$row->sale_line_id]['bonus_quantity'] = $credited[$row->sale_line_id]['bonus_quantity']->plus(Quantity::of($row->bonus_quantity ?? '0'));
             $credited[$row->sale_line_id]['net'] = $credited[$row->sale_line_id]['net']->plus(Money::of($row->net_amount));
             $credited[$row->sale_line_id]['vat'] = $credited[$row->sale_line_id]['vat']->plus(Money::of($row->vat_amount));
             $credited[$row->sale_line_id]['tds'] = $credited[$row->sale_line_id]['tds']->plus(Money::of($row->tds_amount));
@@ -901,16 +1243,19 @@ class SalesReturn extends Model
     }
 
     /**
-     * Goods come back in BASE units: the returned quantity times the
-     * original line's `unit_conversion_factor` (audit P0-12). Returning 1
-     * Box of an item sold in Boxes of 12 puts 12 base units back.
+     * Goods come back in BASE units: the returned quantity (paid plus any
+     * bonus units returned alongside it) times the original line's
+     * `unit_conversion_factor` (audit P0-12, and section 3 "Sales" for the
+     * bonus addition). Returning 1 Box of an item sold in Boxes of 12 puts
+     * 12 base units back.
      *
-     * @param  array{sale_line: SaleLine, quantity: Quantity}  $line
+     * @param  array{sale_line: SaleLine, quantity: Quantity, bonus_quantity?: Quantity}  $line
      */
     private static function recordReturnMovement(array $line, SaleReturnLine $returnLine, string $date, int $storeId): void
     {
         $saleLine = $line['sale_line'];
-        $baseQuantity = $line['quantity']->multipliedBy(Quantity::of($saleLine->unit_conversion_factor));
+        $returnedQuantity = $line['quantity']->plus($line['bonus_quantity'] ?? Quantity::zero());
+        $baseQuantity = $returnedQuantity->multipliedBy(Quantity::of($saleLine->unit_conversion_factor));
 
         $saleLine->item->recordStockMovement(
             StockMovementType::SaleReturn,
@@ -922,7 +1267,38 @@ class SalesReturn extends Model
     }
 
     /**
-     * @param  array{taxable: Money, nontaxable: Money, vat: Money, tds: Money, total: Money}  $prepared
+     * Revenue debited/credited back per account (audit section 3 "Sales",
+     * "service revenue"): reverses each returned line against the SAME
+     * account the original sale would have credited (`item->account_id ??
+     * INI20`), rather than a single hardcoded Sales Revenue line - matching
+     * Purchase::post()'s own per-item grouping and Sale::revenueByAccount()'s
+     * mirror of it. Shared by a linked return (postCreditNote(), which maps
+     * each line's `sale_line->item` in) and an unlinked one (postUnlinked(),
+     * which already has the item), so both group revenue the same way.
+     *
+     * No header-discount reallocation is needed here (unlike Sale::
+     * revenueByAccount()): a linked line's `net` already has its share of
+     * the header discount baked in (saleComponents()/netOfHeaderDiscount()),
+     * and an unlinked return supports no header discount at all, so summing
+     * `net` per account is exact on its own either way.
+     *
+     * @param  list<array{item: Item, net: Money}>  $entries
+     * @return array<int, Money>
+     */
+    private static function revenueByAccount(array $entries, int $fallbackAccountId): array
+    {
+        $byAccount = [];
+
+        foreach ($entries as $entry) {
+            $accountId = $entry['item']->account_id ?? $fallbackAccountId;
+            $byAccount[$accountId] = ($byAccount[$accountId] ?? Money::zero())->plus($entry['net']);
+        }
+
+        return array_filter($byAccount, static fn (Money $amount): bool => ! $amount->isZero());
+    }
+
+    /**
+     * @param  array{taxable: Money, nontaxable: Money, vat: Money, tds: Money, total: Money, lines: list<array{sale_line: SaleLine, net: Money}>}  $prepared
      */
     private static function postCreditNote(Sale $sale, array $prepared, string $date, ?string $reason, User $actor): JournalVoucher
     {
@@ -931,12 +1307,15 @@ class SalesReturn extends Model
         $voucherLines = [];
 
         $salesAccountId = Account::where('code', 'INI20')->firstOrFail()->id;
-        $voucherLines[] = [
-            'account_id' => $salesAccountId,
-            'debit' => $prepared['taxable']->plus($prepared['nontaxable'])->toString(),
-            'credit' => '0',
-            'narration' => 'Sales return',
-        ];
+
+        $revenueEntries = array_map(
+            static fn (array $line): array => ['item' => $line['sale_line']->item, 'net' => $line['net']],
+            $prepared['lines'],
+        );
+
+        foreach (static::revenueByAccount($revenueEntries, $salesAccountId) as $accountId => $amount) {
+            $voucherLines[] = ['account_id' => $accountId, 'debit' => $amount->toString(), 'credit' => '0', 'narration' => 'Sales return'];
+        }
 
         if ($prepared['vat']->isPositive()) {
             $vatPayableId = Account::where('code', 'LIA20')->firstOrFail()->id;
@@ -987,36 +1366,83 @@ class SalesReturn extends Model
      * balance is paid straight back out, so their ledger nets to where it
      * stood before the sale.
      *
-     * @param  array{taxable: Money, nontaxable: Money, vat: Money, tds: Money, total: Money}  $prepared
+     * Split cash+bank refund (audit section 4 polish, "split cash+bank
+     * refund"), for both a linked and an unlinked return: `refund_cash_
+     * amount`/`refund_bank_amount` must add up to $customerCredit exactly
+     * (DocumentCalculator::assertExactSplit(), C3) when either is set. A
+     * return posted before this feature existed (or one that only ever set
+     * `refund_account_id`, matching the form's original single-account
+     * picker) still refunds the whole credit through that one account -
+     * additive, not a breaking change.
+     *
+     * `$customerAccountId` is passed in rather than derived from `$sale`
+     * here, because an unlinked return (postUnlinked()) has no Sale to read
+     * a customer off at all (C7 "returns without a bill").
      */
-    private static function postRefund(self $salesReturn, Sale $sale, array $prepared, string $date, User $actor): void
+    private static function postRefund(self $salesReturn, int $customerAccountId, Money $customerCredit, string $date, User $actor): void
     {
-        if (! $salesReturn->refund_account_id) {
-            return;
-        }
-
-        $customerCredit = $prepared['total']->minus($prepared['tds']);
-
         if (! $customerCredit->isPositive()) {
             return;
         }
 
-        $sale->loadMissing('customer');
+        $hasSplit = $salesReturn->refund_cash_amount !== null || $salesReturn->refund_bank_amount !== null;
+
+        if ($hasSplit) {
+            $cash = Money::of($salesReturn->refund_cash_amount ?? '0');
+            $bank = Money::of($salesReturn->refund_bank_amount ?? '0');
+
+            DocumentCalculator::assertExactSplit($customerCredit, $cash, $bank);
+
+            if ($bank->isPositive() && ! $salesReturn->refund_account_id) {
+                throw new InvalidArgumentException('A bank account is required for the bank portion of a refund.');
+            }
+        } elseif ($salesReturn->refund_account_id) {
+            $cash = Money::zero();
+            $bank = $customerCredit;
+        } else {
+            return;
+        }
+
+        // Money leaves the business, so every money account is CREDITED and
+        // the customer is DEBITED: the credit note already credited them,
+        // and the refund clears that credit balance back to where it stood
+        // before the sale. Reversing these two legs would both double the
+        // customer's credit and inflate cash/bank.
+        $voucherLines = [];
+
+        if ($cash->isPositive()) {
+            $voucherLines[] = [
+                'account_id' => Account::where('code', 'AS1')->firstOrFail()->id,
+                'debit' => '0',
+                'credit' => $cash->toString(),
+                'narration' => 'Refund settlement',
+            ];
+        }
+
+        if ($bank->isPositive()) {
+            $voucherLines[] = ['account_id' => $salesReturn->refund_account_id, 'debit' => '0', 'credit' => $bank->toString(), 'narration' => 'Refund settlement'];
+        }
+
+        if ($voucherLines === []) {
+            return;
+        }
+
+        $voucherLines[] = ['account_id' => $customerAccountId, 'debit' => $cash->plus($bank)->toString(), 'credit' => '0', 'narration' => 'Refund settlement'];
 
         $refundVoucher = JournalVoucher::post(
             [
                 'voucher_type' => VoucherType::Journal->value,
                 'date' => $date,
-                'narration' => "Refund for sales return #{$salesReturn->id}",
+                'narration' => "Refund for {$salesReturn->documentNumber()}",
             ],
-            [
-                ['account_id' => $sale->customer->account_id, 'debit' => $customerCredit->toString(), 'credit' => '0', 'narration' => 'Refund settlement'],
-                ['account_id' => $salesReturn->refund_account_id, 'debit' => '0', 'credit' => $customerCredit->toString(), 'narration' => 'Refund settlement'],
-            ],
+            $voucherLines,
             $actor,
         );
 
         $salesReturn->update(['refund_journal_voucher_id' => $refundVoucher->id]);
+
+        $mode = $cash->isPositive() && $bank->isPositive() ? 'partial' : ($cash->isPositive() ? 'cash' : 'bank');
+        $refundVoucher->lines()->update(['narration' => SettlementNarration::line($salesReturn->documentNumber(), $mode)]);
     }
 
     /**
@@ -1049,6 +1475,14 @@ class SalesReturn extends Model
             if (Quantity::of($line->quantity)->isGreaterThan($remaining)) {
                 throw new InvalidArgumentException(
                     "This request can no longer be approved: only {$remaining->formatQuantity()} of line [{$line->sale_line_id}] remains returnable."
+                );
+            }
+
+            $remainingBonus = Quantity::of($saleLine->bonus_quantity ?? '0')->minus($credited[$line->sale_line_id]['bonus_quantity']);
+
+            if (Quantity::of($line->bonus_quantity ?? '0')->isGreaterThan($remainingBonus)) {
+                throw new InvalidArgumentException(
+                    "This request can no longer be approved: only {$remainingBonus->formatQuantity()} bonus units of line [{$line->sale_line_id}] remain returnable."
                 );
             }
         }
@@ -1115,6 +1549,26 @@ class SalesReturn extends Model
         }
 
         return $refundAccountId;
+    }
+
+    /**
+     * A blank cash/bank refund split field reads as "not given" (postRefund()
+     * falls back to the pre-split single-account shape), never a silent
+     * zero - the same convention `validatedRefundAccountId()` above uses.
+     */
+    private static function validatedRefundSplitAmount(mixed $amount): ?string
+    {
+        if ($amount === null || $amount === '') {
+            return null;
+        }
+
+        $money = Money::of($amount);
+
+        if ($money->isNegative()) {
+            throw new InvalidArgumentException('A refund amount cannot be negative.');
+        }
+
+        return $money->toString();
     }
 
     /**
