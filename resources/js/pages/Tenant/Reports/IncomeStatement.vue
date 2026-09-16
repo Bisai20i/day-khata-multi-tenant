@@ -59,12 +59,26 @@ const isProfit = computed(() => compareMoney(props.netProfit, '0.00') >= 0);
 const isGrossProfit = computed(() => compareMoney(props.grossProfit, '0.00') >= 0);
 const absNetProfit = computed(() => (isProfit.value ? props.netProfit : props.netProfit.replace('-', '')));
 const absGrossProfit = computed(() => (isGrossProfit.value ? props.grossProfit : props.grossProfit.replace('-', '')));
+
+function printUrl() {
+    const params = new URLSearchParams({ fiscal_year_id: fiscalYear.value ?? '', from: from.value ?? '', to: to.value ?? '' });
+    return `/reports/income-statement/print?${params.toString()}`;
+}
+
+function exportUrl() {
+    const params = new URLSearchParams({ fiscal_year_id: fiscalYear.value ?? '', from: from.value ?? '', to: to.value ?? '' });
+    return `/reports/income-statement/export?${params.toString()}`;
+}
 </script>
 
 <template>
     <div>
         <div class="mb-4 flex flex-wrap items-center justify-between gap-3">
             <h2 class="text-base font-bold text-text-strong">Income Statement</h2>
+            <div v-if="fiscalYearId !== null" class="flex items-center gap-2">
+                <a :href="printUrl()" target="_blank" rel="noopener"><Button variant="secondary" tone="purple">Print</Button></a>
+                <a :href="exportUrl()"><Button variant="secondary" tone="purple">Export</Button></a>
+            </div>
         </div>
 
         <Card v-if="fiscalYearId !== null" variant="panel" class="mb-4">

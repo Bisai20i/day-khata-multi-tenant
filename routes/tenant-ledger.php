@@ -41,8 +41,17 @@ Route::name('tenant.')->group(function () {
     Route::prefix('journal-vouchers')->name('journal-vouchers.')->group(function () {
         Route::get('/', [JournalVoucherController::class, 'index'])->name('index');
         Route::post('/', [JournalVoucherController::class, 'store'])->middleware('role:admin')->name('store');
+        // Cash/Bank vouchers (T14, CONTRACTS/accounting parity): Cash
+        // Receipt, Cash Payment, Bank Receipt, Bank Payment, Contra. Posted
+        // through the same controller/model as a manual Journal voucher
+        // since neither has a separate owning record - see
+        // JournalVoucher::postCashBank().
+        Route::post('/cash-bank', [JournalVoucherController::class, 'storeCashBank'])->middleware('role:admin')->name('cash-bank.store');
         Route::post('/{journalVoucher}/cancel', [JournalVoucherController::class, 'cancel'])->middleware('role:admin')->name('cancel');
+        Route::get('/{journalVoucher}/print', [JournalVoucherController::class, 'print'])->name('print');
     });
 
     Route::get('/accounts/{account}/ledger', [AccountController::class, 'ledger'])->name('accounts.ledger');
+    Route::get('/accounts/{account}/ledger/print', [AccountController::class, 'ledgerPrint'])->name('accounts.ledger.print');
+    Route::get('/accounts/{account}/ledger/export', [AccountController::class, 'ledgerExport'])->name('accounts.ledger.export');
 });

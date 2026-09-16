@@ -4,22 +4,41 @@ namespace App\Http\Controllers\Tenant\Reports;
 
 use App\Enums\FiscalYearStatus;
 use App\Enums\VoucherType;
+use App\Exports\AccountBookExport;
+use App\Exports\BalanceSheetExport;
+use App\Exports\CancelledDocumentsExport;
+use App\Exports\DayBookExport;
+use App\Exports\IncomeStatementExport;
+use App\Exports\TrialBalanceExport;
 use App\Http\Controllers\Controller;
 use App\Models\Account;
 use App\Models\AccountHead;
+use App\Models\CapitalPurchase;
+use App\Models\CapitalSale;
+use App\Models\CompanySetting;
 use App\Models\FiscalYear;
 use App\Models\JournalVoucher;
 use App\Models\JournalVoucherLine;
+use App\Models\Payment;
+use App\Models\Purchase;
+use App\Models\PurchaseReturn;
+use App\Models\Receipt;
+use App\Models\Sale;
+use App\Models\SalesReturn;
 use App\Support\Inventory\StockCosting;
 use App\Support\Money\Money;
+use App\Support\NepaliCalendar;
+use Barryvdh\DomPDF\Facade\Pdf;
 use Brick\Math\BigDecimal;
 use Brick\Math\RoundingMode;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Http\Request;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Collection;
+use Illuminate\Support\Str;
 use Inertia\Inertia;
 use Inertia\Response;
+use Maatwebsite\Excel\Facades\Excel;
 use RuntimeException;
 
 /**
@@ -218,6 +237,7 @@ class AccountingReportController extends Controller
     public function dayBook(Request $request): Response
     {
         $fiscalYear = $this->resolveFiscalYear($request);
+        $voucherType = $request->string('voucher_type')->toString() ?: null;
 
         $vouchers = collect();
         [$from, $to] = [null, null];
@@ -230,6 +250,7 @@ class AccountingReportController extends Controller
                 ->where('fiscal_year_id', $fiscalYear->id)
                 ->whereDate('date', '>=', $from)
                 ->whereDate('date', '<=', $to)
+                ->when($voucherType !== null, fn (Builder $query) => $query->where('voucher_type', $voucherType))
                 ->orderBy('date')
                 ->orderBy('id')
                 ->get();
@@ -242,6 +263,8 @@ class AccountingReportController extends Controller
             'fiscalYearId' => $fiscalYear?->id,
             'from' => $from,
             'to' => $to,
+            'voucherType' => $voucherType,
+            'voucherTypeOptions' => array_map(fn (VoucherType $type) => $type->value, VoucherType::cases()),
             'vouchers' => $vouchers->map(fn (JournalVoucher $voucher) => [
                 'date' => $voucher->date->toDateString(),
                 'voucherType' => $voucher->voucher_type->value,
@@ -318,6 +341,421 @@ class AccountingReportController extends Controller
                 ? $this->accountBook($account, $fiscalYear, $from, $to)
                 : $this->emptyAccountBook(),
         ));
+    }
+
+    /**
+     * PDF print of the Trial Balance (T14 task 2). Recomputes exactly what
+     * trialBalance() shows on screen, from the same private helpers, so the
+     * PDF can never disagree with the page it was printed from. Reports have
+     * no PrintLog entry (C9's copy-numbering is for a single countable
+     * document like an invoice or credit note; a "Trial Balance as of
+     * today" has no such identity to count copies of).
+     */
+    public function trialBalancePdf(Request $request)
+    {
+        $fiscalYear = $this->resolveFiscalYear($request);
+        abort_if($fiscalYear === null, 404, 'No fiscal year to report on.');
+
+        [$from, $to] = $this->resolveWindow($request, $fiscalYear);
+        $excluded = $this->sweepVoucherIds($fiscalYear);
+        $opening = $this->balancesByAccount($fiscalYear, $excluded, null, $this->dayBefore($from));
+        $period = $this->balancesByAccount($fiscalYear, $excluded, $from, $to);
+        $rows = $this->trialBalanceRows($opening, $period);
+        $heads = $this->buildHierarchy($rows);
+        $totals = $this->trialBalanceTotals($rows);
+
+        $pdf = Pdf::loadView('pdf.trial-balance', array_merge([
+            'company' => CompanySetting::current(),
+            'documentNumber' => "Trial Balance - {$fiscalYear->name}",
+            'documentDate' => $to,
+            'dateAd' => $to,
+            'dateBs' => NepaliCalendar::formatBs($to),
+            'fiscalYearName' => $fiscalYear->name,
+            'heads' => $heads,
+        ], $totals));
+
+        return $pdf->stream("trial-balance-{$fiscalYear->name}.pdf");
+    }
+
+    public function trialBalanceExport(Request $request)
+    {
+        $fiscalYear = $this->resolveFiscalYear($request);
+        abort_if($fiscalYear === null, 404, 'No fiscal year to report on.');
+
+        [$from, $to] = $this->resolveWindow($request, $fiscalYear);
+        $excluded = $this->sweepVoucherIds($fiscalYear);
+        $opening = $this->balancesByAccount($fiscalYear, $excluded, null, $this->dayBefore($from));
+        $period = $this->balancesByAccount($fiscalYear, $excluded, $from, $to);
+        $heads = $this->buildHierarchy($this->trialBalanceRows($opening, $period));
+
+        return Excel::download(new TrialBalanceExport($heads), "trial-balance-{$fiscalYear->name}.xlsx");
+    }
+
+    public function incomeStatementPdf(Request $request)
+    {
+        $fiscalYear = $this->resolveFiscalYear($request);
+        abort_if($fiscalYear === null, 404, 'No fiscal year to report on.');
+
+        $data = $this->incomeStatementData($request, $fiscalYear);
+
+        $pdf = Pdf::loadView('pdf.income-statement', array_merge([
+            'company' => CompanySetting::current(),
+            'documentNumber' => "Income Statement - {$fiscalYear->name}",
+            'documentDate' => $data['to'],
+            'dateAd' => $data['to'],
+            'dateBs' => NepaliCalendar::formatBs($data['to']),
+            'fiscalYearName' => $fiscalYear->name,
+        ], $data));
+
+        return $pdf->stream("income-statement-{$fiscalYear->name}.pdf");
+    }
+
+    public function incomeStatementExport(Request $request)
+    {
+        $fiscalYear = $this->resolveFiscalYear($request);
+        abort_if($fiscalYear === null, 404, 'No fiscal year to report on.');
+
+        $data = $this->incomeStatementData($request, $fiscalYear);
+
+        return Excel::download(
+            new IncomeStatementExport($data['income'], $data['expenses'], $data['grossProfit'], $data['netProfit']),
+            "income-statement-{$fiscalYear->name}.xlsx",
+        );
+    }
+
+    /**
+     * Shared by incomeStatement()'s Inertia page and its PDF/Excel siblings,
+     * so all three read from one computation and can never disagree.
+     *
+     * @return array{from: string, to: string, income: array, expenses: array, totalIncome: string, totalExpenses: string, grossProfit: string, netProfit: string}
+     */
+    private function incomeStatementData(Request $request, FiscalYear $fiscalYear): array
+    {
+        [$from, $to] = $this->resolveWindow($request, $fiscalYear);
+
+        $excluded = $this->sweepVoucherIds($fiscalYear);
+        $balances = $this->balancesByAccount($fiscalYear, $excluded, $from, $to);
+        $stock = $this->stockPosition($fiscalYear, $to);
+
+        $income = $this->headBalances('Income', $balances, creditNormal: true);
+        $expenses = $this->headBalances('Expenses', $balances, creditNormal: false);
+
+        if (! $stock['posted']) {
+            $expenses = $this->withVirtualRow($expenses, FiscalYear::OPENING_STOCK_CODE, 'Opening Stock', $stock['opening']);
+            $income = $this->withVirtualRow($income, FiscalYear::CLOSING_STOCK_CODE, 'Closing Stock', $stock['closing']);
+        }
+
+        $totalIncome = Money::sum(array_column($income, 'amount'));
+        $totalExpenses = Money::sum(array_column($expenses, 'amount'));
+        $grossProfit = $this->grossProfit($income, $expenses);
+
+        return [
+            'from' => $from,
+            'to' => $to,
+            'income' => $income,
+            'expenses' => $expenses,
+            'totalIncome' => $totalIncome->toString(),
+            'totalExpenses' => $totalExpenses->toString(),
+            'grossProfit' => $grossProfit->toString(),
+            'netProfit' => $totalIncome->minus($totalExpenses)->toString(),
+        ];
+    }
+
+    public function balanceSheetPdf(Request $request)
+    {
+        $fiscalYear = $this->resolveFiscalYear($request);
+        abort_if($fiscalYear === null, 404, 'No fiscal year to report on.');
+
+        $data = $this->balanceSheetData($request, $fiscalYear);
+
+        $pdf = Pdf::loadView('pdf.balance-sheet', array_merge([
+            'company' => CompanySetting::current(),
+            'documentNumber' => "Balance Sheet - {$fiscalYear->name}",
+            'documentDate' => $data['to'],
+            'dateAd' => $data['to'],
+            'dateBs' => NepaliCalendar::formatBs($data['to']),
+            'fiscalYearName' => $fiscalYear->name,
+        ], $data));
+
+        return $pdf->stream("balance-sheet-{$fiscalYear->name}.pdf");
+    }
+
+    public function balanceSheetExport(Request $request)
+    {
+        $fiscalYear = $this->resolveFiscalYear($request);
+        abort_if($fiscalYear === null, 404, 'No fiscal year to report on.');
+
+        $data = $this->balanceSheetData($request, $fiscalYear);
+
+        return Excel::download(
+            new BalanceSheetExport($data['heads'], $data['totalAssets'], $data['totalLiabilitiesAndCapital']),
+            "balance-sheet-{$fiscalYear->name}.xlsx",
+        );
+    }
+
+    /**
+     * Shared by balanceSheet()'s Inertia page and its PDF/Excel siblings.
+     *
+     * @return array{to: string, heads: array, stock: array, currentYearEarnings: string, totalAssets: string, totalLiabilitiesAndCapital: string, balanceWarning: ?string}
+     */
+    private function balanceSheetData(Request $request, FiscalYear $fiscalYear): array
+    {
+        [, $to] = $this->resolveWindow($request, $fiscalYear);
+
+        $balances = $this->balancesByAccount($fiscalYear, [], null, $to);
+        $rows = $this->accountRows($balances, ['Assets', 'Liabilities', 'Capital']);
+        $stock = $this->stockPosition($fiscalYear, $to);
+        $currentYearEarnings = $this->unsweptProfitAndLoss($fiscalYear, $to);
+        $stockAdjustment = Money::of($stock['closing'])->minus(Money::of($stock['opening']));
+
+        if (! $stock['posted'] && ! $stockAdjustment->isZero()) {
+            $rows = $this->withStockInHandRow($rows, $stockAdjustment);
+            $currentYearEarnings = $currentYearEarnings->plus($stockAdjustment);
+        }
+
+        $assetRows = $rows->filter(fn (array $row) => $row['headName'] === 'Assets');
+        $otherRows = $rows->filter(fn (array $row) => $row['headName'] !== 'Assets');
+
+        $totalAssets = Money::sum($assetRows->pluck('debit'))->minus(Money::sum($assetRows->pluck('credit')));
+        $totalLiabilitiesAndCapital = Money::sum($otherRows->pluck('credit'))
+            ->minus(Money::sum($otherRows->pluck('debit')))
+            ->plus($currentYearEarnings);
+
+        return [
+            'to' => $to,
+            'heads' => $this->buildHierarchy($rows),
+            'stock' => $stock,
+            'currentYearEarnings' => $currentYearEarnings->toString(),
+            'totalAssets' => $totalAssets->toString(),
+            'totalLiabilitiesAndCapital' => $totalLiabilitiesAndCapital->toString(),
+            'balanceWarning' => $this->assertBalanced($fiscalYear, $totalAssets, $totalLiabilitiesAndCapital),
+        ];
+    }
+
+    public function dayBookPdf(Request $request)
+    {
+        $fiscalYear = $this->resolveFiscalYear($request);
+        abort_if($fiscalYear === null, 404, 'No fiscal year to report on.');
+
+        $data = $this->dayBookData($request, $fiscalYear);
+
+        $pdf = Pdf::loadView('pdf.day-book', array_merge([
+            'company' => CompanySetting::current(),
+            'documentNumber' => "Day Book - {$fiscalYear->name}",
+            'documentDate' => $data['to'],
+            'dateAd' => $data['to'],
+            'dateBs' => NepaliCalendar::formatBs($data['to']),
+            'fiscalYearName' => $fiscalYear->name,
+        ], $data));
+
+        return $pdf->stream("day-book-{$fiscalYear->name}.pdf");
+    }
+
+    public function dayBookExport(Request $request)
+    {
+        $fiscalYear = $this->resolveFiscalYear($request);
+        abort_if($fiscalYear === null, 404, 'No fiscal year to report on.');
+
+        $data = $this->dayBookData($request, $fiscalYear);
+
+        return Excel::download(new DayBookExport($data['vouchers']), "day-book-{$fiscalYear->name}.xlsx");
+    }
+
+    /**
+     * @return array{from: string, to: string, vouchers: array, totalDebit: string, totalCredit: string}
+     */
+    private function dayBookData(Request $request, FiscalYear $fiscalYear): array
+    {
+        $voucherType = $request->string('voucher_type')->toString() ?: null;
+        [$from, $to] = $this->resolveWindow($request, $fiscalYear);
+
+        $vouchers = JournalVoucher::query()
+            ->with('lines.account:id,code,name')
+            ->where('fiscal_year_id', $fiscalYear->id)
+            ->whereDate('date', '>=', $from)
+            ->whereDate('date', '<=', $to)
+            ->when($voucherType !== null, fn (Builder $query) => $query->where('voucher_type', $voucherType))
+            ->orderBy('date')
+            ->orderBy('id')
+            ->get();
+
+        $lines = $vouchers->flatMap->lines;
+
+        return [
+            'from' => $from,
+            'to' => $to,
+            'vouchers' => $vouchers->map(fn (JournalVoucher $voucher) => [
+                'date' => $voucher->date->toDateString(),
+                'voucherType' => $voucher->voucher_type->value,
+                'voucherNumber' => $voucher->voucher_number,
+                'narration' => $voucher->narration,
+                'lines' => $voucher->lines->map(fn (JournalVoucherLine $line) => [
+                    'accountCode' => $line->account->code,
+                    'accountName' => $line->account->name,
+                    'debit' => Money::of($line->debit)->toString(),
+                    'credit' => Money::of($line->credit)->toString(),
+                    'narration' => $line->narration,
+                ])->values()->all(),
+            ])->values()->all(),
+            'totalDebit' => Money::sum($lines->map(fn (JournalVoucherLine $line) => Money::of($line->debit)))->toString(),
+            'totalCredit' => Money::sum($lines->map(fn (JournalVoucherLine $line) => Money::of($line->credit)))->toString(),
+        ];
+    }
+
+    public function cashBookPdf(Request $request)
+    {
+        return $this->accountBookPdf($request, Account::where('code', 'AS1')->firstOrFail(), 'Cash Book');
+    }
+
+    public function cashBookExport(Request $request)
+    {
+        return $this->accountBookExport($request, Account::where('code', 'AS1')->firstOrFail(), 'cash-book');
+    }
+
+    public function bankBookPdf(Request $request)
+    {
+        $account = Account::findOrFail($request->integer('account_id'));
+
+        return $this->accountBookPdf($request, $account, 'Bank Book');
+    }
+
+    public function bankBookExport(Request $request)
+    {
+        $account = Account::findOrFail($request->integer('account_id'));
+
+        return $this->accountBookExport($request, $account, 'bank-book');
+    }
+
+    private function accountBookPdf(Request $request, Account $account, string $title)
+    {
+        $fiscalYear = $this->resolveFiscalYear($request);
+        abort_if($fiscalYear === null, 404, 'No fiscal year to report on.');
+
+        [$from, $to] = $this->resolveWindow($request, $fiscalYear);
+        $data = $this->accountBook($account, $fiscalYear, $from, $to);
+
+        $pdf = Pdf::loadView('pdf.account-book', array_merge([
+            'title' => "{$title} - {$account->name}",
+            'company' => CompanySetting::current(),
+            'documentNumber' => $account->code ? "{$account->code} - {$account->name}" : $account->name,
+            'documentDate' => $to,
+            'dateAd' => $to,
+            'dateBs' => NepaliCalendar::formatBs($to),
+            'fiscalYearName' => $fiscalYear->name,
+            'from' => $from,
+            'to' => $to,
+        ], $data));
+
+        return $pdf->stream(Str::slug($title).'-'.$account->id.'.pdf');
+    }
+
+    private function accountBookExport(Request $request, Account $account, string $filenamePrefix)
+    {
+        $fiscalYear = $this->resolveFiscalYear($request);
+        abort_if($fiscalYear === null, 404, 'No fiscal year to report on.');
+
+        [$from, $to] = $this->resolveWindow($request, $fiscalYear);
+        $data = $this->accountBook($account, $fiscalYear, $from, $to);
+
+        return Excel::download(
+            new AccountBookExport($data['entries'], $data['openingBalance'], $data['closingBalance']),
+            "{$filenamePrefix}-{$account->id}.xlsx",
+        );
+    }
+
+    /**
+     * Cancelled Documents report (T14 task 4): every cancelled sale,
+     * purchase, return, receipt, payment, capital document and journal
+     * voucher in one list - number, date, cancel date, who and reason
+     * (CONTRACTS C5's four columns on each module table). A cash/bank
+     * voucher (CONTRACTS/T14) has no owning module row, so it surfaces here
+     * too, labelled by its own voucher type, through the Journal Vouchers
+     * bucket below - JournalVoucher::sourceRecordLabel() is what keeps a
+     * module-owned voucher (a cancelled Sale's underlying voucher, say) from
+     * being listed a second time here as if it were a standalone one.
+     */
+    public function cancelledDocuments(Request $request): Response
+    {
+        return Inertia::render('Tenant/Reports/CancelledDocuments', [
+            'rows' => $this->cancelledDocumentRows(),
+        ]);
+    }
+
+    public function cancelledDocumentsExport(Request $request)
+    {
+        return Excel::download(new CancelledDocumentsExport($this->cancelledDocumentRows()), 'cancelled-documents.xlsx');
+    }
+
+    /**
+     * @return array<int, array{type: string, number: string, date: string, cancelledAt: ?string, cancelledBy: ?string, reason: ?string}>
+     */
+    private function cancelledDocumentRows(): array
+    {
+        $rows = collect();
+
+        $modules = [
+            ['type' => 'Sale', 'model' => Sale::class, 'number' => fn (Sale $m) => $m->invoice_number ?? "#{$m->id}"],
+            ['type' => 'Purchase', 'model' => Purchase::class, 'number' => fn (Purchase $m) => $m->bill_number ?: "#{$m->id}"],
+            ['type' => 'Sales Return', 'model' => SalesReturn::class, 'number' => fn (SalesReturn $m) => $m->documentNumber()],
+            ['type' => 'Purchase Return', 'model' => PurchaseReturn::class, 'number' => fn (PurchaseReturn $m) => $m->documentNumber()],
+            ['type' => 'Receipt', 'model' => Receipt::class, 'number' => fn (Receipt $m) => "#{$m->id}"],
+            ['type' => 'Payment', 'model' => Payment::class, 'number' => fn (Payment $m) => "#{$m->id}"],
+            ['type' => 'Capital Sale', 'model' => CapitalSale::class, 'number' => fn (CapitalSale $m) => $m->documentNumber()],
+            ['type' => 'Capital Purchase', 'model' => CapitalPurchase::class, 'number' => fn (CapitalPurchase $m) => $m->bill_number ?: "#{$m->id}"],
+        ];
+
+        foreach ($modules as $module) {
+            $model = $module['model'];
+
+            $model::query()
+                ->where('status', 'cancelled')
+                ->with('canceller:id,name')
+                ->get()
+                ->each(function ($record) use ($module, $rows) {
+                    $rows->push([
+                        'type' => $module['type'],
+                        'number' => ($module['number'])($record),
+                        'date' => $record->date?->toDateString() ?? '',
+                        'cancelledAt' => $record->cancelled_at?->toDateTimeString(),
+                        'cancelledBy' => $record->canceller?->name,
+                        'reason' => $record->cancel_reason,
+                    ]);
+                });
+        }
+
+        // Journal Vouchers and cash/bank vouchers: only the ones with no
+        // owning module record (see sourceRecordLabel()'s docblock) - every
+        // other cancelled voucher_type belongs to one of the modules above
+        // and is already listed under its own record.
+        JournalVoucher::query()
+            ->where('status', 'cancelled')
+            ->whereIn('voucher_type', array_map(fn (VoucherType $t) => $t->value, VoucherType::manuallyCancellableTypes()))
+            ->with('reversal.creator:id,name')
+            ->get()
+            ->each(function (JournalVoucher $voucher) use ($rows) {
+                if ($voucher->sourceRecordLabel() !== null) {
+                    return;
+                }
+
+                $reversal = $voucher->reversal;
+                $reason = $reversal?->narration;
+                // Strip the "Cancellation of ... : " prefix cancel() writes,
+                // leaving just the reason the user typed.
+                if ($reason !== null && str_contains($reason, ': ')) {
+                    $reason = substr($reason, strrpos($reason, ': ') + 2);
+                }
+
+                $rows->push([
+                    'type' => ucwords(str_replace('_', ' ', $voucher->voucher_type->value)),
+                    'number' => "{$voucher->voucher_type->value}-{$voucher->voucher_number}",
+                    'date' => $voucher->date->toDateString(),
+                    'cancelledAt' => $reversal?->date?->toDateString(),
+                    'cancelledBy' => $reversal?->creator?->name,
+                    'reason' => $reason,
+                ]);
+            });
+
+        return $rows->sortByDesc('cancelledAt')->values()->all();
     }
 
     /**

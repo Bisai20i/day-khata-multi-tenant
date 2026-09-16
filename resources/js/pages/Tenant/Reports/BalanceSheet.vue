@@ -54,12 +54,26 @@ function apply() {
 const assetHeads = computed(() => props.heads.filter((head) => head.name === 'Assets'));
 const otherHeads = computed(() => props.heads.filter((head) => head.name !== 'Assets'));
 const hasEarnings = computed(() => !isZeroMoney(props.currentYearEarnings));
+
+function printUrl() {
+    const params = new URLSearchParams({ fiscal_year_id: fiscalYear.value ?? '', to: to.value ?? '' });
+    return `/reports/balance-sheet/print?${params.toString()}`;
+}
+
+function exportUrl() {
+    const params = new URLSearchParams({ fiscal_year_id: fiscalYear.value ?? '', to: to.value ?? '' });
+    return `/reports/balance-sheet/export?${params.toString()}`;
+}
 </script>
 
 <template>
     <div>
         <div class="mb-4 flex flex-wrap items-center justify-between gap-3">
             <h2 class="text-base font-bold text-text-strong">Balance Sheet</h2>
+            <div v-if="fiscalYearId !== null" class="flex items-center gap-2">
+                <a :href="printUrl()" target="_blank" rel="noopener"><Button variant="secondary" tone="purple">Print</Button></a>
+                <a :href="exportUrl()"><Button variant="secondary" tone="purple">Export</Button></a>
+            </div>
         </div>
 
         <Card v-if="fiscalYearId !== null" variant="panel" class="mb-4">

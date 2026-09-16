@@ -4,17 +4,35 @@ namespace App\Http\Controllers\Tenant\Accounting;
 
 use App\Enums\FiscalYearStatus;
 use App\Enums\VoucherType;
+use App\Exports\AccountBookExport;
 use App\Http\Controllers\Concerns\ImportsCsv;
 use App\Http\Controllers\Controller;
 use App\Models\Account;
 use App\Models\AccountGroup;
 use App\Models\AccountSubgroup;
+use App\Models\CapitalPurchase;
+use App\Models\CapitalSale;
+use App\Models\CompanySetting;
 use App\Models\FiscalYear;
+use App\Models\FixedAsset;
+use App\Models\FixedAssetDepreciation;
 use App\Models\JournalVoucher;
 use App\Models\JournalVoucherLine;
+use App\Models\Payment;
+use App\Models\Purchase;
+use App\Models\PurchaseReturn;
+use App\Models\Receipt;
+use App\Models\Sale;
+use App\Models\SalesReturn;
 use App\Models\User;
 use App\Support\Money\Money;
+use App\Support\NepaliCalendar;
+use Barryvdh\DomPDF\Facade\Pdf;
+use Brick\Math\BigDecimal;
+use Brick\Math\RoundingMode;
 use Illuminate\Auth\Access\AuthorizationException;
+use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Database\Eloquent\Model;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -23,6 +41,7 @@ use Illuminate\Validation\Rule;
 use Inertia\Inertia;
 use Inertia\Response;
 use InvalidArgumentException;
+use Maatwebsite\Excel\Facades\Excel;
 use Symfony\Component\HttpFoundation\StreamedResponse;
 
 class AccountController extends Controller
@@ -129,12 +148,102 @@ class AccountController extends Controller
         return redirect()->route('tenant.accounts.index')->with('status', 'Account deleted.');
     }
 
+    /**
+     * The account ledger: an arbitrary date window inside one fiscal year
+     * (T14 task 3), with the opening balance computed the same way
+     * AccountingReportController's Cash/Bank Book does it - that year's
+     * Opening Balance voucher lines plus that year's own lines dated before
+     * `from` - so a window that does not start on day one still opens at the
+     * right figure instead of at zero (audit-class bug: P0-18's "opening
+     * balance double-counts" applies to any windowed book, not only Cash
+     * Book). Each line also carries a `document` drill-down to whichever
+     * module record (if any) the voucher was posted on behalf of.
+     */
     public function ledger(Request $request, Account $account): Response
     {
         $fiscalYearId = $request->integer('fiscal_year_id') ?: FiscalYear::query()->where('status', FiscalYearStatus::Open)->value('id');
+        $fiscalYear = $fiscalYearId ? FiscalYear::find($fiscalYearId) : null;
 
-        $entries = $account->journalVoucherLines()
-            ->whereHas('journalVoucher', fn ($query) => $query->where('fiscal_year_id', $fiscalYearId))
+        $data = $fiscalYear
+            ? $this->ledgerData($account, $fiscalYear, $request->string('from')->toString(), $request->string('to')->toString())
+            : $this->emptyLedgerData();
+
+        return Inertia::render('Tenant/Accounting/Accounts/Ledger', array_merge([
+            'account' => $account->only(['id', 'code', 'name']),
+            'fiscalYears' => FiscalYear::query()->orderByDesc('start_date')->get(['id', 'name', 'status', 'start_date', 'end_date']),
+            'fiscalYearId' => $fiscalYearId,
+        ], $data));
+    }
+
+    public function ledgerPrint(Request $request, Account $account)
+    {
+        $fiscalYear = $this->resolveLedgerFiscalYear($request);
+        abort_if($fiscalYear === null, 404, 'No fiscal year to print.');
+
+        $data = $this->ledgerData($account, $fiscalYear, $request->string('from')->toString(), $request->string('to')->toString());
+
+        $pdf = Pdf::loadView('pdf.account-book', [
+            'title' => "Ledger - {$account->name}",
+            'company' => CompanySetting::current(),
+            'documentNumber' => $account->code ? "{$account->code} - {$account->name}" : $account->name,
+            'documentDate' => $data['to'],
+            'dateAd' => $data['to'],
+            'dateBs' => NepaliCalendar::formatBs($data['to']),
+            'fiscalYearName' => $fiscalYear->name,
+            'from' => $data['from'],
+            'to' => $data['to'],
+            'openingBalance' => $data['openingBalance'],
+            'closingBalance' => $data['closingBalance'],
+            'entries' => $data['entries'],
+        ]);
+
+        return $pdf->stream("ledger-{$account->id}.pdf");
+    }
+
+    public function ledgerExport(Request $request, Account $account)
+    {
+        $fiscalYear = $this->resolveLedgerFiscalYear($request);
+        abort_if($fiscalYear === null, 404, 'No fiscal year to export.');
+
+        $data = $this->ledgerData($account, $fiscalYear, $request->string('from')->toString(), $request->string('to')->toString());
+
+        return Excel::download(
+            new AccountBookExport($data['entries'], $data['openingBalance'], $data['closingBalance']),
+            "ledger-{$account->id}.xlsx",
+        );
+    }
+
+    private function resolveLedgerFiscalYear(Request $request): ?FiscalYear
+    {
+        $fiscalYearId = $request->integer('fiscal_year_id') ?: FiscalYear::query()->where('status', FiscalYearStatus::Open)->value('id');
+
+        return $fiscalYearId ? FiscalYear::find($fiscalYearId) : null;
+    }
+
+    /**
+     * @return array{entries: array<int, array<string, mixed>>, openingBalance: string, closingBalance: string, from: string, to: string}
+     */
+    private function ledgerData(Account $account, FiscalYear $fiscalYear, string $requestedFrom, string $requestedTo): array
+    {
+        $start = $fiscalYear->start_date->toDateString();
+        $end = $fiscalYear->end_date->toDateString();
+
+        $from = $requestedFrom !== '' ? max($requestedFrom, $start) : $start;
+        $to = $requestedTo !== '' ? min($requestedTo, $end) : $end;
+
+        if ($from > $to) {
+            [$from, $to] = [$start, $end];
+        }
+
+        $openingBalance = $this->openingBalanceFor($account, $fiscalYear, $from);
+
+        $lines = $account->journalVoucherLines()
+            ->whereHas('journalVoucher', function (Builder $query) use ($fiscalYear, $from, $to) {
+                $query->where('fiscal_year_id', $fiscalYear->id)
+                    ->where('voucher_type', '!=', VoucherType::OpeningBalance->value)
+                    ->whereDate('date', '>=', $from)
+                    ->whereDate('date', '<=', $to);
+            })
             ->with('journalVoucher')
             ->get()
             ->sortBy([['journalVoucher.date', 'asc'], ['id', 'asc']])
@@ -147,9 +256,9 @@ class AccountController extends Controller
         // is exact and prints plain "0.00". Amounts leave as strings so the
         // page formats them with formatMoney() rather than re-deriving them
         // from a JSON number.
-        $runningBalance = Money::zero();
+        $runningBalance = $openingBalance;
 
-        $entries = $entries->map(function (JournalVoucherLine $line) use (&$runningBalance) {
+        $entries = $lines->map(function (JournalVoucherLine $line) use (&$runningBalance) {
             $debit = Money::of($line->debit);
             $credit = Money::of($line->credit);
             $runningBalance = $runningBalance->plus($debit)->minus($credit);
@@ -162,15 +271,114 @@ class AccountController extends Controller
                 'debit' => $debit->toString(),
                 'credit' => $credit->toString(),
                 'balance' => $runningBalance->toString(),
+                'document' => $this->documentFor($line->journalVoucher),
             ];
-        });
+        })->values()->all();
 
-        return Inertia::render('Tenant/Accounting/Accounts/Ledger', [
-            'account' => $account->only(['id', 'code', 'name']),
-            'fiscalYears' => FiscalYear::query()->orderByDesc('start_date')->get(['id', 'name', 'status']),
-            'fiscalYearId' => $fiscalYearId,
+        return [
             'entries' => $entries,
-        ]);
+            'openingBalance' => $openingBalance->toString(),
+            'closingBalance' => $runningBalance->toString(),
+            'from' => $from,
+            'to' => $to,
+        ];
+    }
+
+    /**
+     * @return array{entries: array<int, array<string, mixed>>, openingBalance: string, closingBalance: string, from: null, to: null}
+     */
+    private function emptyLedgerData(): array
+    {
+        return ['entries' => [], 'openingBalance' => '0.00', 'closingBalance' => '0.00', 'from' => null, 'to' => null];
+    }
+
+    /**
+     * This year's Opening Balance voucher lines on $account, plus this
+     * year's own lines dated before $from - the same "never sum across a
+     * year boundary" rule AccountingReportController::accountBook() uses for
+     * the Cash/Bank Book (audit P0-18).
+     */
+    private function openingBalanceFor(Account $account, FiscalYear $fiscalYear, string $from): Money
+    {
+        $cast = JournalVoucherLine::query()->getConnection()->getDriverName() === 'sqlite' ? 'INTEGER' : 'SIGNED';
+
+        $openingScaled = JournalVoucherLine::query()
+            ->where('account_id', $account->id)
+            ->whereHas('journalVoucher', function (Builder $query) use ($fiscalYear, $from) {
+                $query->where('fiscal_year_id', $fiscalYear->id)
+                    ->where(fn (Builder $q) => $q
+                        ->where('voucher_type', VoucherType::OpeningBalance->value)
+                        ->orWhereDate('date', '<', $from));
+            })
+            ->selectRaw(
+                "COALESCE(SUM(CAST(ROUND(debit * 100) AS {$cast})), 0) - COALESCE(SUM(CAST(ROUND(credit * 100) AS {$cast})), 0) as net_scaled"
+            )
+            ->value('net_scaled');
+
+        return Money::of(BigDecimal::of((int) $openingScaled)->dividedBy(100, 2, RoundingMode::Unnecessary));
+    }
+
+    /**
+     * The module record (if any) that posted $voucher, for the ledger's
+     * per-line drill-down (T14 task 3): a bill number plus, where the module
+     * has its own print page, a link straight to it. Returns null for a
+     * standalone Journal/cash-bank voucher and for any system-bookkeeping
+     * voucher (Opening Balance, Closing Entry, Roll Forward) - none of those
+     * has a "source document" beyond the voucher itself.
+     *
+     * One query per owning table, same shape as
+     * JournalVoucher::sourceRecordLabel() - a report is not a hot path, so
+     * clarity wins over folding this into a single query.
+     *
+     * @return array{label: string, url: ?string}|null
+     */
+    private function documentFor(JournalVoucher $voucher): ?array
+    {
+        $lookups = [
+            [Sale::class, 'journal_voucher_id', fn (Sale $m) => [
+                'label' => 'Sale '.($m->invoice_number ?? "#{$m->id}"),
+                'url' => route('tenant.sales.print', $m),
+            ]],
+            [Purchase::class, 'journal_voucher_id', fn (Purchase $m) => [
+                'label' => 'Purchase '.($m->bill_number ?: "#{$m->id}"),
+                'url' => route('tenant.purchases.print', $m),
+            ]],
+            [SalesReturn::class, 'journal_voucher_id', fn (SalesReturn $m) => [
+                'label' => $m->documentNumber(),
+                'url' => route('tenant.sales-returns.print', $m),
+            ]],
+            [PurchaseReturn::class, 'journal_voucher_id', fn (PurchaseReturn $m) => [
+                'label' => $m->documentNumber(),
+                'url' => route('tenant.purchase-returns.print', $m),
+            ]],
+            [CapitalSale::class, 'journal_voucher_id', fn (CapitalSale $m) => [
+                'label' => 'Capital Sale '.$m->documentNumber(),
+                'url' => route('tenant.capital-sales.print', $m),
+            ]],
+            [CapitalPurchase::class, 'journal_voucher_id', fn (CapitalPurchase $m) => [
+                'label' => 'Capital Purchase '.($m->bill_number ?: "#{$m->id}"),
+                'url' => null,
+            ]],
+            [Receipt::class, 'journal_voucher_id', fn (Receipt $m) => ['label' => "Receipt #{$m->id}", 'url' => null]],
+            [Payment::class, 'journal_voucher_id', fn (Payment $m) => ['label' => "Payment #{$m->id}", 'url' => null]],
+            [FixedAsset::class, 'journal_voucher_id', fn (FixedAsset $m) => ['label' => "Fixed Asset {$m->asset_code}", 'url' => null]],
+            [FixedAsset::class, 'disposal_journal_voucher_id', fn (FixedAsset $m) => ['label' => "Fixed Asset disposal {$m->asset_code}", 'url' => null]],
+            [FixedAssetDepreciation::class, 'journal_voucher_id', fn (FixedAssetDepreciation $m) => [
+                'label' => 'Depreciation '.($m->fixedAsset?->asset_code ?? "#{$m->fixed_asset_id}"),
+                'url' => null,
+            ]],
+        ];
+
+        foreach ($lookups as [$modelClass, $column, $resolve]) {
+            /** @var Model|null $record */
+            $record = $modelClass::query()->where($column, $voucher->id)->first();
+
+            if ($record) {
+                return $resolve($record);
+            }
+        }
+
+        return null;
     }
 
     /**

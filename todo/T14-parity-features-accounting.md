@@ -15,19 +15,19 @@ Migrations with prefix `2026_09_14_14`.
 
 ## Tasks
 
-- [ ] 1. Cash and bank vouchers: new voucher types `CashReceipt`, `CashPayment`, `BankReceipt`,
+- [x] 1. Cash and bank vouchers: new voucher types `CashReceipt`, `CashPayment`, `BankReceipt`,
   `BankPayment`, `Contra`, each with its own number series; one form where the user picks the other accounts
   and the cash/bank line is added automatically; exact balance via `money.js`; listed and filterable in the
   Day Book.
-- [ ] 2. Print and export for accounting: PDF (dompdf, existing layout) and Excel for Trial Balance, Income
+- [x] 2. Print and export for accounting: PDF (dompdf, existing layout) and Excel for Trial Balance, Income
   Statement, Balance Sheet, Day Book, Cash Book, Bank Book, account ledger, Debtors/Creditors (coordinate with
   T10's export via a cross-file request if the export lives in T10's file), and journal voucher print. Every
   print goes through `PrintLog::record()`.
-- [ ] 3. Account ledger: arbitrary date range inside the fiscal year with correct opening balance, and a
+- [x] 3. Account ledger: arbitrary date range inside the fiscal year with correct opening balance, and a
   per-line drill-down to the source document (bill number, link).
-- [ ] 4. Cancelled documents report: every cancelled sale, purchase, return, receipt, payment, capital
+- [x] 4. Cancelled documents report: every cancelled sale, purchase, return, receipt, payment, capital
   document and journal voucher with number, date, cancel date, who and reason (from the C5 columns), export.
-- [ ] 5. Fixed assets: register an existing asset with an opening cost and accumulated depreciation without a
+- [x] 5. Fixed assets: register an existing asset with an opening cost and accumulated depreciation without a
   payment (posted against the opening-balance equity account), and record input VAT on a fixed asset purchase
   (Dr VAT receivable) so it reaches the VAT books.
-- [ ] 6. Tests (write, do not run) for every item above.
+- [x] 6. Tests (write, do not run) for every item above.

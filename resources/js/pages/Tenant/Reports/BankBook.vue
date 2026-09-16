@@ -85,10 +85,35 @@ const voucherTypeLabels = {
     asset_disposal: 'Asset Disposal',
     receipt: 'Receipt',
     payment: 'Payment',
+    cash_receipt: 'Cash Receipt',
+    cash_payment: 'Cash Payment',
+    bank_receipt: 'Bank Receipt',
+    bank_payment: 'Bank Payment',
+    contra: 'Contra',
 };
 
 function voucherLabel(entry) {
     return `${voucherTypeLabels[entry.voucherType] ?? entry.voucherType} #${entry.voucherNumber}`;
+}
+
+function printUrl() {
+    const params = new URLSearchParams({
+        fiscal_year_id: fiscalYear.value ?? '',
+        from: from.value ?? '',
+        to: to.value ?? '',
+        account_id: accountId.value ?? '',
+    });
+    return `/reports/bank-book/print?${params.toString()}`;
+}
+
+function exportUrl() {
+    const params = new URLSearchParams({
+        fiscal_year_id: fiscalYear.value ?? '',
+        from: from.value ?? '',
+        to: to.value ?? '',
+        account_id: accountId.value ?? '',
+    });
+    return `/reports/bank-book/export?${params.toString()}`;
 }
 
 const columns = [
@@ -105,6 +130,10 @@ const columns = [
     <div>
         <div class="mb-4 flex items-center justify-between">
             <h2 class="text-base font-bold text-text-strong">Bank Book</h2>
+            <div v-if="accountId" class="flex items-center gap-2">
+                <a :href="printUrl()" target="_blank" rel="noopener"><Button variant="secondary" tone="purple">Print</Button></a>
+                <a :href="exportUrl()"><Button variant="secondary" tone="purple">Export</Button></a>
+            </div>
         </div>
 
         <Card variant="panel" class="mb-4">

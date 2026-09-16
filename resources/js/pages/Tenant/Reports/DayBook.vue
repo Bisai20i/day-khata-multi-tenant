@@ -20,6 +20,8 @@ const props = defineProps({
     totalCredit: { type: String, default: '0.00' },
     from: { type: [String, null], default: null },
     to: { type: [String, null], default: null },
+    voucherType: { type: [String, null], default: null },
+    voucherTypeOptions: { type: Array, default: () => [] },
 });
 
 useLayoutChrome('Day Book');
@@ -34,22 +36,7 @@ const fiscalYearOptions = computed(() =>
 const fiscalYear = ref(props.fiscalYearId);
 const from = ref(props.from);
 const to = ref(props.to);
-
-// See CashBook.vue: a book is only ever read inside one fiscal year.
-watch(fiscalYear, (value) => {
-    const chosen = props.fiscalYears.find((year) => year.id === value);
-    from.value = chosen?.startDate ?? null;
-    to.value = chosen?.endDate ?? null;
-    applyFilter();
-});
-
-function applyFilter() {
-    router.get(
-        window.location.pathname,
-        { fiscal_year_id: fiscalYear.value ?? undefined, from: from.value ?? undefined, to: to.value ?? undefined },
-        { preserveState: true, preserveScroll: true },
-    );
-}
+const voucherType = ref(props.voucherType ?? '');
 
 // Kept per page rather than shared, matching this app's existing
 // per-page-file convention (mem.md gotcha #5).
@@ -72,7 +59,58 @@ const voucherTypeLabels = {
     asset_disposal: 'Asset Disposal',
     receipt: 'Receipt',
     payment: 'Payment',
+    cash_receipt: 'Cash Receipt',
+    cash_payment: 'Cash Payment',
+    bank_receipt: 'Bank Receipt',
+    bank_payment: 'Bank Payment',
+    contra: 'Contra',
 };
+
+// See CashBook.vue: a book is only ever read inside one fiscal year.
+watch(fiscalYear, (value) => {
+    const chosen = props.fiscalYears.find((year) => year.id === value);
+    from.value = chosen?.startDate ?? null;
+    to.value = chosen?.endDate ?? null;
+    applyFilter();
+});
+
+const voucherTypeFilterOptions = computed(() => [
+    { value: '', label: 'All types' },
+    ...props.voucherTypeOptions.map((type) => ({ value: type, label: voucherTypeLabels[type] ?? type })),
+]);
+
+function applyFilter() {
+    router.get(
+        window.location.pathname,
+        {
+            fiscal_year_id: fiscalYear.value ?? undefined,
+            from: from.value ?? undefined,
+            to: to.value ?? undefined,
+            voucher_type: voucherType.value || undefined,
+        },
+        { preserveState: true, preserveScroll: true },
+    );
+}
+
+function printUrl() {
+    const params = new URLSearchParams({
+        fiscal_year_id: fiscalYear.value ?? '',
+        from: from.value ?? '',
+        to: to.value ?? '',
+        voucher_type: voucherType.value ?? '',
+    });
+    return `/reports/day-book/print?${params.toString()}`;
+}
+
+function exportUrl() {
+    const params = new URLSearchParams({
+        fiscal_year_id: fiscalYear.value ?? '',
+        from: from.value ?? '',
+        to: to.value ?? '',
+        voucher_type: voucherType.value ?? '',
+    });
+    return `/reports/day-book/export?${params.toString()}`;
+}
 
 function voucherLabel(voucher) {
     return `${voucherTypeLabels[voucher.voucherType] ?? voucher.voucherType} #${voucher.voucherNumber}`;
@@ -83,6 +121,10 @@ function voucherLabel(voucher) {
     <div>
         <div class="mb-4 flex items-center justify-between">
             <h2 class="text-base font-bold text-text-strong">Day Book</h2>
+            <div v-if="fiscalYearId !== null" class="flex items-center gap-2">
+                <a :href="printUrl()" target="_blank" rel="noopener"><Button variant="secondary" tone="purple">Print</Button></a>
+                <a :href="exportUrl()"><Button variant="secondary" tone="purple">Export</Button></a>
+            </div>
         </div>
 
         <Card variant="panel" class="mb-4">
@@ -98,6 +140,10 @@ function voucherLabel(voucher) {
                 <div>
                     <label class="mb-1 block text-xs font-semibold text-text-muted">To</label>
                     <NepaliDateInput v-model="to" />
+                </div>
+                <div class="w-56">
+                    <label class="mb-1 block text-xs font-semibold text-text-muted">Voucher Type</label>
+                    <Select v-model="voucherType" :options="voucherTypeFilterOptions" />
                 </div>
                 <Button variant="primary" tone="purple" @click="applyFilter">Apply</Button>
             </div>

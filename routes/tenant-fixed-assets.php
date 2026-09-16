@@ -25,6 +25,10 @@ Route::name('tenant.')->middleware('role:admin')->group(function () {
     Route::prefix('fixed-assets')->name('fixed-assets.')->group(function () {
         Route::get('/', [FixedAssetController::class, 'index'])->name('index');
         Route::post('/', [FixedAssetController::class, 'store'])->name('store');
+        // Registers an asset the business already owned before this system
+        // went live, with no cash/bank movement (T14) - see
+        // FixedAsset::registerExisting().
+        Route::post('/existing', [FixedAssetController::class, 'storeExisting'])->name('store-existing');
         Route::post('/{fixedAsset}/dispose', [FixedAssetController::class, 'dispose'])->name('dispose');
         Route::post('/post-depreciation', [FixedAssetController::class, 'postDepreciation'])->name('post-depreciation');
     });

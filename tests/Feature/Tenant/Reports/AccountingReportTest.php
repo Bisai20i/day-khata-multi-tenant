@@ -595,3 +595,40 @@ test('a non-admin cannot open the financial statements or the three books', func
 
     $tenant->delete();
 });
+
+test('the day book filters to one voucher type when asked (T14)', function () {
+    $domain = 'report-day-book-voucher-type-filter.tenant-test';
+    $tenant = provisionAccountingReportTestTenant($domain);
+
+    $tenant->run(function () {
+        $fy = FiscalYear::create(['name' => 'FY1', 'start_date' => '2026-01-01', 'end_date' => '2026-12-31', 'status' => FiscalYearStatus::Open]);
+        $actor = accountingReportTestAdmin();
+
+        postAccountingReportFixture($fy, $actor);
+
+        $sales = Account::where('code', 'INI20')->firstOrFail();
+        $indirectIncome = Account::where('code', 'INI30')->firstOrFail();
+
+        JournalVoucher::postCashBank([
+            'voucher_type' => 'cash_receipt',
+            'date' => '2026-05-01',
+            'narration' => 'Misc cash receipt',
+            'lines' => [['account_id' => $indirectIncome->id, 'amount' => 60]],
+        ], $actor);
+    });
+
+    loginAccountingReportTestUser($domain);
+
+    $this->get("http://{$domain}/reports/day-book?voucher_type=cash_receipt")
+        ->assertOk()
+        ->assertInertia(fn ($page) => $page
+            ->component('Tenant/Reports/DayBook')
+            ->has('vouchers', 1)
+            ->where('vouchers.0.voucherType', 'cash_receipt'));
+
+    $this->get("http://{$domain}/reports/day-book")
+        ->assertOk()
+        ->assertInertia(fn ($page) => $page->has('vouchers', 3));
+
+    $tenant->delete();
+});

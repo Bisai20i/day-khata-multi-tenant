@@ -12,6 +12,7 @@ use App\Models\Role;
 use App\Models\Supplier;
 use App\Models\Tenant;
 use App\Models\User;
+use App\Support\Money\Money;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 
 uses(RefreshDatabase::class);
@@ -471,6 +472,172 @@ test('a double-clicked depreciation run posts one voucher and one row per asset 
         expect(FixedAssetDepreciation::where('fixed_asset_id', $asset->id)->count())->toBe(1)
             ->and(JournalVoucher::where('fiscal_year_id', $fy1->id)->where('voucher_type', VoucherType::Depreciation)->count())->toBe(1)
             ->and($asset->fresh()->accumulated_depreciation)->toBe('2000.00');
+    });
+
+    $tenant->delete();
+});
+
+test('a fixed asset purchase with a VAT rate debits Vat Receivable and settles cost plus VAT (T14)', function () {
+    $tenant = provisionFixedAssetTestTenant('fa-vat-on-purchase.tenant-test');
+
+    $tenant->run(function () {
+        $actor = User::factory()->create();
+        FiscalYear::create(['name' => 'FY1', 'start_date' => '2026-01-01', 'end_date' => '2026-12-31', 'status' => FiscalYearStatus::Open]);
+
+        $asset = FixedAsset::post([
+            'asset_name' => 'Vatable Printer',
+            'category' => 'Pool D',
+            'purchase_date' => '2026-01-15',
+            'cost' => 10000,
+            'vat_rate' => 13,
+            'salvage_value' => 0,
+            'depreciation_method' => 'wdv',
+            'depreciation_rate' => 25,
+            'payment_mode' => 'cash',
+        ], $actor);
+
+        // 13% of 10000 = 1300 input VAT; the asset's own cost line stays net
+        // of VAT (it is recoverable, not part of the depreciable base), and
+        // the cash settlement carries both.
+        expect($asset->vat_amount)->toBe('1300.00')
+            ->and($asset->cost)->toBe('10000.00');
+
+        $voucher = $asset->journalVoucher()->with('lines')->firstOrFail();
+        $lines = $voucher->lines->keyBy('account_id');
+        $vatReceivable = Account::where('code', 'ASA23')->firstOrFail();
+        $cash = Account::where('code', 'AS1')->firstOrFail();
+
+        expect($lines[$asset->account_id]->debit)->toBe('10000.00')
+            ->and($lines[$vatReceivable->id]->debit)->toBe('1300.00')
+            ->and($lines[$cash->id]->credit)->toBe('11300.00');
+    });
+
+    $tenant->delete();
+});
+
+test('a fixed asset purchase with no VAT rate posts no Vat Receivable line at all', function () {
+    $tenant = provisionFixedAssetTestTenant('fa-no-vat-on-purchase.tenant-test');
+
+    $tenant->run(function () {
+        $actor = User::factory()->create();
+        FiscalYear::create(['name' => 'FY1', 'start_date' => '2026-01-01', 'end_date' => '2026-12-31', 'status' => FiscalYearStatus::Open]);
+
+        $asset = FixedAsset::post([
+            'asset_name' => 'Plain Chair', 'category' => 'Pool E', 'purchase_date' => '2026-01-15',
+            'cost' => 2000, 'depreciation_method' => 'slm', 'depreciation_rate' => 10, 'payment_mode' => 'cash',
+        ], $actor);
+
+        expect($asset->vat_amount)->toBe('0.00')
+            ->and($asset->journalVoucher->lines()->count())->toBe(2);
+    });
+
+    $tenant->delete();
+});
+
+test('registering an existing asset posts against accumulated depreciation and the opening-balance equity account, with no cash movement', function () {
+    $tenant = provisionFixedAssetTestTenant('fa-register-existing.tenant-test');
+
+    $tenant->run(function () {
+        $actor = User::factory()->create();
+        FiscalYear::create(['name' => 'FY1', 'start_date' => '2026-01-01', 'end_date' => '2026-12-31', 'status' => FiscalYearStatus::Open]);
+
+        $asset = FixedAsset::registerExisting([
+            'asset_name' => 'Legacy Generator',
+            'category' => 'Pool B',
+            'purchase_date' => '2026-01-01',
+            'cost' => 50000,
+            'accumulated_depreciation' => 20000,
+            'depreciation_method' => 'wdv',
+            'depreciation_rate' => 25,
+        ], $actor);
+
+        expect($asset->cost)->toBe('50000.00')
+            ->and($asset->accumulated_depreciation)->toBe('20000.00')
+            ->and($asset->wdv)->toBe('30000.00');
+
+        $voucher = $asset->journalVoucher()->with('lines')->firstOrFail();
+        $lines = $voucher->lines->keyBy('account_id');
+        $accumulatedDepreciation = Account::where('code', 'AS31')->firstOrFail();
+        $equity = Account::where('code', 'CA2')->firstOrFail();
+        $cash = Account::where('code', 'AS1')->firstOrFail();
+
+        expect($lines[$asset->account_id]->debit)->toBe('50000.00')
+            ->and($lines[$accumulatedDepreciation->id]->credit)->toBe('20000.00')
+            ->and($lines[$equity->id]->credit)->toBe('30000.00')
+            ->and($lines->has($cash->id))->toBeFalse();
+
+        $totalDebit = Money::sum($voucher->lines->pluck('debit'));
+        $totalCredit = Money::sum($voucher->lines->pluck('credit'));
+        expect($totalDebit->isEqualTo($totalCredit))->toBeTrue();
+    });
+
+    $tenant->delete();
+});
+
+test('registering a fully depreciated existing asset posts no equity line, only accumulated depreciation', function () {
+    $tenant = provisionFixedAssetTestTenant('fa-register-existing-fully-depreciated.tenant-test');
+
+    $tenant->run(function () {
+        $actor = User::factory()->create();
+        FiscalYear::create(['name' => 'FY1', 'start_date' => '2026-01-01', 'end_date' => '2026-12-31', 'status' => FiscalYearStatus::Open]);
+
+        $asset = FixedAsset::registerExisting([
+            'asset_name' => 'Old Shelf',
+            'category' => 'Pool E',
+            'purchase_date' => '2026-01-01',
+            'cost' => 5000,
+            'accumulated_depreciation' => 5000,
+            'depreciation_method' => 'slm',
+            'depreciation_rate' => 10,
+        ], $actor);
+
+        $voucher = $asset->journalVoucher()->with('lines')->firstOrFail();
+        expect($voucher->lines)->toHaveCount(2);
+    });
+
+    $tenant->delete();
+});
+
+test('registering an existing asset rejects accumulated depreciation greater than cost', function () {
+    $tenant = provisionFixedAssetTestTenant('fa-register-existing-over-depreciated.tenant-test');
+
+    $tenant->run(function () {
+        $actor = User::factory()->create();
+        FiscalYear::create(['name' => 'FY1', 'start_date' => '2026-01-01', 'end_date' => '2026-12-31', 'status' => FiscalYearStatus::Open]);
+
+        expect(fn () => FixedAsset::registerExisting([
+            'asset_name' => 'Broken Data', 'category' => 'Pool E', 'purchase_date' => '2026-01-01',
+            'cost' => 1000, 'accumulated_depreciation' => 1500,
+            'depreciation_method' => 'slm', 'depreciation_rate' => 10,
+        ], $actor))->toThrow(InvalidArgumentException::class);
+    });
+
+    $tenant->delete();
+});
+
+test('an admin can register an existing asset through the HTTP route', function () {
+    $domain = 'fa-register-existing-http.tenant-test';
+    $tenant = provisionFixedAssetTestTenant($domain);
+
+    $tenant->run(function () {
+        User::factory()->create(['email' => 'owner@example.com', 'role_id' => Role::where('slug', 'admin')->value('id')]);
+        FiscalYear::create(['name' => 'FY1', 'start_date' => '2026-01-01', 'end_date' => '2026-12-31', 'status' => FiscalYearStatus::Open]);
+    });
+
+    $this->post("http://{$domain}/login", ['email' => 'owner@example.com', 'password' => 'password']);
+
+    $this->post("http://{$domain}/fixed-assets/existing", [
+        'asset_name' => 'HTTP Registered Asset',
+        'category' => 'Pool B',
+        'purchase_date' => '2026-01-01',
+        'cost' => 8000,
+        'accumulated_depreciation' => 1000,
+        'depreciation_method' => 'wdv',
+        'depreciation_rate' => 25,
+    ])->assertRedirect("http://{$domain}/fixed-assets");
+
+    $tenant->run(function () {
+        expect(FixedAsset::where('asset_name', 'HTTP Registered Asset')->exists())->toBeTrue();
     });
 
     $tenant->delete();

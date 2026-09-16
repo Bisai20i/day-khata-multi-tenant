@@ -317,3 +317,138 @@ test('the ledger renders amounts as exact strings and never shows a negative zer
 
     $tenant->delete();
 });
+
+test('the ledger computes a correct opening balance for a window that starts mid-year (T14)', function () {
+    // Cash opens the year at 1000 (Opening Balance voucher). A 200 debit lands
+    // before the window and a 50 credit lands inside it - the window's opening
+    // balance must be 1200 (1000 + the 200 before it), not 1000 and not 0.
+    $domain = 'ledger-window-opening.tenant-test';
+    $tenant = provisionLedgerControllerTestTenant($domain);
+
+    $accountId = null;
+    $tenant->run(function () use (&$accountId) {
+        User::factory()->create(['email' => 'owner@example.com', 'role_id' => Role::where('slug', 'admin')->value('id')]);
+        FiscalYear::create(['name' => 'FY1', 'start_date' => '2026-01-01', 'end_date' => '2026-12-31', 'status' => FiscalYearStatus::Open]);
+
+        $cash = Account::where('code', 'AS1')->firstOrFail();
+        $sales = Account::where('code', 'INI20')->firstOrFail();
+        $actor = User::first();
+        $accountId = $cash->id;
+
+        JournalVoucher::post(
+            ['voucher_type' => 'opening_balance', 'date' => '2026-01-01', 'narration' => 'Opening'],
+            [
+                ['account_id' => $cash->id, 'debit' => 1000, 'credit' => 0],
+                ['account_id' => $sales->id, 'debit' => 0, 'credit' => 1000],
+            ],
+            $actor,
+        );
+
+        JournalVoucher::post(
+            ['date' => '2026-02-01', 'narration' => 'Before the window'],
+            [
+                ['account_id' => $cash->id, 'debit' => 200, 'credit' => 0],
+                ['account_id' => $sales->id, 'debit' => 0, 'credit' => 200],
+            ],
+            $actor,
+        );
+
+        JournalVoucher::post(
+            ['date' => '2026-06-15', 'narration' => 'Inside the window'],
+            [
+                ['account_id' => $cash->id, 'debit' => 0, 'credit' => 50],
+                ['account_id' => $sales->id, 'debit' => 50, 'credit' => 0],
+            ],
+            $actor,
+        );
+    });
+
+    loginLedgerControllerTestUser($domain);
+
+    $this->get("http://{$domain}/accounts/{$accountId}/ledger?from=2026-06-01&to=2026-06-30")
+        ->assertOk()
+        ->assertInertia(fn ($page) => $page
+            ->component('Tenant/Accounting/Accounts/Ledger')
+            ->where('openingBalance', '1200.00')
+            ->where('closingBalance', '1150.00')
+            ->has('entries', 1)
+        );
+
+    $tenant->delete();
+});
+
+test('the ledger drill-down links a sale-backed line to that sale, and leaves a standalone journal line without a link', function () {
+    $domain = 'ledger-drilldown.tenant-test';
+    $tenant = provisionLedgerControllerTestTenant($domain);
+
+    $accountId = null;
+    $tenant->run(function () use (&$accountId) {
+        User::factory()->create(['email' => 'owner@example.com', 'role_id' => Role::where('slug', 'admin')->value('id')]);
+        FiscalYear::create(['name' => 'FY1', 'start_date' => '2026-01-01', 'end_date' => '2026-12-31', 'status' => FiscalYearStatus::Open]);
+
+        $cash = Account::where('code', 'AS1')->firstOrFail();
+        $sales = Account::where('code', 'INI20')->firstOrFail();
+        $accountId = $cash->id;
+
+        // A voucher_type of 'sale' with no Sale row behind it (this test does
+        // not build a full Sale) exercises the "no owning record found"
+        // branch of AccountController::documentFor() - the line must still
+        // render with a null document rather than erroring out.
+        JournalVoucher::post(
+            ['voucher_type' => 'sale', 'date' => '2026-03-01', 'narration' => 'Cash sale with no Sale row'],
+            [
+                ['account_id' => $cash->id, 'debit' => 500, 'credit' => 0],
+                ['account_id' => $sales->id, 'debit' => 0, 'credit' => 500],
+            ],
+            User::first(),
+        );
+    });
+
+    loginLedgerControllerTestUser($domain);
+
+    $this->get("http://{$domain}/accounts/{$accountId}/ledger")
+        ->assertOk()
+        ->assertInertia(fn ($page) => $page
+            ->component('Tenant/Accounting/Accounts/Ledger')
+            ->where('entries.0.document', null)
+        );
+
+    $tenant->delete();
+});
+
+test('the trial balance, day book and cash book print/export routes respond successfully (T14 task 2)', function () {
+    $domain = 'accounting-print-export.tenant-test';
+    $tenant = provisionLedgerControllerTestTenant($domain);
+
+    $tenant->run(function () {
+        User::factory()->create(['email' => 'owner@example.com', 'role_id' => Role::where('slug', 'admin')->value('id')]);
+        FiscalYear::create(['name' => 'FY1', 'start_date' => '2026-01-01', 'end_date' => '2026-12-31', 'status' => FiscalYearStatus::Open]);
+
+        $cash = Account::where('code', 'AS1')->firstOrFail();
+        $sales = Account::where('code', 'INI20')->firstOrFail();
+
+        JournalVoucher::post(
+            ['date' => '2026-03-01', 'narration' => 'Cash sale'],
+            [
+                ['account_id' => $cash->id, 'debit' => 500, 'credit' => 0],
+                ['account_id' => $sales->id, 'debit' => 0, 'credit' => 500],
+            ],
+            User::first(),
+        );
+    });
+
+    loginLedgerControllerTestUser($domain);
+
+    $this->get("http://{$domain}/reports/trial-balance/print")->assertOk();
+    $this->get("http://{$domain}/reports/trial-balance/export")->assertOk();
+    $this->get("http://{$domain}/reports/day-book/print")->assertOk();
+    $this->get("http://{$domain}/reports/day-book/export")->assertOk();
+    $this->get("http://{$domain}/reports/cash-book/print")->assertOk();
+    $this->get("http://{$domain}/reports/cash-book/export")->assertOk();
+    $this->get("http://{$domain}/reports/income-statement/print")->assertOk();
+    $this->get("http://{$domain}/reports/income-statement/export")->assertOk();
+    $this->get("http://{$domain}/reports/balance-sheet/print")->assertOk();
+    $this->get("http://{$domain}/reports/balance-sheet/export")->assertOk();
+
+    $tenant->delete();
+});

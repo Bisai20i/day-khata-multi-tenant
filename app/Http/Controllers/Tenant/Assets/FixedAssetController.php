@@ -57,6 +57,7 @@ class FixedAssetController extends Controller
             'category' => ['required', 'in:'.implode(',', array_column(DepreciationPool::cases(), 'value'))],
             'purchase_date' => ['required', 'date'],
             'cost' => ['required', 'numeric', 'decimal:0,2', 'min:0.01', 'max:9999999999999'],
+            'vat_rate' => ['nullable', 'numeric', 'decimal:0,2', 'min:0', 'max:100'],
             'salvage_value' => ['nullable', 'numeric', 'decimal:0,2', 'min:0', 'max:9999999999999'],
             'depreciation_method' => ['required', 'in:slm,wdv'],
             'depreciation_rate' => ['required', 'numeric', 'decimal:0,2', 'min:0', 'max:100'],
@@ -67,6 +68,7 @@ class FixedAssetController extends Controller
         ], [
             'category.in' => 'Please choose a depreciation pool (Pool A to Pool E).',
             'cost.decimal' => 'The cost may have at most 2 decimal places.',
+            'vat_rate.decimal' => 'The VAT rate may have at most 2 decimal places.',
             'salvage_value.decimal' => 'The salvage value may have at most 2 decimal places.',
             'depreciation_rate.decimal' => 'The depreciation rate may have at most 2 decimal places.',
         ]);
@@ -78,6 +80,41 @@ class FixedAssetController extends Controller
         }
 
         return redirect()->route('tenant.fixed-assets.index')->with('status', 'Fixed asset added.');
+    }
+
+    /**
+     * Registers an asset the business already held before this system went
+     * live, with no cash/bank movement (T14): posted against Accumulated
+     * Depreciation and the opening-balance equity account instead. See
+     * FixedAsset::registerExisting()'s docblock for the accounting.
+     */
+    public function storeExisting(Request $request): RedirectResponse
+    {
+        $data = $request->validate([
+            'asset_name' => ['required', 'string', 'max:255'],
+            'category' => ['required', 'in:'.implode(',', array_column(DepreciationPool::cases(), 'value'))],
+            'purchase_date' => ['required', 'date'],
+            'cost' => ['required', 'numeric', 'decimal:0,2', 'min:0.01', 'max:9999999999999'],
+            'accumulated_depreciation' => ['nullable', 'numeric', 'decimal:0,2', 'min:0', 'max:9999999999999'],
+            'salvage_value' => ['nullable', 'numeric', 'decimal:0,2', 'min:0', 'max:9999999999999'],
+            'depreciation_method' => ['required', 'in:slm,wdv'],
+            'depreciation_rate' => ['required', 'numeric', 'decimal:0,2', 'min:0', 'max:100'],
+            'narration' => ['nullable', 'string', 'max:255'],
+        ], [
+            'category.in' => 'Please choose a depreciation pool (Pool A to Pool E).',
+            'cost.decimal' => 'The cost may have at most 2 decimal places.',
+            'accumulated_depreciation.decimal' => 'The accumulated depreciation may have at most 2 decimal places.',
+            'salvage_value.decimal' => 'The salvage value may have at most 2 decimal places.',
+            'depreciation_rate.decimal' => 'The depreciation rate may have at most 2 decimal places.',
+        ]);
+
+        try {
+            FixedAsset::registerExisting($data, $request->user());
+        } catch (InvalidArgumentException|AuthorizationException $e) {
+            return back()->withErrors(['cost' => $e->getMessage()])->withInput();
+        }
+
+        return redirect()->route('tenant.fixed-assets.index')->with('status', 'Existing asset registered.');
     }
 
     public function dispose(Request $request, FixedAsset $fixedAsset): RedirectResponse

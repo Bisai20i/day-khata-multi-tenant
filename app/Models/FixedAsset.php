@@ -56,7 +56,7 @@ use InvalidArgumentException;
  */
 #[Fillable([
     'asset_code', 'asset_name', 'account_id', 'category', 'purchase_date',
-    'cost', 'salvage_value', 'depreciation_method', 'depreciation_rate',
+    'cost', 'vat_amount', 'salvage_value', 'depreciation_method', 'depreciation_rate',
     'accumulated_depreciation', 'status', 'disposal_date', 'disposal_amount',
     'journal_voucher_id', 'disposal_journal_voucher_id', 'created_by',
 ])]
@@ -79,6 +79,7 @@ class FixedAsset extends Model
         return [
             'purchase_date' => 'date',
             'cost' => Decimal::class.':2',
+            'vat_amount' => Decimal::class.':2',
             'salvage_value' => Decimal::class.':2',
             'depreciation_rate' => Decimal::class.':2',
             'accumulated_depreciation' => Decimal::class.':2',
@@ -143,7 +144,16 @@ class FixedAsset extends Model
      * purchase voucher (debit the new asset account, credit the
      * settlement account), and creates the FixedAsset row.
      *
-     * @param  array{asset_name: string, category: string, purchase_date: string, cost: string|float, salvage_value?: string|float|null, depreciation_method: string, depreciation_rate: string|float, payment_mode: string, bank_account_id?: int|null, supplier_id?: int|null, narration?: string|null}  $data
+     * Input VAT (T14, CONTRACTS/accounting parity, audit section 3): a
+     * fixed asset bought from a VAT-registered supplier carries recoverable
+     * VAT the same way a stock purchase does. `vat_rate` (0 to 100, default
+     * 0 - most fixed-asset bills off a small vendor carry none) adds a
+     * `Dr ASA23 (Vat Receivable)` line for `cost.percent(vat_rate)`, on top
+     * of the settlement, and the same convention Purchase::post() already
+     * uses. The asset's own cost line stays net of VAT - VAT is recoverable,
+     * not part of what gets depreciated.
+     *
+     * @param  array{asset_name: string, category: string, purchase_date: string, cost: string|float, vat_rate?: string|float|null, salvage_value?: string|float|null, depreciation_method: string, depreciation_rate: string|float, payment_mode: string, bank_account_id?: int|null, supplier_id?: int|null, narration?: string|null}  $data
      */
     public static function post(array $data, User $actor): self
     {
@@ -153,6 +163,7 @@ class FixedAsset extends Model
             $cost = Money::of($data['cost']);
             $salvageValue = Money::ofNullable($data['salvage_value'] ?? null) ?? Money::zero();
             $rate = Money::of($data['depreciation_rate']);
+            $vatAmount = $cost->percent($data['vat_rate'] ?? '0');
 
             if (! $cost->isPositive()) {
                 throw new InvalidArgumentException('An asset must cost more than zero.');
@@ -189,6 +200,18 @@ class FixedAsset extends Model
                 throw new InvalidArgumentException("Unknown payment mode: {$paymentMode}");
             }
 
+            $settlementTotal = $cost->plus($vatAmount);
+
+            $voucherLines = [
+                ['account_id' => $account->id, 'debit' => $cost->toString(), 'credit' => '0.00', 'narration' => 'Asset cost'],
+            ];
+
+            if ($vatAmount->isPositive()) {
+                $voucherLines[] = ['account_id' => Account::where('code', 'ASA23')->firstOrFail()->id, 'debit' => $vatAmount->toString(), 'credit' => '0.00', 'narration' => 'Input VAT'];
+            }
+
+            $voucherLines[] = ['account_id' => $settlementAccountId, 'debit' => '0.00', 'credit' => $settlementTotal->toString(), 'narration' => 'Settlement'];
+
             $voucher = JournalVoucher::post(
                 [
                     'voucher_type' => VoucherType::FixedAssetPurchase->value,
@@ -196,10 +219,7 @@ class FixedAsset extends Model
                     'date' => $data['purchase_date'],
                     'narration' => $data['narration'] ?? "Fixed asset purchase - {$data['asset_name']}",
                 ],
-                [
-                    ['account_id' => $account->id, 'debit' => $cost->toString(), 'credit' => '0.00', 'narration' => 'Asset cost'],
-                    ['account_id' => $settlementAccountId, 'debit' => '0.00', 'credit' => $cost->toString(), 'narration' => 'Settlement'],
-                ],
+                $voucherLines,
                 $actor,
             );
 
@@ -210,10 +230,106 @@ class FixedAsset extends Model
                 'category' => $pool->value,
                 'purchase_date' => $data['purchase_date'],
                 'cost' => $cost->toString(),
+                'vat_amount' => $vatAmount->toString(),
                 'salvage_value' => $salvageValue->toString(),
                 'depreciation_method' => $method->value,
                 'depreciation_rate' => $rate->toString(),
                 'accumulated_depreciation' => '0.00',
+                'status' => 'active',
+                'journal_voucher_id' => $voucher->id,
+                'created_by' => $actor->id,
+            ]);
+
+            $asset->update(['asset_code' => 'FA-'.str_pad((string) $asset->id, 5, '0', STR_PAD_LEFT)]);
+
+            return $asset;
+        });
+    }
+
+    /**
+     * Registers an asset the business already owned before this system went
+     * live - an opening cost and, usually, some accumulated depreciation
+     * already run up outside these books - with no cash or bank movement
+     * (T14, audit section 3: "register an existing asset ... without a
+     * payment"). Posts `Dr Asset cost / Cr Accumulated Depreciation (AS31,
+     * if any) / Cr Profit & Loss (CA2)` for the net book value: CA2 is this
+     * chart's one retained-earnings/opening-balance-equity account (see
+     * ChartOfAccountsSeeder), the same account FiscalYear::close() sweeps
+     * the year's net profit into, so an opening asset's net book value
+     * enters equity exactly the way a manual opening-balance import would if
+     * this asset had simply been on the books from day one.
+     *
+     * Zero accumulated depreciation (a nearly-new asset) or zero net book
+     * value (a fully depreciated one) each omit their own line rather than
+     * post a zero line, which JournalVoucher::validateLines() rejects; cost
+     * being required positive guarantees at least one of the two remaining
+     * lines is positive.
+     *
+     * @param  array{asset_name: string, category: string, purchase_date: string, cost: string|float, accumulated_depreciation?: string|float|null, salvage_value?: string|float|null, depreciation_method: string, depreciation_rate: string|float, narration?: string|null}  $data
+     */
+    public static function registerExisting(array $data, User $actor): self
+    {
+        return DB::transaction(function () use ($data, $actor) {
+            $pool = DepreciationPool::from($data['category']);
+            $method = DepreciationMethod::from($data['depreciation_method']);
+            $cost = Money::of($data['cost']);
+            $salvageValue = Money::ofNullable($data['salvage_value'] ?? null) ?? Money::zero();
+            $rate = Money::of($data['depreciation_rate']);
+            $accumulated = Money::ofNullable($data['accumulated_depreciation'] ?? null) ?? Money::zero();
+
+            if (! $cost->isPositive()) {
+                throw new InvalidArgumentException('An asset must cost more than zero.');
+            }
+
+            if ($salvageValue->isGreaterThan($cost)) {
+                throw new InvalidArgumentException('The salvage value cannot be more than the asset cost.');
+            }
+
+            if ($accumulated->isGreaterThan($cost)) {
+                throw new InvalidArgumentException('Accumulated depreciation cannot be more than the asset cost.');
+            }
+
+            $fiscalYear = ClosedFiscalYearGuard::assertDateInOpenYear($data['purchase_date'], $actor);
+
+            $fixedAssetsGroup = AccountGroup::where('name', 'Fixed Assets')->firstOrFail();
+            $account = $fixedAssetsGroup->accounts()->create(['name' => $data['asset_name']]);
+
+            $netBookValue = $cost->minus($accumulated);
+            $voucherLines = [
+                ['account_id' => $account->id, 'debit' => $cost->toString(), 'credit' => '0.00', 'narration' => 'Asset cost (opening)'],
+            ];
+
+            if ($accumulated->isPositive()) {
+                $voucherLines[] = ['account_id' => Account::where('code', 'AS31')->firstOrFail()->id, 'debit' => '0.00', 'credit' => $accumulated->toString(), 'narration' => 'Accumulated depreciation (opening)'];
+            }
+
+            if ($netBookValue->isPositive()) {
+                $voucherLines[] = ['account_id' => Account::where('code', 'CA2')->firstOrFail()->id, 'debit' => '0.00', 'credit' => $netBookValue->toString(), 'narration' => 'Opening balance equity'];
+            }
+
+            $voucher = JournalVoucher::post(
+                [
+                    'voucher_type' => VoucherType::FixedAssetPurchase->value,
+                    'fiscal_year_id' => $fiscalYear->id,
+                    'date' => $data['purchase_date'],
+                    'narration' => $data['narration'] ?? "Registered existing asset - {$data['asset_name']}",
+                ],
+                $voucherLines,
+                $actor,
+            );
+
+            $asset = static::create([
+                'asset_code' => 'FA-PENDING-'.uniqid(),
+                'asset_name' => $data['asset_name'],
+                'account_id' => $account->id,
+                'category' => $pool->value,
+                'purchase_date' => $data['purchase_date'],
+                'cost' => $cost->toString(),
+                'vat_amount' => '0.00',
+                'salvage_value' => $salvageValue->toString(),
+                'depreciation_method' => $method->value,
+                'depreciation_rate' => $rate->toString(),
+                'accumulated_depreciation' => $accumulated->toString(),
                 'status' => 'active',
                 'journal_voucher_id' => $voucher->id,
                 'created_by' => $actor->id,

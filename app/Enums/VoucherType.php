@@ -23,6 +23,19 @@ namespace App\Enums;
  * a cancelled return as a Sale), which burned a real credit-note or invoice
  * number on a document that never existed. A reversal now consumes only a
  * Reversal number, so no customer-facing series ever gains a hole.
+ *
+ * CashReceipt/CashPayment/BankReceipt/BankPayment/Contra (T14, accounting
+ * parity) are the plain cash/bank vouchers a bookkeeper posts for money that
+ * moved with no invoice behind it (bank interest, a cash deposit into the
+ * bank, an owner's cash injection, a inter-account transfer). Each gets its
+ * own gapless series - lumping them into the generic Journal series would
+ * make "how many cash receipts did we post this year" impossible to answer
+ * without reading every voucher's lines, and a Nepali bookkeeper expects the
+ * cash and bank books to number their own vouchers independently of the
+ * journal proper. They have no dedicated owning model (see
+ * JournalVoucher::postCashBank()): the voucher IS the record, the same as a
+ * manually posted Journal voucher, so both are cancelled through
+ * JournalVoucher::cancel() (see VoucherType::manuallyCancellableTypes()).
  */
 enum VoucherType: string
 {
@@ -44,4 +57,36 @@ enum VoucherType: string
     case AssetDisposal = 'asset_disposal';
     case Receipt = 'receipt';
     case Payment = 'payment';
+    case CashReceipt = 'cash_receipt';
+    case CashPayment = 'cash_payment';
+    case BankReceipt = 'bank_receipt';
+    case BankPayment = 'bank_payment';
+    case Contra = 'contra';
+
+    /**
+     * The five plain cash/bank voucher types (T14): each is a two-(or-more)
+     * line voucher with one leg fixed to a cash or bank account, posted
+     * through JournalVoucher::postCashBank() rather than through a module's
+     * own post() method.
+     *
+     * @return list<self>
+     */
+    public static function cashBankTypes(): array
+    {
+        return [self::CashReceipt, self::CashPayment, self::BankReceipt, self::BankPayment, self::Contra];
+    }
+
+    /**
+     * Every type whose voucher row IS its own record, with no separate
+     * module table (Sale, Purchase, Receipt, ...) owning it - so it is the
+     * only type JournalVoucher::cancel() (the generic "cancel a journal
+     * voucher" action) is allowed to touch. Every other case is cancelled
+     * from its own owning record instead (CONTRACTS C5).
+     *
+     * @return list<self>
+     */
+    public static function manuallyCancellableTypes(): array
+    {
+        return [self::Journal, ...self::cashBankTypes()];
+    }
 }

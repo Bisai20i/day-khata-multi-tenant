@@ -426,6 +426,135 @@ class JournalVoucher extends Model
     }
 
     /**
+     * The one entry point for the five plain cash/bank voucher types
+     * (CONTRACTS/T14): Cash Receipt, Cash Payment, Bank Receipt, Bank
+     * Payment and Contra. Unlike Sale/Purchase/Receipt/Payment there is no
+     * separate owning model - the voucher this posts IS the record, so it
+     * lists and cancels exactly like a manually posted Journal voucher (see
+     * VoucherType::manuallyCancellableTypes() and cancel() below).
+     *
+     * The cash/bank leg is computed here, never typed by the user, so it can
+     * never disagree with the "other" lines: for a receipt the user names
+     * where the money came from (one or more accounts) and an amount each;
+     * for a payment, where it went; for a contra, a single amount moves from
+     * one cash/bank account straight to another. Every amount is Money,
+     * exactly summed, and the whole thing is handed to post() unchanged, so
+     * it gets the same date-in-year guard, closed-year override and gapless
+     * numbering as every other voucher.
+     *
+     * @param  array{voucher_type: string, date: string, narration: string, fiscal_year_id?: int, reason?: string, bank_account_id?: int, from_account_id?: int, to_account_id?: int, amount?: string|float, lines?: array<int, array{account_id: int, amount: string|float, narration?: string|null}>}  $data
+     */
+    public static function postCashBank(array $data, User $actor): self
+    {
+        $type = VoucherType::from($data['voucher_type']);
+
+        if (! in_array($type, VoucherType::cashBankTypes(), true)) {
+            throw new InvalidArgumentException("{$type->value} is not a cash/bank voucher type.");
+        }
+
+        $lines = $type === VoucherType::Contra
+            ? static::contraLines($data)
+            : static::cashOrBankLines($type, $data);
+
+        return static::post(
+            [
+                'voucher_type' => $type->value,
+                'fiscal_year_id' => $data['fiscal_year_id'] ?? null,
+                'reason' => $data['reason'] ?? null,
+                'date' => $data['date'],
+                'narration' => $data['narration'],
+            ],
+            $lines,
+            $actor,
+        );
+    }
+
+    /**
+     * A contra voucher moves a single amount from one cash/bank account
+     * straight to another (a cash deposit into the bank, a transfer between
+     * two banks) - there is no "other account" list, just the two legs.
+     *
+     * @param  array{from_account_id?: int, to_account_id?: int, amount?: string|float}  $data
+     * @return list<array{account_id: int, debit: string, credit: string, narration: string}>
+     */
+    private static function contraLines(array $data): array
+    {
+        $amount = Money::of($data['amount'] ?? '0');
+
+        if (! $amount->isPositive()) {
+            throw new InvalidArgumentException('The contra amount must be greater than zero.');
+        }
+
+        $fromAccountId = (int) ($data['from_account_id'] ?? throw new InvalidArgumentException('The account money is moving from is required.'));
+        $toAccountId = (int) ($data['to_account_id'] ?? throw new InvalidArgumentException('The account money is moving to is required.'));
+
+        if ($fromAccountId === $toAccountId) {
+            throw new InvalidArgumentException('The from and to accounts must be different.');
+        }
+
+        return [
+            ['account_id' => $toAccountId, 'debit' => $amount->toString(), 'credit' => '0.00', 'narration' => 'Transfer in'],
+            ['account_id' => $fromAccountId, 'debit' => '0.00', 'credit' => $amount->toString(), 'narration' => 'Transfer out'],
+        ];
+    }
+
+    /**
+     * Cash/Bank Receipt or Payment: the fixed leg is Cash-In-Hand (AS1) for
+     * the two Cash types, or the chosen `bank_account_id` for the two Bank
+     * types; every "other account" line is summed to get its amount, and the
+     * fixed leg is created for that same total, on the opposite side for a
+     * receipt versus a payment - guaranteeing an exact balance without the
+     * user ever entering the cash/bank amount by hand.
+     *
+     * @param  array{bank_account_id?: int, lines?: array<int, array{account_id: int, amount: string|float, narration?: string|null}>}  $data
+     * @return list<array{account_id: int, debit: string, credit: string, narration: string|null}>
+     */
+    private static function cashOrBankLines(VoucherType $type, array $data): array
+    {
+        $otherLines = $data['lines'] ?? [];
+
+        if ($otherLines === []) {
+            throw new InvalidArgumentException('At least one account line is required.');
+        }
+
+        $isBank = in_array($type, [VoucherType::BankReceipt, VoucherType::BankPayment], true);
+        $isReceipt = in_array($type, [VoucherType::CashReceipt, VoucherType::BankReceipt], true);
+
+        $cashOrBankAccountId = $isBank
+            ? (int) ($data['bank_account_id'] ?? throw new InvalidArgumentException('A bank account is required.'))
+            : Account::where('code', 'AS1')->firstOrFail()->id;
+
+        $prepared = [];
+        $total = Money::zero();
+
+        foreach ($otherLines as $line) {
+            $amount = Money::of($line['amount']);
+
+            if (! $amount->isPositive()) {
+                throw new InvalidArgumentException('Each account amount must be greater than zero.');
+            }
+
+            $total = $total->plus($amount);
+
+            $prepared[] = [
+                'account_id' => (int) $line['account_id'],
+                'debit' => $isReceipt ? '0.00' : $amount->toString(),
+                'credit' => $isReceipt ? $amount->toString() : '0.00',
+                'narration' => $line['narration'] ?? null,
+            ];
+        }
+
+        $fixedLeg = [
+            'account_id' => $cashOrBankAccountId,
+            'debit' => $isReceipt ? $total->toString() : '0.00',
+            'credit' => $isReceipt ? '0.00' : $total->toString(),
+            'narration' => $isReceipt ? 'Amount received' : 'Amount paid',
+        ];
+
+        return [$fixedLeg, ...$prepared];
+    }
+
+    /**
      * Today's date in Nepal.
      *
      * config('app.timezone') is Asia/Kathmandu, so now() already answers this,
@@ -480,8 +609,8 @@ class JournalVoucher extends Model
                 throw new InvalidArgumentException('This journal voucher has already been cancelled.');
             }
 
-            if ($locked->voucher_type !== VoucherType::Journal) {
-                throw new InvalidArgumentException("Only a manually posted journal voucher can be cancelled here; this voucher's type ({$locked->voucher_type->value}) is posted by another module and must be cancelled from its own record.");
+            if (! in_array($locked->voucher_type, VoucherType::manuallyCancellableTypes(), true)) {
+                throw new InvalidArgumentException("Only a manually posted journal or cash/bank voucher can be cancelled here; this voucher's type ({$locked->voucher_type->value}) is posted by another module and must be cancelled from its own record.");
             }
 
             if ($sourceLabel = $locked->sourceRecordLabel()) {
@@ -499,8 +628,16 @@ class JournalVoucher extends Model
      * on behalf of, or null if this voucher is a standalone manual entry
      * with nothing depending on it. See cancel()'s docblock for why this
      * check exists and the full list of owning models it covers.
+     *
+     * Public (not just used internally by cancel()) so a report can tell a
+     * standalone Journal/cash-bank voucher apart from one that belongs to a
+     * module record without duplicating this lookup table - see the
+     * Cancelled Documents report in AccountingReportController, which must
+     * list a cancelled manual/cash-bank voucher exactly once and never
+     * double-count it against the module record it might otherwise be
+     * confused with.
      */
-    private function sourceRecordLabel(): ?string
+    public function sourceRecordLabel(): ?string
     {
         $sources = [
             [Sale::class, 'journal_voucher_id', 'a Sale'],
