@@ -3,7 +3,96 @@
 Living state doc. Read this before starting work, update it before stopping. See `goal.md` for
 direction/roadmap — this file is "what exists and why," not "what's next."
 
-**2026-09-09 entry (newest — server-side list filtering + Sales Return request/approval workflow, two-part
+**2026-09-16 entry (newest — gap-audit-2026-09-11 CLOSED, all 4 phases committed).** This file had
+gone stale relative to `todo/START.md`: the last several entries below never mention the gap/correctness
+audit that was, in fact, the dominant effort across this project's last several sessions. That audit is
+now fully done and committed. Treat everything below this entry as background/narrative history that may
+predate architecture this entry describes as current.
+
+**What the audit was.** `plans/gap-audit-2026-09-11.md` catalogued real correctness and parity gaps
+against the legacy `day_khata` app (money math done in floats, no exact-decimal type, missing invoice
+numbering guarantees, inventory costing gaps, missing polish features) and against this rewrite's own
+prior work. `todo/START.md` + `todo/CONTRACTS.md` broke the fix into 4 phases with 14 numbered task files
+(`todo/T01`-`T14`), run by coordinated subagents against 11 numbered contracts (C1-C11, see
+`todo/CONTRACTS.md` — still the authoritative reference for the money/ledger architecture, not repeated
+here).
+
+**Phase 1-3 (money/ledger core, already committed by the time this entry is written; see `git log` for
+exact commits, not re-narrated here):**
+- `App\Support\Money\Money` (2dp) / `Quantity` (4dp) exact-decimal value objects on `brick/math`
+  `BigDecimal`, an `App\Casts\Decimal` Eloquent cast, and `App\Support\Billing\DocumentCalculator` as the
+  single source of truth for line/header discount, VAT, TDS and totals math — mirrored exactly in
+  `resources/js/lib/money.js`'s `calculateDocument`, cross-checked against 43 golden vectors in
+  `tests/fixtures/billing-vectors.json` so the JS preview and the PHP posting math can never silently
+  drift apart.
+- `App\Support\Inventory\StockCosting`: weighted-average costing per base unit, single rounding, fixed
+  basis, excludes transfers (C10).
+- `ClosedFiscalYearGuard` + `JournalVoucher::reverse()`: cancellation only in an open fiscal year, and a
+  cancelled document posts a mirrored *reversal* voucher through its own dedicated
+  `VoucherType::Reversal` series — it never reuses or consumes the original document-number series.
+- Per-series gapless invoice/credit-note/debit-note/receipt/payment numbering, stored at posting time and
+  never re-derived at display time (C7).
+
+**Phase 4 (parity features, committed 2026-09-16 as three task-scoped commits — `T12`/`T13`/`T14`):**
+- **T12 — sales.** Walk-in customer seeded per tenant; `App\Support\SettlementNarration` (ledger
+  narration lines shared with purchases — exact `forMode()`/`line()` contract in `CONTRACTS.md`); service
+  items post to their own posting account instead of the default sales account; MRP/VAT-inclusive entry
+  on Sales/POS (browser-only, backs out `rate` via `money.js`'s `rateExcludingVat`, server never
+  re-derives it); bonus/free quantity on sale lines (stock moves, money doesn't); unlinked sales returns
+  (pre-cutover/walk-in sales with no bill) with an exact cash/bank split refund
+  (`DocumentCalculator::assertExactSplit`); sales list Excel export + SQL-summed totals row + sort/search
+  + "Save & Print N copies" (each copy logged via `PrintLog`, C9); saved note templates.
+- **T13 — purchase & inventory.** TDS on purchases (two-pass calculation so `settlement_due` accounts for
+  its own TDS amount, capped at the base, never silently clamps a rate); PAN/non-VAT purchase mode;
+  bonus/free quantity on purchase lines (average cost divides paid value by the *full* base quantity
+  including bonus units, C10); unlinked purchase returns valued at an entered rate or
+  `StockCosting::averageCost()`; capital purchase → `FixedAsset` registration (reuses the capital
+  purchase's own journal voucher rather than posting the cost twice); item per-unit barcode, base-unit
+  MRP, case-insensitive unique names, bulk mark-vatable, and a `GET /items/lookup-barcode` scan endpoint;
+  stock adjustment alternate-unit entry; purchase/return/capital-purchase list exports with BS dates;
+  purchase form polish (scan-to-add, per-line note, quick add-item); purchase-side ledger narrations.
+- **T14 — accounting.** Cash/bank journal voucher quick-create, fixed asset VAT handling, and new
+  accounting report exports/PDFs (account book, balance sheet, day book, income statement, trial balance,
+  cancelled documents).
+
+**Process note, worth keeping even though the audit is closed:** a subagent handed a whole multi-checkbox
+task file (9-11 items) grew past 450k tokens in its own transcript. The fix was structural, not
+behavioral — split every task into ~2-3-checkbox chunks up front, sequence chunks touching the same files
+serially, and cap each subagent's own transcript at ~150k tokens. This is now recorded durably in
+`.ai/rules/general.md` (read automatically by Laravel Boost) and in real `builder`/`builder-high`/
+`scaffolder` personas under `.claude/agents/`, not just this file. Every Phase 4 chunk run under that
+discipline landed at 74k-195k tokens per agent — worth reusing verbatim for the next multi-item plan.
+
+**Known follow-ups the audit itself surfaced but didn't require fixing to close** (not gaps in Phase 4's
+own scope, flagged by name so they aren't lost): `TdsReportController` could show the per-purchase
+`tds_rate` column now that it's stored; `nav-items.js` could get a "Cancelled Documents" entry under
+Reports now that `T14`'s report exists; `VatSummaryReportController` could show input VAT on fixed-asset
+purchases on its own line.
+
+**2026-09-15 entry (planning/correction, no code changed).** User corrected a
+mischaracterization: this file's repeated "no real browser click-through has ever been done" framing
+(scattered across many historical entries, e.g. `goal.md`'s own "Still not manually smoke-tested in an
+actual browser" line) describes only **agent-session** testing (no browser automation tool available
+in-session). It does **not** mean the app is unverified — the user has been continuously testing and
+fixing issues in a real browser themselves, outside of what gets written up here. Don't re-cite the old
+"never browser tested" framing as if the system is unvalidated; it's about tooling access during agent
+sessions, not real-world verification status.
+
+**Locked-in delivery strategy for upcoming sessions (user's stated priority order, supersedes any prior
+"strategy" discussion in this thread)**: the goal is to ship a complete, ready-to-use system ASAP. Work
+in this order, don't jump ahead:
+1. **Close remaining gaps against the legacy `day_khata` system first** — feature parity + fixing
+   legacy's own known bugs, before anything else. (See `goal.md`'s non-goals list and the various
+   "deferred, not forgotten" flags throughout this file for what's still open — e.g. the ~79-key legacy
+   privilege port, per-store financial reporting, MySQL production wiring.)
+2. **Then UI/UX improvement** — the user already has specific gaps/differences in mind from their own
+   hands-on use, not yet detailed in this file.
+3. **Then optimization and security** — N+1 query audit, thin-controller cleanup scoped to what's
+   actually found to be a problem (not a blanket rewrite-everything pass), tenant-isolation/authorization
+   audit. Business logic is considered already written and correct; this phase is about hardening/
+   modernizing it to current Laravel conventions, not rebuilding it.
+
+**2026-09-09 entry (server-side list filtering + Sales Return request/approval workflow, two-part
 task, both committed).** Ran alongside other concurrent sessions in this same unisolated tree (confirmed
 live: `SaleController`/`PurchaseController` picked up an `item_units` conversion feature from another
 session mid-edit, and a `git add`-broad commit from that session (`33a937d`) ended up including this
@@ -2603,9 +2692,12 @@ aged, pre-existing data exposes.
   browser-based pass is still open** and worth doing once a browser automation tool (Playwright MCP or
   similar) is available in a session — every other item below is either a documented, deliberate scope
   limit or genuinely blocked on infrastructure that doesn't exist yet (a real MySQL target).
-- Aged Receivables/Payables has a real, documented MVP gap: no payment-receipt feature exists, so a
-  credit invoice settled via a generic Journal Voucher keeps aging forever — see the 2026-08-29
-  section above.
+- ~~Aged Receivables/Payables MVP gap (no payment-receipt feature)~~ **Closed 2026-09-02** by the
+  Payment/Receipt module (`Receipt`/`Payment` models + `ReceiptAllocation`/`PaymentAllocation`,
+  `Sale::outstandingAmount()`/`Purchase::outstandingAmount()`) — see the 2026-09-02 section above and
+  `goal.md` roadmap item 9. **Narrower caveat still true**: this only nets correctly as long as
+  payment is recorded through Receipt/Payment — an invoice settled via a raw Journal Voucher still
+  bypasses `outstandingAmount()` and keeps aging forever in the report.
 - The remaining ~28ish legacy report views beyond the now-20-report set (invoice print list, ledger
   summary/sub-ledger, sales/purchase-with-notes, agent charges, capital services, damage-stock,
   outstock/instock raw listings, etc.) are, per a 2026-08-29 dedup pass, mostly either filter-variant

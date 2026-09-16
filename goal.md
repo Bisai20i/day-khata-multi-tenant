@@ -92,9 +92,10 @@ this file for direction.
   Book, Aged Receivables, Aged Payables (13 reports total now), plus cancel-a-return,
   header-discount/TDS reversal, and an optional cash/bank refund voucher for both Sales and Purchase
   Returns. Built via 4 parallel forks. Full suite now 151/151, `npm run build` succeeds. See
-  `mem.md` for the full breakdown, including a real MVP gap Aged Receivables/Payables documents
-  (no payment-receipt feature exists yet) and a design gap both return-fidelity forks independently
-  caught (cancelling a refunded return must also reverse the refund settlement voucher).
+  `mem.md` for the full breakdown, including a real MVP gap Aged Receivables/Payables documented at
+  the time (no payment-receipt feature existed yet — closed 2026-09-02, see roadmap item 9 below) and
+  a design gap both return-fidelity forks independently caught (cancelling a refunded return must
+  also reverse the refund settlement voucher).
 - **5 more legacy reports** (2026-08-29, second session): TDS Report, Stock Valuation, Item-wise
   Sales, Item-wise Purchase, and Sales/Purchase/Stock-by-Category rollups (18 reports total now).
   Built via 5 parallel forks after deduplicating legacy's ~70-method `reportsController.php` down to
@@ -141,6 +142,15 @@ this file for direction.
   including a real guard-ambiguity bug fixed in prep (`2a78704`): the tenant root route and
   `EnsureUserHasRole` were resolving the ambiguous default auth guard instead of `'web'` explicitly,
   which could misidentify a platform admin's session as a tenant user's.
+- **Gap-audit-2026-09-11 CLOSED (2026-09-16)** — all 4 phases of `todo/START.md` done and committed:
+  exact-decimal money/quantity types replacing float math everywhere, a single
+  `DocumentCalculator`/`money.js` source of truth for VAT/TDS/discount/totals math (cross-checked
+  against 43 golden vectors), reversal-voucher-based cancellation, gapless per-series document
+  numbering, weighted-average stock costing, and the full sales/purchase/inventory/accounting parity
+  feature set (walk-in customer, ledger narrations, bonus quantities, unlinked returns with split
+  refund, TDS/PAN purchase modes, capital-purchase asset registration, item barcode/MRP, list
+  exports, and more). See `mem.md`'s 2026-09-16 entry for the full breakdown and
+  `todo/CONTRACTS.md` for the architecture contracts this closed against.
 
 **Next, roughly in order** (not a committed sequence — re-evaluate against sibling
 `05-phase-plan.md` before starting each):
