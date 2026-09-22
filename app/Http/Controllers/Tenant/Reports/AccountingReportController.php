@@ -72,6 +72,7 @@ class AccountingReportController extends Controller
     public function trialBalance(Request $request): Response
     {
         $fiscalYear = $this->resolveFiscalYear($request);
+        $accountId = $request->integer('account_id') ?: null;
 
         $heads = [];
         $totals = $this->emptyTrialBalanceTotals();
@@ -84,7 +85,7 @@ class AccountingReportController extends Controller
             $opening = $this->openingBalancesByAccount($fiscalYear, $excluded, $from);
             $period = $this->balancesByAccount($fiscalYear, [...$excluded, ...$this->openingVoucherIds($fiscalYear)], $from, $to);
 
-            $rows = $this->trialBalanceRows($opening, $period);
+            $rows = $this->trialBalanceRows($opening, $period, $accountId);
             $heads = $this->buildHierarchy($rows);
             $totals = $this->trialBalanceTotals($rows);
         }
@@ -92,6 +93,10 @@ class AccountingReportController extends Controller
         return Inertia::render('Tenant/Reports/TrialBalance', array_merge([
             'fiscalYears' => $this->fiscalYearOptions(),
             'fiscalYearId' => $fiscalYear?->id,
+            // Legacy's `?accno=` single-ledger filter (audit T15-5): narrows
+            // the whole report to one account without a separate endpoint.
+            'accounts' => Account::orderBy('name')->get(['id', 'code', 'name']),
+            'accountId' => $accountId,
             'from' => $from,
             'to' => $to,
             'heads' => $heads,
@@ -355,11 +360,13 @@ class AccountingReportController extends Controller
         $fiscalYear = $this->resolveFiscalYear($request);
         abort_if($fiscalYear === null, 404, 'No fiscal year to report on.');
 
+        $accountId = $request->integer('account_id') ?: null;
+
         [$from, $to] = $this->resolveWindow($request, $fiscalYear);
         $excluded = $this->sweepVoucherIds($fiscalYear);
         $opening = $this->openingBalancesByAccount($fiscalYear, $excluded, $from);
         $period = $this->balancesByAccount($fiscalYear, [...$excluded, ...$this->openingVoucherIds($fiscalYear)], $from, $to);
-        $rows = $this->trialBalanceRows($opening, $period);
+        $rows = $this->trialBalanceRows($opening, $period, $accountId);
         $heads = $this->buildHierarchy($rows);
         $totals = $this->trialBalanceTotals($rows);
 
@@ -381,11 +388,13 @@ class AccountingReportController extends Controller
         $fiscalYear = $this->resolveFiscalYear($request);
         abort_if($fiscalYear === null, 404, 'No fiscal year to report on.');
 
+        $accountId = $request->integer('account_id') ?: null;
+
         [$from, $to] = $this->resolveWindow($request, $fiscalYear);
         $excluded = $this->sweepVoucherIds($fiscalYear);
         $opening = $this->openingBalancesByAccount($fiscalYear, $excluded, $from);
         $period = $this->balancesByAccount($fiscalYear, [...$excluded, ...$this->openingVoucherIds($fiscalYear)], $from, $to);
-        $heads = $this->buildHierarchy($this->trialBalanceRows($opening, $period));
+        $heads = $this->buildHierarchy($this->trialBalanceRows($opening, $period, $accountId));
 
         return Excel::download(new TrialBalanceExport($heads), "trial-balance-{$fiscalYear->name}.xlsx");
     }
@@ -1046,9 +1055,17 @@ class AccountingReportController extends Controller
 
     /**
      * Flat list of {account, head, group, subgroup, debit, credit} rows, one
-     * per account with a nonzero balance, optionally restricted to a set of
-     * head names. Only one of debit/credit is ever nonzero: a positive net
-     * shows as a debit balance, a negative one as a credit balance.
+     * per account within scope, optionally restricted to a set of head
+     * names. Only one of debit/credit is ever nonzero: a positive net shows
+     * as a debit balance, a negative one as a credit balance.
+     *
+     * Every account in scope is listed, including one with a zero balance
+     * (audit T15-4) - legacy's Balance Sheet enumerates from the full chart
+     * of accounts via a LEFT JOIN and only ever hides a zero row behind an
+     * explicit "Hide Zero" toggle, so a brand-new ledger account with no
+     * postings yet, or one that nets to exactly zero for the period, is
+     * still real information (e.g. "this account exists and is currently
+     * settled"), not something to silently drop.
      *
      * @param  array<int, Money>  $balances
      * @param  array<int, string>|null  $headNames
@@ -1074,10 +1091,6 @@ class AccountingReportController extends Controller
             }
 
             $net = $balances[$account->id] ?? Money::zero();
-
-            if ($net->isZero()) {
-                continue;
-            }
 
             $rows->push([
                 'account' => $account,
@@ -1139,17 +1152,28 @@ class AccountingReportController extends Controller
     }
 
     /**
+     * Every account in the chart of accounts, one row each - not just the
+     * ones with a nonzero opening or period balance (audit T15-4). Legacy's
+     * `trailbalance()` runs a LEFT JOIN from `mainaccount` (the full chart),
+     * so a brand-new ledger account with no postings yet, or one whose
+     * period activity happens to net to exactly zero (e.g. a customer fully
+     * settled during the period), still shows a 0.00 row rather than
+     * disappearing; legacy only ever hides it behind an explicit "Hide Zero"
+     * toggle, which is not on by default and has no equivalent here yet.
+     *
+     * $accountId is legacy's `?accno=` single-ledger filter (audit T15-5):
+     * when given, every other account is left out and the report narrows to
+     * that one ledger's opening/period/closing figures.
+     *
      * @param  array<int, Money>  $opening
      * @param  array<int, Money>  $period
      * @return Collection<int, array<string, mixed>>
      */
-    private function trialBalanceRows(array $opening, array $period): Collection
+    private function trialBalanceRows(array $opening, array $period, ?int $accountId = null): Collection
     {
-        $accountIds = array_unique([...array_keys($opening), ...array_keys($period)]);
-
         $accounts = Account::query()
             ->with(['group.accountHead', 'subgroup.accountGroup.accountHead'])
-            ->whereIn('id', $accountIds)
+            ->when($accountId !== null, fn (Builder $query) => $query->where('id', $accountId))
             ->get();
 
         $rows = collect();
@@ -1165,10 +1189,6 @@ class AccountingReportController extends Controller
             $openingNet = $opening[$account->id] ?? Money::zero();
             $periodNet = $period[$account->id] ?? Money::zero();
             $closingNet = $openingNet->plus($periodNet);
-
-            if ($openingNet->isZero() && $periodNet->isZero()) {
-                continue;
-            }
 
             $rows->push([
                 'account' => $account,

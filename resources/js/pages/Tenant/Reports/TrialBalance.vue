@@ -6,6 +6,7 @@ import { useLayoutChrome } from '@/composables/useLayoutChrome';
 import Card from '@/components/ui/Card.vue';
 import Select from '@/components/ui/Select.vue';
 import Button from '@/components/ui/Button.vue';
+import PageHeader from '@/components/ui/PageHeader.vue';
 import NepaliDateInput from '@/components/ui/NepaliDateInput.vue';
 import { formatMoney } from '@/lib/money.js';
 import { formatBsDate } from '@/lib/format.js';
@@ -15,6 +16,8 @@ defineOptions({ layout: AppLayout });
 const props = defineProps({
     fiscalYears: { type: Array, default: () => [] },
     fiscalYearId: { type: [Number, null], default: null },
+    accounts: { type: Array, default: () => [] },
+    accountId: { type: [Number, null], default: null },
     from: { type: [String, null], default: null },
     to: { type: [String, null], default: null },
     heads: { type: Array, default: () => [] },
@@ -39,6 +42,14 @@ const fiscalYearOptions = computed(() =>
 const fiscalYear = ref(props.fiscalYearId);
 const from = ref(props.from);
 const to = ref(props.to);
+const accountId = ref(props.accountId);
+
+// Legacy's `?accno=` single-ledger filter (audit T15-5): "All accounts" is
+// the default, matching the unfiltered trial balance.
+const accountOptions = computed(() => [
+    { value: null, label: 'All accounts' },
+    ...props.accounts.map((account) => ({ value: account.id, label: `${account.name} · ${account.code ?? '-'}` })),
+]);
 
 // The window only ever means "inside the chosen year", so switching years
 // resets it rather than carrying dates that now fall outside.
@@ -52,50 +63,72 @@ watch(fiscalYear, (value) => {
 function apply() {
     router.get(
         window.location.pathname,
-        { fiscal_year_id: fiscalYear.value ?? undefined, from: from.value ?? undefined, to: to.value ?? undefined },
+        {
+            fiscal_year_id: fiscalYear.value ?? undefined,
+            from: from.value ?? undefined,
+            to: to.value ?? undefined,
+            account_id: accountId.value ?? undefined,
+        },
         { preserveState: true, preserveScroll: true },
     );
 }
 
 function printUrl() {
-    const params = new URLSearchParams({ fiscal_year_id: fiscalYear.value ?? '', from: from.value ?? '', to: to.value ?? '' });
+    const params = new URLSearchParams({
+        fiscal_year_id: fiscalYear.value ?? '',
+        from: from.value ?? '',
+        to: to.value ?? '',
+        account_id: accountId.value ?? '',
+    });
     return `/reports/trial-balance/print?${params.toString()}`;
 }
 
 function exportUrl() {
-    const params = new URLSearchParams({ fiscal_year_id: fiscalYear.value ?? '', from: from.value ?? '', to: to.value ?? '' });
+    const params = new URLSearchParams({
+        fiscal_year_id: fiscalYear.value ?? '',
+        from: from.value ?? '',
+        to: to.value ?? '',
+        account_id: accountId.value ?? '',
+    });
     return `/reports/trial-balance/export?${params.toString()}`;
 }
 </script>
 
 <template>
     <div>
-        <div class="mb-4 flex flex-wrap items-center justify-between gap-3">
-            <h2 class="text-base font-bold text-text-strong">Trial Balance</h2>
-            <div v-if="fiscalYearId !== null" class="flex items-center gap-2">
+        <PageHeader
+            title="Trial Balance"
+            description="Total debits and credits of every account. The two totals must match."
+        >
+            <template v-if="fiscalYearId !== null">
                 <a :href="printUrl()" target="_blank" rel="noopener"><Button variant="secondary" tone="purple">Print</Button></a>
                 <a :href="exportUrl()"><Button variant="secondary" tone="purple">Export</Button></a>
-            </div>
-        </div>
+            </template>
+        </PageHeader>
 
         <Card v-if="fiscalYearId !== null" variant="panel" class="mb-4">
             <div class="flex flex-wrap items-end gap-3">
                 <div class="w-56">
-                    <label class="mb-1 block text-xs font-semibold text-text-muted">Fiscal Year</label>
+                    <label class="mb-1 block text-xs font-semibold text-text-muted">Fiscal year</label>
                     <Select v-model="fiscalYear" :options="fiscalYearOptions" />
                 </div>
                 <div>
-                    <label class="mb-1 block text-xs font-semibold text-text-muted">From</label>
+                    <label class="mb-1 block text-xs font-semibold text-text-muted">From date (BS)</label>
                     <NepaliDateInput v-model="from" />
                 </div>
                 <div>
-                    <label class="mb-1 block text-xs font-semibold text-text-muted">To</label>
+                    <label class="mb-1 block text-xs font-semibold text-text-muted">To date (BS)</label>
                     <NepaliDateInput v-model="to" />
                 </div>
-                <Button variant="primary" tone="purple" @click="apply">Apply</Button>
+                <div class="w-64">
+                    <label class="mb-1 block text-xs font-semibold text-text-muted">Account</label>
+                    <Select v-model="accountId" :options="accountOptions" />
+                </div>
+                <Button variant="primary" tone="purple" @click="apply">Generate report</Button>
+                <Button v-if="accountId !== null" variant="secondary" tone="purple" @click="accountId = null; apply()">Reset</Button>
             </div>
             <p v-if="from && to" class="mt-2 text-[12px] text-text-muted">
-                {{ formatBsDate(from) }} to {{ formatBsDate(to) }} BS
+                Showing report for {{ formatBsDate(from) }} to {{ formatBsDate(to) }} BS
                 <span class="text-text-muted">({{ from }} to {{ to }})</span>
             </p>
         </Card>
@@ -115,19 +148,19 @@ function exportUrl() {
                 </p>
 
                 <p v-if="heads.length === 0" class="px-1 py-6 text-center text-[13px] text-text-muted">
-                    No activity in this fiscal year.
+                    No transactions in this period. Try widening the date range.
                 </p>
 
                 <div v-else class="overflow-x-auto">
                     <div class="min-w-[720px] divide-y divide-border">
                         <div class="flex items-center px-1 pb-2 text-[10px] font-bold tracking-[.8px] text-text-muted uppercase">
                             <div class="flex-1">Account</div>
-                            <div class="w-28 text-right">Opening Dr</div>
-                            <div class="w-28 text-right">Opening Cr</div>
-                            <div class="w-28 text-right">Period Dr</div>
-                            <div class="w-28 text-right">Period Cr</div>
-                            <div class="w-28 text-right">Closing Dr</div>
-                            <div class="w-28 text-right">Closing Cr</div>
+                            <div class="w-28 text-right">Opening Debit (Dr)</div>
+                            <div class="w-28 text-right">Opening Credit (Cr)</div>
+                            <div class="w-28 text-right">Period Debit (Dr)</div>
+                            <div class="w-28 text-right">Period Credit (Cr)</div>
+                            <div class="w-28 text-right">Closing Debit (Dr)</div>
+                            <div class="w-28 text-right">Closing Credit (Cr)</div>
                         </div>
 
                         <template v-for="head in heads" :key="head.name">
@@ -141,7 +174,7 @@ function exportUrl() {
                                     :key="`acc-${account.id}`"
                                     class="flex items-center px-1 py-1 pl-8 text-[13px] text-text-base"
                                 >
-                                    <div class="flex-1">{{ account.name }} <span class="text-text-muted">· {{ account.code ?? '—' }}</span></div>
+                                    <div class="flex-1">{{ account.name }} <span class="text-text-muted">· {{ account.code ?? '-' }}</span></div>
                                     <div class="w-28 text-right">{{ formatMoney(account.openingDebit) }}</div>
                                     <div class="w-28 text-right">{{ formatMoney(account.openingCredit) }}</div>
                                     <div class="w-28 text-right">{{ formatMoney(account.periodDebit) }}</div>
@@ -158,7 +191,7 @@ function exportUrl() {
                                         :key="`acc-${account.id}`"
                                         class="flex items-center px-1 py-1 pl-12 text-[13px] text-text-base"
                                     >
-                                        <div class="flex-1">{{ account.name }} <span class="text-text-muted">· {{ account.code ?? '—' }}</span></div>
+                                        <div class="flex-1">{{ account.name }} <span class="text-text-muted">· {{ account.code ?? '-' }}</span></div>
                                         <div class="w-28 text-right">{{ formatMoney(account.openingDebit) }}</div>
                                         <div class="w-28 text-right">{{ formatMoney(account.openingCredit) }}</div>
                                         <div class="w-28 text-right">{{ formatMoney(account.periodDebit) }}</div>

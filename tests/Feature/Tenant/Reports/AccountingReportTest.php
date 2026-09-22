@@ -11,6 +11,7 @@ use App\Models\Store;
 use App\Models\Tenant;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Collection;
 
 uses(RefreshDatabase::class);
 
@@ -82,6 +83,29 @@ function postAccountingReportFixture(FiscalYear $fy1, User $actor): void
         ],
         $actor,
     );
+}
+
+/**
+ * Flattens the Trial Balance/Balance Sheet `heads` prop (head -> group ->
+ * (subgroup, optional) -> accounts) into one list of account rows, keyed the
+ * same way the controller's buildHierarchy() nests them.
+ *
+ * @param  array<int, array<string, mixed>>  $heads
+ * @return Collection<int, array<string, mixed>>
+ */
+function flattenAccountingReportRows(array $heads): Collection
+{
+    return collect($heads)->flatMap(function (array $head) {
+        return collect($head['groups'])->flatMap(function (array $group) {
+            $rows = $group['accounts'];
+
+            foreach ($group['subgroups'] as $subgroup) {
+                $rows = [...$rows, ...$subgroup['accounts']];
+            }
+
+            return $rows;
+        });
+    });
 }
 
 test('trial balance is always in balance and survives year-end closing', function () {
@@ -678,6 +702,143 @@ test('the day book filters to one voucher type when asked (T14)', function () {
     $this->get("http://{$domain}/reports/day-book")
         ->assertOk()
         ->assertInertia(fn ($page) => $page->has('vouchers', 3));
+
+    $tenant->delete();
+});
+
+test('trial balance still lists a brand-new account with no postings and an account whose period activity nets to zero (T15-4)', function () {
+    // Audit T15-4. Before the fix, trialBalanceRows() only ever enumerated
+    // accounts that already appeared in the opening/period balance maps, and
+    // then dropped any row where both buckets net to zero - so a ledger
+    // account with no postings at all, or one that saw real money move
+    // through it but happened to net to exactly zero for the period, simply
+    // never rendered. Legacy's `trailbalance()` runs a LEFT JOIN from the
+    // full chart of accounts and shows every one of them by default.
+    $domain = 'report-trial-balance-zero-balance.tenant-test';
+    $tenant = provisionAccountingReportTestTenant($domain);
+
+    $fy1Id = null;
+    $fy2Id = null;
+    $zeroAccountCode = 'ZERO-NEW';
+
+    $tenant->run(function () use (&$fy1Id, &$fy2Id, $zeroAccountCode) {
+        $admin = accountingReportTestAdmin();
+        $fy1 = FiscalYear::create(['name' => 'FY1', 'start_date' => '2026-01-01', 'end_date' => '2026-12-31', 'status' => FiscalYearStatus::Open]);
+        $fy2 = FiscalYear::create(['name' => 'FY2', 'start_date' => '2027-01-01', 'end_date' => '2027-12-31', 'status' => FiscalYearStatus::Closed]);
+        $fy1Id = $fy1->id;
+        $fy2Id = $fy2->id;
+
+        postAccountingReportFixture($fy1, $admin);
+        FiscalYear::find($fy1->id)->close(FiscalYear::find($fy2->id), $admin, ACCOUNTING_REPORT_CLOSE_REASON);
+
+        // Created after the close: carries no opening balance and has never
+        // been posted to.
+        Account::factory()->create(['code' => $zeroAccountCode, 'name' => 'Zero Activity Ledger']);
+
+        // Cash's FY2 opening (600, carried forward) is nonzero, but its FY2
+        // period activity nets to exactly zero - 300 came in, then the same
+        // 300 went back out - even though real transactions were posted.
+        $cash = Account::where('code', 'AS1')->firstOrFail();
+        $otherIncome = Account::where('code', 'INI30')->firstOrFail();
+
+        JournalVoucher::post(
+            ['date' => '2027-02-01', 'narration' => 'Misc income received in cash'],
+            [
+                ['account_id' => $cash->id, 'debit' => 300, 'credit' => 0],
+                ['account_id' => $otherIncome->id, 'debit' => 0, 'credit' => 300],
+            ],
+            $admin,
+        );
+
+        JournalVoucher::post(
+            ['date' => '2027-03-01', 'narration' => 'Refund of the misc income'],
+            [
+                ['account_id' => $otherIncome->id, 'debit' => 300, 'credit' => 0],
+                ['account_id' => $cash->id, 'debit' => 0, 'credit' => 300],
+            ],
+            $admin,
+        );
+    });
+
+    loginAccountingReportTestUser($domain);
+
+    $this->get("http://{$domain}/reports/trial-balance?fiscal_year_id={$fy2Id}")
+        ->assertOk()
+        ->assertInertia(fn ($page) => $page
+            ->component('Tenant/Reports/TrialBalance')
+            ->where('heads', function (array $heads) use ($zeroAccountCode) {
+                $rows = flattenAccountingReportRows($heads);
+
+                $cashRow = $rows->firstWhere('code', 'AS1');
+                $zeroRow = $rows->firstWhere('code', $zeroAccountCode);
+
+                return $cashRow !== null
+                    && $cashRow['openingDebit'] === '600.00'
+                    && $cashRow['openingCredit'] === '0.00'
+                    && $cashRow['periodDebit'] === '300.00'
+                    && $cashRow['periodCredit'] === '300.00'
+                    && $cashRow['closingDebit'] === '600.00'
+                    && $cashRow['closingCredit'] === '0.00'
+                    && $zeroRow !== null
+                    && $zeroRow['openingDebit'] === '0.00'
+                    && $zeroRow['openingCredit'] === '0.00'
+                    && $zeroRow['periodDebit'] === '0.00'
+                    && $zeroRow['periodCredit'] === '0.00'
+                    && $zeroRow['closingDebit'] === '0.00'
+                    && $zeroRow['closingCredit'] === '0.00';
+            }));
+
+    $tenant->delete();
+});
+
+test('trial balance narrows to a single account when account_id is given (T15-5)', function () {
+    // Audit T15-5. Legacy's `trailbalance()` accepts `?accno=` to narrow the
+    // whole report to one ledger.
+    $domain = 'report-trial-balance-account-filter.tenant-test';
+    $tenant = provisionAccountingReportTestTenant($domain);
+
+    $fy1Id = null;
+    $cashId = null;
+
+    $tenant->run(function () use (&$fy1Id, &$cashId) {
+        $admin = accountingReportTestAdmin();
+        $fy1 = FiscalYear::create(['name' => 'FY1', 'start_date' => '2026-01-01', 'end_date' => '2026-12-31', 'status' => FiscalYearStatus::Open]);
+        $fy1Id = $fy1->id;
+
+        postAccountingReportFixture($fy1, $admin);
+
+        $cashId = Account::where('code', 'AS1')->value('id');
+    });
+
+    loginAccountingReportTestUser($domain);
+
+    $this->get("http://{$domain}/reports/trial-balance?fiscal_year_id={$fy1Id}&account_id={$cashId}")
+        ->assertOk()
+        ->assertInertia(fn ($page) => $page
+            ->component('Tenant/Reports/TrialBalance')
+            ->where('accountId', $cashId)
+            ->where('heads', function (array $heads) {
+                $rows = flattenAccountingReportRows($heads);
+
+                // Exactly one row, and it is the one account asked for -
+                // Sales (INI20) and Purchases (EXE8), which the unfiltered
+                // fixture also touches, must not appear.
+                return $rows->count() === 1 && $rows->first()['code'] === 'AS1';
+            })
+            ->where('totalOpeningDebit', '0.00')
+            ->where('totalOpeningCredit', '0.00')
+            ->where('totalPeriodDebit', '1000.00')
+            ->where('totalPeriodCredit', '400.00')
+            ->where('totalDebit', '600.00')
+            ->where('totalCredit', '0.00'));
+
+    // The account picker itself always lists every account, regardless of
+    // which one (if any) is currently selected.
+    $this->get("http://{$domain}/reports/trial-balance?fiscal_year_id={$fy1Id}")
+        ->assertOk()
+        ->assertInertia(fn ($page) => $page
+            ->where('accountId', null)
+            ->where('accounts', fn ($accounts) => collect($accounts)->pluck('code')->contains('AS1')));
 
     $tenant->delete();
 });
