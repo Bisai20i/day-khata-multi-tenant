@@ -33,7 +33,6 @@ use Brick\Math\BigDecimal;
 use Brick\Math\RoundingMode;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Http\Request;
-use Illuminate\Support\Carbon;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Str;
 use Inertia\Inertia;
@@ -82,8 +81,8 @@ class AccountingReportController extends Controller
             [$from, $to] = $this->resolveWindow($request, $fiscalYear);
 
             $excluded = $this->sweepVoucherIds($fiscalYear);
-            $opening = $this->balancesByAccount($fiscalYear, $excluded, null, $this->dayBefore($from));
-            $period = $this->balancesByAccount($fiscalYear, $excluded, $from, $to);
+            $opening = $this->openingBalancesByAccount($fiscalYear, $excluded, $from);
+            $period = $this->balancesByAccount($fiscalYear, [...$excluded, ...$this->openingVoucherIds($fiscalYear)], $from, $to);
 
             $rows = $this->trialBalanceRows($opening, $period);
             $heads = $this->buildHierarchy($rows);
@@ -358,8 +357,8 @@ class AccountingReportController extends Controller
 
         [$from, $to] = $this->resolveWindow($request, $fiscalYear);
         $excluded = $this->sweepVoucherIds($fiscalYear);
-        $opening = $this->balancesByAccount($fiscalYear, $excluded, null, $this->dayBefore($from));
-        $period = $this->balancesByAccount($fiscalYear, $excluded, $from, $to);
+        $opening = $this->openingBalancesByAccount($fiscalYear, $excluded, $from);
+        $period = $this->balancesByAccount($fiscalYear, [...$excluded, ...$this->openingVoucherIds($fiscalYear)], $from, $to);
         $rows = $this->trialBalanceRows($opening, $period);
         $heads = $this->buildHierarchy($rows);
         $totals = $this->trialBalanceTotals($rows);
@@ -384,8 +383,8 @@ class AccountingReportController extends Controller
 
         [$from, $to] = $this->resolveWindow($request, $fiscalYear);
         $excluded = $this->sweepVoucherIds($fiscalYear);
-        $opening = $this->balancesByAccount($fiscalYear, $excluded, null, $this->dayBefore($from));
-        $period = $this->balancesByAccount($fiscalYear, $excluded, $from, $to);
+        $opening = $this->openingBalancesByAccount($fiscalYear, $excluded, $from);
+        $period = $this->balancesByAccount($fiscalYear, [...$excluded, ...$this->openingVoucherIds($fiscalYear)], $from, $to);
         $heads = $this->buildHierarchy($this->trialBalanceRows($opening, $period));
 
         return Excel::download(new TrialBalanceExport($heads), "trial-balance-{$fiscalYear->name}.xlsx");
@@ -809,11 +808,6 @@ class AccountingReportController extends Controller
         return $from > $to ? [$start, $end] : [$from, $to];
     }
 
-    private function dayBefore(string $date): string
-    {
-        return Carbon::parse($date)->subDay()->toDateString();
-    }
-
     /**
      * Ids of this year's P&L SWEEP vouchers, which Trial Balance and Income
      * Statement must leave out.
@@ -875,6 +869,74 @@ class AccountingReportController extends Controller
                     ->when($excludeVoucherIds !== [], fn (Builder $q) => $q->whereNotIn('id', $excludeVoucherIds))
                     ->when($from !== null, fn (Builder $q) => $q->whereDate('date', '>=', $from))
                     ->when($to !== null, fn (Builder $q) => $q->whereDate('date', '<=', $to));
+            })
+            ->selectRaw(
+                "account_id,
+                 COALESCE(SUM(CAST(ROUND(debit * 100) AS {$cast})), 0) - COALESCE(SUM(CAST(ROUND(credit * 100) AS {$cast})), 0) as net_scaled"
+            )
+            ->groupBy('account_id')
+            ->pluck('net_scaled', 'account_id');
+
+        $balances = [];
+
+        foreach ($rows as $accountId => $netScaled) {
+            $balances[(int) $accountId] = Money::of(
+                BigDecimal::of((int) $netScaled)->dividedBy(100, 2, RoundingMode::Unnecessary)
+            );
+        }
+
+        return $balances;
+    }
+
+    /**
+     * Ids of this fiscal year's Opening Balance vouchers. Trial Balance's
+     * Period bucket must never include them (see openingBalancesByAccount()
+     * below), matching accountBook()'s own `voucher_type != OpeningBalance`
+     * period filter - otherwise the carried-forward balance would count
+     * twice: once as Opening, once as Period.
+     *
+     * @return array<int, int>
+     */
+    private function openingVoucherIds(FiscalYear $fiscalYear): array
+    {
+        return JournalVoucher::query()
+            ->where('fiscal_year_id', $fiscalYear->id)
+            ->where('voucher_type', VoucherType::OpeningBalance->value)
+            ->pluck('id')
+            ->all();
+    }
+
+    /**
+     * Trial Balance's Opening column: this year's Opening Balance voucher
+     * (whatever date it is posted on) PLUS this year's lines dated strictly
+     * before `$from`. This is the same rule accountBook() already uses (see
+     * its docblock at ~line 1290) - not a plain `date <= dayBefore($from)`
+     * comparison, which used to render Opening as 0.00 for the default view
+     * of every year after the first: FiscalYear::postOpeningBalances() dates
+     * the Opening Balance voucher at exactly $fiscalYear->start_date, and
+     * resolveWindow() defaults $from to that same start_date, so
+     * dayBefore($from) landed one day before the fiscal year even starts and
+     * the carry-forward silently fell into the Period bucket instead
+     * (audit T15-1).
+     *
+     * $excludeVoucherIds is the sweepVoucherIds() exclusion, orthogonal to
+     * the OpeningBalance question - a ClosingEntry sweep voucher must never
+     * appear in Opening either.
+     *
+     * @param  array<int, int>  $excludeVoucherIds
+     * @return array<int, Money>
+     */
+    private function openingBalancesByAccount(FiscalYear $fiscalYear, array $excludeVoucherIds, string $from): array
+    {
+        $cast = JournalVoucherLine::query()->getConnection()->getDriverName() === 'sqlite' ? 'INTEGER' : 'SIGNED';
+
+        $rows = JournalVoucherLine::query()
+            ->whereHas('journalVoucher', function (Builder $query) use ($fiscalYear, $excludeVoucherIds, $from) {
+                $query->where('fiscal_year_id', $fiscalYear->id)
+                    ->when($excludeVoucherIds !== [], fn (Builder $q) => $q->whereNotIn('id', $excludeVoucherIds))
+                    ->where(fn (Builder $q) => $q
+                        ->where('voucher_type', VoucherType::OpeningBalance->value)
+                        ->orWhereDate('date', '<', $from));
             })
             ->selectRaw(
                 "account_id,

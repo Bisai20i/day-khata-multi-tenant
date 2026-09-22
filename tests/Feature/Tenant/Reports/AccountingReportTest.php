@@ -164,6 +164,55 @@ test('trial balance splits opening, period and closing columns for a window insi
     $tenant->delete();
 });
 
+test('trial balance shows the carried-forward opening balance in Opening, not Period, for the default view of the year after a close', function () {
+    // Audit T15-1. FiscalYear::postOpeningBalances() dates the Opening
+    // Balance voucher at exactly $fiscalYear->start_date, and
+    // resolveWindow() defaults `from` to that same start_date when no
+    // filter is given (the default view). The old opening computation used
+    // `date <= dayBefore($from)`, which landed one day before the fiscal
+    // year even starts, so the carry-forward matched neither Opening nor
+    // any real window and silently fell into Period instead - Opening
+    // rendered 0.00 and Period was inflated by exactly the carried-forward
+    // balance. The Cash Book's own accountBook() never had this bug (see
+    // "the cash book of the year after a close..." above); this test pins
+    // the same rule for Trial Balance.
+    $domain = 'report-trial-balance-year-two.tenant-test';
+    $tenant = provisionAccountingReportTestTenant($domain);
+
+    $fy1Id = null;
+    $fy2Id = null;
+    $tenant->run(function () use (&$fy1Id, &$fy2Id) {
+        $admin = accountingReportTestAdmin();
+        $fy1 = FiscalYear::create(['name' => 'FY1', 'start_date' => '2026-01-01', 'end_date' => '2026-12-31', 'status' => FiscalYearStatus::Open]);
+        $fy2 = FiscalYear::create(['name' => 'FY2', 'start_date' => '2027-01-01', 'end_date' => '2027-12-31', 'status' => FiscalYearStatus::Closed]);
+        $fy1Id = $fy1->id;
+        $fy2Id = $fy2->id;
+
+        postAccountingReportFixture($fy1, $admin);
+
+        FiscalYear::find($fy1->id)->close(FiscalYear::find($fy2->id), $admin, ACCOUNTING_REPORT_CLOSE_REASON);
+    });
+
+    loginAccountingReportTestUser($domain);
+
+    // No from/to: resolveWindow() defaults to FY2's own start_date, exactly
+    // where the Opening Balance voucher (carrying forward FY1's 600 cash) is
+    // dated.
+    $this->get("http://{$domain}/reports/trial-balance?fiscal_year_id={$fy2Id}")
+        ->assertOk()
+        ->assertInertia(fn ($page) => $page
+            ->component('Tenant/Reports/TrialBalance')
+            ->where('totalOpeningDebit', '600.00')
+            ->where('totalOpeningCredit', '600.00')
+            ->where('totalPeriodDebit', '0.00')
+            ->where('totalPeriodCredit', '0.00')
+            ->where('totalDebit', '600.00')
+            ->where('totalCredit', '600.00')
+            ->where('inBalance', true));
+
+    $tenant->delete();
+});
+
 test('income statement nets income and expenses, and survives year-end closing', function () {
     $domain = 'report-income-statement.tenant-test';
     $tenant = provisionAccountingReportTestTenant($domain);
