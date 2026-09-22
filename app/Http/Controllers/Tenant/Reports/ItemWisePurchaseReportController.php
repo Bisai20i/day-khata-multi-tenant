@@ -4,8 +4,11 @@ namespace App\Http\Controllers\Tenant\Reports;
 
 use App\Enums\FiscalYearStatus;
 use App\Http\Controllers\Controller;
+use App\Models\Brand;
 use App\Models\FiscalYear;
 use App\Models\Item;
+use App\Models\ItemCategory;
+use App\Models\ItemSubcategory;
 use App\Models\PurchaseLine;
 use App\Models\Store;
 use App\Support\Money\Money;
@@ -39,6 +42,15 @@ use Inertia\Response;
  * that item's raw per-line rows alongside the aggregate, so "show me every
  * purchase of item X, at what rate, from which supplier" has an answer here
  * too.
+ *
+ * Audit T15-11: legacy also had a single-category/subcategory/brand
+ * drill-down. Rather than a second set of endpoints, `category_id`,
+ * `subcategory_id` and `brand_id` narrow this same report - both the
+ * aggregate and the item picker - to that group's items, so "pivot from a
+ * category total into its lines" is answered here too. `item_id` is the
+ * more specific filter: when it is set it wins outright (the group filters
+ * still narrow which items appear in the all-items aggregate/picker, but
+ * the single-item drill-down below is keyed on `item_id` alone).
  */
 class ItemWisePurchaseReportController extends Controller
 {
@@ -47,6 +59,9 @@ class ItemWisePurchaseReportController extends Controller
         [$from, $to] = $this->resolveDateRange($request);
         $storeId = $request->integer('store_id') ?: null;
         $itemId = $request->integer('item_id') ?: null;
+        $categoryId = $request->integer('category_id') ?: null;
+        $subcategoryId = $request->integer('subcategory_id') ?: null;
+        $brandId = $request->integer('brand_id') ?: null;
 
         $lines = PurchaseLine::query()
             ->join('purchases', 'purchases.id', '=', 'purchase_lines.purchase_id')
@@ -55,6 +70,9 @@ class ItemWisePurchaseReportController extends Controller
             ->whereDate('purchases.date', '>=', $from)
             ->whereDate('purchases.date', '<=', $to)
             ->when($storeId, fn (Builder $query) => $query->where('purchases.store_id', $storeId))
+            ->when($categoryId, fn (Builder $query) => $query->where('items.item_category_id', $categoryId))
+            ->when($subcategoryId, fn (Builder $query) => $query->where('items.item_subcategory_id', $subcategoryId))
+            ->when($brandId, fn (Builder $query) => $query->where('items.brand_id', $brandId))
             ->get([
                 'purchase_lines.item_id as item_id',
                 'purchase_lines.purchase_id as document_id',
@@ -74,12 +92,23 @@ class ItemWisePurchaseReportController extends Controller
                 'quantities' => $this->quantitiesByUnit($items),
             ],
             'lines' => $itemId ? $this->itemLineDetail($itemId, $from, $to, $storeId) : [],
-            'itemsList' => Item::query()->orderBy('name')->get(['id', 'name']),
+            'itemsList' => Item::query()
+                ->when($categoryId, fn (Builder $query) => $query->where('item_category_id', $categoryId))
+                ->when($subcategoryId, fn (Builder $query) => $query->where('item_subcategory_id', $subcategoryId))
+                ->when($brandId, fn (Builder $query) => $query->where('brand_id', $brandId))
+                ->orderBy('name')
+                ->get(['id', 'name']),
+            'categories' => ItemCategory::query()->orderBy('name')->get(['id', 'name']),
+            'subcategories' => ItemSubcategory::query()->orderBy('name')->get(['id', 'name', 'item_category_id']),
+            'brands' => Brand::query()->orderBy('name')->get(['id', 'name']),
             'stores' => Store::where('is_active', true)->orderBy('name')->get(['id', 'name']),
             'from' => $from,
             'to' => $to,
             'storeId' => $storeId,
             'itemId' => $itemId,
+            'categoryId' => $categoryId,
+            'subcategoryId' => $subcategoryId,
+            'brandId' => $brandId,
         ]);
     }
 

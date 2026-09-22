@@ -19,11 +19,17 @@ const props = defineProps({
     totals: { type: Object, default: () => ({ total_value: '0.00', quantities: [] }) },
     lines: { type: Array, default: () => [] },
     itemsList: { type: Array, default: () => [] },
+    categories: { type: Array, default: () => [] },
+    subcategories: { type: Array, default: () => [] },
+    brands: { type: Array, default: () => [] },
     stores: { type: Array, default: () => [] },
     from: { type: String, required: true },
     to: { type: String, required: true },
     storeId: { type: [Number, null], default: null },
     itemId: { type: [Number, null], default: null },
+    categoryId: { type: [Number, null], default: null },
+    subcategoryId: { type: [Number, null], default: null },
+    brandId: { type: [Number, null], default: null },
 });
 
 useLayoutChrome('Item-wise Purchase');
@@ -32,6 +38,9 @@ const from = ref(props.from);
 const to = ref(props.to);
 const storeId = ref(props.storeId);
 const itemId = ref(props.itemId);
+const categoryId = ref(props.categoryId);
+const subcategoryId = ref(props.subcategoryId);
+const brandId = ref(props.brandId);
 
 const storeOptions = computed(() => [
     { value: null, label: 'All stores' },
@@ -43,20 +52,57 @@ const itemOptions = computed(() => [
     ...props.itemsList.map((item) => ({ value: item.id, label: item.name })),
 ]);
 
+const categoryOptions = computed(() => [
+    { value: null, label: 'All categories' },
+    ...props.categories.map((category) => ({ value: category.id, label: category.name })),
+]);
+
+// Narrowed to the picked category's own subcategories, same convention as
+// the item picker only listing items within an active group filter.
+const subcategoryOptions = computed(() => [
+    { value: null, label: 'All subcategories' },
+    ...props.subcategories
+        .filter((subcategory) => !categoryId.value || subcategory.item_category_id === categoryId.value)
+        .map((subcategory) => ({ value: subcategory.id, label: subcategory.name })),
+]);
+
+const brandOptions = computed(() => [
+    { value: null, label: 'All brands' },
+    ...props.brands.map((brand) => ({ value: brand.id, label: brand.name })),
+]);
+
 const isLoading = ref(false);
 
-const hasActiveFilter = computed(() => storeId.value !== null || itemId.value !== null);
+const hasActiveFilter = computed(
+    () =>
+        storeId.value !== null ||
+        itemId.value !== null ||
+        categoryId.value !== null ||
+        subcategoryId.value !== null ||
+        brandId.value !== null,
+);
 
 function resetFilters() {
     storeId.value = null;
     itemId.value = null;
+    categoryId.value = null;
+    subcategoryId.value = null;
+    brandId.value = null;
     applyFilter();
 }
 
 function applyFilter() {
     router.get(
         window.location.pathname,
-        { from: from.value, to: to.value, store_id: storeId.value ?? undefined, item_id: itemId.value ?? undefined },
+        {
+            from: from.value,
+            to: to.value,
+            store_id: storeId.value ?? undefined,
+            item_id: itemId.value ?? undefined,
+            category_id: categoryId.value ?? undefined,
+            subcategory_id: subcategoryId.value ?? undefined,
+            brand_id: brandId.value ?? undefined,
+        },
         {
             preserveState: true,
             preserveScroll: true,
@@ -127,6 +173,18 @@ const columns = [
                 <div class="w-56">
                     <label class="mb-1 block text-xs font-semibold text-text-muted">Store</label>
                     <Select v-model="storeId" :options="storeOptions" />
+                </div>
+                <div class="w-56">
+                    <label class="mb-1 block text-xs font-semibold text-text-muted">Category</label>
+                    <Select v-model="categoryId" :options="categoryOptions" />
+                </div>
+                <div class="w-56">
+                    <label class="mb-1 block text-xs font-semibold text-text-muted">Subcategory</label>
+                    <Select v-model="subcategoryId" :options="subcategoryOptions" />
+                </div>
+                <div class="w-56">
+                    <label class="mb-1 block text-xs font-semibold text-text-muted">Brand</label>
+                    <Select v-model="brandId" :options="brandOptions" />
                 </div>
                 <div class="w-64">
                     <label class="mb-1 block text-xs font-semibold text-text-muted">Item (drill-down)</label>

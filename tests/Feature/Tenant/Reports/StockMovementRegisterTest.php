@@ -2,9 +2,12 @@
 
 use App\Enums\FiscalYearStatus;
 use App\Enums\StockMovementType;
+use App\Models\Brand;
 use App\Models\Customer;
 use App\Models\FiscalYear;
 use App\Models\Item;
+use App\Models\ItemCategory;
+use App\Models\ItemSubcategory;
 use App\Models\Purchase;
 use App\Models\Sale;
 use App\Models\Store;
@@ -238,6 +241,78 @@ test('the register can be narrowed to a single store, carries the store name on 
         ->assertInertia(fn ($page) => $page
             ->has('movements', 2)
             ->where('storeId', null)
+        );
+
+    $tenant->delete();
+});
+
+test('the register can be narrowed to a single category, subcategory or brand (audit T15-11)', function () {
+    $domain = 'stock-movement-register-group-filter.tenant-test';
+    $tenant = provisionStockMovementRegisterTestTenant($domain);
+
+    $categoryAId = null;
+    $subcategoryAId = null;
+    $brandAId = null;
+    $tenant->run(function () use (&$categoryAId, &$subcategoryAId, &$brandAId) {
+        User::factory()->create(['email' => 'owner@example.com']);
+        $storeId = Store::where('is_active', true)->orderBy('id')->firstOrFail()->id;
+
+        $categoryA = ItemCategory::factory()->create(['name' => 'Category A']);
+        $subcategoryA = ItemSubcategory::factory()->create(['name' => 'Subcategory A', 'item_category_id' => $categoryA->id]);
+        $brandA = Brand::factory()->create(['name' => 'Brand A']);
+
+        $itemA = Item::factory()->create([
+            'name' => 'Item A',
+            'is_stockable' => true,
+            'item_category_id' => $categoryA->id,
+            'item_subcategory_id' => $subcategoryA->id,
+            'brand_id' => $brandA->id,
+        ]);
+        $itemB = Item::factory()->create(['name' => 'Item B', 'is_stockable' => true]);
+
+        $itemA->recordStockMovement(StockMovementType::AdjustmentIn, 5, '2026-06-05', $storeId);
+        $itemB->recordStockMovement(StockMovementType::AdjustmentIn, 7, '2026-06-06', $storeId);
+
+        $categoryAId = $categoryA->id;
+        $subcategoryAId = $subcategoryA->id;
+        $brandAId = $brandA->id;
+    });
+
+    loginStockMovementRegisterTestUser($domain);
+
+    $this->get("http://{$domain}/reports/stock-movement-register?from=2026-06-01&to=2026-06-30&category_id={$categoryAId}")
+        ->assertOk()
+        ->assertInertia(fn ($page) => $page
+            ->has('movements', 1)
+            ->where('movements.0.itemName', 'Item A')
+            ->where('categoryId', $categoryAId)
+        );
+
+    $this->get("http://{$domain}/reports/stock-movement-register?from=2026-06-01&to=2026-06-30&subcategory_id={$subcategoryAId}")
+        ->assertOk()
+        ->assertInertia(fn ($page) => $page
+            ->has('movements', 1)
+            ->where('movements.0.itemName', 'Item A')
+            ->where('subcategoryId', $subcategoryAId)
+        );
+
+    $this->get("http://{$domain}/reports/stock-movement-register?from=2026-06-01&to=2026-06-30&brand_id={$brandAId}")
+        ->assertOk()
+        ->assertInertia(fn ($page) => $page
+            ->has('movements', 1)
+            ->where('movements.0.itemName', 'Item A')
+            ->where('brandId', $brandAId)
+        );
+
+    // Unfiltered: both items' movements show up, i.e. the pre-group-filter
+    // behaviour is unchanged.
+    $this->get("http://{$domain}/reports/stock-movement-register?from=2026-06-01&to=2026-06-30")
+        ->assertOk()
+        ->assertInertia(fn ($page) => $page
+            ->has('movements', 2)
+            ->where('categoryId', null)
+            ->where('subcategoryId', null)
+            ->where('brandId', null)
         );
 
     $tenant->delete();

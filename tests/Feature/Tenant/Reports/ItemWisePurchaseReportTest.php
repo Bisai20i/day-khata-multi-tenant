@@ -1,8 +1,10 @@
 <?php
 
 use App\Enums\FiscalYearStatus;
+use App\Models\Brand;
 use App\Models\FiscalYear;
 use App\Models\Item;
+use App\Models\ItemCategory;
 use App\Models\Purchase;
 use App\Models\Role;
 use App\Models\Store;
@@ -282,6 +284,130 @@ test('picking an item_id keeps the all-items aggregate and adds that item\'s raw
             ->where('lines.1.rate', '80.0000')
             ->where('lines.1.quantity', '3.0000')
             ->where('lines.1.line_total', '240.00')
+        );
+
+    $tenant->delete();
+});
+
+test('the item-wise purchase report can be narrowed to a single category (audit T15-11)', function () {
+    $domain = 'item-wise-purchase-category-filter.tenant-test';
+    $tenant = provisionItemWisePurchaseReportTestTenant($domain);
+
+    $categoryAId = null;
+    $tenant->run(function () use (&$categoryAId) {
+        itemWisePurchaseReportTestOpenFiscalYear();
+        $admin = itemWisePurchaseReportTestAdmin();
+        $supplier = Supplier::factory()->create();
+        $categoryA = ItemCategory::factory()->create(['name' => 'Category A']);
+        $categoryB = ItemCategory::factory()->create(['name' => 'Category B']);
+        $itemA = Item::factory()->create(['name' => 'Item A', 'unit' => 'pcs', 'item_category_id' => $categoryA->id, 'is_vatable' => false, 'is_stockable' => false]);
+        $itemB = Item::factory()->create(['name' => 'Item B', 'unit' => 'pcs', 'item_category_id' => $categoryB->id, 'is_vatable' => false, 'is_stockable' => false]);
+
+        Purchase::post(
+            ['supplier_id' => $supplier->id, 'date' => '2026-06-01', 'payment_mode' => 'cash'],
+            [['item_id' => $itemA->id, 'quantity' => 2, 'rate' => 100, 'discount' => 0]],
+            $admin,
+        );
+        Purchase::post(
+            ['supplier_id' => $supplier->id, 'date' => '2026-06-01', 'payment_mode' => 'cash'],
+            [['item_id' => $itemB->id, 'quantity' => 5, 'rate' => 100, 'discount' => 0]],
+            $admin,
+        );
+
+        $categoryAId = $categoryA->id;
+    });
+
+    loginItemWisePurchaseReportTestUser($domain);
+
+    $this->get("http://{$domain}/reports/item-wise-purchase?from=2026-06-01&to=2026-06-30&category_id={$categoryAId}")
+        ->assertOk()
+        ->assertInertia(fn ($page) => $page
+            ->has('items', 1)
+            ->where('items.0.name', 'Item A')
+            ->where('totals.total_value', '200.00')
+            ->has('itemsList', 1)
+            ->where('itemsList.0.name', 'Item A')
+            ->where('categoryId', $categoryAId)
+        );
+
+    $tenant->delete();
+});
+
+test('the item-wise purchase report can be narrowed to a single brand (audit T15-11)', function () {
+    $domain = 'item-wise-purchase-brand-filter.tenant-test';
+    $tenant = provisionItemWisePurchaseReportTestTenant($domain);
+
+    $brandAId = null;
+    $tenant->run(function () use (&$brandAId) {
+        itemWisePurchaseReportTestOpenFiscalYear();
+        $admin = itemWisePurchaseReportTestAdmin();
+        $supplier = Supplier::factory()->create();
+        $brandA = Brand::factory()->create(['name' => 'Brand A']);
+        $itemA = Item::factory()->create(['name' => 'Item A', 'unit' => 'pcs', 'brand_id' => $brandA->id, 'is_vatable' => false, 'is_stockable' => false]);
+        $itemB = Item::factory()->create(['name' => 'Item B', 'unit' => 'pcs', 'is_vatable' => false, 'is_stockable' => false]);
+
+        Purchase::post(
+            ['supplier_id' => $supplier->id, 'date' => '2026-06-01', 'payment_mode' => 'cash'],
+            [['item_id' => $itemA->id, 'quantity' => 1, 'rate' => 300, 'discount' => 0]],
+            $admin,
+        );
+        Purchase::post(
+            ['supplier_id' => $supplier->id, 'date' => '2026-06-01', 'payment_mode' => 'cash'],
+            [['item_id' => $itemB->id, 'quantity' => 1, 'rate' => 999, 'discount' => 0]],
+            $admin,
+        );
+
+        $brandAId = $brandA->id;
+    });
+
+    loginItemWisePurchaseReportTestUser($domain);
+
+    $this->get("http://{$domain}/reports/item-wise-purchase?from=2026-06-01&to=2026-06-30&brand_id={$brandAId}")
+        ->assertOk()
+        ->assertInertia(fn ($page) => $page
+            ->has('items', 1)
+            ->where('items.0.name', 'Item A')
+            ->where('totals.total_value', '300.00')
+            ->where('brandId', $brandAId)
+        );
+
+    $tenant->delete();
+});
+
+test('omitting the category/subcategory/brand filters preserves the unfiltered purchase report exactly (no regression, audit T15-11)', function () {
+    $domain = 'item-wise-purchase-no-group-filter.tenant-test';
+    $tenant = provisionItemWisePurchaseReportTestTenant($domain);
+
+    $tenant->run(function () {
+        itemWisePurchaseReportTestOpenFiscalYear();
+        $admin = itemWisePurchaseReportTestAdmin();
+        $supplier = Supplier::factory()->create();
+        $itemA = Item::factory()->create(['name' => 'Item A', 'unit' => 'pcs', 'is_vatable' => false, 'is_stockable' => false]);
+        $itemB = Item::factory()->create(['name' => 'Item B', 'unit' => 'pcs', 'is_vatable' => false, 'is_stockable' => false]);
+
+        Purchase::post(
+            ['supplier_id' => $supplier->id, 'date' => '2026-06-01', 'payment_mode' => 'cash'],
+            [['item_id' => $itemA->id, 'quantity' => 2, 'rate' => 100, 'discount' => 0]],
+            $admin,
+        );
+        Purchase::post(
+            ['supplier_id' => $supplier->id, 'date' => '2026-06-01', 'payment_mode' => 'cash'],
+            [['item_id' => $itemB->id, 'quantity' => 5, 'rate' => 100, 'discount' => 0]],
+            $admin,
+        );
+    });
+
+    loginItemWisePurchaseReportTestUser($domain);
+
+    $this->get("http://{$domain}/reports/item-wise-purchase?from=2026-06-01&to=2026-06-30")
+        ->assertOk()
+        ->assertInertia(fn ($page) => $page
+            ->has('items', 2)
+            ->where('totals.total_value', '700.00')
+            ->where('categoryId', null)
+            ->where('subcategoryId', null)
+            ->where('brandId', null)
+            ->has('itemsList', 2)
         );
 
     $tenant->delete();
