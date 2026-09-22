@@ -115,6 +115,15 @@ class SalesPurchaseReportController extends Controller
         ]);
     }
 
+    /**
+     * Trading purchases only, by design (audit T15-7).
+     *
+     * Legacy's purchaseRegularReport() has no purchaseType='capital' exclusion, so a capital
+     * purchase recorded as a purchase_records row is included in legacy's Purchase Register
+     * total. That appears to be a legacy oversight rather than intended behavior. Decision:
+     * keep this report scoped to trading purchases (Purchase model) only; CapitalPurchase
+     * rows remain visible via the Purchase VAT Book instead of being unioned in here.
+     */
     public function purchaseRegister(Request $request): Response
     {
         [$from, $to] = $this->resolveDateRange($request);
@@ -839,6 +848,11 @@ class SalesPurchaseReportController extends Controller
      * voucher restates the same closing balances, so an all-years sum double
      * counts every party from the first year-end close onwards.
      *
+     * Audit T15-8: legacy's debtors()/creditors() use HAVING SUM(...) > 0, so an
+     * overpaid party (credit balance) is silently dropped there. This report keeps
+     * those rows - an overpayment is real money owed back - but flags each one via
+     * `is_credit_balance` so the difference from legacy is visible, not silent.
+     *
      * @param  Builder<covariant Model>  $parties
      * @return array<string, mixed>
      */
@@ -860,6 +874,10 @@ class SalesPurchaseReportController extends Controller
                 'balance' => ($balances[$party->account_id] ?? Money::zero())->toString(),
             ])
             ->filter(fn (array $row) => ! Money::of($row['balance'])->isZero())
+            ->map(fn (array $row) => [
+                ...$row,
+                'is_credit_balance' => Money::of($row['balance'])->isNegative(),
+            ])
             ->values();
 
         return [
@@ -867,6 +885,9 @@ class SalesPurchaseReportController extends Controller
             'total' => Money::sum($rows->map(fn (array $row) => Money::of($row['balance'])))->toString(),
             'fiscalYears' => $fiscalYears,
             'fiscalYearId' => $fiscalYearId,
+            'creditBalanceNote' => $creditNormal
+                ? 'A negative balance means this supplier owes money back (overpaid).'
+                : 'A negative balance means this customer overpaid and is owed money back.',
         ];
     }
 

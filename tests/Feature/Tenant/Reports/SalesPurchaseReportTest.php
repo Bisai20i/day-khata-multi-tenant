@@ -1157,6 +1157,51 @@ test('the debtors list carries every customer with a ledger balance for the sele
     $tenant->delete();
 });
 
+test('the debtors list flags an overpaid customer as a credit balance instead of hiding it (audit T15-8)', function () {
+    $domain = 'debtors-credit-balance.tenant-test';
+    $tenant = provisionReportTestTenant($domain);
+
+    $tenant->run(function () {
+        reportTestOpenFiscalYear();
+        $admin = reportTestAdmin();
+        $customer = Customer::factory()->create(['name' => 'Overpaid Customer']);
+        $item = Item::factory()->create(['is_vatable' => false, 'is_stockable' => false]);
+
+        $sale = Sale::post(
+            ['customer_id' => $customer->id, 'invoice_type' => 'full', 'date' => '2026-06-01', 'payment_mode' => 'credit'],
+            [['item_id' => $item->id, 'quantity' => 1, 'rate' => 400, 'discount' => 0]],
+            $admin,
+        );
+
+        // Legacy's debtors() uses HAVING SUM(...) > 0, so this customer would
+        // vanish from the report entirely once they overpay. Multi-tenant keeps
+        // the row (audit T15-8) and flags it instead of hiding it.
+        Receipt::post([
+            'customer_id' => $customer->id,
+            'date' => '2026-06-05',
+            'amount' => 500,
+            'payment_mode' => 'cash',
+            'allocations' => [['sale_id' => $sale->id, 'amount' => 400]],
+        ], $admin);
+    });
+
+    loginReportTestUser($domain);
+
+    $this->get("http://{$domain}/reports/debtors")
+        ->assertOk()
+        ->assertInertia(fn ($page) => $page
+            ->component('Tenant/Reports/Debtors')
+            ->has('rows', 1)
+            ->where('rows.0.name', 'Overpaid Customer')
+            ->where('rows.0.balance', '-100.00')
+            ->where('rows.0.is_credit_balance', true)
+            ->where('total', '-100.00')
+            ->has('creditBalanceNote')
+        );
+
+    $tenant->delete();
+});
+
 test('the creditors list carries every supplier with a ledger balance for the selected fiscal year', function () {
     $domain = 'creditors-list.tenant-test';
     $tenant = provisionReportTestTenant($domain);

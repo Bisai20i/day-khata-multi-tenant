@@ -1,11 +1,12 @@
 <script setup>
-import { computed, ref } from 'vue';
+import { computed, h, ref } from 'vue';
 import { router } from '@inertiajs/vue3';
 import AppLayout from '@/layouts/AppLayout.vue';
 import { useLayoutChrome } from '@/composables/useLayoutChrome';
 import Card from '@/components/ui/Card.vue';
 import Select from '@/components/ui/Select.vue';
 import Button from '@/components/ui/Button.vue';
+import PageHeader from '@/components/ui/PageHeader.vue';
 import DataTable from '@/components/ui/DataTable.vue';
 import { FileSpreadsheet } from '@lucide/vue';
 import { formatMoney } from '@/lib/money';
@@ -17,6 +18,7 @@ const props = defineProps({
     total: { type: String, default: '0.00' },
     fiscalYears: { type: Array, default: () => [] },
     fiscalYearId: { type: [Number, null], default: null },
+    creditBalanceNote: { type: String, default: '' },
 });
 
 useLayoutChrome('Debtors');
@@ -41,27 +43,33 @@ const exportUrl = computed(() =>
 
 const columns = [
     { id: 'name', header: 'Customer', numeric: false, cell: ({ row }) => row.original.name },
-    { id: 'address', header: 'Address', numeric: false, cell: ({ row }) => row.original.address ?? '—' },
-    { id: 'mobile_no', header: 'Mobile', numeric: false, cell: ({ row }) => row.original.mobile_no ?? '—' },
-    { id: 'balance', header: 'Balance', numeric: true, cell: ({ row }) => formatMoney(row.original.balance) },
+    { id: 'address', header: 'Address', numeric: false, cell: ({ row }) => row.original.address ?? '-' },
+    { id: 'mobile_no', header: 'Mobile', numeric: false, cell: ({ row }) => row.original.mobile_no ?? '-' },
+    {
+        id: 'balance',
+        header: 'Balance',
+        numeric: true,
+        cell: ({ row }) => row.original.is_credit_balance
+            ? h('span', { class: 'inline-flex items-center gap-1.5' }, [
+                formatMoney(row.original.balance),
+                h('span', { class: 'rounded-full bg-success/15 px-1.5 py-0.5 text-[10px] font-semibold text-success' }, 'Credit balance'),
+            ])
+            : formatMoney(row.original.balance),
+    },
 ];
 </script>
 
 <template>
     <div>
-        <div class="mb-4 flex items-center justify-between">
-            <h2 class="text-base font-bold text-text-strong">Debtors</h2>
+        <PageHeader
+            title="Debtors"
+            description="Customers who owe you money, with the balance each one owes. Includes migrated opening dues no invoice explains."
+        >
             <Button as="a" :href="exportUrl" variant="secondary" tone="purple">
                 <FileSpreadsheet class="h-[14px] w-[14px]" aria-hidden="true" />
                 Export to Excel
             </Button>
-        </div>
-
-        <p class="mb-4 text-[12.5px] text-text-muted">
-            Every customer whose ledger account carries a balance in the selected fiscal year - the party
-            breakdown of Sundry Debtors on the Balance Sheet, including migrated opening dues no invoice
-            explains.
-        </p>
+        </PageHeader>
 
         <Card variant="panel" class="mb-4">
             <div class="flex flex-wrap items-end gap-3">
@@ -69,15 +77,16 @@ const columns = [
                     <label class="mb-1 block text-xs font-semibold text-text-muted">Fiscal year</label>
                     <Select v-model="fiscalYearId" :options="fiscalYearOptions" />
                 </div>
-                <Button variant="primary" tone="purple" @click="applyFilter">Apply</Button>
+                <Button variant="primary" tone="purple" @click="applyFilter">Generate report</Button>
             </div>
+            <p v-if="creditBalanceNote" class="mt-3 text-xs text-text-muted">{{ creditBalanceNote }}</p>
         </Card>
 
         <Card variant="panel">
-            <DataTable :columns="columns" :data="rows" :page-size="25" empty-message="No customer carries a balance" />
+            <DataTable :columns="columns" :data="rows" :page-size="25" empty-message="No customer owes a balance in this fiscal year. Try another fiscal year." />
 
             <div class="mt-3 flex flex-wrap justify-end gap-6 border-t-[1.5px] border-border pt-3 text-[12.5px]">
-                <div><span class="text-text-muted">Total:</span> <span class="font-semibold">{{ formatMoney(total) }}</span></div>
+                <div><span class="font-bold text-text-strong">Total:</span> <span class="font-bold">{{ formatMoney(total) }}</span></div>
             </div>
         </Card>
     </div>
