@@ -4,6 +4,7 @@ use App\Enums\FiscalYearStatus;
 use App\Enums\StockMovementType;
 use App\Models\FiscalYear;
 use App\Models\Item;
+use App\Models\PrintLog;
 use App\Models\StockTransfer;
 use App\Models\Store;
 use App\Models\Tenant;
@@ -76,6 +77,47 @@ test('the stock transfer print route returns a streamed PDF for an authenticated
     $this->get("http://{$domain}/stock-transfers/{$transferId}/print")
         ->assertOk()
         ->assertHeader('Content-Type', 'application/pdf');
+
+    $tenant->delete();
+});
+
+/**
+ * Every printable document has to log its print (CONTRACTS C9) - a stock
+ * transfer's print route was silently skipping PrintLog::record(), the same
+ * gap PurchasePrintTest and QuotationPrintTest already guard for their own
+ * documents.
+ */
+test('printing a stock transfer records a PrintLog row', function () {
+    $domain = 'stock-transfer-print-log.tenant-test';
+    $tenant = provisionStockTransferPrintTestTenant($domain);
+
+    $transferId = null;
+    $tenant->run(function () use (&$transferId) {
+        stockTransferPrintTestOpenFiscalYear();
+        $admin = User::factory()->create(['email' => 'owner@example.com']);
+        $item = Item::factory()->create(['is_stockable' => true]);
+        $fromStore = Store::where('is_active', true)->orderBy('id')->firstOrFail();
+        $toStore = Store::factory()->create(['is_active' => true]);
+
+        $item->recordStockMovement(StockMovementType::Opening, 10, '2026-06-01', $fromStore->id);
+
+        $transferId = StockTransfer::post(
+            ['date' => '2026-06-02', 'from_store_id' => $fromStore->id, 'to_store_id' => $toStore->id, 'note' => 'Rebalance stock'],
+            [['item_id' => $item->id, 'quantity' => 4]],
+            $admin,
+        )->id;
+    });
+
+    loginStockTransferPrintTestUser($domain);
+
+    $this->get("http://{$domain}/stock-transfers/{$transferId}/print")->assertOk();
+    $this->get("http://{$domain}/stock-transfers/{$transferId}/print")->assertOk();
+
+    $tenant->run(function () use ($transferId) {
+        expect(PrintLog::where('printable_type', (new StockTransfer)->getMorphClass())
+            ->where('printable_id', $transferId)
+            ->count())->toBe(2);
+    });
 
     $tenant->delete();
 });

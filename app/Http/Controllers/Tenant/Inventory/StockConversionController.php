@@ -6,6 +6,7 @@ use App\Enums\StockConversionType;
 use App\Http\Controllers\Controller;
 use App\Models\CompanySetting;
 use App\Models\Item;
+use App\Models\PrintLog;
 use App\Models\StockConversion;
 use App\Models\Store;
 use Barryvdh\DomPDF\Facade\Pdf;
@@ -98,7 +99,7 @@ class StockConversionController extends Controller
      * sectionLabels map so the printed document reads the same way the
      * create form did.
      */
-    public function print(StockConversion $stock_conversion): HttpResponse
+    public function print(Request $request, StockConversion $stock_conversion): HttpResponse
     {
         $stock_conversion->load(['store', 'lines.item']);
 
@@ -117,6 +118,10 @@ class StockConversionController extends Controller
             'company' => CompanySetting::current(),
             'documentNumber' => "CNV-{$stock_conversion->id}",
             'documentDate' => $stock_conversion->date->format('Y-m-d'),
+            // Records this print for the audit trail (CONTRACTS C9), same as
+            // every other printable document - see QuotationController::
+            // print() for the identical pattern.
+            'copyNumber' => PrintLog::record($stock_conversion, $request->user()),
         ]);
 
         return $pdf->stream("stock-conversion-{$stock_conversion->id}.pdf");

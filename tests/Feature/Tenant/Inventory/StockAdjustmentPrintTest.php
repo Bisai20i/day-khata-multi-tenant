@@ -3,6 +3,7 @@
 use App\Enums\FiscalYearStatus;
 use App\Models\FiscalYear;
 use App\Models\Item;
+use App\Models\PrintLog;
 use App\Models\StockAdjustment;
 use App\Models\Tenant;
 use App\Models\User;
@@ -70,6 +71,43 @@ test('the stock adjustment print route returns a streamed PDF for an authenticat
     $this->get("http://{$domain}/stock-adjustments/{$adjustmentId}/print")
         ->assertOk()
         ->assertHeader('Content-Type', 'application/pdf');
+
+    $tenant->delete();
+});
+
+/**
+ * Every printable document has to log its print (CONTRACTS C9) - a stock
+ * adjustment's print route was silently skipping PrintLog::record(), the
+ * same gap PurchasePrintTest and QuotationPrintTest already guard for their
+ * own documents.
+ */
+test('printing a stock adjustment records a PrintLog row', function () {
+    $domain = 'stock-adjustment-print-log.tenant-test';
+    $tenant = provisionStockAdjustmentPrintTestTenant($domain);
+
+    $adjustmentId = null;
+    $tenant->run(function () use (&$adjustmentId) {
+        stockAdjustmentPrintTestOpenFiscalYear();
+        $admin = User::factory()->create(['email' => 'owner@example.com']);
+        $item = Item::factory()->create(['is_stockable' => true]);
+
+        $adjustmentId = StockAdjustment::post(
+            ['date' => '2026-06-01', 'note' => 'Damaged in storage'],
+            [['item_id' => $item->id, 'direction' => 'out', 'reason_type' => 'damage', 'quantity' => 2]],
+            $admin,
+        )->id;
+    });
+
+    loginStockAdjustmentPrintTestUser($domain);
+
+    $this->get("http://{$domain}/stock-adjustments/{$adjustmentId}/print")->assertOk();
+    $this->get("http://{$domain}/stock-adjustments/{$adjustmentId}/print")->assertOk();
+
+    $tenant->run(function () use ($adjustmentId) {
+        expect(PrintLog::where('printable_type', (new StockAdjustment)->getMorphClass())
+            ->where('printable_id', $adjustmentId)
+            ->count())->toBe(2);
+    });
 
     $tenant->delete();
 });

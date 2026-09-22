@@ -4,6 +4,7 @@ use App\Enums\FiscalYearStatus;
 use App\Enums\StockMovementType;
 use App\Models\FiscalYear;
 use App\Models\Item;
+use App\Models\PrintLog;
 use App\Models\StockConversion;
 use App\Models\Store;
 use App\Models\Tenant;
@@ -77,6 +78,48 @@ test('the stock conversion print route returns a streamed PDF for a repackaging 
     $this->get("http://{$domain}/stock-conversions/{$conversionId}/print")
         ->assertOk()
         ->assertHeader('Content-Type', 'application/pdf');
+
+    $tenant->delete();
+});
+
+/**
+ * Every printable document has to log its print (CONTRACTS C9) - a stock
+ * conversion's print route was silently skipping PrintLog::record(), the
+ * same gap PurchasePrintTest and QuotationPrintTest already guard for their
+ * own documents.
+ */
+test('printing a stock conversion records a PrintLog row', function () {
+    $domain = 'stock-conversion-print-log.tenant-test';
+    $tenant = provisionStockConversionPrintTestTenant($domain);
+
+    $conversionId = null;
+    $tenant->run(function () use (&$conversionId) {
+        stockConversionPrintTestOpenFiscalYear();
+        $admin = User::factory()->create(['email' => 'owner@example.com']);
+        $bulk = Item::factory()->create(['is_stockable' => true, 'name' => 'Bulk Sack']);
+        $retail = Item::factory()->create(['is_stockable' => true, 'name' => 'Retail Bag']);
+        $store = Store::where('is_active', true)->orderBy('id')->firstOrFail();
+
+        $bulk->recordStockMovement(StockMovementType::Opening, 10, '2026-06-01', $store->id);
+
+        $conversionId = StockConversion::post(
+            ['type' => 'repackaging', 'date' => '2026-06-02', 'note' => 'Split into retail bags'],
+            [['item_id' => $bulk->id, 'quantity' => 10]],
+            [['item_id' => $retail->id, 'quantity' => 8]],
+            $admin,
+        )->id;
+    });
+
+    loginStockConversionPrintTestUser($domain);
+
+    $this->get("http://{$domain}/stock-conversions/{$conversionId}/print")->assertOk();
+    $this->get("http://{$domain}/stock-conversions/{$conversionId}/print")->assertOk();
+
+    $tenant->run(function () use ($conversionId) {
+        expect(PrintLog::where('printable_type', (new StockConversion)->getMorphClass())
+            ->where('printable_id', $conversionId)
+            ->count())->toBe(2);
+    });
 
     $tenant->delete();
 });

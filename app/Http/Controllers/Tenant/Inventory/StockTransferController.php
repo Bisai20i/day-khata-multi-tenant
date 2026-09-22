@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Tenant\Inventory;
 use App\Http\Controllers\Controller;
 use App\Models\CompanySetting;
 use App\Models\Item;
+use App\Models\PrintLog;
 use App\Models\StockTransfer;
 use App\Models\Store;
 use Barryvdh\DomPDF\Facade\Pdf;
@@ -90,7 +91,7 @@ class StockTransferController extends Controller
      * number is simply its own id, matching QuotationController::print()'s
      * fallback for a quotation with no reference_number.
      */
-    public function print(StockTransfer $stock_transfer): HttpResponse
+    public function print(Request $request, StockTransfer $stock_transfer): HttpResponse
     {
         $stock_transfer->load(['fromStore', 'toStore', 'lines.item']);
 
@@ -99,6 +100,10 @@ class StockTransferController extends Controller
             'company' => CompanySetting::current(),
             'documentNumber' => "TRF-{$stock_transfer->id}",
             'documentDate' => $stock_transfer->date->format('Y-m-d'),
+            // Records this print for the audit trail (CONTRACTS C9), same as
+            // every other printable document - see QuotationController::
+            // print() for the identical pattern.
+            'copyNumber' => PrintLog::record($stock_transfer, $request->user()),
         ]);
 
         return $pdf->stream("stock-transfer-{$stock_transfer->id}.pdf");

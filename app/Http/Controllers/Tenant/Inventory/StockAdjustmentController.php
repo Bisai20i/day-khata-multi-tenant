@@ -7,6 +7,7 @@ use App\Http\Controllers\Controller;
 use App\Models\CompanySetting;
 use App\Models\FiscalYear;
 use App\Models\Item;
+use App\Models\PrintLog;
 use App\Models\StockAdjustment;
 use App\Models\Store;
 use Barryvdh\DomPDF\Facade\Pdf;
@@ -149,7 +150,7 @@ class StockAdjustmentController extends Controller
      * document number is simply its own id, matching QuotationController::
      * print()'s fallback for a quotation with no reference_number.
      */
-    public function print(StockAdjustment $stock_adjustment): HttpResponse
+    public function print(Request $request, StockAdjustment $stock_adjustment): HttpResponse
     {
         $stock_adjustment->load(['store', 'lines.item', 'lines.itemUnit']);
 
@@ -158,6 +159,10 @@ class StockAdjustmentController extends Controller
             'company' => CompanySetting::current(),
             'documentNumber' => "ADJ-{$stock_adjustment->id}",
             'documentDate' => $stock_adjustment->date->format('Y-m-d'),
+            // Records this print for the audit trail (CONTRACTS C9), same as
+            // every other printable document - see QuotationController::
+            // print() for the identical pattern.
+            'copyNumber' => PrintLog::record($stock_adjustment, $request->user()),
         ]);
 
         return $pdf->stream("stock-adjustment-{$stock_adjustment->id}.pdf");
