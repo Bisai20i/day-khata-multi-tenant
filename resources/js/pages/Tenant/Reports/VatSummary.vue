@@ -4,6 +4,7 @@ import { router } from '@inertiajs/vue3';
 import AppLayout from '@/layouts/AppLayout.vue';
 import { useLayoutChrome } from '@/composables/useLayoutChrome';
 import Card from '@/components/ui/Card.vue';
+import PageHeader from '@/components/ui/PageHeader.vue';
 import NepaliDateInput from '@/components/ui/NepaliDateInput.vue';
 import Select from '@/components/ui/Select.vue';
 import Button from '@/components/ui/Button.vue';
@@ -14,8 +15,8 @@ import { formatBsDate } from '@/lib/format';
 defineOptions({ layout: AppLayout });
 
 const props = defineProps({
-    outputVat: { type: Object, default: () => ({ gross: '0.00', capital: '0.00', cancelled: '0.00', returns: '0.00', net: '0.00' }) },
-    inputVat: { type: Object, default: () => ({ gross: '0.00', capital: '0.00', cancelled: '0.00', returns: '0.00', net: '0.00' }) },
+    outputVat: { type: Object, default: () => ({ gross: '0.00', capital: '0.00', fixedAssetVat: '0.00', cancelled: '0.00', returns: '0.00', net: '0.00' }) },
+    inputVat: { type: Object, default: () => ({ gross: '0.00', capital: '0.00', fixedAssetVat: '0.00', cancelled: '0.00', returns: '0.00', net: '0.00' }) },
     netVatPayable: { type: String, default: '0.00' },
     reconciliation: { type: Object, default: () => ({ applicable: false }) },
     stores: { type: Array, default: () => [] },
@@ -39,11 +40,25 @@ const rangeLabel = computed(
     () => `BS ${formatBsDate(props.from)} to ${formatBsDate(props.to)} (AD ${props.from} to ${props.to})`,
 );
 
+const isLoading = ref(false);
+
+const hasActiveFilter = computed(() => storeId.value !== null);
+
+function resetFilters() {
+    storeId.value = null;
+    applyFilter();
+}
+
 function applyFilter() {
     router.get(
         window.location.pathname,
         { from: from.value, to: to.value, store_id: storeId.value ?? undefined },
-        { preserveState: true, preserveScroll: true },
+        {
+            preserveState: true,
+            preserveScroll: true,
+            onStart: () => (isLoading.value = true),
+            onFinish: () => (isLoading.value = false),
+        },
     );
 }
 
@@ -71,15 +86,14 @@ const reconciles = computed(
 
 <template>
     <div>
-        <div class="mb-4 flex items-center justify-between">
-            <h2 class="text-base font-bold text-text-strong">VAT Summary</h2>
+        <PageHeader title="VAT Summary" description="VAT Summary: output VAT on sales less input VAT on purchases, showing what you owe or can claim back for the period.">
             <Button as="a" :href="exportUrl" variant="secondary" tone="purple">
                 <FileSpreadsheet class="h-[14px] w-[14px]" aria-hidden="true" />
                 Export to Excel
             </Button>
-        </div>
+        </PageHeader>
 
-        <p class="mb-1 text-[12.5px] text-text-muted">{{ rangeLabel }}</p>
+        <p class="mb-1 text-[12.5px] text-text-muted">Showing report for {{ rangeLabel }}</p>
 
         <p class="mb-4 text-[12.5px] text-text-muted">
             Net VAT payable or refundable for the filing period. Capital sales and capital purchases are
@@ -90,18 +104,19 @@ const reconciles = computed(
         <Card variant="panel" class="mb-4">
             <div class="flex flex-wrap items-end gap-3">
                 <div>
-                    <label class="mb-1 block text-xs font-semibold text-text-muted">From</label>
+                    <label class="mb-1 block text-xs font-semibold text-text-muted">From date (BS)</label>
                     <NepaliDateInput v-model="from" />
                 </div>
                 <div>
-                    <label class="mb-1 block text-xs font-semibold text-text-muted">To</label>
+                    <label class="mb-1 block text-xs font-semibold text-text-muted">To date (BS)</label>
                     <NepaliDateInput v-model="to" />
                 </div>
                 <div class="w-56">
                     <label class="mb-1 block text-xs font-semibold text-text-muted">Store</label>
                     <Select v-model="storeId" :options="storeOptions" />
                 </div>
-                <Button variant="primary" tone="purple" @click="applyFilter">Apply</Button>
+                <Button variant="primary" tone="purple" :loading="isLoading" @click="applyFilter">Generate report</Button>
+                <Button v-if="hasActiveFilter" variant="secondary" tone="purple" :disabled="isLoading" @click="resetFilters">Reset</Button>
             </div>
         </Card>
 
@@ -140,6 +155,10 @@ const reconciles = computed(
                     <div class="flex items-center justify-between py-1.5">
                         <span class="text-text-muted">VAT on capital purchases</span>
                         <span class="font-semibold">{{ formatMoney(inputVat.capital) }}</span>
+                    </div>
+                    <div class="flex items-center justify-between py-1.5 pl-3">
+                        <span class="text-[12px] text-text-muted">of which: fixed-asset lines (already in "VAT on purchases" above)</span>
+                        <span class="text-[12px] font-semibold text-text-muted">{{ formatMoney(inputVat.fixedAssetVat) }}</span>
                     </div>
                     <div class="flex items-center justify-between py-1.5">
                         <span class="text-text-muted">Less: cancelled bills</span>

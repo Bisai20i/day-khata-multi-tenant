@@ -7,6 +7,7 @@ import Card from '@/components/ui/Card.vue';
 import NepaliDateInput from '@/components/ui/NepaliDateInput.vue';
 import Select from '@/components/ui/Select.vue';
 import Button from '@/components/ui/Button.vue';
+import PageHeader from '@/components/ui/PageHeader.vue';
 import DataTable from '@/components/ui/DataTable.vue';
 import { formatMoney } from '@/lib/money';
 import { formatBsDate } from '@/lib/format';
@@ -71,13 +72,22 @@ function columnsFor(partyHeader, documentHeader) {
             id: 'document_number',
             header: documentHeader,
             numeric: false,
-            cell: ({ row }) => row.original.document_number ?? '—',
+            cell: ({ row }) => row.original.document_number ?? '-',
         },
-        { id: 'party', header: partyHeader, numeric: false, cell: ({ row }) => row.original.party ?? '—' },
+        { id: 'party', header: partyHeader, numeric: false, cell: ({ row }) => row.original.party ?? '-' },
         { id: 'entry', header: 'Entry', numeric: false, cell: entryCell },
         { id: 'base_total', header: 'Gross Total', numeric: true, cell: ({ row }) => formatMoney(row.original.base_total) },
-        { id: 'tds_amount', header: 'TDS', numeric: true, cell: ({ row }) => formatMoney(row.original.tds_amount) },
-        { id: 'tds_account', header: 'TDS Account', numeric: false, cell: ({ row }) => row.original.tds_account ?? '—' },
+        {
+            id: 'tds_rate',
+            header: 'TDS Rate',
+            numeric: true,
+            // Sales carry no stored TDS rate: the amount is typed directly,
+            // never derived from a rate x base calculation, so there is
+            // nothing to show for a sale row.
+            cell: ({ row }) => (row.original.tds_rate != null ? `${row.original.tds_rate}%` : '-'),
+        },
+        { id: 'tds_amount', header: 'TDS Amount', numeric: true, cell: ({ row }) => formatMoney(row.original.tds_amount) },
+        { id: 'tds_account', header: 'TDS Account', numeric: false, cell: ({ row }) => row.original.tds_account ?? '-' },
     ];
 }
 
@@ -87,11 +97,10 @@ const purchaseColumns = columnsFor('Supplier', 'Bill #');
 
 <template>
     <div>
-        <div class="mb-4 flex items-center justify-between">
-            <h2 class="text-base font-bold text-text-strong">TDS Report</h2>
-        </div>
-
-        <p class="mb-1 text-[12.5px] text-text-muted">{{ rangeLabel }}</p>
+        <PageHeader
+            title="TDS Report"
+            description="Tax deducted at source on sales (credit you can claim) and purchases (amount you must pay to the tax office)."
+        />
 
         <p class="mb-4 text-[12.5px] text-text-muted">
             One row per event, in the period the event happened. A credit or debit note reverses TDS in its
@@ -102,23 +111,24 @@ const purchaseColumns = columnsFor('Supplier', 'Bill #');
         <Card variant="panel" class="mb-4">
             <div class="flex flex-wrap items-end gap-3">
                 <div>
-                    <label class="mb-1 block text-xs font-semibold text-text-muted">From</label>
+                    <label class="mb-1 block text-xs font-semibold text-text-muted">From date (BS)</label>
                     <NepaliDateInput v-model="from" />
                 </div>
                 <div>
-                    <label class="mb-1 block text-xs font-semibold text-text-muted">To</label>
+                    <label class="mb-1 block text-xs font-semibold text-text-muted">To date (BS)</label>
                     <NepaliDateInput v-model="to" />
                 </div>
                 <div class="w-56">
                     <label class="mb-1 block text-xs font-semibold text-text-muted">Store</label>
                     <Select v-model="storeId" :options="storeOptions" />
                 </div>
-                <Button variant="primary" tone="purple" @click="applyFilter">Apply</Button>
+                <Button variant="primary" tone="purple" @click="applyFilter">Generate report</Button>
             </div>
+            <p class="mt-2 text-[12px] text-text-muted">Showing report for {{ rangeLabel }}</p>
         </Card>
 
         <Card variant="panel" title="TDS on Sales (claimable credit)" class="mb-4">
-            <DataTable :columns="salesColumns" :data="sales" :page-size="25" empty-message="No TDS withheld on sales in this range" />
+            <DataTable :columns="salesColumns" :data="sales" :page-size="25" empty-message="No transactions in this period. Try widening the date range." />
 
             <div class="mt-3 flex flex-wrap justify-end gap-6 border-t-[1.5px] border-border pt-3 text-[12.5px]">
                 <div><span class="text-text-muted">Total TDS on Sales:</span> <span class="font-semibold">{{ formatMoney(salesTotal) }}</span></div>
@@ -126,7 +136,7 @@ const purchaseColumns = columnsFor('Supplier', 'Bill #');
         </Card>
 
         <Card variant="panel" title="TDS on Purchases (liability to remit)" class="mb-4">
-            <DataTable :columns="purchaseColumns" :data="purchases" :page-size="25" empty-message="No TDS withheld on purchases in this range" />
+            <DataTable :columns="purchaseColumns" :data="purchases" :page-size="25" empty-message="No transactions in this period. Try widening the date range." />
 
             <div class="mt-3 flex flex-wrap justify-end gap-6 border-t-[1.5px] border-border pt-3 text-[12.5px]">
                 <div><span class="text-text-muted">Total TDS on Purchases:</span> <span class="font-semibold">{{ formatMoney(purchasesTotal) }}</span></div>
