@@ -106,6 +106,39 @@ test('stock valuation snapshot computes as-of quantity and weighted-average valu
     $tenant->delete();
 });
 
+test('the hs_code column passes through for an item that has one, and reports null gracefully for an item that does not', function () {
+    $domain = 'stock-valuation-hs-code.tenant-test';
+    $tenant = provisionStockValuationReportTestTenant($domain);
+
+    $codedId = null;
+    $uncodedId = null;
+    $tenant->run(function () use (&$codedId, &$uncodedId) {
+        User::factory()->create(['email' => 'owner@example.com']);
+        $storeId = Store::where('is_active', true)->orderBy('id')->firstOrFail()->id;
+
+        $coded = Item::factory()->create(['name' => 'Coded Item', 'unit' => 'pcs', 'is_stockable' => true, 'hs_code' => '8471.30']);
+        $codedId = $coded->id;
+        $coded->recordStockMovement(StockMovementType::Purchase, 10, '2026-01-01', $storeId, value: 1000);
+
+        $uncoded = Item::factory()->create(['name' => 'Uncoded Item', 'unit' => 'pcs', 'is_stockable' => true, 'hs_code' => null]);
+        $uncodedId = $uncoded->id;
+        $uncoded->recordStockMovement(StockMovementType::Purchase, 5, '2026-01-01', $storeId, value: 500);
+    });
+
+    loginStockValuationReportTestUser($domain);
+
+    $this->get("http://{$domain}/reports/stock-valuation?as_of=2026-02-28")
+        ->assertOk()
+        ->assertInertia(fn ($page) => $page
+            ->where('rows', fn ($rows) => count($rows) === 2)
+            ->where('rows', fn ($rows) => collect($rows)->firstWhere('itemId', $codedId)['hsCode'] === '8471.30')
+            ->where('rows', fn ($rows) => collect($rows)->firstWhere('itemId', $uncodedId)['hsCode'] === null)
+            ->etc()
+        );
+
+    $tenant->delete();
+});
+
 test('an item with no movements at all is excluded from the stock valuation report', function () {
     $domain = 'stock-valuation-empty-item.tenant-test';
     $tenant = provisionStockValuationReportTestTenant($domain);

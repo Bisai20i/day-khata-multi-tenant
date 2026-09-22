@@ -142,7 +142,7 @@ class StockCosting
      * threads the request param through.
      *
      * @param  array<string, mixed>  $filters
-     * @return Collection<int, array{item_id: int, name: string, unit: string, quantity: Quantity, average_cost: string, value: Money}>
+     * @return Collection<int, array{item_id: int, name: string, unit: string, hs_code: ?string, quantity: Quantity, average_cost: string, value: Money}>
      */
     public static function valuationRows(string $asOf, ?int $storeId = null, array $filters = []): Collection
     {
@@ -153,7 +153,7 @@ class StockCosting
             ->when(($filters['brand_id'] ?? null) !== null, fn (Builder $q) => $q->where('brand_id', $filters['brand_id']))
             ->when(($filters['search'] ?? null) !== null, fn (Builder $q) => $q->where('name', 'like', '%'.$filters['search'].'%'))
             ->orderBy('name')
-            ->get(['id', 'name', 'unit', 'purchase_rate']);
+            ->get(['id', 'name', 'unit', 'purchase_rate', 'hs_code']);
 
         if ($items->isEmpty()) {
             return new Collection;
@@ -180,6 +180,7 @@ class StockCosting
                 'item_id' => $item->getKey(),
                 'name' => $item->name,
                 'unit' => $item->unit,
+                'hs_code' => $item->hs_code,
                 'quantity' => $quantity,
                 // 4 decimals is what the rate columns show everywhere else;
                 // the full-precision figure only ever exists inside $value.

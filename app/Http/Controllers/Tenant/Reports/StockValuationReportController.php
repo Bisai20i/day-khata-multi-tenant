@@ -39,6 +39,7 @@ class StockValuationReportController extends Controller
                 'itemId' => $row['item_id'],
                 'name' => $row['name'],
                 'unit' => $row['unit'],
+                'hsCode' => $row['hs_code'],
                 'quantity' => $row['quantity']->toString(),
                 'avgCost' => $row['average_cost'],
                 'valuation' => $row['value']->toString(),

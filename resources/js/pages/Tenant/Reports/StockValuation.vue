@@ -69,6 +69,7 @@ const asOfLabel = computed(() => `As of BS ${formatBsDate(props.asOf)} (AD ${pro
 
 const columns = [
     { accessorKey: 'name', header: 'Item' },
+    { id: 'hsCode', header: 'HS Code', numeric: false, cell: ({ row }) => row.original.hsCode ?? '-' },
     { accessorKey: 'unit', header: 'Unit' },
     { accessorKey: 'quantity', header: 'Quantity', numeric: true, cell: ({ row }) => formatQuantity(row.original.quantity) },
     { accessorKey: 'avgCost', header: 'Average cost per unit', numeric: true, cell: ({ row }) => formatRate(row.original.avgCost) },
