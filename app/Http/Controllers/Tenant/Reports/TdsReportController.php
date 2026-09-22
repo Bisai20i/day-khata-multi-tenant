@@ -91,6 +91,11 @@ class TdsReportController extends Controller
                 'party' => $sale->buyer_name ?? $sale->customer?->name,
                 'tds_account' => $sale->tdsAccount?->name,
                 'base_total' => $sale->total,
+                // Sales carry no `tds_rate` column: unlike a purchase, TDS on
+                // a sale is typed directly as a rupee amount, never derived
+                // from a rate x base calculation, so there is nothing to
+                // display here.
+                'tds_rate' => null,
                 'tds_amount' => $sale->tds_amount,
             ]);
 
@@ -105,6 +110,7 @@ class TdsReportController extends Controller
                 'party' => $sale->buyer_name ?? $sale->customer?->name,
                 'tds_account' => $sale->tdsAccount?->name,
                 'base_total' => Money::of($sale->total)->negated()->toString(),
+                'tds_rate' => null,
                 'tds_amount' => Money::of($sale->tds_amount)->negated()->toString(),
             ]);
 
@@ -122,6 +128,7 @@ class TdsReportController extends Controller
                 'party' => $return->sale?->buyer_name ?? $return->sale?->customer?->name,
                 'tds_account' => $return->sale?->tdsAccount?->name,
                 'base_total' => Money::of($return->total)->negated()->toString(),
+                'tds_rate' => null,
                 'tds_amount' => Money::of($return->tds_amount)->negated()->toString(),
             ]);
 
@@ -148,6 +155,7 @@ class TdsReportController extends Controller
                 'party' => $purchase->supplier?->name,
                 'tds_account' => $purchase->tdsAccount?->name,
                 'base_total' => $purchase->total,
+                'tds_rate' => $purchase->tds_rate,
                 'tds_amount' => $purchase->tds_amount ?? '0.00',
             ]);
 
@@ -162,11 +170,12 @@ class TdsReportController extends Controller
                 'party' => $purchase->supplier?->name,
                 'tds_account' => $purchase->tdsAccount?->name,
                 'base_total' => Money::of($purchase->total)->negated()->toString(),
+                'tds_rate' => $purchase->tds_rate,
                 'tds_amount' => Money::of($purchase->tds_amount ?? '0.00')->negated()->toString(),
             ]);
 
         $returns = PurchaseReturn::query()
-            ->with(['purchase:id,bill_number,supplier_id,tds_account_id', 'purchase.supplier:id,name', 'purchase.tdsAccount:id,name'])
+            ->with(['purchase:id,bill_number,supplier_id,tds_account_id,tds_rate', 'purchase.supplier:id,name', 'purchase.tdsAccount:id,name'])
             ->where('status', 'posted')
             ->whereDate('date', '>=', $from)
             ->whereDate('date', '<=', $to)
@@ -179,6 +188,7 @@ class TdsReportController extends Controller
                 'party' => $return->purchase?->supplier?->name,
                 'tds_account' => $return->purchase?->tdsAccount?->name,
                 'base_total' => Money::of($return->total)->negated()->toString(),
+                'tds_rate' => $return->purchase?->tds_rate,
                 'tds_amount' => Money::of($return->tds_amount)->negated()->toString(),
             ]);
 

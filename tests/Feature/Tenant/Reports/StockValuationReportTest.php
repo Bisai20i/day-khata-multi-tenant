@@ -179,6 +179,80 @@ test('stock valuation is scoped to a single store when store_id is given, and su
     $tenant->delete();
 });
 
+test('the stock_status filter isolates positive and negative on-hand quantities, mirroring legacy stockValuationReport()', function () {
+    $domain = 'stock-valuation-status-filter.tenant-test';
+    $tenant = provisionStockValuationReportTestTenant($domain);
+
+    $positiveId = null;
+    $negativeId = null;
+    $tenant->run(function () use (&$positiveId, &$negativeId) {
+        User::factory()->create(['email' => 'owner@example.com']);
+        $storeId = Store::where('is_active', true)->orderBy('id')->firstOrFail()->id;
+
+        // Positive stock: 10 in, 3 out, 7 on hand.
+        $positive = Item::factory()->create(['name' => 'Positive Item', 'unit' => 'pcs', 'is_stockable' => true]);
+        $positiveId = $positive->id;
+        $positive->recordStockMovement(StockMovementType::Purchase, 10, '2026-01-01', $storeId, value: 1000);
+        $positive->recordStockMovement(StockMovementType::Sale, 3, '2026-01-05', $storeId);
+
+        // Negative stock (a data-entry error, or an oversold item where the
+        // caller allowed it): 2 in, 5 out, -3 on hand. This is the class of
+        // bug legacy's stock_status=negative filter exists to surface, and
+        // recordStockMovement() carries no guard against it (the guard, if
+        // any, lives in the document controller, not the model) - matching
+        // how the other tests in this file build raw movements directly.
+        $negative = Item::factory()->create(['name' => 'Negative Item', 'unit' => 'pcs', 'is_stockable' => true]);
+        $negativeId = $negative->id;
+        $negative->recordStockMovement(StockMovementType::Purchase, 2, '2026-01-01', $storeId, value: 200);
+        $negative->recordStockMovement(StockMovementType::Sale, 5, '2026-01-05', $storeId);
+    });
+
+    loginStockValuationReportTestUser($domain);
+
+    // Default ('all'): both rows show, unchanged from before this filter
+    // existed.
+    $this->get("http://{$domain}/reports/stock-valuation?as_of=2026-01-31")
+        ->assertOk()
+        ->assertInertia(fn ($page) => $page
+            ->where('stockStatus', 'all')
+            ->where('rows', fn ($rows) => count($rows) === 2)
+            ->etc()
+        );
+
+    // stock_status=positive: only the item with positive on-hand quantity.
+    $this->get("http://{$domain}/reports/stock-valuation?as_of=2026-01-31&stock_status=positive")
+        ->assertOk()
+        ->assertInertia(fn ($page) => $page
+            ->where('stockStatus', 'positive')
+            ->where('rows', fn ($rows) => count($rows) === 1)
+            ->where('rows.0.itemId', $positiveId)
+            ->where('rows.0.quantity', '7.0000')
+            ->etc()
+        );
+
+    // stock_status=negative: only the item with negative on-hand quantity.
+    $this->get("http://{$domain}/reports/stock-valuation?as_of=2026-01-31&stock_status=negative")
+        ->assertOk()
+        ->assertInertia(fn ($page) => $page
+            ->where('stockStatus', 'negative')
+            ->where('rows', fn ($rows) => count($rows) === 1)
+            ->where('rows.0.itemId', $negativeId)
+            ->where('rows.0.quantity', '-3.0000')
+            ->etc()
+        );
+
+    // An unrecognised value falls back to 'all' rather than erroring.
+    $this->get("http://{$domain}/reports/stock-valuation?as_of=2026-01-31&stock_status=bogus")
+        ->assertOk()
+        ->assertInertia(fn ($page) => $page
+            ->where('stockStatus', 'all')
+            ->where('rows', fn ($rows) => count($rows) === 2)
+            ->etc()
+        );
+
+    $tenant->delete();
+});
+
 test('the stock valuation report reports exactly what StockCosting reports', function () {
     $domain = 'stock-valuation-matches-costing.tenant-test';
     $tenant = provisionStockValuationReportTestTenant($domain);

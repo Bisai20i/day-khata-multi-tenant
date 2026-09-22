@@ -32,8 +32,9 @@ class StockValuationReportController extends Controller
     {
         $asOf = $this->resolveAsOf($request);
         $storeId = $request->integer('store_id') ?: null;
+        $stockStatus = $this->resolveStockStatus($request);
 
-        $rows = StockCosting::valuationRows($asOf, $storeId)
+        $rows = StockCosting::valuationRows($asOf, $storeId, ['stock_status' => $stockStatus])
             ->map(fn (array $row) => [
                 'itemId' => $row['item_id'],
                 'name' => $row['name'],
@@ -53,6 +54,7 @@ class StockValuationReportController extends Controller
             'grandTotalValuation' => Money::sum($rows->map(fn (array $row) => Money::of($row['valuation'])))->toString(),
             'stores' => Store::where('is_active', true)->orderBy('name')->get(['id', 'name']),
             'storeId' => $storeId,
+            'stockStatus' => $stockStatus,
         ]);
     }
 
@@ -61,5 +63,21 @@ class StockValuationReportController extends Controller
         $asOf = $request->string('as_of')->toString();
 
         return $asOf !== '' ? Carbon::parse($asOf)->toDateString() : Carbon::now()->toDateString();
+    }
+
+    /**
+     * Mirrors legacy's `stockValuationReport()` `stock_status` param
+     * (`positive` / `negative` / default `<> 0`), which real users used to
+     * hunt down negative-stock data-entry errors. `'all'` is the default
+     * here and applies no sign filter, preserving the report's existing
+     * behaviour (every non-zero-quantity-and-non-zero-value row) for anyone
+     * who has not touched the new filter. Any other value falls back to
+     * `'all'` rather than erroring on a stray query string.
+     */
+    private function resolveStockStatus(Request $request): string
+    {
+        $status = $request->string('stock_status')->toString();
+
+        return in_array($status, ['positive', 'negative'], true) ? $status : 'all';
     }
 }

@@ -84,6 +84,9 @@ test('a sale with TDS withheld shows up on the report with the right net TDS amo
             ->where('sales.0.entry', 'invoice')
             ->where('sales.0.party', 'Sale Customer')
             ->where('sales.0.base_total', '100.00')
+            // Sales carry no stored TDS rate: the amount is typed directly,
+            // never derived from a rate x base calculation.
+            ->where('sales.0.tds_rate', null)
             ->where('sales.0.tds_amount', '10.00')
             ->where('sales.0.tds_account', 'TDS Receivable')
             ->has('purchases', 0)
@@ -112,6 +115,7 @@ test('a purchase with TDS withheld shows up on the report with the right net TDS
                 'date' => '2026-06-01',
                 'payment_mode' => 'cash',
                 'tds_account_id' => $tdsAccount->id,
+                'tds_rate' => 15,
                 'tds_amount' => 15,
             ],
             [['item_id' => $item->id, 'quantity' => 1, 'rate' => 100, 'discount' => 0]],
@@ -128,6 +132,9 @@ test('a purchase with TDS withheld shows up on the report with the right net TDS
             ->where('purchases.0.entry', 'invoice')
             ->where('purchases.0.party', 'Purchase Supplier')
             ->where('purchases.0.base_total', '100.00')
+            // Unlike a sale, a purchase stores the rate that was applied
+            // (`purchases.tds_rate`), so the report can show it directly.
+            ->where('purchases.0.tds_rate', '15.00')
             ->where('purchases.0.tds_amount', '15.00')
             ->where('purchases.0.tds_account', 'TDS Payable')
             ->has('sales', 0)

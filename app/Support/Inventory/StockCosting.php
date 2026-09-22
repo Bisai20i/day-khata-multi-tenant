@@ -128,7 +128,18 @@ class StockCosting
      * Items that have never moved and hold nothing are skipped, so a catalog
      * of 5,000 items does not produce 5,000 zero rows. Supported $filters:
      * `item_category_id`, `item_subcategory_id`, `brand_id`, `search` (item
-     * name), and `include_empty` (true to keep the zero rows).
+     * name), `include_empty` (true to keep the zero rows), and `stock_status`
+     * (`'positive'`, `'negative'` or `'all'`, default `'all'`).
+     *
+     * `stock_status` mirrors legacy's `stockValuationReport()` filter, which
+     * real users relied on to hunt down negative-stock data-entry errors -
+     * the sign of the on-hand quantity, checked with `Quantity::isPositive()`
+     * / `isNegative()` rather than a numeric comparison, since a `Quantity`
+     * is never cast to float for comparison anywhere in this app. `'all'` is
+     * the default and applies no sign filter at all, so callers that never
+     * pass `stock_status` (the category/brand/inventory reports) see exactly
+     * the rows they always have - only `StockValuationReportController`
+     * threads the request param through.
      *
      * @param  array<string, mixed>  $filters
      * @return Collection<int, array{item_id: int, name: string, unit: string, quantity: Quantity, average_cost: string, value: Money}>
@@ -149,6 +160,7 @@ class StockCosting
         }
 
         $includeEmpty = (bool) ($filters['include_empty'] ?? false);
+        $stockStatus = $filters['stock_status'] ?? 'all';
         $quantities = Item::currentStockByItem($items->modelKeys(), $storeId, $asOf);
         $bases = static::basisByItem($items->modelKeys(), $asOf);
 
@@ -176,6 +188,8 @@ class StockCosting
             ];
         })
             ->filter(fn (array $row) => $includeEmpty || ! $row['quantity']->isZero() || ! $row['value']->isZero())
+            ->when($stockStatus === 'positive', fn (Collection $rows) => $rows->filter(fn (array $row) => $row['quantity']->isPositive()))
+            ->when($stockStatus === 'negative', fn (Collection $rows) => $rows->filter(fn (array $row) => $row['quantity']->isNegative()))
             ->values();
     }
 
