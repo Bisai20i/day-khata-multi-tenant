@@ -16,6 +16,7 @@ use App\Models\AccountHead;
 use App\Models\CapitalPurchase;
 use App\Models\CapitalSale;
 use App\Models\CompanySetting;
+use App\Models\Customer;
 use App\Models\FiscalYear;
 use App\Models\JournalVoucher;
 use App\Models\JournalVoucherLine;
@@ -25,6 +26,7 @@ use App\Models\PurchaseReturn;
 use App\Models\Receipt;
 use App\Models\Sale;
 use App\Models\SalesReturn;
+use App\Models\Supplier;
 use App\Support\Inventory\StockCosting;
 use App\Support\Money\Money;
 use App\Support\NepaliCalendar;
@@ -681,11 +683,28 @@ class AccountingReportController extends Controller
      * bucket below - JournalVoucher::sourceRecordLabel() is what keeps a
      * module-owned voucher (a cancelled Sale's underlying voucher, say) from
      * being listed a second time here as if it were a standalone one.
+     *
+     * Audit T15-14: legacy's two narrower cancelled-document views had a
+     * date range and a party filter with server-side pagination; this one
+     * unions everything with no request params at all. `from`/`to` and
+     * customer_id/supplier_id are optional here for exactly that reason -
+     * every one of them defaults to "no filter", so a bare hit on this
+     * route still returns the full unfiltered list exactly as before.
      */
     public function cancelledDocuments(Request $request): Response
     {
+        [$from, $to] = $this->resolveCancelledDocumentsDateRange($request);
+        $customerId = $request->integer('customer_id') ?: null;
+        $supplierId = $request->integer('supplier_id') ?: null;
+
         return Inertia::render('Tenant/Reports/CancelledDocuments', [
-            'rows' => $this->cancelledDocumentRows(),
+            'rows' => $this->cancelledDocumentRows($from, $to, $customerId, $supplierId),
+            'customers' => Customer::query()->orderBy('name')->get(['id', 'name']),
+            'suppliers' => Supplier::query()->orderBy('name')->get(['id', 'name']),
+            'from' => $from,
+            'to' => $to,
+            'customerId' => $customerId,
+            'supplierId' => $supplierId,
         ]);
     }
 
@@ -695,29 +714,63 @@ class AccountingReportController extends Controller
     }
 
     /**
-     * @return array<int, array{type: string, number: string, date: string, cancelledAt: ?string, cancelledBy: ?string, reason: ?string}>
+     * Unlike resolveWindow(), there is no fiscal year to clamp this report
+     * into - it has always spanned every fiscal year ever posted. So a
+     * missing from/to here means "no date filter" (null), not "this
+     * year", which is what keeps the unfiltered response identical to
+     * before this filter existed.
+     *
+     * @return array{0: ?string, 1: ?string}
      */
-    private function cancelledDocumentRows(): array
+    private function resolveCancelledDocumentsDateRange(Request $request): array
+    {
+        $from = $request->string('from')->toString();
+        $to = $request->string('to')->toString();
+
+        return [$from !== '' ? $from : null, $to !== '' ? $to : null];
+    }
+
+    /**
+     * @return array<int, array{type: string, number: string, date: string, cancelledAt: ?string, cancelledBy: ?string, reason: ?string, party: ?string}>
+     */
+    private function cancelledDocumentRows(?string $from = null, ?string $to = null, ?int $customerId = null, ?int $supplierId = null): array
     {
         $rows = collect();
 
         $modules = [
-            ['type' => 'Sale', 'model' => Sale::class, 'number' => fn (Sale $m) => $m->invoice_number ?? "#{$m->id}"],
-            ['type' => 'Purchase', 'model' => Purchase::class, 'number' => fn (Purchase $m) => $m->bill_number ?: "#{$m->id}"],
-            ['type' => 'Sales Return', 'model' => SalesReturn::class, 'number' => fn (SalesReturn $m) => $m->documentNumber()],
-            ['type' => 'Purchase Return', 'model' => PurchaseReturn::class, 'number' => fn (PurchaseReturn $m) => $m->documentNumber()],
-            ['type' => 'Receipt', 'model' => Receipt::class, 'number' => fn (Receipt $m) => "#{$m->id}"],
-            ['type' => 'Payment', 'model' => Payment::class, 'number' => fn (Payment $m) => "#{$m->id}"],
-            ['type' => 'Capital Sale', 'model' => CapitalSale::class, 'number' => fn (CapitalSale $m) => $m->documentNumber()],
-            ['type' => 'Capital Purchase', 'model' => CapitalPurchase::class, 'number' => fn (CapitalPurchase $m) => $m->bill_number ?: "#{$m->id}"],
+            ['type' => 'Sale', 'model' => Sale::class, 'partyType' => 'customer', 'number' => fn (Sale $m) => $m->invoice_number ?? "#{$m->id}"],
+            ['type' => 'Purchase', 'model' => Purchase::class, 'partyType' => 'supplier', 'number' => fn (Purchase $m) => $m->bill_number ?: "#{$m->id}"],
+            ['type' => 'Sales Return', 'model' => SalesReturn::class, 'partyType' => 'customer', 'number' => fn (SalesReturn $m) => $m->documentNumber()],
+            ['type' => 'Purchase Return', 'model' => PurchaseReturn::class, 'partyType' => 'supplier', 'number' => fn (PurchaseReturn $m) => $m->documentNumber()],
+            ['type' => 'Receipt', 'model' => Receipt::class, 'partyType' => 'customer', 'number' => fn (Receipt $m) => "#{$m->id}"],
+            ['type' => 'Payment', 'model' => Payment::class, 'partyType' => 'supplier', 'number' => fn (Payment $m) => "#{$m->id}"],
+            ['type' => 'Capital Sale', 'model' => CapitalSale::class, 'partyType' => 'customer', 'number' => fn (CapitalSale $m) => $m->documentNumber()],
+            ['type' => 'Capital Purchase', 'model' => CapitalPurchase::class, 'partyType' => 'supplier', 'number' => fn (CapitalPurchase $m) => $m->bill_number ?: "#{$m->id}"],
         ];
 
         foreach ($modules as $module) {
+            // A customer filter has nothing to say about a supplier-owned
+            // module (and vice versa) - such a module contributes no rows
+            // at all rather than being silently searched on the wrong
+            // column.
+            if ($customerId !== null && $module['partyType'] !== 'customer') {
+                continue;
+            }
+
+            if ($supplierId !== null && $module['partyType'] !== 'supplier') {
+                continue;
+            }
+
             $model = $module['model'];
+            $partyColumn = $module['partyType'] === 'customer' ? 'customer_id' : 'supplier_id';
+            $partyId = $module['partyType'] === 'customer' ? $customerId : $supplierId;
 
             $model::query()
                 ->where('status', 'cancelled')
-                ->with('canceller:id,name')
+                ->when($from !== null, fn (Builder $q) => $q->whereDate('date', '>=', $from))
+                ->when($to !== null, fn (Builder $q) => $q->whereDate('date', '<=', $to))
+                ->when($partyId !== null, fn (Builder $q) => $q->where($partyColumn, $partyId))
+                ->with(['canceller:id,name', $module['partyType'].':id,name'])
                 ->get()
                 ->each(function ($record) use ($module, $rows) {
                     $rows->push([
@@ -727,6 +780,7 @@ class AccountingReportController extends Controller
                         'cancelledAt' => $record->cancelled_at?->toDateTimeString(),
                         'cancelledBy' => $record->canceller?->name,
                         'reason' => $record->cancel_reason,
+                        'party' => $record->{$module['partyType']}?->name,
                     ]);
                 });
         }
@@ -734,34 +788,41 @@ class AccountingReportController extends Controller
         // Journal Vouchers and cash/bank vouchers: only the ones with no
         // owning module record (see sourceRecordLabel()'s docblock) - every
         // other cancelled voucher_type belongs to one of the modules above
-        // and is already listed under its own record.
-        JournalVoucher::query()
-            ->where('status', 'cancelled')
-            ->whereIn('voucher_type', array_map(fn (VoucherType $t) => $t->value, VoucherType::manuallyCancellableTypes()))
-            ->with('reversal.creator:id,name')
-            ->get()
-            ->each(function (JournalVoucher $voucher) use ($rows) {
-                if ($voucher->sourceRecordLabel() !== null) {
-                    return;
-                }
+        // and is already listed under its own record. A standalone voucher
+        // has no customer_id/supplier_id of its own, so a party filter
+        // excludes this bucket entirely rather than matching it by accident.
+        if ($customerId === null && $supplierId === null) {
+            JournalVoucher::query()
+                ->where('status', 'cancelled')
+                ->whereIn('voucher_type', array_map(fn (VoucherType $t) => $t->value, VoucherType::manuallyCancellableTypes()))
+                ->when($from !== null, fn (Builder $q) => $q->whereDate('date', '>=', $from))
+                ->when($to !== null, fn (Builder $q) => $q->whereDate('date', '<=', $to))
+                ->with('reversal.creator:id,name')
+                ->get()
+                ->each(function (JournalVoucher $voucher) use ($rows) {
+                    if ($voucher->sourceRecordLabel() !== null) {
+                        return;
+                    }
 
-                $reversal = $voucher->reversal;
-                $reason = $reversal?->narration;
-                // Strip the "Cancellation of ... : " prefix cancel() writes,
-                // leaving just the reason the user typed.
-                if ($reason !== null && str_contains($reason, ': ')) {
-                    $reason = substr($reason, strrpos($reason, ': ') + 2);
-                }
+                    $reversal = $voucher->reversal;
+                    $reason = $reversal?->narration;
+                    // Strip the "Cancellation of ... : " prefix cancel() writes,
+                    // leaving just the reason the user typed.
+                    if ($reason !== null && str_contains($reason, ': ')) {
+                        $reason = substr($reason, strrpos($reason, ': ') + 2);
+                    }
 
-                $rows->push([
-                    'type' => ucwords(str_replace('_', ' ', $voucher->voucher_type->value)),
-                    'number' => "{$voucher->voucher_type->value}-{$voucher->voucher_number}",
-                    'date' => $voucher->date->toDateString(),
-                    'cancelledAt' => $reversal?->date?->toDateString(),
-                    'cancelledBy' => $reversal?->creator?->name,
-                    'reason' => $reason,
-                ]);
-            });
+                    $rows->push([
+                        'type' => ucwords(str_replace('_', ' ', $voucher->voucher_type->value)),
+                        'number' => "{$voucher->voucher_type->value}-{$voucher->voucher_number}",
+                        'date' => $voucher->date->toDateString(),
+                        'cancelledAt' => $reversal?->date?->toDateString(),
+                        'cancelledBy' => $reversal?->creator?->name,
+                        'reason' => $reason,
+                        'party' => null,
+                    ]);
+                });
+        }
 
         return $rows->sortByDesc('cancelledAt')->values()->all();
     }

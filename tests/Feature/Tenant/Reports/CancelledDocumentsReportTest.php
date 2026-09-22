@@ -83,6 +83,77 @@ test('the cancelled documents report lists a cancelled payment and a cancelled s
     $tenant->delete();
 });
 
+test('the cancelled documents report can be narrowed by date range and by supplier, and stays unfiltered by default', function () {
+    $domain = 'cancelled-docs-report-filters.tenant-test';
+    $tenant = provisionCancelledDocumentsTestTenant($domain);
+
+    $supplierBId = null;
+
+    $tenant->run(function () use (&$supplierBId) {
+        $admin = User::factory()->create(['email' => 'owner@example.com', 'role_id' => Role::where('slug', 'admin')->value('id')]);
+        FiscalYear::create(['name' => 'FY1', 'start_date' => '2026-01-01', 'end_date' => '2026-12-31', 'status' => FiscalYearStatus::Open]);
+
+        $supplierA = Supplier::factory()->create();
+        $supplierB = Supplier::factory()->create();
+        $supplierBId = $supplierB->id;
+
+        $paymentA = Payment::post([
+            'supplier_id' => $supplierA->id,
+            'date' => '2026-06-01',
+            'amount' => 500,
+            'payment_mode' => 'cash',
+        ], $admin);
+        $paymentA->cancel($admin, 'Wrong supplier A');
+
+        $paymentB = Payment::post([
+            'supplier_id' => $supplierB->id,
+            'date' => '2026-08-15',
+            'amount' => 300,
+            'payment_mode' => 'cash',
+        ], $admin);
+        $paymentB->cancel($admin, 'Wrong supplier B');
+    });
+
+    $this->post("http://{$domain}/login", ['email' => 'owner@example.com', 'password' => 'password']);
+
+    // (a) Unfiltered: both cancelled payments still come back, and every
+    // filter prop is null - a bare hit on this route is unchanged.
+    $this->get("http://{$domain}/reports/cancelled-documents")
+        ->assertOk()
+        ->assertInertia(function ($page) {
+            $props = $page->toArray()['props'];
+
+            expect($props['rows'])->toHaveCount(2)
+                ->and($props['from'])->toBeNull()
+                ->and($props['to'])->toBeNull()
+                ->and($props['customerId'])->toBeNull()
+                ->and($props['supplierId'])->toBeNull();
+        });
+
+    // (b) Date range narrows to just the June payment.
+    $this->get("http://{$domain}/reports/cancelled-documents?from=2026-06-01&to=2026-06-30")
+        ->assertOk()
+        ->assertInertia(function ($page) {
+            $rows = $page->toArray()['props']['rows'];
+
+            expect($rows)->toHaveCount(1)
+                ->and($rows[0]['reason'])->toBe('Wrong supplier A');
+        });
+
+    // (c) Supplier filter narrows to just supplier B's payment, and also
+    // excludes the standalone-voucher bucket (it has no supplier of its own).
+    $this->get("http://{$domain}/reports/cancelled-documents?supplier_id={$supplierBId}")
+        ->assertOk()
+        ->assertInertia(function ($page) {
+            $rows = $page->toArray()['props']['rows'];
+
+            expect($rows)->toHaveCount(1)
+                ->and($rows[0]['reason'])->toBe('Wrong supplier B');
+        });
+
+    $tenant->delete();
+});
+
 test('a staff user cannot reach the cancelled documents report', function () {
     $domain = 'cancelled-docs-role-gate.tenant-test';
     $tenant = provisionCancelledDocumentsTestTenant($domain);
