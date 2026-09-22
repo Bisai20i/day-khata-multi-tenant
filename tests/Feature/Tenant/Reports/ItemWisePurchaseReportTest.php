@@ -223,3 +223,95 @@ test('the item-wise purchase report can be narrowed to a single store', function
 
     $tenant->delete();
 });
+
+test('picking an item_id keeps the all-items aggregate and adds that item\'s raw per-line transaction ledger (audit T15-6)', function () {
+    $domain = 'item-wise-purchase-drilldown.tenant-test';
+    $tenant = provisionItemWisePurchaseReportTestTenant($domain);
+
+    $widgetId = null;
+    $billNumber = null;
+    $supplierName = null;
+    $tenant->run(function () use (&$widgetId, &$billNumber, &$supplierName) {
+        itemWisePurchaseReportTestOpenFiscalYear();
+        $admin = itemWisePurchaseReportTestAdmin();
+        $supplier = Supplier::factory()->create(['name' => 'Himal Traders']);
+        $widget = Item::factory()->create(['name' => 'Widget', 'unit' => 'pcs', 'is_vatable' => false, 'is_stockable' => false]);
+        $gadget = Item::factory()->create(['name' => 'Gadget', 'unit' => 'pcs', 'is_vatable' => false, 'is_stockable' => false]);
+
+        // Two Widget purchases at different rates, plus an unrelated Gadget
+        // purchase that must show in the aggregate but never in Widget's lines.
+        $purchase1 = Purchase::post(
+            ['supplier_id' => $supplier->id, 'date' => '2026-06-01', 'payment_mode' => 'cash'],
+            [['item_id' => $widget->id, 'quantity' => 2, 'rate' => 100, 'discount' => 0]],
+            $admin,
+        );
+        Purchase::post(
+            ['supplier_id' => $supplier->id, 'date' => '2026-06-10', 'payment_mode' => 'cash'],
+            [['item_id' => $widget->id, 'quantity' => 3, 'rate' => 80, 'discount' => 0]],
+            $admin,
+        );
+        Purchase::post(
+            ['supplier_id' => $supplier->id, 'date' => '2026-06-05', 'payment_mode' => 'cash'],
+            [['item_id' => $gadget->id, 'quantity' => 1, 'rate' => 500, 'discount' => 0]],
+            $admin,
+        );
+
+        $widgetId = $widget->id;
+        $billNumber = $purchase1->bill_number;
+        $supplierName = $supplier->name;
+    });
+
+    loginItemWisePurchaseReportTestUser($domain);
+
+    $this->get("http://{$domain}/reports/item-wise-purchase?from=2026-06-01&to=2026-06-30&item_id={$widgetId}")
+        ->assertOk()
+        ->assertInertia(fn ($page) => $page
+            // The aggregate is untouched by the item_id filter: both items
+            // still appear, exactly as without any item_id at all.
+            ->has('items', 2)
+            ->where('itemId', $widgetId)
+            // Alongside it, the raw per-line ledger for just the picked
+            // item: two Widget lines, in date order, never the Gadget line.
+            ->has('lines', 2)
+            ->where('lines.0.document_number', $billNumber)
+            ->where('lines.0.party_name', $supplierName)
+            ->where('lines.0.rate', '100.0000')
+            ->where('lines.0.quantity', '2.0000')
+            ->where('lines.0.line_total', '200.00')
+            ->where('lines.0.vatable', false)
+            ->where('lines.1.rate', '80.0000')
+            ->where('lines.1.quantity', '3.0000')
+            ->where('lines.1.line_total', '240.00')
+        );
+
+    $tenant->delete();
+});
+
+test('without an item_id the purchase report returns no per-line detail at all', function () {
+    $domain = 'item-wise-purchase-no-drilldown.tenant-test';
+    $tenant = provisionItemWisePurchaseReportTestTenant($domain);
+
+    $tenant->run(function () {
+        itemWisePurchaseReportTestOpenFiscalYear();
+        $admin = itemWisePurchaseReportTestAdmin();
+        $supplier = Supplier::factory()->create();
+        $item = Item::factory()->create(['name' => 'Widget', 'is_vatable' => false, 'is_stockable' => false]);
+
+        Purchase::post(
+            ['supplier_id' => $supplier->id, 'date' => '2026-06-01', 'payment_mode' => 'cash'],
+            [['item_id' => $item->id, 'quantity' => 1, 'rate' => 100, 'discount' => 0]],
+            $admin,
+        );
+    });
+
+    loginItemWisePurchaseReportTestUser($domain);
+
+    $this->get("http://{$domain}/reports/item-wise-purchase?from=2026-06-01&to=2026-06-30")
+        ->assertOk()
+        ->assertInertia(fn ($page) => $page
+            ->where('itemId', null)
+            ->has('lines', 0)
+        );
+
+    $tenant->delete();
+});

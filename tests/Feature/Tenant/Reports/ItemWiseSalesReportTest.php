@@ -245,3 +245,95 @@ test('the item-wise sales report can be narrowed to a single store', function ()
 
     $tenant->delete();
 });
+
+test('picking an item_id keeps the all-items aggregate and adds that item\'s raw per-line transaction ledger (audit T15-6)', function () {
+    $domain = 'item-wise-sales-drilldown.tenant-test';
+    $tenant = provisionItemWiseSalesTestTenant($domain);
+
+    $widgetId = null;
+    $invoiceNumber = null;
+    $customerName = null;
+    $tenant->run(function () use (&$widgetId, &$invoiceNumber, &$customerName) {
+        FiscalYear::create(['name' => 'FY1', 'start_date' => '2026-01-01', 'end_date' => '2026-12-31', 'status' => FiscalYearStatus::Open]);
+        $admin = User::factory()->create(['email' => 'owner@example.com']);
+        $customer = Customer::factory()->create(['name' => 'Ram Shrestha']);
+        $widget = Item::factory()->create(['name' => 'Widget', 'unit' => 'pcs', 'is_vatable' => false, 'is_stockable' => false]);
+        $gadget = Item::factory()->create(['name' => 'Gadget', 'unit' => 'pcs', 'is_vatable' => false, 'is_stockable' => false]);
+
+        // Two Widget sales at different rates, plus an unrelated Gadget
+        // sale that must show in the aggregate but never in Widget's lines.
+        $sale1 = Sale::post(
+            ['customer_id' => $customer->id, 'invoice_type' => 'full', 'date' => '2026-06-01', 'payment_mode' => 'cash'],
+            [['item_id' => $widget->id, 'quantity' => 2, 'rate' => 100, 'discount' => 0]],
+            $admin,
+        );
+        Sale::post(
+            ['customer_id' => $customer->id, 'invoice_type' => 'full', 'date' => '2026-06-10', 'payment_mode' => 'cash'],
+            [['item_id' => $widget->id, 'quantity' => 3, 'rate' => 120, 'discount' => 0]],
+            $admin,
+        );
+        Sale::post(
+            ['customer_id' => $customer->id, 'invoice_type' => 'full', 'date' => '2026-06-05', 'payment_mode' => 'cash'],
+            [['item_id' => $gadget->id, 'quantity' => 1, 'rate' => 500, 'discount' => 0]],
+            $admin,
+        );
+
+        $widgetId = $widget->id;
+        $invoiceNumber = $sale1->invoice_number;
+        $customerName = $customer->name;
+    });
+
+    loginItemWiseSalesTestUser($domain);
+
+    $this->get("http://{$domain}/reports/item-wise-sales?from=2026-06-01&to=2026-06-30&item_id={$widgetId}")
+        ->assertOk()
+        ->assertInertia(fn ($page) => $page
+            // The aggregate is untouched by the item_id filter: both items
+            // still appear, exactly as without any item_id at all.
+            ->has('items', 2)
+            ->where('itemId', $widgetId)
+            // Alongside it, the raw per-line ledger for just the picked
+            // item: two Widget lines, in date order, never the Gadget line.
+            ->has('lines', 2)
+            ->where('lines.0.document_number', $invoiceNumber)
+            ->where('lines.0.party_name', $customerName)
+            ->where('lines.0.rate', '100.0000')
+            ->where('lines.0.quantity', '2.0000')
+            ->where('lines.0.line_total', '200.00')
+            ->where('lines.0.vatable', false)
+            ->where('lines.1.rate', '120.0000')
+            ->where('lines.1.quantity', '3.0000')
+            ->where('lines.1.line_total', '360.00')
+        );
+
+    $tenant->delete();
+});
+
+test('without an item_id the sales report returns no per-line detail at all', function () {
+    $domain = 'item-wise-sales-no-drilldown.tenant-test';
+    $tenant = provisionItemWiseSalesTestTenant($domain);
+
+    $tenant->run(function () {
+        FiscalYear::create(['name' => 'FY1', 'start_date' => '2026-01-01', 'end_date' => '2026-12-31', 'status' => FiscalYearStatus::Open]);
+        $admin = User::factory()->create(['email' => 'owner@example.com']);
+        $customer = Customer::factory()->create();
+        $item = Item::factory()->create(['name' => 'Widget', 'is_vatable' => false, 'is_stockable' => false]);
+
+        Sale::post(
+            ['customer_id' => $customer->id, 'invoice_type' => 'full', 'date' => '2026-06-01', 'payment_mode' => 'cash'],
+            [['item_id' => $item->id, 'quantity' => 1, 'rate' => 100, 'discount' => 0]],
+            $admin,
+        );
+    });
+
+    loginItemWiseSalesTestUser($domain);
+
+    $this->get("http://{$domain}/reports/item-wise-sales?from=2026-06-01&to=2026-06-30")
+        ->assertOk()
+        ->assertInertia(fn ($page) => $page
+            ->where('itemId', null)
+            ->has('lines', 0)
+        );
+
+    $tenant->delete();
+});

@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Tenant\Reports;
 use App\Enums\FiscalYearStatus;
 use App\Http\Controllers\Controller;
 use App\Models\FiscalYear;
+use App\Models\Item;
 use App\Models\PurchaseLine;
 use App\Models\Store;
 use App\Support\Money\Money;
@@ -29,6 +30,15 @@ use Inertia\Response;
  * being added to base units). For the same reason the grand total is a
  * per-unit breakdown rather than one number - adding Kilograms to Pieces
  * produces a figure nobody can use.
+ *
+ * Audit T15-6: legacy's viewPurchaseReportItemWise() requires a specific
+ * item and shows nothing but a per-line transaction ledger (date, bill
+ * number, supplier, rate, quantity, vatable flag) - it never aggregates.
+ * This report keeps its own (more useful) all-items aggregate as the
+ * default view, but when an `item_id` is picked it additionally returns
+ * that item's raw per-line rows alongside the aggregate, so "show me every
+ * purchase of item X, at what rate, from which supplier" has an answer here
+ * too.
  */
 class ItemWisePurchaseReportController extends Controller
 {
@@ -36,6 +46,7 @@ class ItemWisePurchaseReportController extends Controller
     {
         [$from, $to] = $this->resolveDateRange($request);
         $storeId = $request->integer('store_id') ?: null;
+        $itemId = $request->integer('item_id') ?: null;
 
         $lines = PurchaseLine::query()
             ->join('purchases', 'purchases.id', '=', 'purchase_lines.purchase_id')
@@ -62,11 +73,55 @@ class ItemWisePurchaseReportController extends Controller
                 'total_value' => Money::sum($items->map(fn (array $row) => Money::of($row['total_value'])))->toString(),
                 'quantities' => $this->quantitiesByUnit($items),
             ],
+            'lines' => $itemId ? $this->itemLineDetail($itemId, $from, $to, $storeId) : [],
+            'itemsList' => Item::query()->orderBy('name')->get(['id', 'name']),
             'stores' => Store::where('is_active', true)->orderBy('name')->get(['id', 'name']),
             'from' => $from,
             'to' => $to,
             'storeId' => $storeId,
+            'itemId' => $itemId,
         ]);
+    }
+
+    /**
+     * The raw per-line transaction ledger for a single item, i.e. legacy's
+     * entire viewPurchaseReportItemWise() view - one row per PurchaseLine,
+     * not folded into any aggregate, so a shopkeeper can see exactly which
+     * bill, at what rate, from which supplier.
+     *
+     * @return Collection<int, array<string, mixed>>
+     */
+    private function itemLineDetail(int $itemId, string $from, string $to, ?int $storeId): Collection
+    {
+        return PurchaseLine::query()
+            ->join('purchases', 'purchases.id', '=', 'purchase_lines.purchase_id')
+            ->leftJoin('suppliers', 'suppliers.id', '=', 'purchases.supplier_id')
+            ->where('purchases.status', 'posted')
+            ->where('purchase_lines.item_id', $itemId)
+            ->whereDate('purchases.date', '>=', $from)
+            ->whereDate('purchases.date', '<=', $to)
+            ->when($storeId, fn (Builder $query) => $query->where('purchases.store_id', $storeId))
+            ->orderBy('purchases.date')
+            ->orderBy('purchases.id')
+            ->get([
+                'purchases.date as date',
+                'purchases.bill_number as document_number',
+                'suppliers.name as party_name',
+                'purchase_lines.rate as rate',
+                'purchase_lines.quantity as quantity',
+                'purchase_lines.line_total as line_total',
+                'purchase_lines.vatable as vatable',
+            ])
+            ->map(fn (Model $line) => [
+                'date' => (string) $line->date,
+                'document_number' => $line->document_number,
+                'party_name' => $line->party_name,
+                'rate' => Quantity::of($line->rate)->toString(),
+                'quantity' => Quantity::of($line->quantity)->toString(),
+                'line_total' => Money::of($line->line_total)->toString(),
+                'vatable' => (bool) $line->vatable,
+            ])
+            ->values();
     }
 
     /**
