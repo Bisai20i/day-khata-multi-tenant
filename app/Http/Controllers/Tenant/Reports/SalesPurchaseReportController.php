@@ -16,6 +16,7 @@ use App\Models\Customer;
 use App\Models\FiscalYear;
 use App\Models\JournalVoucherLine;
 use App\Models\Purchase;
+use App\Models\PurchaseLine;
 use App\Models\PurchaseReturn;
 use App\Models\Sale;
 use App\Models\SalesReturn;
@@ -298,7 +299,7 @@ class SalesPurchaseReportController extends Controller
         return [
             'rows' => $rows,
             'totals' => [
-                ...$this->totalsFor($rows, ['taxable_amount', 'nontaxable_amount', 'vat_amount', 'capital_amount', 'total']),
+                ...$this->totalsFor($rows, ['taxable_amount', 'nontaxable_amount', 'vat_amount', 'capital_amount', 'fixed_asset_vat_amount', 'total']),
                 'count' => $rows->count(),
             ],
             'from' => $from,
@@ -449,7 +450,7 @@ class SalesPurchaseReportController extends Controller
     private function purchaseVatBookRows(string $from, string $to, ?int $storeId): Collection
     {
         $issued = Purchase::query()
-            ->with(['supplier:id,name,tpin'])
+            ->with(['supplier:id,name,tpin', 'lines.account.group'])
             ->whereIn('status', ['posted', 'cancelled'])
             ->whereDate('date', '>=', $from)
             ->whereDate('date', '<=', $to)
@@ -459,7 +460,7 @@ class SalesPurchaseReportController extends Controller
             ->get()
             ->map(fn (Purchase $purchase) => $this->purchaseVatRow($purchase, $purchase->date->toDateString(), 'issued'));
 
-        $cancelled = $this->cancelledInPeriod(Purchase::query()->with(['supplier:id,name,tpin']), $from, $to)
+        $cancelled = $this->cancelledInPeriod(Purchase::query()->with(['supplier:id,name,tpin', 'lines.account.group']), $from, $to)
             ->when($storeId, fn (Builder $query) => $query->where('store_id', $storeId))
             ->get()
             ->map(fn (Purchase $purchase) => $this->purchaseVatRow($purchase, $this->cancelDate($purchase), 'cancelled'));
@@ -503,9 +504,41 @@ class SalesPurchaseReportController extends Controller
             'nontaxable_amount' => $this->signed($purchase->nontaxable_amount, $sign),
             'vat_amount' => $this->signed($purchase->vat_amount, $sign),
             'capital_amount' => Money::zero()->toString(),
+            // T15-3: the slice of the vat_amount above that sits on a line
+            // posted to a Fixed Assets account - an asset bought as one line
+            // inside an otherwise-ordinary Purchase (e.g. an office chair on
+            // a supply invoice), as opposed to a whole CapitalPurchase
+            // document (already its own "capital" bucket above). Purely
+            // informational: it is a breakdown OF vat_amount, never
+            // subtracted from it, so gross/capital/reconciliation keep
+            // tying to the ledger exactly as before.
+            'fixed_asset_vat_amount' => $this->signed($this->fixedAssetVatAmount($purchase)->toString(), $sign),
             'total' => $this->signed($purchase->total, $sign),
             'capital' => false,
         ];
+    }
+
+    /**
+     * The portion of this purchase's input VAT that belongs to a line whose
+     * resolved account (PurchaseLine::account(), the account the line
+     * actually debited at posting - not the item's current, possibly
+     * re-pointed, account_id) sits under the "Fixed Assets" account group.
+     * Reuses the exact classification FixedAsset::post() relies on when it
+     * files every registered asset's own ledger account directly under that
+     * group (see that method's docblock: "no subgroup - that group has
+     * none").
+     */
+    private function fixedAssetVatAmount(Purchase $purchase): Money
+    {
+        $lines = $purchase->relationLoaded('lines')
+            ? $purchase->lines
+            : $purchase->lines()->with('account.group')->get();
+
+        return Money::sum(
+            $lines
+                ->filter(fn (PurchaseLine $line) => $line->account?->group?->name === 'Fixed Assets')
+                ->map(fn (PurchaseLine $line) => Money::of($line->vat_amount))
+        );
     }
 
     /**
@@ -528,6 +561,10 @@ class SalesPurchaseReportController extends Controller
             'nontaxable_amount' => $this->signed($purchase->nontaxable_amount, $sign),
             'vat_amount' => $this->signed($purchase->vat_amount, $sign),
             'capital_amount' => $this->signed($purchase->taxable_amount, $sign),
+            // A whole CapitalPurchase document is already its own "capital"
+            // bucket above, so it never contributes to the fixed-asset
+            // breakdown of an ordinary Purchase's vat_amount.
+            'fixed_asset_vat_amount' => Money::zero()->toString(),
             'total' => $this->signed($purchase->total, $sign),
             'capital' => true,
         ];

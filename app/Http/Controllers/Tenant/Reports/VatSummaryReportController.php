@@ -135,22 +135,32 @@ class VatSummaryReportController extends Controller
      * book rows already carry cancellations as negative amounts, so this
      * only has to re-sign them for display.
      *
+     * `fixedAssetVat` (T15-3) is purely an informational breakdown OF
+     * `gross`: the slice of gross's own VAT that sits on a line inside an
+     * ordinary Purchase posted to a Fixed Assets account (as opposed to a
+     * whole CapitalPurchase document, which is `capital`). It is never
+     * subtracted from `gross` or from `net`, so both keep tying to the
+     * ledger reconciliation exactly as before this field was added.
+     *
      * @param  Collection<int, array<string, mixed>>  $bookRows
      * @param  Collection<int, array<string, mixed>>  $returnRows
-     * @return array{gross: string, capital: string, cancelled: string, returns: string, net: string}
+     * @return array{gross: string, capital: string, fixedAssetVat: string, cancelled: string, returns: string, net: string}
      */
     private function side(Collection $bookRows, Collection $returnRows): array
     {
         $issued = $bookRows->filter(fn (array $row) => $row['entry'] === 'issued');
+        $issuedGross = $issued->reject(fn (array $row) => $row['capital']);
 
-        $gross = $this->sumVat($issued->reject(fn (array $row) => $row['capital']));
+        $gross = $this->sumVat($issuedGross);
         $capital = $this->sumVat($issued->filter(fn (array $row) => $row['capital']));
+        $fixedAssetVat = $this->sumVat($issuedGross, 'fixed_asset_vat_amount');
         $cancelled = $this->sumVat($bookRows->filter(fn (array $row) => $row['entry'] === 'cancelled'))->negated();
         $returns = $this->sumVat($returnRows);
 
         return [
             'gross' => $gross->toString(),
             'capital' => $capital->toString(),
+            'fixedAssetVat' => $fixedAssetVat->toString(),
             'cancelled' => $cancelled->toString(),
             'returns' => $returns->toString(),
             'net' => $gross->plus($capital)->minus($cancelled)->minus($returns)->toString(),
@@ -160,9 +170,9 @@ class VatSummaryReportController extends Controller
     /**
      * @param  Collection<int, array<string, mixed>>  $rows
      */
-    private function sumVat(Collection $rows): Money
+    private function sumVat(Collection $rows, string $key = 'vat_amount'): Money
     {
-        return Money::sum($rows->map(fn (array $row) => Money::of($row['vat_amount'])));
+        return Money::sum($rows->map(fn (array $row) => Money::of($row[$key] ?? '0.00')));
     }
 
     /**

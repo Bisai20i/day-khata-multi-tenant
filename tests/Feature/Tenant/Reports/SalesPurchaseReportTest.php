@@ -2,6 +2,7 @@
 
 use App\Enums\FiscalYearStatus;
 use App\Models\Account;
+use App\Models\AccountGroup;
 use App\Models\CapitalPurchase;
 use App\Models\CapitalSale;
 use App\Models\Customer;
@@ -860,6 +861,63 @@ test('the purchase VAT book includes capital purchases in their own capital colu
             ->where('rows.0.capital_amount', '1000.00')
             ->where('rows.0.vat_amount', '130.00')
             ->where('totals.capital_amount', '1000.00')
+        );
+
+    $tenant->delete();
+});
+
+test('the purchase VAT book breaks out input VAT on a fixed-asset line inside an ordinary purchase, without changing gross, capital or the total', function () {
+    $domain = 'purchase-vat-book-fixed-asset-line.tenant-test';
+    $tenant = provisionReportTestTenant($domain);
+
+    $tenant->run(function () {
+        reportTestOpenFiscalYear();
+        $admin = reportTestAdmin();
+        $supplier = Supplier::factory()->create();
+
+        // An ordinary stock item (falls back to the seeded "Purchases
+        // Account", EXE8, since it has no account_id of its own) alongside
+        // an office chair whose item.account_id points at a Fixed Assets
+        // account - a fixed asset bought as one line inside an otherwise
+        // ordinary Purchase, per T15-3, not a whole CapitalPurchase document.
+        $ordinaryItem = Item::factory()->create(['is_vatable' => true, 'is_stockable' => false]);
+        $fixedAssetsGroup = AccountGroup::where('name', 'Fixed Assets')->firstOrFail();
+        $assetAccount = $fixedAssetsGroup->accounts()->create(['name' => 'Office Chair Asset']);
+        $assetItem = Item::factory()->create(['is_vatable' => true, 'is_stockable' => false, 'account_id' => $assetAccount->id]);
+
+        // 100 taxable => 13 VAT (ordinary) + 200 taxable => 26 VAT (asset
+        // line) = 300 taxable, 39 VAT total.
+        Purchase::post(
+            ['supplier_id' => $supplier->id, 'bill_number' => 'SUP-501', 'date' => '2026-06-01', 'payment_mode' => 'cash'],
+            [
+                ['item_id' => $ordinaryItem->id, 'quantity' => 1, 'rate' => 100, 'discount' => 0],
+                ['item_id' => $assetItem->id, 'quantity' => 1, 'rate' => 200, 'discount' => 0],
+            ],
+            $admin,
+        );
+    });
+
+    loginReportTestUser($domain);
+
+    $this->get("http://{$domain}/reports/purchase-vat-book?from=2026-06-01&to=2026-06-30")
+        ->assertOk()
+        ->assertInertia(fn ($page) => $page
+            ->component('Tenant/Reports/PurchaseVatBook')
+            ->has('rows', 1)
+            // The breakdown: only the asset line's own VAT.
+            ->where('rows.0.fixed_asset_vat_amount', '26.00')
+            // Additive, not a re-bucketing: vat_amount, capital_amount and
+            // total are exactly what they would have been without this
+            // field (T10's existing gross/capital split still reconciles).
+            ->where('rows.0.vat_amount', '39.00')
+            ->where('rows.0.capital_amount', '0.00')
+            ->where('rows.0.capital', false)
+            ->where('rows.0.total', '339.00')
+            ->where('totals.taxable_amount', '300.00')
+            ->where('totals.vat_amount', '39.00')
+            ->where('totals.fixed_asset_vat_amount', '26.00')
+            ->where('totals.capital_amount', '0.00')
+            ->where('totals.total', '339.00')
         );
 
     $tenant->delete();

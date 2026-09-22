@@ -2,6 +2,7 @@
 
 use App\Enums\FiscalYearStatus;
 use App\Models\Account;
+use App\Models\AccountGroup;
 use App\Models\CapitalPurchase;
 use App\Models\CapitalSale;
 use App\Models\Customer;
@@ -598,6 +599,52 @@ test('a capital sale contributes its VAT to output VAT in its own column', funct
             ->where('outputVat.capital', '260.00')
             ->where('outputVat.net', '260.00')
             ->where('reconciliation.ledgerOutputVat', '260.00')
+            ->where('reconciliation.difference', '0.00')
+        );
+
+    $tenant->delete();
+});
+
+test('a fixed-asset line inside an ordinary purchase surfaces its own input VAT without changing inputVat.gross, capital or net', function () {
+    $domain = 'vat-summary-fixed-asset-line.tenant-test';
+    $tenant = provisionVatSummaryTestTenant($domain);
+
+    $tenant->run(function () {
+        vatSummaryTestOpenFiscalYear();
+        $admin = vatSummaryTestAdmin();
+        $supplier = Supplier::factory()->create();
+
+        $ordinaryItem = Item::factory()->create(['is_vatable' => true, 'is_stockable' => false]);
+        $fixedAssetsGroup = AccountGroup::where('name', 'Fixed Assets')->firstOrFail();
+        $assetAccount = $fixedAssetsGroup->accounts()->create(['name' => 'Office Chair Asset']);
+        $assetItem = Item::factory()->create(['is_vatable' => true, 'is_stockable' => false, 'account_id' => $assetAccount->id]);
+
+        // 100 taxable => 13 VAT (ordinary) + 200 taxable => 26 VAT (asset
+        // line) = 300 taxable, 39 VAT total, same 2026-09-11 audit as T15-3.
+        Purchase::post(
+            ['supplier_id' => $supplier->id, 'date' => '2026-06-01', 'payment_mode' => 'cash'],
+            [
+                ['item_id' => $ordinaryItem->id, 'quantity' => 1, 'rate' => 100, 'discount' => 0],
+                ['item_id' => $assetItem->id, 'quantity' => 1, 'rate' => 200, 'discount' => 0],
+            ],
+            $admin,
+        );
+    });
+
+    loginVatSummaryTestUser($domain);
+
+    $this->get("http://{$domain}/reports/vat-summary?from=2026-06-01&to=2026-06-30")
+        ->assertOk()
+        ->assertInertia(fn ($page) => $page
+            // The new, purely informational breakdown.
+            ->where('inputVat.fixedAssetVat', '26.00')
+            // Untouched: gross still carries the WHOLE purchase's VAT, capital
+            // stays 0 (this is not a CapitalPurchase document), and net/the
+            // ledger reconciliation still tie out exactly as before.
+            ->where('inputVat.gross', '39.00')
+            ->where('inputVat.capital', '0.00')
+            ->where('inputVat.net', '39.00')
+            ->where('netVatPayable', '-39.00')
             ->where('reconciliation.difference', '0.00')
         );
 
