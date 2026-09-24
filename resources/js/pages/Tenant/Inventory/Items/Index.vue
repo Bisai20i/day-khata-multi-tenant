@@ -1,5 +1,5 @@
 <script setup>
-import { computed, h, ref, watch } from 'vue';
+import { h, ref, watch } from 'vue';
 import { router, useForm, usePage } from '@inertiajs/vue3';
 import AppLayout from '@/layouts/AppLayout.vue';
 import { useLayoutChrome } from '@/composables/useLayoutChrome';
@@ -8,12 +8,11 @@ import Card from '@/components/ui/Card.vue';
 import Button from '@/components/ui/Button.vue';
 import Badge from '@/components/ui/Badge.vue';
 import DataTable from '@/components/ui/DataTable.vue';
-import Modal from '@/components/ui/Modal.vue';
-import Input from '@/components/ui/Input.vue';
-import Select from '@/components/ui/Select.vue';
-import Combobox from '@/components/ui/Combobox.vue';
-import NepaliDateInput from '@/components/ui/NepaliDateInput.vue';
 import RowActions from '@/components/ui/RowActions.vue';
+import ItemsIndexFormModal from '@/components/inventory/ItemsIndexFormModal.vue';
+import ItemsIndexImportModal from '@/components/inventory/ItemsIndexImportModal.vue';
+import ItemsIndexUnitsModal from '@/components/inventory/ItemsIndexUnitsModal.vue';
+import ItemsIndexBarcodeModal from '@/components/inventory/ItemsIndexBarcodeModal.vue';
 import { useToast } from '@/composables/useToast';
 import { useConfirm } from '@/composables/useConfirm';
 import { formatQuantity, formatRate } from '@/lib/money.js';
@@ -69,189 +68,36 @@ watch(
     { immediate: true },
 );
 
-const categoryOptions = computed(() => props.categories.map((category) => ({ value: category.id, label: category.name })));
 
-const brandOptions = computed(() => [
-    { value: '', label: 'None' },
-    ...props.brands.map((brand) => ({ value: brand.id, label: brand.name })),
-]);
+const formModal = ref(null);
+const importModal = ref(null);
+const unitsModal = ref(null);
+const barcodeModal = ref(null);
 
-const postingAccountOptions = computed(() => [
-    { value: '', label: 'Default (Purchases Account)' },
-    ...props.postingAccounts.map((account) => ({ value: account.id, label: account.label })),
-]);
+function openCreate() {
+    formModal.value.openCreate();
+}
+
+function openEdit(item) {
+    formModal.value.openEdit(item);
+}
+
+function openImport() {
+    importModal.value.openImport();
+}
+
+function openUnits(item) {
+    unitsModal.value.openUnits(item);
+}
+
+function openBarcodeModal(item) {
+    barcodeModal.value.openBarcodeModal(item);
+}
 
 // "0.0000" when the item has never moved. Kept as a string all the way to
 // the formatter: this is a quantity, so it never goes through Number().
 function stockOnHand(item) {
     return props.stockByItem[item.id] ?? '0.0000';
-}
-
-function hasStock(item) {
-    const onHand = stockOnHand(item);
-    return onHand !== '0.0000' && onHand !== '0';
-}
-
-const showModal = ref(false);
-const editing = ref(null);
-
-const importModalOpen = ref(false);
-const importForm = useForm({ file: null });
-const importResult = ref(null);
-
-// Same flash-watch reasoning as flash.status above: the import submit
-// redirects back to this same route + component instead of navigating away.
-watch(
-    () => page.props.flash?.importResult,
-    (result) => {
-        if (result) importResult.value = result;
-    },
-);
-
-function openImport() {
-    importForm.reset();
-    importForm.clearErrors();
-    importResult.value = null;
-    importModalOpen.value = true;
-}
-
-function closeImportModal() {
-    importModalOpen.value = false;
-    importForm.reset();
-    importForm.clearErrors();
-    importResult.value = null;
-}
-
-function onImportModalOpenChange(value) {
-    if (value) {
-        importModalOpen.value = true;
-    } else {
-        closeImportModal();
-    }
-}
-
-function onImportFileChange(event) {
-    importForm.file = event.target.files[0] ?? null;
-}
-
-function submitImport() {
-    importForm.post('/items/import', { forceFormData: true });
-}
-
-const form = useForm({
-    item_category_id: '',
-    item_subcategory_id: '',
-    brand_id: '',
-    account_id: '',
-    name: '',
-    description: '',
-    unit: '',
-    hs_code: '',
-    barcode: '',
-    min_stock: '',
-    expiry_date: '',
-    purchase_rate: '',
-    sale_rate: '',
-    mrp: '',
-    image: null,
-    is_vatable: false,
-    is_stockable: true,
-    is_active: true,
-});
-
-form.transform((data) => ({
-    ...data,
-    item_subcategory_id: data.item_subcategory_id === '' ? null : data.item_subcategory_id,
-    brand_id: data.brand_id === '' ? null : data.brand_id,
-    account_id: data.account_id === '' ? null : data.account_id,
-    description: data.description === '' ? null : data.description,
-    hs_code: data.hs_code === '' ? null : data.hs_code,
-    barcode: data.barcode === '' ? null : data.barcode,
-    min_stock: data.min_stock === '' ? null : data.min_stock,
-    expiry_date: data.expiry_date === '' ? null : data.expiry_date,
-    purchase_rate: data.purchase_rate === '' ? null : data.purchase_rate,
-    sale_rate: data.sale_rate === '' ? null : data.sale_rate,
-    mrp: data.mrp === '' ? null : data.mrp,
-}));
-
-// Local-only preview for the image picker - shows the item's existing
-// image when editing, or a fresh blob preview once a new file is chosen.
-// Not part of `form` since the file input itself can't be pre-filled from
-// an existing image_path (browsers refuse to set <input type="file">
-// programmatically), so this is tracked separately.
-const imagePreviewUrl = ref('');
-
-function onImageChange(event) {
-    const file = event.target.files?.[0] ?? null;
-    form.image = file;
-    imagePreviewUrl.value = file ? URL.createObjectURL(file) : '';
-}
-
-const subcategoryOptions = computed(() => {
-    const filtered = props.subcategories.filter((subcategory) => subcategory.item_category_id === form.item_category_id);
-    return [{ value: '', label: 'None' }, ...filtered.map((subcategory) => ({ value: subcategory.id, label: subcategory.name }))];
-});
-
-function onCategoryChange(value) {
-    form.item_category_id = value;
-    form.item_subcategory_id = '';
-}
-
-function openCreate() {
-    editing.value = null;
-    form.reset();
-    form.clearErrors();
-    showModal.value = true;
-}
-
-function openEdit(item) {
-    editing.value = item;
-    form.clearErrors();
-    form.item_category_id = item.item_category_id;
-    form.item_subcategory_id = item.item_subcategory_id ?? '';
-    form.brand_id = item.brand_id ?? '';
-    form.account_id = item.account_id ?? '';
-    form.name = item.name;
-    form.description = item.description ?? '';
-    form.unit = item.unit;
-    form.hs_code = item.hs_code ?? '';
-    form.barcode = item.barcode ?? '';
-    form.min_stock = item.min_stock ?? '';
-    // item.expiry_date comes back from the server as a full ISO datetime
-    // string (Eloquent's default 'date'-cast serialization), not the plain
-    // "YYYY-MM-DD" NepaliDateInput/adToBs() require - truncate to the date
-    // portion so editing an item with an existing expiry date doesn't
-    // silently blank out the BS fields.
-    form.expiry_date = item.expiry_date ? item.expiry_date.slice(0, 10) : '';
-    form.purchase_rate = item.purchase_rate ?? '';
-    form.sale_rate = item.sale_rate ?? '';
-    form.mrp = item.mrp ?? '';
-    form.image = null;
-    imagePreviewUrl.value = item.image_path ? `/storage/${item.image_path}` : '';
-    form.is_vatable = !!item.is_vatable;
-    form.is_stockable = !!item.is_stockable;
-    form.is_active = !!item.is_active;
-    showModal.value = true;
-}
-
-function closeModal() {
-    showModal.value = false;
-    editing.value = null;
-    form.reset();
-    form.clearErrors();
-    imagePreviewUrl.value = '';
-}
-
-function onModalOpenChange(value) {
-    if (!value) closeModal();
-}
-
-function submit() {
-    if (editing.value) {
-        form.put(`/items/${editing.value.id}`, { onSuccess: closeModal });
-    } else {
-        form.post('/items', { onSuccess: closeModal });
-    }
 }
 
 async function destroy(item) {
@@ -264,126 +110,6 @@ async function destroy(item) {
             if (errors.item) toast({ message: errors.item, variant: 'danger' });
         },
     });
-}
-
-// --- Alternate units ("Box" = 12 "pcs", etc.) --------------------------
-// Managed inline per item rather than a separate page, since an item's
-// units only ever matter in the context of that one item (see ItemUnit's
-// docblock). unitsItemId (not the item object itself) is what's tracked,
-// so the list re-renders from the live `items` prop after every create/
-// update/delete redirect instead of going stale.
-const unitsModalOpen = ref(false);
-const unitsItemId = ref(null);
-const unitsItem = computed(() => props.items.find((item) => item.id === unitsItemId.value) ?? null);
-
-const editingUnit = ref(null);
-const unitForm = useForm({
-    name: '',
-    conversion_factor: '',
-    purchase_rate: '',
-    sale_rate: '',
-    mrp: '',
-    barcode: '',
-    is_active: true,
-});
-
-unitForm.transform((data) => ({
-    ...data,
-    purchase_rate: data.purchase_rate === '' ? null : data.purchase_rate,
-    sale_rate: data.sale_rate === '' ? null : data.sale_rate,
-    mrp: data.mrp === '' ? null : data.mrp,
-    barcode: data.barcode === '' ? null : data.barcode,
-}));
-
-function resetUnitForm() {
-    editingUnit.value = null;
-    unitForm.reset();
-    unitForm.clearErrors();
-}
-
-function openUnits(item) {
-    unitsItemId.value = item.id;
-    resetUnitForm();
-    unitsModalOpen.value = true;
-}
-
-function closeUnitsModal() {
-    unitsModalOpen.value = false;
-    unitsItemId.value = null;
-    resetUnitForm();
-}
-
-function onUnitsModalOpenChange(value) {
-    if (!value) closeUnitsModal();
-}
-
-function editUnit(unit) {
-    editingUnit.value = unit;
-    unitForm.clearErrors();
-    unitForm.name = unit.name;
-    unitForm.conversion_factor = unit.conversion_factor;
-    unitForm.purchase_rate = unit.purchase_rate ?? '';
-    unitForm.sale_rate = unit.sale_rate ?? '';
-    unitForm.mrp = unit.mrp ?? '';
-    unitForm.barcode = unit.barcode ?? '';
-    unitForm.is_active = !!unit.is_active;
-}
-
-function submitUnit() {
-    if (!unitsItem.value) return;
-
-    if (editingUnit.value) {
-        unitForm.put(`/items/${unitsItem.value.id}/units/${editingUnit.value.id}`, { onSuccess: resetUnitForm });
-    } else {
-        unitForm.post(`/items/${unitsItem.value.id}/units`, { onSuccess: resetUnitForm });
-    }
-}
-
-async function destroyUnit(unit) {
-    if (!unitsItem.value) return;
-    if (!(await confirm({ message: `Delete the "${unit.name}" unit?`, tone: 'danger', confirmLabel: 'Delete unit' }))) return;
-    router.delete(`/items/${unitsItem.value.id}/units/${unit.id}`, {
-        onSuccess: () => {
-            if (editingUnit.value?.id === unit.id) resetUnitForm();
-        },
-    });
-}
-
-// --- Barcode label printing ---------------------------------------------
-// A small "how many labels" prompt before opening the print sheet in a new
-// tab - mirrors how the Sale/Purchase Index pages open their print PDF via
-// a plain link, except this one needs a quantity first, so a tiny modal
-// stands in for the plain anchor. See BarcodeLabelController's docblock for
-// why an item with no barcode still gets a (barcode-less) label rather than
-// being blocked entirely.
-const barcodeModalOpen = ref(false);
-const barcodeItem = ref(null);
-const barcodeQuantity = ref(1);
-
-function openBarcodeModal(item) {
-    barcodeItem.value = item;
-    barcodeQuantity.value = 1;
-    barcodeModalOpen.value = true;
-}
-
-function closeBarcodeModal() {
-    barcodeModalOpen.value = false;
-    barcodeItem.value = null;
-}
-
-function onBarcodeModalOpenChange(value) {
-    if (!value) closeBarcodeModal();
-}
-
-function printBarcodeLabels() {
-    if (!barcodeItem.value) return;
-
-    const params = new URLSearchParams();
-    params.set('items[0][item_id]', barcodeItem.value.id);
-    params.set('items[0][quantity]', String(barcodeQuantity.value));
-
-    window.open(`/items/barcode-labels/print?${params.toString()}`, '_blank', 'noopener');
-    closeBarcodeModal();
 }
 
 // Client-side only - mirrors Item::scopeExpired()/scopeExpiringSoon()'s
@@ -615,390 +341,16 @@ const columns = [
             <DataTable :columns="columns" :data="items" :page-size="10" empty-message="No items yet. Use 'New item' above to add one, or Bulk import (CSV)." />
         </Card>
 
-        <Modal :open="showModal" :title="editing ? 'Edit item' : 'New item'" @update:open="onModalOpenChange">
-            <form id="item-form" class="flex flex-col gap-4" @submit.prevent="submit">
-                <div class="grid grid-cols-2 gap-4">
-                    <div>
-                        <label for="item_category_id" class="mb-1 block text-sm font-semibold text-text-base">Category <span class="text-danger">*</span></label>
-                        <Select
-                            id="item_category_id"
-                            :model-value="form.item_category_id"
-                            :options="categoryOptions"
-                            placeholder="Select category"
-                            @update:model-value="onCategoryChange"
-                        />
-                        <p v-if="form.errors.item_category_id" class="mt-1 text-sm text-danger">{{ form.errors.item_category_id }}</p>
-                    </div>
-
-                    <div>
-                        <label for="item_subcategory_id" class="mb-1 block text-sm font-semibold text-text-base">Subcategory</label>
-                        <Select
-                            id="item_subcategory_id"
-                            v-model="form.item_subcategory_id"
-                            :options="subcategoryOptions"
-                            placeholder="Select subcategory"
-                        />
-                        <p v-if="form.errors.item_subcategory_id" class="mt-1 text-sm text-danger">{{ form.errors.item_subcategory_id }}</p>
-                    </div>
-                </div>
-
-                <div>
-                    <label for="name" class="mb-1 block text-sm font-semibold text-text-base">Name <span class="text-danger">*</span></label>
-                    <Input id="name" v-model="form.name" type="text" placeholder="Enter item name" required />
-                    <p v-if="form.errors.name" class="mt-1 text-sm text-danger">{{ form.errors.name }}</p>
-                </div>
-
-                <div>
-                    <label for="description" class="mb-1 block text-sm font-semibold text-text-base">Description</label>
-                    <textarea
-                        id="description"
-                        v-model="form.description"
-                        rows="3"
-                        placeholder="Optional notes"
-                        class="w-full border-[1.5px] border-border bg-bg-subtle px-3 py-2 text-[13px] text-text-base transition-colors duration-150 outline-none placeholder:text-text-faint focus:border-primary focus:bg-white focus:[box-shadow:0_0_0_3px_var(--color-primary-focus-ring)]"
-                    ></textarea>
-                    <p v-if="form.errors.description" class="mt-1 text-sm text-danger">{{ form.errors.description }}</p>
-                </div>
-
-                <div class="grid grid-cols-2 gap-4">
-                    <div>
-                        <label for="unit" class="mb-1 block text-sm font-semibold text-text-base">Unit <span class="text-danger">*</span></label>
-                        <Input id="unit" v-model="form.unit" type="text" placeholder="pcs" required />
-                        <p class="mt-1 text-xs text-text-faint">Base unit stock is counted in, e.g. pcs, kg, litre. Add bigger units (box, carton) later with "Units".</p>
-                        <p v-if="form.errors.unit" class="mt-1 text-sm text-danger">{{ form.errors.unit }}</p>
-                    </div>
-
-                    <div>
-                        <label for="hs_code" class="mb-1 block text-sm font-semibold text-text-base">HS code</label>
-                        <Input id="hs_code" v-model="form.hs_code" type="text" placeholder="e.g. 8471.30" />
-                        <p v-if="form.errors.hs_code" class="mt-1 text-sm text-danger">{{ form.errors.hs_code }}</p>
-                    </div>
-                </div>
-
-                <div class="grid grid-cols-2 gap-4">
-                    <div>
-                        <label for="barcode" class="mb-1 block text-sm font-semibold text-text-base">Barcode</label>
-                        <Input id="barcode" v-model="form.barcode" type="text" placeholder="Scan or type a barcode" />
-                        <p v-if="form.errors.barcode" class="mt-1 text-sm text-danger">{{ form.errors.barcode }}</p>
-                    </div>
-
-                    <div>
-                        <label for="brand_id" class="mb-1 block text-sm font-semibold text-text-base">Brand</label>
-                        <Combobox
-                            id="brand_id"
-                            :model-value="form.brand_id"
-                            :options="brandOptions"
-                            placeholder="Select brand"
-                            @update:model-value="(v) => (form.brand_id = v)"
-                        />
-                        <p v-if="form.errors.brand_id" class="mt-1 text-sm text-danger">{{ form.errors.brand_id }}</p>
-                    </div>
-                </div>
-
-                <div>
-                    <label for="account_id" class="mb-1 block text-sm font-semibold text-text-base">Posting account</label>
-                    <Combobox
-                        id="account_id"
-                        :model-value="form.account_id"
-                        :options="postingAccountOptions"
-                        placeholder="Default (Purchases Account)"
-                        @update:model-value="(v) => (form.account_id = v)"
-                    />
-                    <p class="mt-1 text-xs text-text-faint">
-                        Where buying this item is posted in the ledger. Leave it on the default for ordinary stock.
-                        Pick an expense account for a service item, or a fixed asset account for a capital item.
-                    </p>
-                    <p v-if="form.errors.account_id" class="mt-1 text-sm text-danger">{{ form.errors.account_id }}</p>
-                </div>
-
-                <div class="grid grid-cols-2 gap-4">
-                    <div>
-                        <label for="min_stock" class="mb-1 block text-sm font-semibold text-text-base">Reorder level (minimum stock)</label>
-                        <Input id="min_stock" v-model="form.min_stock" type="number" step="0.01" placeholder="e.g. 10" class="max-w-[160px]" />
-                        <p class="mt-1 text-xs text-text-faint">Reorder level: the item is flagged "Low stock" when quantity falls to this or below.</p>
-                        <p v-if="form.errors.min_stock" class="mt-1 text-sm text-danger">{{ form.errors.min_stock }}</p>
-                    </div>
-
-                    <div>
-                        <label class="mb-1 block text-sm font-semibold text-text-base">Expiry date</label>
-                        <NepaliDateInput v-model="form.expiry_date" />
-                        <p v-if="form.errors.expiry_date" class="mt-1 text-sm text-danger">{{ form.errors.expiry_date }}</p>
-                    </div>
-                </div>
-
-                <div class="grid grid-cols-2 gap-4">
-                    <div>
-                        <label for="purchase_rate" class="mb-1 block text-sm font-semibold text-text-base">Purchase rate</label>
-                        <Input id="purchase_rate" v-model="form.purchase_rate" type="number" step="0.01" min="0" placeholder="0.00" />
-                        <p v-if="form.errors.purchase_rate" class="mt-1 text-sm text-danger">{{ form.errors.purchase_rate }}</p>
-                    </div>
-
-                    <div>
-                        <label for="sale_rate" class="mb-1 block text-sm font-semibold text-text-base">Sale rate</label>
-                        <Input id="sale_rate" v-model="form.sale_rate" type="number" step="0.01" min="0" placeholder="0.00" />
-                        <p v-if="form.errors.sale_rate" class="mt-1 text-sm text-danger">{{ form.errors.sale_rate }}</p>
-                    </div>
-
-                    <div>
-                        <label for="mrp" class="mb-1 block text-sm font-semibold text-text-base">MRP (base unit)</label>
-                        <Input id="mrp" v-model="form.mrp" type="number" step="0.01" min="0" placeholder="Optional" />
-                        <p v-if="form.errors.mrp" class="mt-1 text-sm text-danger">{{ form.errors.mrp }}</p>
-                    </div>
-                </div>
-
-                <div>
-                    <label for="image" class="mb-1 block text-sm font-semibold text-text-base">Item image</label>
-                    <div class="flex items-center gap-3">
-                        <img
-                            v-if="imagePreviewUrl"
-                            :src="imagePreviewUrl"
-                            alt="Item image preview"
-                            class="h-16 w-16 border-[1.5px] border-border object-cover"
-                        />
-                        <input
-                            id="image"
-                            type="file"
-                            accept="image/*"
-                            class="w-full border-[1.5px] border-border bg-bg-subtle px-3 py-2 text-[13px] text-text-base transition-colors duration-150 outline-none file:mr-3 file:border-0 file:bg-transparent file:text-[13px] file:font-semibold file:text-primary focus:border-primary focus:bg-white focus:[box-shadow:0_0_0_3px_var(--color-primary-focus-ring)]"
-                            @change="onImageChange"
-                        />
-                    </div>
-                    <p class="mt-1 text-xs text-text-faint">JPEG, PNG, or WebP up to 2MB.</p>
-                    <p v-if="form.errors.image" class="mt-1 text-sm text-danger">{{ form.errors.image }}</p>
-                </div>
-
-                <div class="flex flex-wrap items-center gap-4">
-                    <div class="flex items-center gap-2">
-                        <input id="is_vatable" v-model="form.is_vatable" type="checkbox" class="size-4 border-[1.5px] border-border" />
-                        <label for="is_vatable" class="text-sm font-semibold text-text-base">Vatable</label>
-                    </div>
-
-                    <div class="flex items-center gap-2">
-                        <input id="is_stockable" v-model="form.is_stockable" type="checkbox" class="size-4 border-[1.5px] border-border" />
-                        <label for="is_stockable" class="text-sm font-semibold text-text-base">Stockable</label>
-                    </div>
-
-                    <div class="flex items-center gap-2">
-                        <input id="is_active" v-model="form.is_active" type="checkbox" class="size-4 border-[1.5px] border-border" />
-                        <label for="is_active" class="text-sm font-semibold text-text-base">Active</label>
-                    </div>
-                </div>
-
-                <p v-if="editing && hasStock(editing) && !form.is_active" class="border-[1.5px] border-warning-text bg-warning-bg px-3 py-2 text-sm text-warning-text">
-                    This item still has {{ formatQuantity(stockOnHand(editing)) }} {{ editing.unit }} in stock. An inactive item
-                    disappears from every picker, so that stock could never be sold, adjusted or transferred out. Clear the stock
-                    first.
-                </p>
-                <p v-if="form.errors.is_active" class="text-sm text-danger">{{ form.errors.is_active }}</p>
-            </form>
-
-            <template #footer>
-                <Button variant="secondary" tone="purple" type="button" @click="closeModal">Cancel</Button>
-                <Button variant="primary" tone="purple" type="submit" form="item-form" :disabled="form.processing">
-                    {{ form.processing ? 'Saving...' : editing ? 'Save item' : 'Create item' }}
-                </Button>
-            </template>
-        </Modal>
-
-        <Modal :open="importModalOpen" title="Bulk import items" @update:open="onImportModalOpenChange">
-            <div v-if="!importResult" class="flex flex-col gap-4">
-                <p class="text-[13px] text-text-muted">
-                    Download the template, fill in one item per row (category/subcategory are matched by name),
-                    then upload the completed CSV file. Rows with a missing name/unit, an unknown category,
-                    subcategory or posting account, or a barcode already in use (or repeated in the file) are
-                    skipped and reported after import. The optional <strong>posting_account</strong> column takes
-                    an expense or fixed asset account code such as EXE8.
-                </p>
-                <a
-                    href="/items/import/template"
-                    class="inline-flex w-fit items-center gap-1.5 text-[13px] font-bold text-primary hover:underline"
-                >
-                    Download CSV template
-                </a>
-                <div>
-                    <label for="item-import-file" class="mb-1 block text-sm font-semibold text-text-base">
-                        CSV file <span class="text-danger">*</span>
-                    </label>
-                    <input
-                        id="item-import-file"
-                        type="file"
-                        accept=".csv,text/csv"
-                        class="w-full border-[1.5px] border-border bg-bg-subtle px-3 py-2 text-[13px] text-text-base outline-none file:mr-3 file:cursor-pointer file:border-0 file:bg-primary-tint file:px-3 file:py-1.5 file:text-[12px] file:font-bold file:text-primary"
-                        @change="onImportFileChange"
-                    />
-                    <p v-if="importForm.errors.file" class="mt-1 text-sm text-danger">{{ importForm.errors.file }}</p>
-                </div>
-            </div>
-
-            <div v-else class="flex flex-col gap-4">
-                <p class="text-[13px] font-semibold text-text-base">
-                    Imported {{ importResult.imported }} of {{ importResult.imported + importResult.skipped.length }} row(s).
-                </p>
-                <div v-if="importResult.skipped.length" class="max-h-64 overflow-auto border-[1.5px] border-border">
-                    <table class="w-full text-left text-[12px]">
-                        <thead class="bg-bg-subtle">
-                            <tr>
-                                <th class="px-2 py-1.5">Row</th>
-                                <th class="px-2 py-1.5">Name</th>
-                                <th class="px-2 py-1.5">Reason</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            <tr v-for="item in importResult.skipped" :key="item.row" class="border-t border-border">
-                                <td class="px-2 py-1.5">{{ item.row }}</td>
-                                <td class="px-2 py-1.5">{{ item.name || '-' }}</td>
-                                <td class="px-2 py-1.5">{{ item.reason }}</td>
-                            </tr>
-                        </tbody>
-                    </table>
-                </div>
-            </div>
-
-            <template #footer>
-                <template v-if="!importResult">
-                    <Button variant="secondary" tone="purple" type="button" @click="closeImportModal">Cancel</Button>
-                    <Button
-                        variant="primary"
-                        tone="purple"
-                        type="button"
-                        :loading="importForm.processing"
-                        :disabled="importForm.processing || !importForm.file"
-                        @click="submitImport"
-                    >
-                        Import
-                    </Button>
-                </template>
-                <template v-else>
-                    <Button variant="primary" tone="purple" type="button" @click="closeImportModal">Done</Button>
-                </template>
-            </template>
-        </Modal>
-
-        <Modal
-            :open="unitsModalOpen"
-            :title="unitsItem ? `Units - ${unitsItem.name}` : 'Units'"
-            @update:open="onUnitsModalOpenChange"
-        >
-            <div v-if="unitsItem" class="flex flex-col gap-4">
-                <p class="text-[13px] text-text-muted">
-                    Alternate units this item can be bought/sold in, alongside its base unit
-                    (<strong>{{ unitsItem.unit }}</strong>). E.g. a "Box" with a conversion of 12 means
-                    selling 1 Box moves 12 {{ unitsItem.unit }} out of stock. The base unit is always the
-                    smallest one, so a conversion is never below 1: to sell in halves, make the half the base
-                    unit instead.
-                </p>
-
-                <div v-if="unitsItem.units?.length" class="border-[1.5px] border-border">
-                    <table class="w-full text-left text-[12px]">
-                        <thead class="bg-bg-subtle">
-                            <tr>
-                                <th class="px-2 py-1.5">Name</th>
-                                <th class="px-2 py-1.5">Equals</th>
-                                <th class="px-2 py-1.5">Purchase rate</th>
-                                <th class="px-2 py-1.5">Sale rate</th>
-                                <th class="px-2 py-1.5">MRP</th>
-                                <th class="px-2 py-1.5">Barcode</th>
-                                <th class="px-2 py-1.5">Active</th>
-                                <th class="px-2 py-1.5"></th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            <tr v-for="unit in unitsItem.units" :key="unit.id" class="border-t border-border">
-                                <td class="px-2 py-1.5 font-semibold text-text-strong">{{ unit.name }}</td>
-                                <td class="px-2 py-1.5">{{ formatQuantity(unit.conversion_factor) }} {{ unitsItem.unit }}</td>
-                                <td class="px-2 py-1.5">{{ unit.purchase_rate != null ? formatRate(unit.purchase_rate) : '-' }}</td>
-                                <td class="px-2 py-1.5">{{ unit.sale_rate != null ? formatRate(unit.sale_rate) : '-' }}</td>
-                                <td class="px-2 py-1.5">{{ unit.mrp != null ? formatRate(unit.mrp) : '-' }}</td>
-                                <td class="px-2 py-1.5">{{ unit.barcode ?? '-' }}</td>
-                                <td class="px-2 py-1.5">
-                                    <Badge :variant="unit.is_active ? 'success' : 'neutral'" pill>
-                                        {{ unit.is_active ? 'Active' : 'Inactive' }}
-                                    </Badge>
-                                </td>
-                                <td class="px-2 py-1.5">
-                                    <RowActions @edit="editUnit(unit)" @delete="destroyUnit(unit)" />
-                                </td>
-                            </tr>
-                        </tbody>
-                    </table>
-                </div>
-                <p v-else class="text-[13px] text-text-faint">No alternate units yet.</p>
-
-                <form id="item-unit-form" class="grid grid-cols-2 gap-4 border-t-[1.5px] border-border pt-4" @submit.prevent="submitUnit">
-                    <div>
-                        <label for="unit_name" class="mb-1 block text-sm font-semibold text-text-base">Name <span class="text-danger">*</span></label>
-                        <Input id="unit_name" v-model="unitForm.name" type="text" placeholder="e.g. Box" required />
-                        <p v-if="unitForm.errors.name" class="mt-1 text-sm text-danger">{{ unitForm.errors.name }}</p>
-                    </div>
-                    <div>
-                        <label for="unit_conversion_factor" class="mb-1 block text-sm font-semibold text-text-base">
-                            Equals (in {{ unitsItem.unit }}) <span class="text-danger">*</span>
-                        </label>
-                        <Input id="unit_conversion_factor" v-model="unitForm.conversion_factor" type="number" min="1" step="0.0001" placeholder="e.g. 12" required />
-                        <p v-if="unitForm.errors.conversion_factor" class="mt-1 text-sm text-danger">{{ unitForm.errors.conversion_factor }}</p>
-                    </div>
-                    <div>
-                        <label for="unit_purchase_rate" class="mb-1 block text-sm font-semibold text-text-base">Purchase rate</label>
-                        <Input id="unit_purchase_rate" v-model="unitForm.purchase_rate" type="number" step="0.01" min="0" placeholder="Defaults to item's rate" />
-                        <p v-if="unitForm.errors.purchase_rate" class="mt-1 text-sm text-danger">{{ unitForm.errors.purchase_rate }}</p>
-                    </div>
-                    <div>
-                        <label for="unit_sale_rate" class="mb-1 block text-sm font-semibold text-text-base">Sale rate</label>
-                        <Input id="unit_sale_rate" v-model="unitForm.sale_rate" type="number" step="0.01" min="0" placeholder="Defaults to item's rate" />
-                        <p v-if="unitForm.errors.sale_rate" class="mt-1 text-sm text-danger">{{ unitForm.errors.sale_rate }}</p>
-                    </div>
-                    <div>
-                        <label for="unit_mrp" class="mb-1 block text-sm font-semibold text-text-base">MRP</label>
-                        <Input id="unit_mrp" v-model="unitForm.mrp" type="number" step="0.01" min="0" placeholder="Optional" />
-                        <p v-if="unitForm.errors.mrp" class="mt-1 text-sm text-danger">{{ unitForm.errors.mrp }}</p>
-                    </div>
-                    <div>
-                        <label for="unit_barcode" class="mb-1 block text-sm font-semibold text-text-base">Barcode</label>
-                        <Input id="unit_barcode" v-model="unitForm.barcode" type="text" placeholder="Scan or type a barcode for this unit" />
-                        <p v-if="unitForm.errors.barcode" class="mt-1 text-sm text-danger">{{ unitForm.errors.barcode }}</p>
-                    </div>
-                    <div class="flex items-end gap-2 pb-2.5">
-                        <input id="unit_is_active" v-model="unitForm.is_active" type="checkbox" class="size-4 border-[1.5px] border-border" />
-                        <label for="unit_is_active" class="text-sm font-semibold text-text-base">Active</label>
-                    </div>
-                </form>
-            </div>
-
-            <template #footer>
-                <Button v-if="editingUnit" variant="secondary" tone="purple" type="button" @click="resetUnitForm">Cancel edit</Button>
-                <Button variant="secondary" tone="purple" type="button" @click="closeUnitsModal">Close</Button>
-                <Button variant="primary" tone="purple" type="submit" form="item-unit-form" :disabled="unitForm.processing">
-                    {{ editingUnit ? 'Save unit' : 'Add unit' }}
-                </Button>
-            </template>
-        </Modal>
-
-        <Modal
-            :open="barcodeModalOpen"
-            :title="barcodeItem ? `Print Barcode - ${barcodeItem.name}` : 'Print Barcode'"
-            size="compact"
-            @update:open="onBarcodeModalOpenChange"
-        >
-            <div v-if="barcodeItem" class="flex flex-col gap-4">
-                <p v-if="barcodeItem.barcode" class="text-[13px] text-text-muted">
-                    Prints a sheet of CODE-128 labels for <strong>{{ barcodeItem.name }}</strong>
-                    (barcode <strong>{{ barcodeItem.barcode }}</strong>).
-                </p>
-                <p v-else class="text-[13px] text-text-muted">
-                    <strong>{{ barcodeItem.name }}</strong> has no barcode set - the printed label will show its
-                    name/price only, without a scannable code. Set a barcode on this item first if you need one.
-                </p>
-
-                <div>
-                    <label for="barcode_quantity" class="mb-1 block text-sm font-semibold text-text-base">Quantity</label>
-                    <Input id="barcode_quantity" v-model.number="barcodeQuantity" type="number" min="1" max="500" class="max-w-[160px]" />
-                </div>
-            </div>
-
-            <template #footer>
-                <Button variant="secondary" tone="purple" type="button" @click="closeBarcodeModal">Cancel</Button>
-                <Button variant="primary" tone="purple" type="button" @click="printBarcodeLabels">Print</Button>
-            </template>
-        </Modal>
+        <ItemsIndexFormModal
+            ref="formModal"
+            :categories="categories"
+            :subcategories="subcategories"
+            :brands="brands"
+            :stock-by-item="stockByItem"
+            :posting-accounts="postingAccounts"
+        />
+        <ItemsIndexImportModal ref="importModal" />
+        <ItemsIndexUnitsModal ref="unitsModal" :items="items" />
+        <ItemsIndexBarcodeModal ref="barcodeModal" />
     </div>
 </template>
