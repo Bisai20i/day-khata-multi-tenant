@@ -3,6 +3,7 @@ import { h, ref, watch } from 'vue';
 import { router, useForm, usePage } from '@inertiajs/vue3';
 import AppLayout from '@/layouts/AppLayout.vue';
 import { useLayoutChrome } from '@/composables/useLayoutChrome';
+import PageHeader from '@/components/ui/PageHeader.vue';
 import Card from '@/components/ui/Card.vue';
 import Button from '@/components/ui/Button.vue';
 import Badge from '@/components/ui/Badge.vue';
@@ -99,7 +100,7 @@ function submit() {
 }
 
 async function destroy(brand) {
-    if (!(await confirm({ message: 'Delete this brand?', tone: 'danger', confirmLabel: 'Delete' }))) return;
+    if (!(await confirm({ message: `Delete brand "${brand.name}"? Items using it will lose their brand. This cannot be undone.`, tone: 'danger', confirmLabel: 'Delete brand' }))) return;
     router.delete(`/brands/${brand.id}`);
 }
 
@@ -142,10 +143,9 @@ const columns = [
 
 <template>
     <div>
-        <div class="mb-4 flex items-center justify-between">
-            <h2 class="text-base font-bold text-text-strong">Brands</h2>
+        <PageHeader title="Brands" description="Brands: manufacturers or labels your items belong to, used to group and filter items.">
             <Button variant="primary" tone="purple" @click="openCreate">New brand</Button>
-        </div>
+        </PageHeader>
 
         <Card variant="panel">
             <DataTable :columns="columns" :data="brands" :page-size="10" />
@@ -188,6 +188,7 @@ const columns = [
                 <div class="flex items-center gap-2">
                     <input id="is_active" v-model="form.is_active" type="checkbox" class="size-4 border-[1.5px] border-border" />
                     <label for="is_active" class="text-sm font-semibold text-text-base">Active</label>
+                    <span class="text-xs text-text-faint">(inactive brands are hidden from item forms)</span>
                 </div>
             </form>
 
@@ -200,7 +201,7 @@ const columns = [
                     form="brand-form"
                     :disabled="form.processing"
                 >
-                    {{ editing ? 'Save changes' : 'Create brand' }}
+                    {{ form.processing ? 'Saving...' : editing ? 'Save brand' : 'Create brand' }}
                 </Button>
             </template>
         </Modal>

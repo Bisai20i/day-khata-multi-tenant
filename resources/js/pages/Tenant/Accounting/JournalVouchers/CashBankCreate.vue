@@ -23,7 +23,7 @@ const emit = defineEmits(['cancel', 'posted']);
 const accountOptions = computed(() =>
     props.accounts.map((account) => ({
         value: account.id,
-        label: account.code ? `${account.code} — ${account.name}` : account.name,
+        label: account.code ? `${account.code} - ${account.name}` : account.name,
     })),
 );
 
@@ -124,9 +124,14 @@ function submit() {
 
 <template>
     <Card variant="panel">
-        <div class="mb-4 flex items-center justify-between">
-            <h3 class="text-base font-bold text-text-strong">New cash/bank voucher</h3>
-            <Button variant="secondary" tone="purple" type="button" @click="emit('cancel')">Cancel</Button>
+        <div class="mb-4 flex items-start justify-between gap-3">
+            <div>
+                <h3 class="text-base font-bold text-text-strong">New cash/bank voucher</h3>
+                <p class="mt-1 text-[13px] text-text-muted">
+                    Record simple money in or out. Use a cash voucher when paid in cash, a bank voucher when it goes through a bank account, and Contra to move money between two cash/bank accounts.
+                </p>
+            </div>
+            <Button variant="secondary" tone="purple" type="button" @click="emit('cancel')">Back to vouchers</Button>
         </div>
 
         <p v-if="form.errors.lines" class="mb-4 border-[1.5px] border-danger bg-danger-bg px-3 py-2 text-sm text-danger">
@@ -136,8 +141,17 @@ function submit() {
         <form class="flex flex-col gap-4" @submit.prevent="submit">
             <div class="grid grid-cols-2 gap-4">
                 <div>
-                    <label class="mb-1 block text-sm font-semibold text-text-base">Voucher Type <span class="text-danger">*</span></label>
+                    <label class="mb-1 block text-sm font-semibold text-text-base">Voucher type <span class="text-danger">*</span></label>
                     <Select v-model="form.voucher_type" :options="voucherTypeOptions" />
+                    <p class="mt-1 text-xs text-text-muted">
+                        {{
+                            isContra
+                                ? 'Moves money from one cash/bank account to another.'
+                                : isReceipt
+                                  ? 'Money coming in, to ' + (isBank ? 'a bank account.' : 'cash in hand.')
+                                  : 'Money going out, from ' + (isBank ? 'a bank account.' : 'cash in hand.')
+                        }}
+                    </p>
                 </div>
                 <div>
                     <label class="mb-1 block text-sm font-semibold text-text-base">Date <span class="text-danger">*</span></label>
@@ -149,6 +163,7 @@ function submit() {
             <div>
                 <label class="mb-1 block text-sm font-semibold text-text-base">Narration <span class="text-danger">*</span></label>
                 <Input v-model="form.narration" type="text" placeholder="Describe this transaction" required />
+                <p class="mt-1 text-xs text-text-muted">A short note explaining what this voucher is for, shown in the ledger.</p>
                 <p v-if="form.errors.narration" class="mt-1 text-sm text-danger">{{ form.errors.narration }}</p>
             </div>
 
@@ -181,9 +196,9 @@ function submit() {
 
                 <div>
                     <div class="mb-2 grid grid-cols-[1fr_140px_1fr_28px] gap-2 text-[10px] font-bold tracking-[.8px] text-text-muted uppercase">
-                        <span>{{ otherAccountsLabel }}</span>
-                        <span>Amount</span>
-                        <span>Narration</span>
+                        <span>{{ otherAccountsLabel }} <span class="text-danger">*</span></span>
+                        <span>Amount <span class="text-danger">*</span></span>
+                        <span>Line note (optional)</span>
                         <span></span>
                     </div>
 
@@ -225,7 +240,7 @@ function submit() {
 
             <div class="flex items-center justify-end gap-2">
                 <Button variant="secondary" tone="purple" type="button" @click="emit('cancel')">Cancel</Button>
-                <Button variant="primary" tone="purple" type="submit" :disabled="form.processing || !canSubmit">
+                <Button variant="primary" tone="purple" type="submit" :loading="form.processing" :disabled="form.processing || !canSubmit">
                     Post voucher
                 </Button>
             </div>

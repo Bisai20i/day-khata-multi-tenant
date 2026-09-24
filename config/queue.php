@@ -33,7 +33,7 @@ return [
 
         'sync' => [
             'driver' => 'sync',
-            // Read by Stancl\Tenancy\Bootstrappers\QueueTenancyBootstrapper::getPayload() —
+            // Read by Stancl\Tenancy\Bootstrappers\QueueTenancyBootstrapper::getPayload() -
             // NOT config/tenancy.php, despite that being where you'd expect tenancy-related
             // settings to live (verified against vendor/stancl/tenancy's own stub config,
             // which has no `queue` section at all). Marks this connection exempt from having
@@ -43,7 +43,7 @@ return [
             // $tenant->run() around code that queues something) gets tagged, and then fails
             // with TenantCouldNotBeIdentifiedById once that tenant is gone (e.g. a prior test's
             // tenant rolled back) by the time the job is processed. There are currently no
-            // genuinely tenant-scoped queued jobs in this app — revisit if one is ever added.
+            // genuinely tenant-scoped queued jobs in this app - revisit if one is ever added.
             'central' => true,
         ],
 

@@ -201,6 +201,35 @@ test('the sales export streams an xlsx built from the filtered set', function ()
     $tenant->delete();
 });
 
+test('the sales export streams a csv when format=csv is requested', function () {
+    $domain = 'sale-export-csv.tenant-test';
+    $tenant = provisionSaleListExportTestTenant($domain);
+
+    $tenant->run(function () {
+        User::factory()->create(['email' => 'owner@example.com']);
+        FiscalYear::create(['name' => 'FY1', 'start_date' => '2026-01-01', 'end_date' => '2026-12-31', 'status' => FiscalYearStatus::Open]);
+        $admin = User::factory()->create();
+        $customer = Customer::factory()->create();
+        $item = Item::factory()->create(['is_vatable' => false, 'is_stockable' => false]);
+
+        Sale::post(
+            ['customer_id' => $customer->id, 'invoice_type' => 'full', 'date' => '2026-06-01', 'payment_mode' => 'credit'],
+            [['item_id' => $item->id, 'quantity' => 1, 'rate' => 100, 'discount' => 0]],
+            $admin,
+        );
+    });
+
+    loginSaleListExportTestUser($domain);
+
+    Excel::fake();
+
+    $this->get("http://{$domain}/sales/export?format=csv")->assertOk();
+
+    Excel::assertDownloaded('sales.csv', fn (SalesExport $export) => $export->collection()->count() === 2);
+
+    $tenant->delete();
+});
+
 test('save and print N copies renders one PDF and records one print log row per copy', function () {
     $domain = 'sale-print-copies.tenant-test';
     $tenant = provisionSaleListExportTestTenant($domain);

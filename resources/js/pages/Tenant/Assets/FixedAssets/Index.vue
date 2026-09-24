@@ -3,8 +3,10 @@ import { computed, h, ref, watch } from 'vue';
 import { useForm, usePage } from '@inertiajs/vue3';
 import AppLayout from '@/layouts/AppLayout.vue';
 import { useLayoutChrome } from '@/composables/useLayoutChrome';
+import PageHeader from '@/components/ui/PageHeader.vue';
 import Card from '@/components/ui/Card.vue';
 import Button from '@/components/ui/Button.vue';
+import Badge from '@/components/ui/Badge.vue';
 import Input from '@/components/ui/Input.vue';
 import Select from '@/components/ui/Select.vue';
 import Combobox from '@/components/ui/Combobox.vue';
@@ -57,7 +59,7 @@ const disposeForm = useForm({
 const accountOptions = computed(() =>
     props.accounts.map((account) => ({
         value: account.id,
-        label: account.code ? `${account.code} — ${account.name}` : account.name,
+        label: account.code ? `${account.code} - ${account.name}` : account.name,
     })),
 );
 
@@ -99,9 +101,9 @@ function submitDispose() {
 
 async function postDepreciation() {
     const confirmed = await confirm({
-        title: 'Post depreciation',
-        message: "Post this fiscal year's depreciation for every eligible asset?",
-        confirmLabel: 'Post',
+        title: 'Post depreciation?',
+        message: "This posts this fiscal year's depreciation to the books for every eligible asset. Each asset's accumulated depreciation and value will change.",
+        confirmLabel: 'Post depreciation',
     });
     if (!confirmed) {
         return;
@@ -112,7 +114,7 @@ async function postDepreciation() {
 const columns = [
     { accessorKey: 'asset_code', header: 'Code' },
     { accessorKey: 'asset_name', header: 'Name' },
-    { accessorKey: 'category', header: 'Pool' },
+    { accessorKey: 'category', header: 'Depreciation pool' },
     {
         id: 'method',
         header: 'Method',
@@ -127,13 +129,13 @@ const columns = [
     },
     {
         id: 'accumulated_depreciation',
-        header: 'Accum. Depr.',
+        header: 'Accumulated depreciation',
         numeric: true,
         cell: ({ row }) => formatMoney(row.original.accumulated_depreciation),
     },
     {
         id: 'wdv',
-        header: 'WDV',
+        header: 'Book value (WDV)',
         numeric: true,
         // wdv is appended by the FixedAsset model as an exact string, so the
         // browser never subtracts two money values itself.
@@ -143,7 +145,10 @@ const columns = [
         id: 'status',
         header: 'Status',
         numeric: false,
-        cell: ({ row }) => (row.original.status === 'disposed' ? 'Disposed' : 'Active'),
+        cell: ({ row }) =>
+            h(Badge, { variant: row.original.status === 'disposed' ? 'neutral' : 'success', pill: true }, () =>
+                row.original.status === 'disposed' ? 'Disposed' : 'Active',
+            ),
     },
     {
         id: 'actions',
@@ -156,8 +161,9 @@ const columns = [
                       tone: 'purple',
                       type: 'button',
                       onClick: () => openDispose(row.original),
+                      'aria-label': `Dispose ${row.original.asset_name}`,
                   }, () => 'Dispose')
-                : '—',
+                : '-',
     },
 ];
 </script>
@@ -169,17 +175,20 @@ const columns = [
         </template>
 
         <template v-else>
-            <div class="mb-4 flex items-center justify-between">
-                <h2 class="text-base font-bold text-text-strong">Fixed Assets</h2>
-                <div class="flex items-center gap-2">
-                    <Button v-if="isAdmin" variant="secondary" tone="purple" @click="postDepreciation">
-                        Post Depreciation
-                    </Button>
-                    <Button variant="primary" tone="purple" @click="showCreateForm = true">New asset</Button>
-                </div>
-            </div>
+            <PageHeader title="Fixed Assets" description="Long-lived assets and their depreciation.">
+                <Button v-if="isAdmin" variant="secondary" tone="purple" @click="postDepreciation">
+                    Post depreciation
+                </Button>
+                <Button variant="primary" tone="purple" @click="showCreateForm = true">New asset</Button>
+            </PageHeader>
 
-            <Card variant="panel">
+            <Card v-if="fixedAssets.length === 0" variant="panel">
+                <div class="px-1 py-8 text-center">
+                    <p class="text-sm text-text-muted">No fixed assets yet. Add equipment, vehicles or property to track their value and depreciation.</p>
+                    <Button class="mt-3" variant="primary" tone="purple" @click="showCreateForm = true">Add your first asset</Button>
+                </div>
+            </Card>
+            <Card v-else variant="panel">
                 <DataTable :columns="columns" :data="fixedAssets" :page-size="10" empty-message="No fixed assets yet" />
             </Card>
         </template>
@@ -202,6 +211,7 @@ const columns = [
                 <div>
                     <label class="mb-1 block text-sm font-semibold text-text-base">Proceeds</label>
                     <Input v-model="disposeForm.disposal_amount" type="number" min="0" step="0.01" placeholder="0.00" />
+                    <p class="mt-1 text-xs text-text-faint">Amount received from selling the asset. Leave blank if scrapped for nothing.</p>
                 </div>
                 <div>
                     <label class="mb-1 block text-sm font-semibold text-text-base">Settlement Mode <span class="text-danger">*</span></label>
@@ -227,7 +237,7 @@ const columns = [
             <template #footer>
                 <Button variant="secondary" tone="purple" type="button" @click="disposing = null">Back</Button>
                 <Button variant="primary" tone="purple" type="button" :disabled="disposeForm.processing" @click="submitDispose">
-                    Confirm disposal
+                    {{ disposeForm.processing ? 'Disposing...' : 'Confirm disposal' }}
                 </Button>
             </template>
         </Modal>

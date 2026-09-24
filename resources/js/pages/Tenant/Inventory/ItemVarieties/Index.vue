@@ -3,6 +3,7 @@ import { computed, h, ref, watch } from 'vue';
 import { router, useForm, usePage } from '@inertiajs/vue3';
 import AppLayout from '@/layouts/AppLayout.vue';
 import { useLayoutChrome } from '@/composables/useLayoutChrome';
+import PageHeader from '@/components/ui/PageHeader.vue';
 import Card from '@/components/ui/Card.vue';
 import Button from '@/components/ui/Button.vue';
 import Badge from '@/components/ui/Badge.vue';
@@ -97,7 +98,7 @@ function submit() {
 }
 
 async function destroy(variety) {
-    if (!(await confirm({ message: 'Delete this variety?', tone: 'danger', confirmLabel: 'Delete' }))) return;
+    if (!(await confirm({ message: `Delete variety "${variety.name}"? Existing records that use it keep their history. This cannot be undone.`, tone: 'danger', confirmLabel: 'Delete variety' }))) return;
     router.delete(`/item-varieties/${variety.id}`);
 }
 
@@ -111,13 +112,13 @@ const columns = [
     },
     {
         id: 'sku_suffix',
-        header: 'SKU Suffix',
+        header: 'SKU suffix',
         numeric: false,
         cell: ({ row }) => row.original.sku_suffix ?? '-',
     },
     {
         id: 'price_adjustment',
-        header: 'Price Adjustment',
+        header: 'Price adjustment',
         numeric: true,
         cell: ({ row }) => formatMoney(row.original.price_adjustment),
     },
@@ -145,10 +146,9 @@ const columns = [
 
 <template>
     <div>
-        <div class="mb-4 flex items-center justify-between">
-            <h2 class="text-base font-bold text-text-strong">Item Varieties</h2>
+        <PageHeader title="Item Varieties" description="Item varieties: sub-types of an item such as size or grade.">
             <Button variant="primary" tone="purple" @click="openCreate">New variety</Button>
-        </div>
+        </PageHeader>
 
         <Card variant="panel">
             <DataTable :columns="columns" :data="varieties" :page-size="10" />
@@ -176,6 +176,7 @@ const columns = [
                 <div>
                     <label for="sku_suffix" class="mb-1 block text-sm font-semibold text-text-base">SKU Suffix</label>
                     <Input id="sku_suffix" v-model="form.sku_suffix" type="text" placeholder="e.g. RED-L" />
+                    <p class="mt-1 text-xs text-text-faint">Short code appended to the item's SKU to identify this variety.</p>
                     <p v-if="form.errors.sku_suffix" class="mt-1 text-sm text-danger">{{ form.errors.sku_suffix }}</p>
                 </div>
 
@@ -184,6 +185,7 @@ const columns = [
                         Price Adjustment
                     </label>
                     <Input id="price_adjustment" v-model="form.price_adjustment" type="number" step="0.01" placeholder="0.00" />
+                    <p class="mt-1 text-xs text-text-faint">Amount added to (or, if negative, subtracted from) the item's price for this variety.</p>
                     <p v-if="form.errors.price_adjustment" class="mt-1 text-sm text-danger">
                         {{ form.errors.price_adjustment }}
                     </p>
@@ -192,6 +194,7 @@ const columns = [
                 <div class="flex items-center gap-2">
                     <input id="is_active" v-model="form.is_active" type="checkbox" class="size-4 border-[1.5px] border-border" />
                     <label for="is_active" class="text-sm font-semibold text-text-base">Active</label>
+                    <span class="text-xs text-text-faint">(inactive entries are hidden from selection lists)</span>
                 </div>
             </form>
 
@@ -204,7 +207,7 @@ const columns = [
                     form="item-variety-form"
                     :disabled="form.processing"
                 >
-                    {{ editing ? 'Save changes' : 'Create variety' }}
+                    {{ form.processing ? 'Saving...' : editing ? 'Save variety' : 'Create variety' }}
                 </Button>
             </template>
         </Modal>

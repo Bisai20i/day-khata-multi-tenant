@@ -872,6 +872,11 @@ class SalesReturn extends Model
         $lines = [];
 
         foreach ($saleLines as $saleLine) {
+            // Negative lines are not returnable and are not offered (SAL-03).
+            if (! isset($components[$saleLine->id])) {
+                continue;
+            }
+
             $quantity = Quantity::of($saleLine->quantity);
             $returned = $credited[$saleLine->id]['quantity'];
             $bonusQuantity = Quantity::of($saleLine->bonus_quantity ?? '0');
@@ -981,6 +986,11 @@ class SalesReturn extends Model
 
         foreach ($requested as $saleLineId => $quantity) {
             $saleLine = $saleLines[$saleLineId];
+
+            if (! isset($components[$saleLineId])) {
+                throw new InvalidArgumentException("Line [{$saleLineId}] has a negative value and cannot be returned.");
+            }
+
             $lineQuantity = Quantity::of($saleLine->quantity);
             $alreadyReturned = $credited[$saleLineId]['quantity'];
             $remaining = $lineQuantity->minus($alreadyReturned);
@@ -1082,12 +1092,24 @@ class SalesReturn extends Model
     {
         $vatableTotals = [];
         $nonVatableTotals = [];
+        $negativeVatable = Money::zero();
+        $negativeNonVatable = Money::zero();
 
         foreach ($saleLines as $saleLine) {
             $lineTotal = Money::of($saleLine->line_total);
 
+            // A negative line (legacy parity, SAL-03) is not returnable itself
+            // and takes no share of the discount/VAT/TDS, but its value stays
+            // inside the group so the returnable lines still sum to the stored
+            // invoice totals exactly.
             if ($lineTotal->isNegative()) {
-                throw new InvalidArgumentException("Line [{$saleLine->id}] has a negative value and cannot be returned.");
+                if ($saleLine->vatable) {
+                    $negativeVatable = $negativeVatable->plus($lineTotal);
+                } else {
+                    $negativeNonVatable = $negativeNonVatable->plus($lineTotal);
+                }
+
+                continue;
             }
 
             if ($saleLine->vatable) {
@@ -1097,8 +1119,8 @@ class SalesReturn extends Model
             }
         }
 
-        $net = static::netOfHeaderDiscount($vatableTotals, Money::of($sale->taxable_amount))
-            + static::netOfHeaderDiscount($nonVatableTotals, Money::of($sale->nontaxable_amount));
+        $net = static::netOfHeaderDiscount($vatableTotals, Money::of($sale->taxable_amount), $negativeVatable)
+            + static::netOfHeaderDiscount($nonVatableTotals, Money::of($sale->nontaxable_amount), $negativeNonVatable);
 
         ksort($net);
 
@@ -1131,13 +1153,13 @@ class SalesReturn extends Model
      * @param  array<int, Money>  $lineTotals
      * @return array<int, Money>
      */
-    private static function netOfHeaderDiscount(array $lineTotals, Money $groupTotalAfterDiscount): array
+    private static function netOfHeaderDiscount(array $lineTotals, Money $groupTotalAfterDiscount, ?Money $negativeLinesTotal = null): array
     {
         if ($lineTotals === []) {
             return [];
         }
 
-        $discount = Money::sum($lineTotals)->minus($groupTotalAfterDiscount);
+        $discount = Money::sum($lineTotals)->plus($negativeLinesTotal ?? Money::zero())->minus($groupTotalAfterDiscount);
 
         if ($discount->isZero()) {
             return $lineTotals;

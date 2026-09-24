@@ -101,9 +101,7 @@ class SaleController extends Controller
             'invoiceSettings' => [
                 'default_vat_rate' => $settings->default_vat_rate,
                 'default_store_id' => $settings->default_store_id,
-                'sale_full_enabled' => (bool) $settings->sale_full_enabled,
-                'sale_abbreviated_enabled' => (bool) $settings->sale_abbreviated_enabled,
-                'sale_pan_enabled' => (bool) $settings->sale_pan_enabled,
+                'active_invoice_type' => $settings->active_invoice_type ?? 'full',
             ],
         ]);
     }
@@ -152,7 +150,8 @@ class SaleController extends Controller
      */
     private function filteredTotals(array $filters): array
     {
-        $row = $this->filteredSalesQuery($filters)->toBase()->selectRaw(
+        // Cancelled invoices stay in the list but never move the totals row.
+        $row = $this->filteredSalesQuery($filters)->where('status', '!=', 'cancelled')->toBase()->selectRaw(
             'COALESCE(SUM(taxable_amount), 0) as taxable_amount, '
             .'COALESCE(SUM(nontaxable_amount), 0) as nontaxable_amount, '
             .'COALESCE(SUM(vat_amount), 0) as vat_amount, '
@@ -168,13 +167,15 @@ class SaleController extends Controller
     }
 
     /**
-     * Excel export of the same filtered/sorted/searched set index() shows
-     * (audit section 4 polish, "list export"), every row and never a
-     * paginated page's worth.
+     * Export of the same filtered/sorted/searched set index() shows (audit
+     * section 4 polish, "list export"), every row and never a paginated
+     * page's worth. `format=csv` streams a .csv instead of the default
+     * .xlsx - Laravel Excel infers the writer from the filename extension.
      */
     public function export(Request $request)
     {
         $filters = $this->listFilters($request);
+        $extension = $request->query('format') === 'csv' ? 'csv' : 'xlsx';
 
         $rows = $this->filteredSalesQuery($filters)
             ->with(['customer:id,name', 'agent:id,name'])
@@ -193,7 +194,7 @@ class SaleController extends Controller
                 'total' => $sale->total,
             ]);
 
-        return Excel::download(new SalesExport($rows, $this->filteredTotals($filters)), 'sales.xlsx');
+        return Excel::download(new SalesExport($rows, $this->filteredTotals($filters)), "sales.{$extension}");
     }
 
     /**
@@ -237,7 +238,7 @@ class SaleController extends Controller
     {
         $items = Item::query()->where('is_active', true)->orderBy('name')
             ->with(['units' => fn ($q) => $q->where('is_active', true)->orderBy('name')])
-            ->get(['id', 'name', 'unit', 'is_vatable', 'is_stockable', 'barcode', 'sale_rate', 'hs_code']);
+            ->get(['id', 'name', 'unit', 'is_vatable', 'is_stockable', 'barcode', 'sale_rate', 'hs_code', 'min_stock']);
 
         $stock = Item::currentStockByItem($items->pluck('id')->all());
 
@@ -399,7 +400,10 @@ class SaleController extends Controller
 
         return [
             'customer_id' => ['required', 'exists:customers,id'],
-            'invoice_type' => ['required', 'in:abbreviated,full,pan'],
+            // invoice_type is deliberately absent: it is never a cashier
+            // choice (see Sale::post(), which always reads
+            // CompanySetting::active_invoice_type - set only by the
+            // platform admin from the central panel).
             'chalani_number' => ['nullable', 'string', 'max:100'],
             'date' => ['required', 'date'],
             'payment_mode' => ['required', 'in:cash,bank,partial,credit'],

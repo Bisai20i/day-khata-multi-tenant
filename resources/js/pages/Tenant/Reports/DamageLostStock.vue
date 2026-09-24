@@ -4,6 +4,7 @@ import { router, usePage } from '@inertiajs/vue3';
 import AppLayout from '@/layouts/AppLayout.vue';
 import { useLayoutChrome } from '@/composables/useLayoutChrome';
 import Card from '@/components/ui/Card.vue';
+import PageHeader from '@/components/ui/PageHeader.vue';
 import NepaliDateInput from '@/components/ui/NepaliDateInput.vue';
 import Select from '@/components/ui/Select.vue';
 import Button from '@/components/ui/Button.vue';
@@ -57,6 +58,17 @@ const reasonOptions = [
     { value: 'lost', label: 'Lost only' },
 ];
 
+const isLoading = ref(false);
+
+const hasActiveFilter = computed(() => itemId.value !== null || storeId.value !== null || reason.value !== null);
+
+function resetFilters() {
+    itemId.value = null;
+    storeId.value = null;
+    reason.value = null;
+    applyFilter();
+}
+
 function applyFilter() {
     router.get(
         window.location.pathname,
@@ -67,7 +79,12 @@ function applyFilter() {
             item_id: itemId.value ?? undefined,
             reason: reason.value ?? undefined,
         },
-        { preserveState: true, preserveScroll: true },
+        {
+            preserveState: true,
+            preserveScroll: true,
+            onStart: () => (isLoading.value = true),
+            onFinish: () => (isLoading.value = false),
+        },
     );
 }
 
@@ -78,10 +95,10 @@ const listColumns = [
     { accessorKey: 'date', header: 'Date (AD)' },
     { accessorKey: 'itemName', header: 'Item' },
     { accessorKey: 'unit', header: 'Unit' },
-    { id: 'storeName', header: 'Store', numeric: false, cell: ({ row }) => row.original.storeName ?? '—' },
+    { id: 'storeName', header: 'Store', numeric: false, cell: ({ row }) => row.original.storeName ?? '-' },
     { id: 'reason', header: 'Reason', numeric: false, cell: ({ row }) => reasonLabels[row.original.reason] ?? row.original.reason },
     { id: 'quantity', header: 'Quantity', numeric: true, cell: ({ row }) => formatQuantity(row.original.quantity) },
-    { id: 'remarks', header: 'Remarks', numeric: false, cell: ({ row }) => row.original.remarks ?? '—' },
+    { id: 'remarks', header: 'Remarks', numeric: false, cell: ({ row }) => row.original.remarks ?? '-' },
 ];
 
 const itemWiseColumns = [
@@ -99,7 +116,7 @@ const rangeLabel = computed(
 // not "5". The server sums each unit separately in exact Quantity.
 const totalQuantityLabel = computed(() => {
     if (props.totalQuantities.length === 0) {
-        return '—';
+        return '-';
     }
 
     return props.totalQuantities
@@ -110,20 +127,18 @@ const totalQuantityLabel = computed(() => {
 
 <template>
     <div>
-        <div class="mb-4 flex items-center justify-between">
-            <h2 class="text-base font-bold text-text-strong">Damage & Lost Stock</h2>
-        </div>
+        <PageHeader title="Damage & Lost Stock" description="Stock written off as damaged or lost, with quantity and value for the selected dates." />
 
-        <p class="mb-4 text-[12.5px] text-text-muted">{{ rangeLabel }}</p>
+        <p class="mb-4 text-[12.5px] text-text-muted">Showing report for {{ rangeLabel }}</p>
 
         <Card variant="panel" class="mb-4">
             <div class="flex flex-wrap items-end gap-3">
                 <div>
-                    <label class="mb-1 block text-xs font-semibold text-text-muted">From</label>
+                    <label class="mb-1 block text-xs font-semibold text-text-muted">From date (BS)</label>
                     <NepaliDateInput v-model="from" />
                 </div>
                 <div>
-                    <label class="mb-1 block text-xs font-semibold text-text-muted">To</label>
+                    <label class="mb-1 block text-xs font-semibold text-text-muted">To date (BS)</label>
                     <NepaliDateInput v-model="to" />
                 </div>
                 <div class="w-56">
@@ -138,7 +153,8 @@ const totalQuantityLabel = computed(() => {
                     <label class="mb-1 block text-xs font-semibold text-text-muted">Reason</label>
                     <Select v-model="reason" :options="reasonOptions" />
                 </div>
-                <Button variant="primary" tone="purple" @click="applyFilter">Apply</Button>
+                <Button variant="primary" tone="purple" :loading="isLoading" @click="applyFilter">Generate report</Button>
+                <Button v-if="hasActiveFilter" variant="secondary" tone="purple" :disabled="isLoading" @click="resetFilters">Reset</Button>
             </div>
         </Card>
 
@@ -148,7 +164,7 @@ const totalQuantityLabel = computed(() => {
         </div>
 
         <Card variant="panel" v-if="view === 'list'">
-            <DataTable :columns="listColumns" :data="lines" :page-size="25" empty-message="No damage or lost stock entries in this range" />
+            <DataTable :columns="listColumns" :data="lines" :page-size="25" empty-message="No records for this period or filter. Try widening the date range." />
             <div class="mt-3 border-t-[1.5px] border-border pt-3 text-sm">
                 <span class="text-[10px] font-bold tracking-[.8px] text-text-muted uppercase">Total quantity written off:</span>
                 <span class="ml-2 font-bold text-text-strong">{{ totalQuantityLabel }}</span>

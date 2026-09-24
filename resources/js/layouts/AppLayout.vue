@@ -1,7 +1,7 @@
 <script setup>
-import { computed, reactive, ref } from 'vue';
+import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue';
 import { Head, Link, router, usePage } from '@inertiajs/vue3';
-import { Bell, ChevronDown, ChevronRight, FileSignature, Package, PackageSearch, Plus, ScanBarcode, Search, ShoppingCart, Users } from '@lucide/vue';
+import { ChevronDown, ChevronRight, FileSignature, Package, PackageSearch, Plus, ScanBarcode, Search, ShoppingCart, Users } from '@lucide/vue';
 import { PopoverAnchor, PopoverContent, PopoverPortal, PopoverRoot } from 'reka-ui';
 import DropdownMenu from '@/components/ui/DropdownMenu.vue';
 import DropdownMenuItem from '@/components/ui/DropdownMenuItem.vue';
@@ -50,8 +50,11 @@ const sections = computed(() => {
     return [{ label: null, items: navItems.value }];
 });
 
-function isActive(href) {
-    return page.url === href || (href !== '/' && page.url.startsWith(`${href}/`));
+const isPlatformAdmin = computed(() => Boolean(page.props.auth?.platformAdmin));
+
+function isActive(href, exact = false) {
+    const path = page.url.split('?')[0];
+    return path === href || (!exact && href !== '/' && path.startsWith(`${href}/`));
 }
 
 // A category is a toggleable accordion only once it has something worth
@@ -61,7 +64,7 @@ function isCollapsible(category) {
 }
 
 function categoryHasActiveItem(category) {
-    return category.items.some((item) => isActive(item.href));
+    return category.items.some((item) => isActive(item.href, item.exact));
 }
 
 const OPEN_CATEGORIES_STORAGE_KEY = 'day-khata:sidebar-open-categories';
@@ -93,8 +96,53 @@ for (const section of sections.value) {
     }
 }
 
+watch(
+    () => page.url,
+    () => {
+        for (const section of sections.value) {
+            for (const category of section.categories ?? []) {
+                if (categoryHasActiveItem(category)) openCategories[`${section.label}::${category.label}`] = true;
+            }
+        }
+    },
+);
+
+function toTitleCase(text) {
+    return text.toLowerCase().replace(/\b\w/g, (character) => character.toUpperCase());
+}
+
+/**
+ * Tenant-only breadcrumb prefix: the label of the nav section containing the
+ * active page (e.g. "Transactions"), or null when nothing matches.
+ */
+const sectionPrefix = computed(() => {
+    if (isPlatformAdmin.value || !page.props.auth?.user) return null;
+    for (const section of sections.value) {
+        const items = section.categories ? section.categories.flatMap((category) => category.items) : section.items;
+        if (section.label && items.some((item) => isActive(item.href, item.exact))) return toTitleCase(section.label);
+    }
+    return null;
+});
+
+const searchInput = ref(null);
+
+function onGlobalKeydown(event) {
+    if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'k' && page.props.auth?.user) {
+        event.preventDefault();
+        searchInput.value?.focus();
+        searchInput.value?.select();
+    }
+}
+
+onMounted(() => window.addEventListener('keydown', onGlobalKeydown));
+onBeforeUnmount(() => window.removeEventListener('keydown', onGlobalKeydown));
+
 function isCategoryOpen(section, category) {
     return !isCollapsible(category) || Boolean(openCategories[`${section.label}::${category.label}`]);
+}
+
+function categoryPanelId(section, category) {
+    return `nav-${`${section.label}-${category.label}`.toLowerCase().replace(/[^a-z0-9]+/g, '-')}`;
 }
 
 function toggleCategory(section, category) {
@@ -119,11 +167,11 @@ function logout() {
  * happens in-memory against a static command list - no backend round trip.
  */
 const QUICK_ACTIONS = [
-    { label: 'New Sale', href: '/sales', icon: ShoppingCart, group: 'Quick Actions' },
-    { label: 'New Purchase', href: '/purchases', icon: PackageSearch, group: 'Quick Actions' },
-    { label: 'New Quotation', href: '/quotations', icon: FileSignature, group: 'Quick Actions' },
-    { label: 'New Customer', href: '/customers', icon: Users, group: 'Quick Actions' },
-    { label: 'New Item', href: '/items', icon: Package, group: 'Quick Actions' },
+    { label: 'New sale', href: '/sales', icon: ShoppingCart, group: 'Quick Actions' },
+    { label: 'New purchase', href: '/purchases', icon: PackageSearch, group: 'Quick Actions' },
+    { label: 'New quotation', href: '/quotations', icon: FileSignature, group: 'Quick Actions' },
+    { label: 'New customer', href: '/customers', icon: Users, group: 'Quick Actions' },
+    { label: 'New item', href: '/items', icon: Package, group: 'Quick Actions' },
 ];
 
 // Every sidebar destination, flattened out of `sections` (already normalized
@@ -206,6 +254,7 @@ function selectActiveCommand() {
                     >
                         {{ page.props.tenant.company_name }}
                     </p>
+                    <p v-else-if="isPlatformAdmin" class="text-[10px] font-bold tracking-wide text-text-faint uppercase">Platform Admin</p>
                 </div>
             </div>
 
@@ -222,7 +271,9 @@ function selectActiveCommand() {
                             <button
                                 v-if="isCollapsible(category)"
                                 type="button"
-                                class="flex cursor-pointer items-center justify-between px-2.5 pt-1 pb-1 text-[11.5px] font-semibold text-text-muted transition-colors hover:text-text-strong"
+                                :aria-expanded="Boolean(openCategories[`${section.label}::${category.label}`])"
+                                :aria-controls="categoryPanelId(section, category)"
+                                class="flex cursor-pointer items-center justify-between px-2.5 pt-1 pb-1 focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-primary text-[11.5px] font-semibold text-text-muted transition-colors hover:text-text-strong"
                                 @click="toggleCategory(section, category)"
                             >
                                 <span>{{ category.label }}</span>
@@ -235,14 +286,15 @@ function selectActiveCommand() {
                                 {{ category.label }}
                             </p>
 
-                            <template v-if="isCategoryOpen(section, category)">
+                            <div v-if="isCategoryOpen(section, category)" :id="categoryPanelId(section, category)" class="flex flex-col gap-1">
                                 <Link
                                     v-for="item in category.items"
                                     :key="item.href"
                                     :href="item.href"
-                                    class="flex items-center gap-2.5 py-2.5 pr-2.5 pl-4 text-sm font-semibold transition-colors"
+                                    :aria-current="isActive(item.href, item.exact) ? 'page' : undefined"
+                                    class="flex cursor-pointer items-center gap-2.5 py-2.5 pr-2.5 pl-4 text-sm font-semibold transition-colors focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-primary"
                                     :class="
-                                        isActive(item.href)
+                                        isActive(item.href, item.exact)
                                             ? 'bg-primary-tint text-primary'
                                             : 'text-text-muted hover:bg-bg-subtle hover:text-text-strong'
                                     "
@@ -250,7 +302,7 @@ function selectActiveCommand() {
                                     <component :is="item.icon" v-if="item.icon" class="size-[17px] shrink-0" />
                                     {{ item.label }}
                                 </Link>
-                            </template>
+                            </div>
                         </div>
                     </template>
 
@@ -261,9 +313,10 @@ function selectActiveCommand() {
                             v-for="item in section.items"
                             :key="item.href"
                             :href="item.href"
-                            class="flex items-center gap-2.5 px-2.5 py-2.5 text-sm font-semibold transition-colors"
+                            :aria-current="isActive(item.href, item.exact) ? 'page' : undefined"
+                            class="flex cursor-pointer items-center gap-2.5 px-2.5 py-2.5 text-sm font-semibold transition-colors focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-primary"
                             :class="
-                                isActive(item.href)
+                                isActive(item.href, item.exact)
                                     ? 'bg-primary-tint text-primary'
                                     : 'text-text-muted hover:bg-bg-subtle hover:text-text-strong'
                             "
@@ -286,13 +339,24 @@ function selectActiveCommand() {
                     <p class="overflow-hidden text-ellipsis whitespace-nowrap text-xs text-text-muted">
                         {{ currentPrincipal?.email }}
                     </p>
+                    <p v-if="isPlatformAdmin" class="text-[10px] font-bold tracking-wide text-primary uppercase">Platform Admin</p>
                 </div>
             </div>
         </aside>
 
         <div class="flex min-h-0 min-w-0 flex-1 flex-col">
             <header v-if="!chrome.fullscreen" class="flex h-16 shrink-0 items-center justify-between border-b border-border bg-bg-surface px-6">
-                <h1 class="text-sm font-bold text-text-strong">{{ chrome.title }}</h1>
+                <h1 class="text-sm font-bold text-text-strong">
+                    <template v-if="isPlatformAdmin">
+                        <span class="font-semibold text-text-muted">Platform Admin</span>
+                        <span class="px-1.5 text-text-faint" aria-hidden="true">/</span>
+                    </template>
+                    <template v-if="sectionPrefix && sectionPrefix !== chrome.title">
+                        <span class="font-semibold text-text-muted">{{ sectionPrefix }}</span>
+                        <span class="px-1.5 text-text-faint" aria-hidden="true">/</span>
+                    </template>
+                    {{ chrome.title }}
+                </h1>
 
                 <div v-if="page.props.auth?.user" class="mx-auto flex max-w-[340px] flex-1 items-center">
                     <PopoverRoot v-model:open="searchOpen">
@@ -300,10 +364,17 @@ function selectActiveCommand() {
                             <div class="relative w-full">
                                 <Search class="pointer-events-none absolute top-1/2 left-2.5 size-4 -translate-y-1/2 text-text-faint" />
                                 <input
+                                    ref="searchInput"
                                     v-model="searchQuery"
                                     type="text"
-                                    placeholder="Search pages, actions…"
-                                    class="w-full border border-border bg-bg-subtle py-1.5 pr-3 pl-8 text-[12.5px] text-text-base placeholder:text-text-faint focus:border-primary focus:bg-white focus:outline-none"
+                                    role="combobox"
+                                    aria-label="Search pages and actions"
+                                    aria-autocomplete="list"
+                                    aria-controls="command-results"
+                                    :aria-expanded="searchOpen"
+                                    :aria-activedescendant="searchOpen && filteredCommands.length ? `command-option-${activeIndex}` : undefined"
+                                    placeholder="Search pages and actions (Ctrl K)"
+                                    class="w-full border border-border bg-bg-subtle py-1.5 pr-3 pl-8 text-[12.5px] text-text-base placeholder:text-text-faint focus:border-primary focus:bg-white focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
                                     @input="onSearchInput"
                                     @focus="() => { if (searchQuery.trim() !== '') searchOpen = true; }"
                                     @keydown.esc="searchOpen = false"
@@ -323,9 +394,9 @@ function selectActiveCommand() {
                                 :side-offset="4"
                                 @open-auto-focus.prevent
                             >
-                                <div class="max-h-80 overflow-y-auto p-1">
+                                <div id="command-results" role="listbox" class="max-h-80 overflow-y-auto p-1">
                                     <p v-if="filteredCommands.length === 0" class="px-2.5 py-3 text-center text-[12.5px] text-text-faint">
-                                        No results found.
+                                        No results for "{{ searchQuery.trim() }}"
                                     </p>
                                     <template v-else>
                                         <div v-for="group in groupedResults" :key="group.label" class="flex flex-col">
@@ -333,7 +404,10 @@ function selectActiveCommand() {
                                             <button
                                                 v-for="command in group.items"
                                                 :key="`${command.group}-${command.href}-${command.label}`"
+                                                :id="`command-option-${command.index}`"
                                                 type="button"
+                                                role="option"
+                                                :aria-selected="command.index === activeIndex"
                                                 class="flex w-full items-center gap-2.5 px-2.5 py-2 text-left text-[13px] outline-none"
                                                 :class="
                                                     command.index === activeIndex
@@ -358,39 +432,48 @@ function selectActiveCommand() {
                 <div class="flex items-center gap-4">
                     <DropdownMenu v-if="page.props.auth?.user" align="end">
                         <template #trigger>
-                            <button type="button" title="Quick Create" class="flex items-center justify-center text-text-muted">
+                            <button type="button" title="Quick Create" aria-label="Quick Create" class="flex cursor-pointer items-center justify-center text-text-muted focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary">
                                 <Plus class="size-5" />
                             </button>
                         </template>
 
-                        <DropdownMenuItem @select="() => router.visit('/sales')">New Sale</DropdownMenuItem>
-                        <DropdownMenuItem @select="() => router.visit('/purchases')">New Purchase</DropdownMenuItem>
-                        <DropdownMenuItem @select="() => router.visit('/quotations')">New Quotation</DropdownMenuItem>
-                        <DropdownMenuItem @select="() => router.visit('/customers')">New Customer</DropdownMenuItem>
-                        <DropdownMenuItem @select="() => router.visit('/items')">New Item</DropdownMenuItem>
+                        <DropdownMenuItem @select="() => router.visit('/sales')">
+                            <component :is="ShoppingCart" class="mr-2 size-4 shrink-0 text-text-faint" />New sale
+                        </DropdownMenuItem>
+                        <DropdownMenuItem @select="() => router.visit('/purchases')">
+                            <component :is="PackageSearch" class="mr-2 size-4 shrink-0 text-text-faint" />New purchase
+                        </DropdownMenuItem>
+                        <DropdownMenuItem @select="() => router.visit('/quotations')">
+                            <component :is="FileSignature" class="mr-2 size-4 shrink-0 text-text-faint" />New quotation
+                        </DropdownMenuItem>
+                        <DropdownMenuItem @select="() => router.visit('/customers')">
+                            <component :is="Users" class="mr-2 size-4 shrink-0 text-text-faint" />New customer
+                        </DropdownMenuItem>
+                        <DropdownMenuItem @select="() => router.visit('/items')">
+                            <component :is="Package" class="mr-2 size-4 shrink-0 text-text-faint" />New item
+                        </DropdownMenuItem>
                     </DropdownMenu>
 
                     <Tooltip v-if="page.props.auth?.user" label="POS">
-                        <Link href="/pos" class="flex items-center justify-center text-text-muted">
+                        <Link href="/pos" aria-label="POS" class="flex cursor-pointer items-center justify-center text-text-muted focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary">
                             <ScanBarcode class="size-5" />
                         </Link>
                     </Tooltip>
 
-                    <Tooltip label="Notifications">
-                        <button type="button" class="flex items-center justify-center text-text-muted">
-                            <Bell class="size-5" />
-                        </button>
-                    </Tooltip>
+                    <!-- Notifications bell intentionally omitted until a notifications feature exists. -->
 
                     <div class="h-[22px] w-px bg-border"></div>
 
                     <DropdownMenu align="end">
                         <template #trigger>
-                            <button type="button" class="flex items-center gap-2.5">
+                            <button type="button" aria-label="Account menu" class="flex cursor-pointer items-center gap-2.5 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary">
                                 <div class="flex size-8 shrink-0 items-center justify-center rounded-full bg-primary-tint text-sm font-bold text-primary">
                                     {{ currentPrincipal?.name?.charAt(0)?.toUpperCase() }}
                                 </div>
-                                <span class="text-sm font-semibold text-text-strong">{{ currentPrincipal?.name }}</span>
+                                <span class="text-left leading-tight">
+                                    <span class="block text-sm font-semibold text-text-strong">{{ currentPrincipal?.name }}</span>
+                                    <span v-if="isPlatformAdmin" class="block text-[10px] font-bold tracking-wide text-text-faint uppercase">Platform Admin</span>
+                                </span>
                                 <ChevronDown class="size-4 text-text-muted" />
                             </button>
                         </template>
@@ -399,14 +482,14 @@ function selectActiveCommand() {
                             My Profile
                         </DropdownMenuItem>
                         <DropdownMenuItem v-if="page.props.auth?.platformAdmin" @select="() => router.visit('/two-factor')">
-                            Two-Factor Authentication
+                            Security (two-factor)
                         </DropdownMenuItem>
                         <DropdownMenuItem @select="logout">Log out</DropdownMenuItem>
                     </DropdownMenu>
                 </div>
             </header>
 
-            <main :class="['min-h-0 flex-1 overflow-y-auto bg-bg-page', chrome.fullscreen ? 'p-4' : 'p-6']">
+            <main :class="['min-h-0 flex-1 overflow-y-auto bg-bg-page', !chrome.padded ? 'p-0' : chrome.fullscreen ? 'p-4' : 'p-6']">
                 <slot />
             </main>
         </div>

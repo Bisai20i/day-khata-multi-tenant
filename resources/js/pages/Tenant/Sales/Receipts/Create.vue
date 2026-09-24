@@ -139,7 +139,10 @@ function submit() {
 <template>
     <Card variant="panel">
         <div class="mb-4 flex items-center justify-between">
-            <h3 class="text-base font-bold text-text-strong">New receipt</h3>
+            <div>
+                <h3 class="text-base font-bold text-text-strong">New receipt</h3>
+                <p class="mt-0.5 text-sm text-text-muted">Money received from a customer. It reduces what they owe you.</p>
+            </div>
             <Button variant="secondary" tone="purple" type="button" @click="emit('cancel')">Cancel</Button>
         </div>
 
@@ -166,10 +169,11 @@ function submit() {
                     <p v-if="form.amount !== '' && receiptAmount === null" class="mt-1 text-sm text-danger">
                         Enter an amount with at most 2 decimals.
                     </p>
-                    <p v-if="form.errors.amount" class="mt-1 text-sm text-danger">{{ form.errors.amount }}</p>
+                    <p v-if="form.errors.amount" class="mt-1 text-sm text-danger" role="alert">{{ form.errors.amount }}</p>
+                    <p v-else class="mt-1 text-xs text-text-muted">Total amount the customer paid.</p>
                 </div>
                 <div>
-                    <label class="mb-1 block text-sm font-semibold text-text-base">Payment Mode <span class="text-danger">*</span></label>
+                    <label class="mb-1 block text-sm font-semibold text-text-base">Payment mode <span class="text-danger">*</span></label>
                     <Select
                         :model-value="form.payment_mode"
                         :options="paymentModeOptions"
@@ -189,6 +193,7 @@ function submit() {
                 <div>
                     <label class="mb-1 block text-sm font-semibold text-text-base">Reference #</label>
                     <Input v-model="form.reference_number" type="text" placeholder="Optional" />
+                    <p class="mt-1 text-xs text-text-muted">Cheque or transaction number, if any.</p>
                 </div>
                 <div class="col-span-3">
                     <label class="mb-1 block text-sm font-semibold text-text-base">Narration</label>
@@ -197,7 +202,8 @@ function submit() {
             </div>
 
             <div v-if="form.customer_id">
-                <p class="mb-2 text-sm font-semibold text-text-base">Allocate against outstanding invoices (optional)</p>
+                <p class="mb-2 text-sm font-semibold text-text-base">Match to unpaid invoices (optional)</p>
+                <p class="mb-2 text-xs text-text-muted">Enter how much of this receipt pays off each invoice. Anything left over stays as an advance on the customer's account.</p>
                 <p v-if="!customerSales.length" class="text-sm text-text-muted">This customer has no outstanding invoices.</p>
 
                 <div v-else class="flex flex-col gap-2">
@@ -243,7 +249,7 @@ function submit() {
 
             <div class="flex items-center justify-end gap-2">
                 <Button variant="secondary" tone="purple" type="button" @click="emit('cancel')">Cancel</Button>
-                <Button variant="primary" tone="purple" type="submit" :disabled="!canSubmit">Save receipt</Button>
+                <Button variant="primary" tone="purple" type="submit" :disabled="!canSubmit || form.processing" :loading="form.processing">Save receipt</Button>
             </div>
         </form>
     </Card>

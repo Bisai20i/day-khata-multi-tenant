@@ -3,6 +3,7 @@ import { computed, watch } from 'vue';
 import { useForm } from '@inertiajs/vue3';
 import { Plus, X } from '@lucide/vue';
 import Card from '@/components/ui/Card.vue';
+import PageHeader from '@/components/ui/PageHeader.vue';
 import Button from '@/components/ui/Button.vue';
 import Input from '@/components/ui/Input.vue';
 import Select from '@/components/ui/Select.vue';
@@ -27,7 +28,7 @@ const storeOptions = computed(() => props.stores.map((s) => ({ value: s.id, labe
 const accountOptions = computed(() =>
     props.accounts.map((account) => ({
         value: account.id,
-        label: account.code ? `${account.code} — ${account.name}` : account.name,
+        label: account.code ? `${account.code} - ${account.name}` : account.name,
     })),
 );
 
@@ -186,10 +187,9 @@ function submit() {
 
 <template>
     <Card variant="panel">
-        <div class="mb-4 flex items-center justify-between">
-            <h3 class="text-base font-bold text-text-strong">New capital purchase</h3>
+        <PageHeader title="New capital purchase" description="Record a long-term asset or service bill, such as equipment or furniture. Fields marked * are required.">
             <Button variant="secondary" tone="purple" type="button" @click="emit('cancel')">Cancel</Button>
-        </div>
+        </PageHeader>
 
         <p v-if="form.errors.lines" class="mb-4 border-[1.5px] border-danger bg-danger-bg px-3 py-2 text-sm text-danger">
             {{ form.errors.lines }}
@@ -199,14 +199,16 @@ function submit() {
         </p>
 
         <form class="flex flex-col gap-4" @submit.prevent="submit">
-            <div class="grid grid-cols-3 gap-4">
+            <h4 class="border-b-[1.5px] border-border pb-1 text-sm font-bold text-text-strong">Supplier &amp; date</h4>
+            <div class="grid grid-cols-1 gap-4 sm:grid-cols-3">
                 <div>
-                    <label class="mb-1 block text-sm font-semibold text-text-base">Date <span class="text-danger">*</span></label>
+                    <label class="mb-1 block text-sm font-semibold text-text-base">Purchase date (BS) <span class="text-danger">*</span></label>
                     <NepaliDateInput v-model="form.date" required />
+                    <p class="mt-1 text-xs text-text-faint">Bikram Sambat date on the supplier's bill.</p>
                     <p v-if="form.errors.date" class="mt-1 text-sm text-danger">{{ form.errors.date }}</p>
                 </div>
                 <div>
-                    <label class="mb-1 block text-sm font-semibold text-text-base">Type <span class="text-danger">*</span></label>
+                    <label class="mb-1 block text-sm font-semibold text-text-base">Purchase type <span class="text-danger">*</span></label>
                     <Select :model-value="form.type" :options="typeOptions" @update:model-value="(v) => (form.type = v)" />
                 </div>
                 <div>
@@ -219,15 +221,16 @@ function submit() {
                         placeholder="Optional unless credit/partial"
                         @update:model-value="(v) => (form.supplier_id = v)"
                     />
+                    <p class="mt-1 text-xs text-text-faint">Required when you pay on credit or part-pay.</p>
                     <p v-if="form.errors.supplier_id" class="mt-1 text-sm text-danger">{{ form.errors.supplier_id }}</p>
                 </div>
                 <div>
-                    <label class="mb-1 block text-sm font-semibold text-text-base">Supplier Bill #</label>
+                    <label class="mb-1 block text-sm font-semibold text-text-base">Supplier bill number</label>
                     <Input v-model="form.bill_number" type="text" placeholder="As printed on the bill" />
                     <p v-if="form.errors.bill_number" class="mt-1 text-sm text-danger">{{ form.errors.bill_number }}</p>
                 </div>
                 <div>
-                    <label class="mb-1 block text-sm font-semibold text-text-base">Supplier PAN</label>
+                    <label class="mb-1 block text-sm font-semibold text-text-base">Supplier PAN number</label>
                     <Input v-model="form.supplier_pan" type="text" placeholder="From the supplier record" />
                     <p v-if="form.errors.supplier_pan" class="mt-1 text-sm text-danger">{{ form.errors.supplier_pan }}</p>
                 </div>
@@ -241,8 +244,12 @@ function submit() {
                     />
                     <p v-if="form.errors.store_id" class="mt-1 text-sm text-danger">{{ form.errors.store_id }}</p>
                 </div>
+            </div>
+
+            <h4 class="border-b-[1.5px] border-border pb-1 text-sm font-bold text-text-strong">Payment</h4>
+            <div class="grid grid-cols-1 gap-4 sm:grid-cols-3">
                 <div>
-                    <label class="mb-1 block text-sm font-semibold text-text-base">Payment Mode <span class="text-danger">*</span></label>
+                    <label class="mb-1 block text-sm font-semibold text-text-base">Payment mode <span class="text-danger">*</span></label>
                     <Select
                         :model-value="form.payment_mode"
                         :options="paymentModeOptions"
@@ -250,7 +257,7 @@ function submit() {
                     />
                 </div>
                 <div v-if="showBankAccount">
-                    <label class="mb-1 block text-sm font-semibold text-text-base">Bank Account <span class="text-danger">*</span></label>
+                    <label class="mb-1 block text-sm font-semibold text-text-base">Bank account <span class="text-danger">*</span></label>
                     <Combobox
                         :model-value="form.bank_account_id"
                         :options="accountOptions"
@@ -263,11 +270,11 @@ function submit() {
 
             <div v-if="showPartialSplit" class="grid grid-cols-2 gap-4">
                 <div>
-                    <label class="mb-1 block text-sm font-semibold text-text-base">Cash Amount</label>
+                    <label class="mb-1 block text-sm font-semibold text-text-base">Paid in cash (Rs.)</label>
                     <Input v-model="form.cash_amount" type="number" min="0" step="0.01" inputmode="decimal" placeholder="0.00" />
                 </div>
                 <div>
-                    <label class="mb-1 block text-sm font-semibold text-text-base">Bank Amount</label>
+                    <label class="mb-1 block text-sm font-semibold text-text-base">Paid by bank (Rs.)</label>
                     <Input v-model="form.bank_amount" type="number" min="0" step="0.01" inputmode="decimal" placeholder="0.00" />
                 </div>
                 <p v-if="!splitIsExact" class="col-span-2 text-sm text-danger">
@@ -275,13 +282,14 @@ function submit() {
                 </p>
             </div>
 
+            <h4 class="border-b-[1.5px] border-border pb-1 text-sm font-bold text-text-strong">Items <span class="text-danger">*</span></h4>
             <div>
                 <div class="mb-2 grid grid-cols-[1fr_130px_70px_1fr_28px] gap-2 text-[10px] font-bold tracking-[.8px] text-text-muted uppercase">
                     <span>Account</span>
-                    <span>Amount</span>
+                    <span>Amount (Rs.)</span>
                     <span>VAT</span>
                     <span>Narration</span>
-                    <span></span>
+                    <span class="sr-only">Remove</span>
                 </div>
 
                 <div v-for="(line, index) in form.lines" :key="index" class="mb-2 border-b-[1.5px] border-border/40 pb-2">
@@ -307,7 +315,8 @@ function submit() {
                             v-if="form.lines.length > 1"
                             type="button"
                             class="mt-2 flex h-7 w-7 items-center justify-center text-text-muted transition-colors duration-150 hover:text-danger"
-                            aria-label="Remove line"
+                            :aria-label="`Remove row ${index + 1}`"
+                            :title="`Remove row ${index + 1}`"
                             @click="removeLine(index)"
                         >
                             <X class="h-3.5 w-3.5" />
@@ -364,36 +373,39 @@ function submit() {
                 </div>
 
                 <Button variant="secondary" tone="purple" type="button" class="mt-1" @click="addLine">
-                    <Plus class="h-3.5 w-3.5" /> Add line
+                    <Plus class="h-3.5 w-3.5" aria-hidden="true" /> Add another row
                 </Button>
             </div>
 
-            <div class="grid grid-cols-3 gap-4 border-t-[1.5px] border-border pt-4">
+            <h4 class="border-b-[1.5px] border-border pb-1 text-sm font-bold text-text-strong">Charges &amp; notes</h4>
+            <div class="grid grid-cols-1 gap-4 sm:grid-cols-3">
                 <div>
-                    <label class="mb-1 block text-sm font-semibold text-text-base">VAT Rate (%)</label>
+                    <label class="mb-1 block text-sm font-semibold text-text-base">VAT rate (%) <span class="text-danger">*</span></label>
                     <Input v-model="form.vat_rate" type="number" min="0" max="100" step="0.01" inputmode="decimal" required />
+                    <p class="mt-1 text-xs text-text-faint">Charged only on rows ticked Taxable.</p>
                     <p v-if="form.errors.vat_rate" class="mt-1 text-sm text-danger">{{ form.errors.vat_rate }}</p>
                 </div>
-                <div class="col-span-2">
+                <div class="sm:col-span-2">
                     <label class="mb-1 block text-sm font-semibold text-text-base">Narration</label>
                     <Input v-model="form.narration" type="text" placeholder="Optional" />
                 </div>
             </div>
 
-            <div class="border-t-[1.5px] border-border pt-3 text-sm">
+            <h4 class="border-b-[1.5px] border-border pb-1 text-sm font-bold text-text-strong">Bill summary</h4>
+            <div class="text-sm">
                 <p v-if="previewError" class="border-[1.5px] border-danger bg-danger-bg px-3 py-2 text-sm text-danger">
                     {{ previewError }}
                 </p>
                 <div v-else-if="totals" class="grid grid-cols-2 gap-1">
-                    <span class="text-text-muted">Taxable Amount</span>
+                    <span class="text-text-muted">Taxable amount</span>
                     <span class="text-right font-semibold text-text-strong">{{ formatMoney(totals.taxable_amount) }}</span>
                     <template v-if="totals.nontaxable_amount !== '0.00'">
-                        <span class="text-text-muted">Non-taxable Amount</span>
+                        <span class="text-text-muted">Non-taxable amount</span>
                         <span class="text-right font-semibold text-text-strong">{{ formatMoney(totals.nontaxable_amount) }}</span>
                     </template>
                     <span class="text-text-muted">VAT ({{ totals.vat_rate }}%)</span>
                     <span class="text-right font-semibold text-text-strong">{{ formatMoney(totals.vat_amount) }}</span>
-                    <span class="font-bold text-text-strong">Grand Total</span>
+                    <span class="font-bold text-text-strong">Bill total</span>
                     <span class="text-right font-bold text-text-strong">{{ formatMoney(totals.total) }}</span>
                 </div>
                 <p v-else class="text-text-muted">Add a line to see the bill total.</p>
@@ -401,8 +413,8 @@ function submit() {
 
             <div class="flex items-center justify-end gap-2">
                 <Button variant="secondary" tone="purple" type="button" @click="emit('cancel')">Cancel</Button>
-                <Button variant="primary" tone="purple" type="submit" :disabled="!canSubmit">
-                    Create Capital Purchase
+                <Button variant="primary" tone="purple" type="submit" :loading="form.processing" :disabled="!canSubmit">
+                    Create capital purchase
                 </Button>
             </div>
         </form>

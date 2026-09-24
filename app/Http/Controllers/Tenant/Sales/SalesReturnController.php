@@ -250,6 +250,11 @@ class SalesReturnController extends Controller
 
     public function approve(Request $request, SalesReturn $salesReturn): RedirectResponse
     {
+        // Maker/checker (SAL-04): the person who raised the request cannot approve it.
+        if ($salesReturn->created_by !== null && (int) $salesReturn->created_by === (int) $request->user()->id) {
+            return back()->withErrors(['salesReturn' => 'You cannot approve a return request you created yourself.']);
+        }
+
         try {
             $salesReturn->approve($request->user());
         } catch (InvalidArgumentException|AuthorizationException $e) {

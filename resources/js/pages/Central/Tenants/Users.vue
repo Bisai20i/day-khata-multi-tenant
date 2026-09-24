@@ -1,12 +1,11 @@
 <script setup>
 import { h } from 'vue';
-import { Link } from '@inertiajs/vue3';
-import { ArrowLeft } from '@lucide/vue';
 import AppLayout from '@/layouts/AppLayout.vue';
 import { useLayoutChrome } from '@/composables/useLayoutChrome';
 import Card from '@/components/ui/Card.vue';
 import Badge from '@/components/ui/Badge.vue';
 import DataTable from '@/components/ui/DataTable.vue';
+import PageHeader from '@/components/ui/PageHeader.vue';
 
 defineOptions({ layout: AppLayout });
 
@@ -21,7 +20,7 @@ const props = defineProps({
     },
 });
 
-useLayoutChrome(() => `${props.tenant.company_name} — Users`);
+useLayoutChrome(() => `${props.tenant.company_name} - Users`);
 
 const columns = [
     { accessorKey: 'name', header: 'Name' },
@@ -30,7 +29,7 @@ const columns = [
         accessorKey: 'role',
         header: 'Role',
         numeric: false,
-        cell: ({ row }) => (row.original.role ? h(Badge, { variant: 'neutral', pill: true }, () => row.original.role) : '—'),
+        cell: ({ row }) => (row.original.role ? h(Badge, { variant: 'neutral', pill: true }, () => row.original.role) : 'No role'),
     },
     {
         accessorKey: 'is_active',
@@ -47,17 +46,20 @@ const columns = [
 
 <template>
     <div>
-        <Link :href="`/tenants/${tenant.id}`" class="mb-2 inline-flex items-center gap-1 text-sm font-semibold text-primary">
-            <ArrowLeft class="size-4" />
-            Back to {{ tenant.company_name }}
-        </Link>
-
-        <div class="mb-4">
-            <h2 class="text-base font-bold text-text-strong">Users</h2>
-        </div>
+        <PageHeader
+            :title="`Users of ${tenant.company_name}`"
+            description="People who can sign in to this tenant, with their role and whether their account is active."
+            :back-href="`/tenants/${tenant.id}`"
+            :back-label="`Back to ${tenant.company_name}`"
+        />
 
         <Card variant="panel">
-            <DataTable :columns="columns" :data="users" :page-size="10" empty-message="This tenant has no users yet" />
+            <DataTable
+                :columns="columns"
+                :data="users"
+                :page-size="10"
+                empty-message="No users yet. Users appear here once the tenant's first admin is created (during provisioning) or when the tenant adds staff."
+            />
         </Card>
     </div>
 </template>

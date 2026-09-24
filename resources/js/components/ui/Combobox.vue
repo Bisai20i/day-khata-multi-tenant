@@ -45,10 +45,15 @@ function searchText(option) {
 </script>
 
 <template>
-    <ComboboxRoot v-model="modelValue" :disabled="disabled" class="relative w-full">
+    <ComboboxRoot
+        v-model="modelValue"
+        :disabled="disabled"
+        open-on-click
+        class="relative w-full"
+    >
         <ComboboxAnchor
             :class="cn(
-                'flex w-full items-center justify-between border-[1.5px] border-border bg-bg-subtle px-3 py-2 transition-colors duration-150',
+                'flex h-9 w-full items-center justify-between border-[1.5px] border-border bg-bg-subtle px-3 transition-colors duration-150',
                 'has-[input:focus]:border-primary has-[input:focus]:bg-white has-[input:focus]:[box-shadow:0_0_0_3px_var(--color-primary-focus-ring)]',
                 disabled ? 'cursor-not-allowed opacity-50' : '',
                 props.class,
@@ -63,6 +68,12 @@ function searchText(option) {
             <ComboboxTrigger>
                 <ChevronDown class="h-3.5 w-3.5 shrink-0 text-text-muted" />
             </ComboboxTrigger>
+            <!-- Trailing action tied to this specific field (e.g. "+ add new") -
+                 rendered inside the same bordered box instead of floating
+                 beside it as its own button. -->
+            <div v-if="$slots.addon" class="ml-2 flex h-9 shrink-0 items-center border-l-[1.5px] border-border pl-2">
+                <slot name="addon" />
+            </div>
         </ComboboxAnchor>
         <ComboboxPortal>
             <ComboboxContent
@@ -79,9 +90,12 @@ function searchText(option) {
                         :key="option.value"
                         :value="option.value"
                         :text-value="searchText(option)"
-                        class="relative flex cursor-pointer select-none items-center justify-between px-2.5 py-2 text-[13px] text-text-base outline-none data-[highlighted]:bg-primary-tint data-[highlighted]:text-primary"
+                        class="relative flex cursor-pointer select-none items-center justify-between gap-2 px-2.5 py-2 text-[13px] text-text-base outline-none data-[highlighted]:bg-primary-tint data-[highlighted]:text-primary"
                     >
-                        {{ option.label }}
+                        <span class="flex flex-1 items-center justify-between gap-2">
+                            <span>{{ option.label }}</span>
+                            <span v-if="option.meta" :class="cn('shrink-0 text-xs font-semibold', option.metaClass)">{{ option.meta }}</span>
+                        </span>
                         <ComboboxItemIndicator>
                             <Check class="h-3.5 w-3.5 text-primary" />
                         </ComboboxItemIndicator>

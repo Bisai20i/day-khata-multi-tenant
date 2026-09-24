@@ -159,11 +159,15 @@ test('an abbreviated invoice hides buyer info and the VAT breakdown, and prints 
         ])->render();
 
         expect($html)
-            ->not->toContain('Bill To')
+            ->toContain('ABBREVIATED TAX INVOICE')
+            ->not->toContain('Buyer Details')
             ->not->toContain('Taxable Amount')
             ->not->toContain('VAT (')
+            ->not->toContain('Net Payable')
+            ->toContain('Tax Rate')
+            ->toContain("(Seller's Signature)")
             ->toContain('This invoice shall not be issued for the sale of goods or services where the taxable value exceeds NPR 10,000.')
-            ->toContain('<div class="pan-box-wrapper">');
+            ->toContain('<table class="pan-boxes">');
     });
 
     $tenant->delete();
@@ -192,30 +196,32 @@ test('a pan invoice shows buyer info but hides the VAT breakdown', function () {
             ->and($sale->nontaxable_amount)->toBe('1000.00');
 
         expect($html)
-            ->toContain('Bill To')
+            ->toContain('>INVOICE<')
+            ->toContain('Buyer Details')
             ->toContain('Rebate Test Customer')
             ->not->toContain('Taxable Amount')
             ->not->toContain('VAT (')
-            ->not->toContain('<div class="pan-box-wrapper">')
+            ->not->toContain('Digital Payment Rebate')
+            ->not->toContain('<table class="pan-boxes">')
             ->not->toContain('This invoice shall not be issued');
     });
 
     $tenant->delete();
 });
 
-test('a full invoice paid by bank does not include a digital payment VAT rebate', function () {
-    $domain = 'sale-print-full-digital.tenant-test';
+test('a full tax invoice prints the IRD layout with no digital payment rebate, and ticks only the payment method used', function (string $mode, string $ticked) {
+    $domain = "sale-print-full-{$mode}.tenant-test";
     $tenant = provisionSalePrintTestTenant($domain);
 
-    $tenant->run(function () {
-        ['sale' => $sale, 'company' => $company] = buildSalePrintTestSale('full', 'bank');
+    $tenant->run(function () use ($mode, $ticked) {
+        ['sale' => $sale, 'company' => $company] = buildSalePrintTestSale('full', $mode);
 
-        // taxable 1000, vat 13% = 130, total = 1130. The 10% "digital
-        // payment rebate" was a Phase B removal (dead, unbacked-by-any-
-        // settings-toggle print-time assumption - see pdf/sale.blade.php);
-        // this pins that it stays gone rather than accidentally reappearing.
-        expect((float) $sale->vat_amount)->toBe(130.0);
-        expect((float) $sale->total)->toBe(1130.0);
+        // taxable 1000, vat 13% = 130, total = 1130. The legacy bill printed a
+        // "10% Digital Payment Rebate (on VAT)" row that was never applied
+        // (always 0.00). The stored sale and its voucher carry no rebate, so the
+        // bill must not print one; this pins that it stays gone.
+        expect((float) $sale->vat_amount)->toBe(130.0)
+            ->and((float) $sale->total)->toBe(1130.0);
 
         $html = view('pdf.sale', [
             'sale' => $sale,
@@ -225,37 +231,71 @@ test('a full invoice paid by bank does not include a digital payment VAT rebate'
         ])->render();
 
         expect($html)
+            ->toContain('TAX INVOICE')
+            ->toContain('VAT Registered Persons Only')
             ->toContain('Taxable Amount')
+            ->not->toContain('Digital Payment Rebate')
+            ->not->toContain('Net Payable')
+            ->not->toContain('Net Receivable')
+            ->toContain('(Authorized Signature)')
+            ->toContain('(Computer generated invoice does not need signature)')
             ->toContain('1,130.00')
-            ->not->toContain('Digital Payment Rebate')
-            ->not->toContain('Net Payable');
+            ->toContain('<span class="check-box">✓</span> '.$ticked);
+
+        expect(substr_count($html, '✓'))->toBe(1);
     });
 
     $tenant->delete();
-});
+})->with([
+    'cash' => ['cash', 'Cash'],
+    'bank' => ['bank', 'Bank/Digital'],
+    'credit' => ['credit', 'Credit'],
+]);
 
-test('a full invoice paid by cash does not include a digital payment VAT rebate', function () {
-    $domain = 'sale-print-full-cash.tenant-test';
+test('the pan and abbreviated formats use their own IRD titles and signature wording', function () {
+    $domain = 'sale-print-format-wording.tenant-test';
     $tenant = provisionSalePrintTestTenant($domain);
 
     $tenant->run(function () {
-        ['sale' => $sale, 'company' => $company] = buildSalePrintTestSale('full', 'cash');
+        ['sale' => $sale, 'company' => $company] = buildSalePrintTestSale('pan', 'credit');
 
         $html = view('pdf.sale', [
             'sale' => $sale,
             'company' => $company,
-            'documentNumber' => 'SL-1',
+            'documentNumber' => 'SLP-1',
             'documentDate' => '2026-06-01',
         ])->render();
 
         expect($html)
-            ->toContain('Taxable Amount')
-            ->not->toContain('Digital Payment Rebate')
-            ->not->toContain('Net Payable');
+            ->toContain('Tax Registration No. (PAN)')
+            ->toContain('Bank Transfer')
+            ->toContain('(Authorized Signature)');
     });
 
     $tenant->delete();
 });
+
+test('a reprint is stamped as a copy of the original on every IRD format', function (string $type) {
+    $domain = "sale-print-copy-{$type}.tenant-test";
+    $tenant = provisionSalePrintTestTenant($domain);
+
+    $tenant->run(function () use ($type) {
+        ['sale' => $sale, 'company' => $company] = buildSalePrintTestSale($type, 'cash');
+
+        $render = fn (int $copy) => view('pdf.sale', [
+            'sale' => $sale,
+            'company' => $company,
+            'documentNumber' => 'SL-1',
+            'documentDate' => '2026-06-01',
+            'copyNumber' => $copy,
+        ])->render();
+
+        expect($render(1))->toContain('Original')->not->toContain('Copy of Original')
+            ->and($render(3))->toContain('Copy of Original - 2');
+    });
+
+    $tenant->delete();
+})->with(['full', 'pan', 'abbreviated']);
 
 test('the printed invoice includes the company logo when one is set', function () {
     $domain = 'sale-print-logo-present.tenant-test';
@@ -380,8 +420,8 @@ test('the printed invoice orders its totals subtotal, discount, taxable, VAT, gr
         // the VAT is charged on (audit P1: "taxable prints before discount").
         // Scoped to the totals table, since "Discount" is also a column header
         // in the items table above it.
-        $totalsBlock = substr($html, (int) strpos($html, 'totals-table'));
-        $order = ['Subtotal', 'Discount', 'Taxable Amount', 'VAT (', 'Grand Total', 'TDS Withheld', 'Net Receivable'];
+        $totalsBlock = substr($html, (int) strpos($html, '<table class="totals">'));
+        $order = ['Sub Total', 'Discount', 'Taxable Amount', 'VAT (', 'Grand Total', 'TDS Withheld', 'Net Receivable'];
         $positions = array_map(fn (string $label) => strpos($totalsBlock, $label), $order);
 
         expect($positions)->not->toContain(false)

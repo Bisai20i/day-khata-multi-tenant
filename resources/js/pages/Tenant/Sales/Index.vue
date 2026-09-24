@@ -1,7 +1,7 @@
 <script setup>
 import { computed, h, onMounted, reactive, ref, watch } from 'vue';
 import { Link, router, useForm, usePage } from '@inertiajs/vue3';
-import { Ban, Plus, Printer, Search, X } from '@lucide/vue';
+import { Ban, ChevronDown, ChevronUp, ChevronsUpDown, Download, Plus, Printer, Search, SlidersHorizontal, X } from '@lucide/vue';
 import AppLayout from '@/layouts/AppLayout.vue';
 import { useLayoutChrome } from '@/composables/useLayoutChrome';
 import Card from '@/components/ui/Card.vue';
@@ -9,9 +9,13 @@ import Button from '@/components/ui/Button.vue';
 import Input from '@/components/ui/Input.vue';
 import Modal from '@/components/ui/Modal.vue';
 import DataTable from '@/components/ui/DataTable.vue';
+import PageHeader from '@/components/ui/PageHeader.vue';
+import Badge from '@/components/ui/Badge.vue';
 import Tooltip from '@/components/ui/Tooltip.vue';
 import NepaliDateInput from '@/components/ui/NepaliDateInput.vue';
 import Combobox from '@/components/ui/Combobox.vue';
+import DropdownMenu from '@/components/ui/DropdownMenu.vue';
+import DropdownMenuItem from '@/components/ui/DropdownMenuItem.vue';
 import { useToast } from '@/composables/useToast';
 import { formatMoney } from '@/lib/money';
 import { formatBsDate } from '@/lib/format';
@@ -50,9 +54,7 @@ const props = defineProps({
         default: () => ({
             default_vat_rate: '13.00',
             default_store_id: null,
-            sale_full_enabled: true,
-            sale_abbreviated_enabled: true,
-            sale_pan_enabled: true,
+            active_invoice_type: 'full',
         }),
     },
 });
@@ -74,11 +76,7 @@ const filtering = ref(false);
  * header sort would only reorder the 25 rows of the current page, which on a
  * list this long reads as a wrong answer.
  */
-const sortColumns = [
-    { value: 'date', label: 'Date' },
-    { value: 'invoice_number', label: 'Invoice #' },
-    { value: 'total', label: 'Total' },
-];
+const sortableColumns = { date: 'date', voucher: 'invoice_number', total: 'total' };
 
 const sortState = reactive({
     sort: props.filters.sort ?? 'date',
@@ -123,6 +121,51 @@ function sortBy(column) {
     reload();
 }
 
+/**
+ * Column header for a server-sorted column: a button, so the sort is reachable
+ * by keyboard, with the arrow only lit on the column currently sorted by.
+ */
+function sortableHeader(columnId, label) {
+    const sortKey = sortableColumns[columnId];
+
+    return () => {
+        const active = sortState.sort === sortKey;
+        const Icon = !active ? ChevronsUpDown : sortState.sort_dir === 'asc' ? ChevronUp : ChevronDown;
+
+        return h(
+            'button',
+            {
+                type: 'button',
+                class: `inline-flex cursor-pointer items-center gap-1 uppercase transition-colors duration-150 hover:text-text-strong focus-visible:outline-2 focus-visible:outline-primary ${active ? 'text-text-strong' : ''}`,
+                'aria-label': `Sort by ${label}`,
+                onClick: () => sortBy(sortKey),
+            },
+            [label, h(Icon, { class: `h-3 w-3 shrink-0 ${active ? 'text-primary' : 'text-text-faint'}` })],
+        );
+    };
+}
+
+const showFilters = ref(false);
+
+const activeFilterChips = computed(() => {
+    const chips = [];
+
+    if (props.filters.from) chips.push({ key: 'from', label: `From ${formatBsDate(props.filters.from)}` });
+    if (props.filters.to) chips.push({ key: 'to', label: `To ${formatBsDate(props.filters.to)}` });
+    if (props.filters.customer_id) {
+        const customer = props.customers.find((c) => c.id === Number(props.filters.customer_id));
+        chips.push({ key: 'customer_id', label: customer?.name ?? 'Customer' });
+    }
+    if (props.filters.search) chips.push({ key: 'search', label: `Invoice "${props.filters.search}"` });
+
+    return chips;
+});
+
+function removeFilter(key) {
+    filterState[key] = key === 'customer_id' ? null : '';
+    reload();
+}
+
 function clearFilters() {
     filterState.from = '';
     filterState.to = '';
@@ -143,29 +186,25 @@ const hasActiveFilters = computed(
 
 // The export covers the same filtered, searched and sorted set the page is
 // showing, all rows and not just this page (SaleController::export()).
-const exportUrl = computed(() => {
+function exportUrl(format) {
     const params = new URLSearchParams();
 
     for (const [key, value] of Object.entries(queryParams())) {
         if (value !== undefined && value !== null && value !== '') params.append(key, value);
     }
+    params.append('format', format);
 
-    const query = params.toString();
-
-    return query ? `/sales/export?${query}` : '/sales/export';
-});
-
-/**
- * "Save & Print N copies" (audit section 4 polish): the print action carries
- * how many copies to produce, and the server records one print-log row per
- * copy, so copy 1 prints as the Original and 2..N as "Copy of Original"
- * (C9).
- */
-const printCopyOptions = [1, 2, 3, 4, 5];
-const printCopies = ref(1);
+    return `/sales/export?${params.toString()}`;
+}
 
 function printUrl(sale) {
-    return printCopies.value > 1 ? `/sales/${sale.id}/print?copies=${printCopies.value}` : `/sales/${sale.id}/print`;
+    return `/sales/${sale.id}/print`;
+}
+
+// Prints the currently visible list via the browser's own print dialog -
+// per-sale copies (Actions column) stay a separate concern.
+function printList() {
+    window.print();
 }
 
 const page = usePage();
@@ -239,7 +278,7 @@ const paymentModeLabels = {
 // SL/SLA map, so a PAN bill showed SL-n on screen and SLP-n on paper, and
 // changing a prefix in Settings silently renumbered every past invoice.
 function invoiceLabel(sale) {
-    return sale.invoice_number ?? '—';
+    return sale.invoice_number ?? '-';
 }
 
 const cancelling = ref(null);
@@ -267,13 +306,13 @@ function submitCancel() {
 const columns = [
     {
         id: 'date',
-        header: 'Date (BS)',
+        header: sortableHeader('date', 'Date (BS)'),
         numeric: false,
         cell: ({ row }) => formatBsDate(row.original.date),
     },
     {
         id: 'voucher',
-        header: 'Invoice #',
+        header: sortableHeader('voucher', 'Invoice #'),
         numeric: false,
         cell: ({ row }) => invoiceLabel(row.original),
     },
@@ -287,13 +326,13 @@ const columns = [
         id: 'customer',
         header: 'Customer',
         numeric: false,
-        cell: ({ row }) => row.original.customer?.name ?? '—',
+        cell: ({ row }) => row.original.customer?.name ?? '-',
     },
     {
         id: 'agent',
         header: 'Agent',
         numeric: false,
-        cell: ({ row }) => row.original.agent?.name ?? '—',
+        cell: ({ row }) => row.original.agent?.name ?? '-',
     },
     {
         id: 'payment_mode',
@@ -303,7 +342,7 @@ const columns = [
     },
     {
         id: 'total',
-        header: 'Total',
+        header: sortableHeader('total', 'Total'),
         numeric: true,
         cell: ({ row }) => formatMoney(row.original.total),
     },
@@ -313,14 +352,9 @@ const columns = [
         numeric: false,
         cell: ({ row }) =>
             h(
-                'span',
-                {
-                    class:
-                        row.original.status === 'cancelled'
-                            ? 'text-danger font-semibold'
-                            : 'text-success font-semibold',
-                },
-                row.original.status === 'cancelled' ? 'Cancelled' : 'Posted',
+                Badge,
+                { variant: row.original.status === 'cancelled' ? 'danger' : 'success' },
+                () => (row.original.status === 'cancelled' ? 'Cancelled' : 'Posted'),
             ),
     },
     {
@@ -329,7 +363,7 @@ const columns = [
         numeric: false,
         cell: ({ row }) =>
             h('div', { class: 'flex items-center gap-1' }, [
-                h(Tooltip, { label: 'Print' }, () =>
+                h(Tooltip, { label: 'Print sale' }, () =>
                     h(
                         'a',
                         {
@@ -344,7 +378,7 @@ const columns = [
                 ),
                 row.original.status === 'cancelled'
                     ? null
-                    : h(Tooltip, { label: 'Cancel sale' }, () =>
+                    : h(Tooltip, { label: 'Cancel sale (posts reversing entry)' }, () =>
                           h(
                               'button',
                               {
@@ -381,79 +415,107 @@ const columns = [
         </template>
 
         <template v-else>
-            <div class="mb-4 flex items-center justify-between">
-                <h2 class="text-base font-bold text-text-strong">Sales</h2>
+            <PageHeader title="Sales" description="All sales invoices. Filter, print or export them, and cancel a sale posted in error.">
                 <Button variant="primary" tone="purple" @click="openCreateForm">
                     <Plus class="size-4" />
                     New sale
                 </Button>
-            </div>
+            </PageHeader>
 
-            <Card variant="panel" class="mb-4">
-                <div class="flex flex-wrap items-end gap-3">
+            <Card variant="panel" class="mb-4 bg-white">
+                <div class="flex items-center justify-between gap-2 md:hidden">
+                    <Button variant="secondary" tone="neutral" type="button" :aria-expanded="showFilters" @click="showFilters = !showFilters">
+                        <SlidersHorizontal class="size-4" />
+                        Filters
+                        <span v-if="activeFilterChips.length" class="bg-bg-muted px-1.5 text-[11px] text-text-strong">{{ activeFilterChips.length }}</span>
+                    </Button>
+                </div>
+                <div :class="[showFilters ? 'mt-3 flex' : 'hidden', 'flex-wrap items-end gap-3 md:mt-0 md:flex']">
                     <div class="min-w-[160px]">
-                        <label class="mb-1 block text-xs font-semibold text-text-muted">From</label>
+                        <label class="mb-1 block text-xs font-semibold text-text-muted">From date (BS)</label>
                         <NepaliDateInput v-model="filterState.from" />
                     </div>
                     <div class="min-w-[160px]">
-                        <label class="mb-1 block text-xs font-semibold text-text-muted">To</label>
+                        <label class="mb-1 block text-xs font-semibold text-text-muted">To date (BS)</label>
                         <NepaliDateInput v-model="filterState.to" />
                     </div>
                     <div class="min-w-[220px]">
                         <label class="mb-1 block text-xs font-semibold text-text-muted">Customer</label>
-                        <Combobox v-model="filterState.customer_id" :options="customerOptions" placeholder="All customers" />
+                        <Combobox v-model="filterState.customer_id" @update:model-value="applyFilters" :options="customerOptions" placeholder="All customers" />
                     </div>
-                    <div class="min-w-[200px]">
+                    <div class="min-w-[200px] flex-1">
                         <label class="mb-1 block text-xs font-semibold text-text-muted">Invoice #</label>
-                        <Input v-model="filterState.search" type="text" placeholder="Search invoice number" @keydown.enter.prevent="applyFilters" />
+                        <div class="relative">
+                            <Search class="pointer-events-none absolute top-1/2 left-2.5 size-4 -translate-y-1/2 text-text-faint" />
+                            <Input v-model="filterState.search" type="text" placeholder="Search invoice number" class="pl-8" @keydown.enter.prevent="applyFilters" />
+                        </div>
                     </div>
-                    <Button variant="primary" tone="purple" :loading="filtering" @click="applyFilters">
+                    <Button variant="secondary" tone="neutral" :loading="filtering" @click="applyFilters">
                         <Search class="size-4" />
                         Filter
                     </Button>
-                    <Button v-if="hasActiveFilters" variant="secondary" tone="purple" @click="clearFilters">
-                        <X class="size-4" />
-                        Clear
-                    </Button>
-                    <a :href="exportUrl">
-                        <Button variant="secondary" tone="purple" type="button">Export</Button>
-                    </a>
                 </div>
-
-                <div class="mt-3 flex flex-wrap items-center gap-2 border-t-[1.5px] border-border pt-3">
-                    <span class="text-xs font-semibold text-text-muted">Sort by</span>
-                    <Button
-                        v-for="column in sortColumns"
-                        :key="column.value"
-                        :variant="filters.sort === column.value ? 'primary' : 'secondary'"
-                        tone="purple"
+                <div v-if="activeFilterChips.length" class="mt-3 flex flex-wrap items-center gap-2 border-t border-border pt-3">
+                    <button
+                        v-for="chip in activeFilterChips"
+                        :key="chip.key"
                         type="button"
-                        @click="sortBy(column.value)"
+                        class="inline-flex cursor-pointer items-center gap-1 border-[1.5px] border-border bg-bg-subtle px-2 py-1 text-xs font-semibold text-text-base transition-colors duration-150 hover:bg-bg-muted focus-visible:outline-2 focus-visible:outline-primary"
+                        :aria-label="`Remove filter: ${chip.label}`"
+                        @click="removeFilter(chip.key)"
                     >
-                        {{ column.label }}
-                        <span v-if="filters.sort === column.value">{{ filters.sort_dir === 'asc' ? '↑' : '↓' }}</span>
-                    </Button>
+                        {{ chip.label }}
+                        <X class="size-3 text-text-muted" />
+                    </button>
+                    <button type="button" class="cursor-pointer text-xs font-semibold text-primary hover:underline focus-visible:outline-2 focus-visible:outline-primary" @click="clearFilters">
+                        Clear all
+                    </button>
                 </div>
             </Card>
 
-            <Card variant="panel">
-                <div class="mb-3 flex flex-wrap items-center justify-end gap-2">
-                    <label class="text-xs font-semibold text-text-muted" for="print-copies">Print copies</label>
-                    <select
-                        id="print-copies"
-                        v-model="printCopies"
-                        class="border-[1.5px] border-border bg-white px-2 py-1 text-xs font-semibold text-text-base"
-                    >
-                        <option v-for="option in printCopyOptions" :key="option" :value="option">{{ option }}</option>
-                    </select>
-                    <span class="text-xs text-text-faint">Copy 1 prints as the original, the rest as copies.</span>
+            <Card variant="panel" class="bg-white">
+                <div class="mb-3 flex flex-wrap items-center justify-between gap-2">
+                    <div class="ml-auto flex items-center gap-2">
+                        <Button variant="secondary" tone="neutral" type="button" @click="printList">
+                            <Printer class="size-4" />
+                            Print
+                        </Button>
+                        <DropdownMenu align="end">
+                            <template #trigger>
+                                <Button variant="secondary" tone="neutral" type="button">
+                                    <Download class="size-4" />
+                                    Export
+                                    <ChevronDown class="size-3.5" />
+                                </Button>
+                            </template>
+                            <DropdownMenuItem as="a" :href="exportUrl('csv')">CSV</DropdownMenuItem>
+                            <DropdownMenuItem as="a" :href="exportUrl('xlsx')">Excel</DropdownMenuItem>
+                        </DropdownMenu>
+                    </div>
                 </div>
 
-                <DataTable :columns="columns" :data="sales.data" :page-size="Math.max(sales.data.length, 1)" empty-message="No sales yet" />
+                <div v-if="sales.data.length === 0" class="flex flex-col items-center gap-3 py-10 text-center">
+                    <template v-if="hasActiveFilters">
+                        <p class="text-sm font-semibold text-text-strong">No sales match these filters</p>
+                        <Button variant="secondary" tone="neutral" @click="clearFilters">
+                            <X class="size-4" />
+                            Clear filters
+                        </Button>
+                    </template>
+                    <template v-else>
+                        <p class="text-sm font-semibold text-text-strong">No sales yet</p>
+                        <p class="text-xs text-text-muted">Create your first sale and it will be listed here.</p>
+                        <Button variant="primary" tone="purple" @click="openCreateForm">
+                            <Plus class="size-4" />
+                            New sale
+                        </Button>
+                    </template>
+                </div>
+                <DataTable v-else :columns="columns" :data="sales.data" :page-size="Math.max(sales.data.length, 1)" empty-message="No sales" />
 
                 <!-- Server-computed SQL sums for the whole filtered set, not
                      just this page (audit section 4 polish). -->
-                <div class="mt-3 grid grid-cols-4 gap-3 border-t-[1.5px] border-border pt-3 text-sm">
+                <div class="mt-3 grid grid-cols-2 gap-3 sm:grid-cols-4 border-t-[1.5px] border-border pt-3 text-sm">
                     <div>
                         <p class="text-[10px] font-bold tracking-[.8px] text-text-muted uppercase">Taxable (filtered)</p>
                         <p class="font-bold text-text-strong">{{ formatMoney(totals.taxable_amount) }}</p>
@@ -472,42 +534,32 @@ const columns = [
                     </div>
                 </div>
 
-                <div v-if="sales.data.length > 0" class="mt-3 flex flex-wrap items-center justify-between gap-3">
-                    <p class="text-xs text-text-muted">Showing {{ sales.from }}–{{ sales.to }} of {{ sales.total }}</p>
-                    <div class="flex items-center gap-2">
-                        <Link
-                            v-if="sales.prev_page_url"
-                            :href="sales.prev_page_url"
-                            preserve-state
-                            preserve-scroll
-                            class="inline-flex items-center border-[1.5px] border-border bg-white px-3 py-1.5 text-xs font-semibold text-text-muted transition-colors duration-150 ease-out hover:border-primary hover:text-primary"
-                        >
-                            Previous
-                        </Link>
-                        <span
-                            v-else
-                            class="inline-flex cursor-not-allowed items-center border-[1.5px] border-border bg-white px-3 py-1.5 text-xs font-semibold text-text-faint opacity-40"
-                        >
-                            Previous
-                        </span>
-                        <span class="text-xs text-text-muted">Page {{ sales.current_page }} of {{ sales.last_page }}</span>
-                        <Link
-                            v-if="sales.next_page_url"
-                            :href="sales.next_page_url"
-                            preserve-state
-                            preserve-scroll
-                            class="inline-flex items-center border-[1.5px] border-border bg-white px-3 py-1.5 text-xs font-semibold text-text-muted transition-colors duration-150 ease-out hover:border-primary hover:text-primary"
-                        >
-                            Next
-                        </Link>
-                        <span
-                            v-else
-                            class="inline-flex cursor-not-allowed items-center border-[1.5px] border-border bg-white px-3 py-1.5 text-xs font-semibold text-text-faint opacity-40"
-                        >
-                            Next
-                        </span>
-                    </div>
-                </div>
+                <p v-if="sales.data.length > 0" class="mt-3 text-xs text-text-muted" aria-live="polite">Showing {{ sales.from }}–{{ sales.to }} of {{ sales.total }}</p>
+                <nav v-if="sales.data.length > 0 && sales.last_page > 1" aria-label="Sales pagination" class="mt-3 flex items-center justify-end gap-2">
+                    <Link
+                        v-if="sales.prev_page_url"
+                        :href="sales.prev_page_url"
+                        preserve-state
+                        preserve-scroll
+                        aria-label="Previous page"
+                        class="inline-flex items-center border-[1.5px] border-border bg-white px-3 py-1.5 text-xs font-semibold text-text-muted transition-colors duration-150 ease-out hover:border-primary hover:text-primary"
+                    >
+                        Previous
+                    </Link>
+                    <span v-else aria-disabled="true" class="inline-flex cursor-not-allowed items-center border-[1.5px] border-border bg-white px-3 py-1.5 text-xs font-semibold text-text-faint opacity-40">Previous</span>
+                    <span class="text-xs text-text-muted" aria-current="page">Page {{ sales.current_page }} of {{ sales.last_page }}</span>
+                    <Link
+                        v-if="sales.next_page_url"
+                        :href="sales.next_page_url"
+                        preserve-state
+                        preserve-scroll
+                        aria-label="Next page"
+                        class="inline-flex items-center border-[1.5px] border-border bg-white px-3 py-1.5 text-xs font-semibold text-text-muted transition-colors duration-150 ease-out hover:border-primary hover:text-primary"
+                    >
+                        Next
+                    </Link>
+                    <span v-else aria-disabled="true" class="inline-flex cursor-not-allowed items-center border-[1.5px] border-border bg-white px-3 py-1.5 text-xs font-semibold text-text-faint opacity-40">Next</span>
+                </nav>
             </Card>
         </template>
 
@@ -524,7 +576,7 @@ const columns = [
             </form>
 
             <template #footer>
-                <Button variant="secondary" tone="purple" type="button" @click="cancelling = null">Back</Button>
+                <Button variant="secondary" tone="neutral" type="button" @click="cancelling = null">Back</Button>
                 <Button variant="primary" tone="purple" type="button" :disabled="cancelForm.processing" @click="submitCancel">
                     Confirm cancellation
                 </Button>

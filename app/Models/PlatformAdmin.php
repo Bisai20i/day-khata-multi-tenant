@@ -35,7 +35,7 @@ class PlatformAdmin extends Authenticatable
 
     /**
      * Whether this admin has completed 2FA enrollment (a secret alone, before
-     * the confirm step, does not count — see TwoFactorAuthenticationController).
+     * the confirm step, does not count - see TwoFactorAuthenticationController).
      */
     public function hasTwoFactorEnabled(): bool
     {

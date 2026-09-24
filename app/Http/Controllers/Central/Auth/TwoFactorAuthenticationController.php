@@ -21,7 +21,7 @@ class TwoFactorAuthenticationController extends Controller
     /**
      * Show the current admin's 2FA status. If a secret has been generated but
      * not yet confirmed, also render the QR code (self-rendered inline SVG
-     * data URI — no external QR image API, so no CSP img-src exception needed)
+     * data URI - no external QR image API, so no CSP img-src exception needed)
      * and the plaintext secret for manual entry.
      */
     public function show(Request $request): Response
@@ -34,7 +34,7 @@ class TwoFactorAuthenticationController extends Controller
         if ($admin->two_factor_secret && ! $admin->hasTwoFactorEnabled()) {
             $props['pendingSecret'] = $admin->two_factor_secret;
             $props['qrCodeDataUri'] = $this->qrCodeDataUri(
-                (new Google2FA())->getQRCodeUrl('Day Khata', $admin->email, $admin->two_factor_secret),
+                (new Google2FA)->getQRCodeUrl('Day Khata', $admin->email, $admin->two_factor_secret),
             );
         }
 
@@ -52,7 +52,7 @@ class TwoFactorAuthenticationController extends Controller
         $admin = $request->user('platform');
 
         $admin->forceFill([
-            'two_factor_secret' => (new Google2FA())->generateSecretKey(),
+            'two_factor_secret' => (new Google2FA)->generateSecretKey(),
             'two_factor_recovery_codes' => null,
             'two_factor_confirmed_at' => null,
         ])->save();
@@ -76,7 +76,7 @@ class TwoFactorAuthenticationController extends Controller
             throw ValidationException::withMessages(['code' => 'Generate a QR code first.']);
         }
 
-        if (! (new Google2FA())->verifyKey($admin->two_factor_secret, $validated['code'])) {
+        if (! (new Google2FA)->verifyKey($admin->two_factor_secret, $validated['code'])) {
             throw ValidationException::withMessages(['code' => 'The provided code is invalid.']);
         }
 
@@ -121,7 +121,7 @@ class TwoFactorAuthenticationController extends Controller
 
     private function qrCodeDataUri(string $otpauthUrl): string
     {
-        $renderer = new ImageRenderer(new RendererStyle(240), new SvgImageBackEnd());
+        $renderer = new ImageRenderer(new RendererStyle(240), new SvgImageBackEnd);
         $svg = (new Writer($renderer))->writeString($otpauthUrl);
 
         return 'data:image/svg+xml;base64,'.base64_encode($svg);

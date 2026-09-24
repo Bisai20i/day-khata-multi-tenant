@@ -3,6 +3,7 @@ import { computed, onMounted, ref } from 'vue';
 import { router, useForm, usePage } from '@inertiajs/vue3';
 import { Plus, X } from '@lucide/vue';
 import Card from '@/components/ui/Card.vue';
+import PageHeader from '@/components/ui/PageHeader.vue';
 import Button from '@/components/ui/Button.vue';
 import Input from '@/components/ui/Input.vue';
 import Select from '@/components/ui/Select.vue';
@@ -69,7 +70,7 @@ const itemOptions = computed(() =>
 function accountOptions(accounts) {
     return accounts.map((account) => ({
         value: account.id,
-        label: account.code ? `${account.code} — ${account.name}` : account.name,
+        label: account.code ? `${account.code} - ${account.name}` : account.name,
     }));
 }
 
@@ -605,10 +606,9 @@ onMounted(() => {
 <template>
     <div>
     <Card variant="panel">
-        <div class="mb-4 flex items-center justify-between">
-            <h3 class="text-base font-bold text-text-strong">New purchase</h3>
+        <PageHeader title="New purchase" description="Record a bill received from a supplier. Stock and the supplier's balance update when you create it. Fields marked * are required.">
             <Button variant="secondary" tone="purple" type="button" @click="emit('cancel')">Cancel</Button>
-        </div>
+        </PageHeader>
 
         <p v-if="form.errors.lines" class="mb-4 border-[1.5px] border-danger bg-danger-bg px-3 py-2 text-sm text-danger">
             {{ form.errors.lines }}
@@ -653,7 +653,8 @@ onMounted(() => {
                 </div>
             </div>
 
-            <div class="grid grid-cols-3 gap-4">
+            <h4 class="border-b-[1.5px] border-border pb-1 text-sm font-bold text-text-strong">Supplier &amp; date</h4>
+            <div class="grid grid-cols-1 gap-4 sm:grid-cols-3">
                 <div>
                     <label class="mb-1 block text-sm font-semibold text-text-base">Supplier <span class="text-danger">*</span></label>
                     <div class="flex gap-2">
@@ -664,33 +665,35 @@ onMounted(() => {
                             class="flex-1"
                             @update:model-value="selectSupplier"
                         />
-                        <Button variant="secondary" tone="purple" type="button" class="!px-2.5" @click="openSupplierModal">
-                            <Plus class="h-3.5 w-3.5" />
+                        <Button variant="secondary" tone="purple" type="button" class="!px-2.5" aria-label="Add a new supplier" title="Add a new supplier" @click="openSupplierModal">
+                            <Plus class="h-3.5 w-3.5" aria-hidden="true" />
                         </Button>
                     </div>
                     <p v-if="form.errors.supplier_id" class="mt-1 text-sm text-danger">{{ form.errors.supplier_id }}</p>
                 </div>
                 <div>
-                    <label class="mb-1 block text-sm font-semibold text-text-base">Date <span class="text-danger">*</span></label>
+                    <label class="mb-1 block text-sm font-semibold text-text-base">Purchase date (BS) <span class="text-danger">*</span></label>
                     <NepaliDateInput v-model="form.date" required />
+                    <p class="mt-1 text-xs text-text-faint">Bikram Sambat date printed on the supplier's bill.</p>
                     <p v-if="form.errors.date" class="mt-1 text-sm text-danger">{{ form.errors.date }}</p>
                 </div>
                 <div>
-                    <label class="mb-1 block text-sm font-semibold text-text-base">Bill Number</label>
-                    <Input v-model="form.bill_number" type="text" placeholder="Supplier's bill no." />
+                    <label class="mb-1 block text-sm font-semibold text-text-base">Supplier bill number</label>
+                    <Input v-model="form.bill_number" type="text" placeholder="Number printed on the bill" />
+                    <p class="mt-1 text-xs text-text-faint">Optional. Helps you match this entry to the paper bill.</p>
                     <p v-if="form.errors.bill_number" class="mt-1 text-sm text-danger">{{ form.errors.bill_number }}</p>
                 </div>
                 <div>
-                    <label class="mb-1 block text-sm font-semibold text-text-base">PAN Number</label>
+                    <label class="mb-1 block text-sm font-semibold text-text-base">Supplier PAN number</label>
                     <Input v-model="form.pan_number" type="text" placeholder="Optional" />
                 </div>
                 <div>
-                    <label class="mb-1 block text-sm font-semibold text-text-base">Chalani Number</label>
+                    <label class="mb-1 block text-sm font-semibold text-text-base">Chalani (dispatch) number</label>
                     <Input v-model="form.chalani_number" type="text" placeholder="Optional" />
                     <p v-if="form.errors.chalani_number" class="mt-1 text-sm text-danger">{{ form.errors.chalani_number }}</p>
                 </div>
                 <div>
-                    <label class="mb-1 block text-sm font-semibold text-text-base">Store</label>
+                    <label class="mb-1 block text-sm font-semibold text-text-base">Receive stock into store</label>
                     <Combobox
                         :model-value="form.store_id"
                         :options="storeOptions"
@@ -699,8 +702,12 @@ onMounted(() => {
                     />
                     <p v-if="form.errors.store_id" class="mt-1 text-sm text-danger">{{ form.errors.store_id }}</p>
                 </div>
+            </div>
+
+            <h4 class="border-b-[1.5px] border-border pb-1 text-sm font-bold text-text-strong">Payment</h4>
+            <div class="grid grid-cols-1 gap-4 sm:grid-cols-3">
                 <div>
-                    <label class="mb-1 block text-sm font-semibold text-text-base">Payment Mode <span class="text-danger">*</span></label>
+                    <label class="mb-1 block text-sm font-semibold text-text-base">Payment mode <span class="text-danger">*</span></label>
                     <Select
                         :model-value="form.payment_mode"
                         :options="paymentModeOptions"
@@ -708,7 +715,7 @@ onMounted(() => {
                     />
                 </div>
                 <div v-if="showBankAccount">
-                    <label class="mb-1 block text-sm font-semibold text-text-base">Bank Account</label>
+                    <label class="mb-1 block text-sm font-semibold text-text-base">Bank account</label>
                     <Combobox
                         :model-value="form.bank_account_id"
                         :options="bankAccountOptions"
@@ -721,16 +728,17 @@ onMounted(() => {
 
             <div v-if="showPartialSplit" class="grid grid-cols-2 gap-4">
                 <div>
-                    <label class="mb-1 block text-sm font-semibold text-text-base">Cash Amount</label>
+                    <label class="mb-1 block text-sm font-semibold text-text-base">Paid in cash (Rs.)</label>
                     <Input v-model="form.cash_amount" type="number" min="0" step="0.01" placeholder="0.00" />
                 </div>
                 <div>
-                    <label class="mb-1 block text-sm font-semibold text-text-base">Bank Amount</label>
+                    <label class="mb-1 block text-sm font-semibold text-text-base">Paid by bank (Rs.)</label>
                     <Input v-model="form.bank_amount" type="number" min="0" step="0.01" placeholder="0.00" />
                 </div>
                 <p v-if="partialSplitError" class="col-span-2 text-sm text-danger">{{ partialSplitError }}</p>
             </div>
 
+            <h4 class="border-b-[1.5px] border-border pb-1 text-sm font-bold text-text-strong">Items <span class="text-danger">*</span></h4>
             <div>
                 <div class="mb-3 flex items-end gap-2">
                     <div class="flex-1">
@@ -754,13 +762,13 @@ onMounted(() => {
                 <div class="mb-2 grid grid-cols-[1fr_90px_100px_80px_100px_90px_40px_90px_28px] gap-2 text-[10px] font-bold tracking-[.8px] text-text-muted uppercase">
                     <span>Item</span>
                     <span>Unit</span>
-                    <span>Qty</span>
-                    <span>Free</span>
-                    <span>Rate</span>
+                    <span>Quantity</span>
+                    <span title="Bonus quantity received at no charge">Free qty</span>
+                    <span>Rate (Rs.)</span>
                     <span>Discount</span>
-                    <span></span>
-                    <span>Total</span>
-                    <span></span>
+                    <span title="Discount type">Type</span>
+                    <span class="text-right">Line total</span>
+                    <span class="sr-only">Remove</span>
                 </div>
 
                 <div v-for="(line, index) in form.lines" :key="index" class="mb-2 border-b border-border pb-2 last:border-b-0">
@@ -783,7 +791,7 @@ onMounted(() => {
                                 :options="unitOptionsFor(itemsById.get(line.item_id))"
                                 @update:model-value="(v) => selectLineUnit(line, v)"
                             />
-                            <span v-else class="block pt-2 text-xs text-text-muted">{{ itemsById.get(line.item_id)?.unit ?? '—' }}</span>
+                            <span v-else class="block pt-2 text-xs text-text-muted">{{ itemsById.get(line.item_id)?.unit ?? '-' }}</span>
                         </div>
                         <Input v-model="line.quantity" type="number" min="0" step="0.0001" placeholder="0" required />
                         <Input v-model="line.bonus_quantity" type="number" min="0" step="0.0001" placeholder="0" />
@@ -808,14 +816,15 @@ onMounted(() => {
                             v-if="form.lines.length > 1"
                             type="button"
                             class="mt-2 flex h-7 w-7 items-center justify-center text-text-muted transition-colors duration-150 hover:text-danger"
-                            aria-label="Remove line"
+                            :aria-label="`Remove item row ${index + 1}`"
+                            :title="`Remove item row ${index + 1}`"
                             @click="removeLine(index)"
                         >
                             <X class="h-3.5 w-3.5" />
                         </button>
                     </div>
                     <div class="mt-1">
-                        <Input v-model="line.note" type="text" placeholder="Note (optional)" class="text-xs" />
+                        <Input v-model="line.note" type="text" placeholder="Note for this item (optional)" aria-label="Note for this item" class="text-xs" />
                         <p v-if="form.errors[`lines.${index}.note`]" class="mt-1 text-xs text-danger">
                             {{ form.errors[`lines.${index}.note`] }}
                         </p>
@@ -823,13 +832,14 @@ onMounted(() => {
                 </div>
 
                 <Button variant="secondary" tone="purple" type="button" class="mt-1" @click="addLine">
-                    <Plus class="h-3.5 w-3.5" /> Add line
+                    <Plus class="h-3.5 w-3.5" aria-hidden="true" /> Add another item
                 </Button>
             </div>
 
-            <div class="grid grid-cols-3 gap-4 border-t-[1.5px] border-border pt-4">
+            <h4 class="border-b-[1.5px] border-border pb-1 text-sm font-bold text-text-strong">Charges &amp; discount</h4>
+            <div class="grid grid-cols-1 gap-4 sm:grid-cols-3">
                 <div>
-                    <label class="mb-1 block text-sm font-semibold text-text-base">Header Discount</label>
+                    <label class="mb-1 block text-sm font-semibold text-text-base">Discount on whole bill</label>
                     <div class="flex gap-2">
                         <Input
                             v-model="form.discount"
@@ -847,17 +857,14 @@ onMounted(() => {
                             {{ form.discount_type === 'percentage' ? '%' : 'Rs' }}
                         </button>
                     </div>
+                    <p class="mt-1 text-xs text-text-faint">Applied after item-level discounts. Use the button to switch between % and Rs.</p>
                 </div>
                 <div>
-                    <label class="mb-1 block text-sm font-semibold text-text-base">VAT Rate (%)</label>
+                    <label class="mb-1 block text-sm font-semibold text-text-base">VAT rate (%)</label>
                     <Input v-model="form.vat_rate" type="number" min="0" max="100" step="0.01" :disabled="form.force_non_taxable" />
                     <p v-if="form.errors.vat_rate" class="mt-1 text-sm text-danger">{{ form.errors.vat_rate }}</p>
                 </div>
-                <div>
-                    <label class="mb-1 block text-sm font-semibold text-text-base">Narration</label>
-                    <Input v-model="form.narration" type="text" placeholder="Optional" />
-                </div>
-                <div class="col-span-3 flex items-center gap-2">
+                <div class="flex flex-wrap items-center gap-2 sm:col-span-3">
                     <input
                         id="force_non_taxable"
                         v-model="form.force_non_taxable"
@@ -873,7 +880,7 @@ onMounted(() => {
                     </span>
                 </div>
                 <div>
-                    <label class="mb-1 block text-sm font-semibold text-text-base">TDS Account</label>
+                    <label class="mb-1 block text-sm font-semibold text-text-base">TDS account (tax withheld)</label>
                     <Combobox
                         :model-value="form.tds_account_id"
                         :options="tdsAccountOptions"
@@ -883,12 +890,12 @@ onMounted(() => {
                     <p v-if="form.errors.tds_account_id" class="mt-1 text-sm text-danger">{{ form.errors.tds_account_id }}</p>
                 </div>
                 <div>
-                    <label class="mb-1 block text-sm font-semibold text-text-base">TDS Rate (%)</label>
+                    <label class="mb-1 block text-sm font-semibold text-text-base">TDS rate (%)</label>
                     <Input v-model="form.tds_rate" type="number" min="0" max="100" step="0.01" placeholder="Optional" />
                     <p v-if="form.errors.tds_rate" class="mt-1 text-sm text-danger">{{ form.errors.tds_rate }}</p>
                 </div>
                 <div>
-                    <label class="mb-1 block text-sm font-semibold text-text-base">TDS Amount</label>
+                    <label class="mb-1 block text-sm font-semibold text-text-base">TDS amount (Rs.)</label>
                     <Input
                         v-model="form.tds_amount"
                         type="number"
@@ -904,23 +911,30 @@ onMounted(() => {
                 </div>
             </div>
 
-            <div class="grid grid-cols-2 gap-2 border-t-[1.5px] border-border pt-3 text-sm">
+            <h4 class="border-b-[1.5px] border-border pb-1 text-sm font-bold text-text-strong">Notes</h4>
+            <div>
+                <label class="mb-1 block text-sm font-semibold text-text-base">Narration</label>
+                <Input v-model="form.narration" type="text" placeholder="Optional note kept with this purchase" />
+            </div>
+
+            <h4 class="border-b-[1.5px] border-border pb-1 text-sm font-bold text-text-strong">Bill summary</h4>
+            <div class="grid grid-cols-2 gap-2 text-sm">
                 <template v-if="totals && totals.header_discount !== '0.00'">
-                    <span class="text-text-muted">Header Discount</span>
+                    <span class="text-text-muted">Discount on whole bill</span>
                     <span class="text-right font-semibold text-text-strong">-{{ money(totals.header_discount) }}</span>
                 </template>
-                <span class="text-text-muted">Taxable Amount</span>
+                <span class="text-text-muted">Taxable amount</span>
                 <span class="text-right font-semibold text-text-strong">{{ money(totals?.taxable_amount) }}</span>
-                <span class="text-text-muted">Non-Taxable Amount</span>
+                <span class="text-text-muted">Non-taxable amount</span>
                 <span class="text-right font-semibold text-text-strong">{{ money(totals?.nontaxable_amount) }}</span>
                 <span class="text-text-muted">VAT</span>
                 <span class="text-right font-semibold text-text-strong">{{ money(totals?.vat_amount) }}</span>
-                <span class="font-bold text-text-strong">Grand Total</span>
+                <span class="font-bold text-text-strong">Bill total</span>
                 <span class="text-right font-bold text-text-strong">{{ money(totals?.total) }}</span>
                 <template v-if="totals && totals.tds_amount !== '0.00'">
                     <span class="text-text-muted">TDS Withheld</span>
                     <span class="text-right font-semibold text-text-strong">-{{ money(totals.tds_amount) }}</span>
-                    <span class="text-text-muted">Amount Due (after TDS)</span>
+                    <span class="text-text-muted">Amount payable to supplier (after TDS)</span>
                     <span class="text-right font-semibold text-text-strong">{{ money(totals.settlement_due) }}</span>
                 </template>
             </div>
@@ -928,10 +942,10 @@ onMounted(() => {
             <div class="flex items-center justify-end gap-2">
                 <Button variant="secondary" tone="purple" type="button" @click="emit('cancel')">Cancel</Button>
                 <Button variant="secondary" tone="purple" type="button" :disabled="form.processing || !canSubmit" @click="submit(true)">
-                    Save &amp; Print
+                    Create &amp; print bill
                 </Button>
-                <Button variant="primary" tone="purple" type="submit" :disabled="form.processing || !canSubmit">
-                    Create Purchase
+                <Button variant="primary" tone="purple" type="submit" :loading="form.processing" :disabled="form.processing || !canSubmit">
+                    Create purchase
                 </Button>
             </div>
         </form>

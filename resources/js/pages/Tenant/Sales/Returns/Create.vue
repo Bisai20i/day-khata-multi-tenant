@@ -488,7 +488,7 @@ const heading = computed(() => {
     return 'New sales return';
 });
 
-const submitLabel = computed(() => (props.mode === 'request' ? 'Submit for approval' : 'Create Sales Return'));
+const submitLabel = computed(() => (props.mode === 'request' ? 'Submit for approval' : 'Post sales return'));
 
 const canSubmit = computed(() => {
     if (form.processing || !form.date || refundSplitError.value) {
@@ -567,7 +567,14 @@ function submit() {
 <template>
     <Card variant="panel">
         <div class="mb-4 flex items-center justify-between">
-            <h3 class="text-base font-bold text-text-strong">{{ heading }}</h3>
+            <div>
+                <h3 class="text-base font-bold text-text-strong">{{ heading }}</h3>
+                <p class="mt-0.5 text-sm text-text-muted">
+                    <template v-if="mode === 'request'">Sends the return to an approver. Nothing is posted until it is approved.</template>
+                    <template v-else-if="mode === 'unlinked'">For goods returned with no bill from this system. Posts immediately as a credit note.</template>
+                    <template v-else>Pick the original bill, then enter how many units came back. Posting adds the stock back and credits the customer.</template>
+                </p>
+            </div>
             <Button variant="secondary" tone="purple" type="button" @click="emit('cancel')">Cancel</Button>
         </div>
 
@@ -669,7 +676,7 @@ function submit() {
                         <span class="text-right">Returned</span>
                         <span class="text-right">Left</span>
                         <span class="text-right">Rate</span>
-                        <span>Return qty</span>
+                        <span>Return qty (max: Left)</span>
                         <span>Bonus qty</span>
                         <span class="text-right">Credit</span>
                     </div>
@@ -878,7 +885,7 @@ function submit() {
                         placeholder="No refund - credit note only"
                         @update:model-value="(value) => (form.refund_account_id = value)"
                     />
-                    <p class="mt-1 text-xs text-text-muted">Cash and bank accounts only.</p>
+                    <p class="mt-1 text-xs text-text-muted">Cash and bank accounts only. Leave empty to only reduce what the customer owes.</p>
                     <p v-if="form.errors.refund_account_id" class="mt-1 text-sm text-danger">{{ form.errors.refund_account_id }}</p>
                 </div>
                 <div>
@@ -899,7 +906,7 @@ function submit() {
 
             <div class="flex items-center justify-end gap-2">
                 <Button variant="secondary" tone="purple" type="button" @click="emit('cancel')">Cancel</Button>
-                <Button variant="primary" tone="purple" type="submit" :disabled="!canSubmit">
+                <Button variant="primary" tone="purple" type="submit" :disabled="!canSubmit" :loading="form.processing">
                     {{ submitLabel }}
                 </Button>
             </div>

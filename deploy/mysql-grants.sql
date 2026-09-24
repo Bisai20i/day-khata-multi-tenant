@@ -1,6 +1,6 @@
 -- MySQL credential roles for production deployment.
 -- See mysql-credentials.md in this directory for the reasoning behind exactly these two roles
--- (not the three the general security-hardening doc describes — this rewrite has no trigger/view
+-- (not the three the general security-hardening doc describes - this rewrite has no trigger/view
 -- DDL, so there is no third `tenant_ddl_owner` role to create).
 --
 -- Not run against anything yet: dev is SQLite. Run this once against a real MySQL server before the
@@ -25,14 +25,14 @@ GRANT CREATE, ALTER, DROP, INDEX, REFERENCES ON `tenant_%`.* TO 'tenant_provisio
 GRANT SELECT, INSERT, UPDATE, DELETE ON `tenant_%`.* TO 'tenant_provisioner'@'%';
 
 -- Runtime app DB user: used by the application itself for every ordinary per-request query.
--- DML + SELECT only, no DDL, no CREATE/DROP DATABASE — limits the blast radius of an
+-- DML + SELECT only, no DDL, no CREATE/DROP DATABASE - limits the blast radius of an
 -- application-level SQLi/RCE to data manipulation, not schema or database destruction.
 CREATE USER IF NOT EXISTS 'day_khata_app'@'%' IDENTIFIED BY 'change-me-runtime';
 
 GRANT SELECT, INSERT, UPDATE, DELETE ON `tenant_%`.* TO 'day_khata_app'@'%';
 
 -- The runtime user also needs full access to the central database (tenants/domains/platform_admins/
--- central sessions/cache/jobs tables) — it is not tenant-namespace-scoped like the two grants above.
+-- central sessions/cache/jobs tables) - it is not tenant-namespace-scoped like the two grants above.
 -- Replace `day_khata_central` with the real central database name from .env (DB_DATABASE).
 GRANT SELECT, INSERT, UPDATE, DELETE ON `day_khata_central`.* TO 'day_khata_app'@'%';
 

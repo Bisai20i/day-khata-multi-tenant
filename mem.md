@@ -1,9 +1,9 @@
-# Day Khata — Multi-Tenant Rewrite: Memory
+# Day Khata - Multi-Tenant Rewrite: Memory
 
 Living state doc. Read this before starting work, update it before stopping. See `goal.md` for
-direction/roadmap — this file is "what exists and why," not "what's next."
+direction/roadmap - this file is "what exists and why," not "what's next."
 
-**2026-09-16 entry (newest — gap-audit-2026-09-11 CLOSED, all 4 phases committed).** This file had
+**2026-09-16 entry (newest - gap-audit-2026-09-11 CLOSED, all 4 phases committed).** This file had
 gone stale relative to `todo/START.md`: the last several entries below never mention the gap/correctness
 audit that was, in fact, the dominant effort across this project's last several sessions. That audit is
 now fully done and committed. Treat everything below this entry as background/narrative history that may
@@ -14,14 +14,14 @@ against the legacy `day_khata` app (money math done in floats, no exact-decimal 
 numbering guarantees, inventory costing gaps, missing polish features) and against this rewrite's own
 prior work. `todo/START.md` + `todo/CONTRACTS.md` broke the fix into 4 phases with 14 numbered task files
 (`todo/T01`-`T14`), run by coordinated subagents against 11 numbered contracts (C1-C11, see
-`todo/CONTRACTS.md` — still the authoritative reference for the money/ledger architecture, not repeated
+`todo/CONTRACTS.md` - still the authoritative reference for the money/ledger architecture, not repeated
 here).
 
 **Phase 1-3 (money/ledger core, already committed by the time this entry is written; see `git log` for
 exact commits, not re-narrated here):**
 - `App\Support\Money\Money` (2dp) / `Quantity` (4dp) exact-decimal value objects on `brick/math`
   `BigDecimal`, an `App\Casts\Decimal` Eloquent cast, and `App\Support\Billing\DocumentCalculator` as the
-  single source of truth for line/header discount, VAT, TDS and totals math — mirrored exactly in
+  single source of truth for line/header discount, VAT, TDS and totals math - mirrored exactly in
   `resources/js/lib/money.js`'s `calculateDocument`, cross-checked against 43 golden vectors in
   `tests/fixtures/billing-vectors.json` so the JS preview and the PHP posting math can never silently
   drift apart.
@@ -29,20 +29,20 @@ exact commits, not re-narrated here):**
   basis, excludes transfers (C10).
 - `ClosedFiscalYearGuard` + `JournalVoucher::reverse()`: cancellation only in an open fiscal year, and a
   cancelled document posts a mirrored *reversal* voucher through its own dedicated
-  `VoucherType::Reversal` series — it never reuses or consumes the original document-number series.
+  `VoucherType::Reversal` series - it never reuses or consumes the original document-number series.
 - Per-series gapless invoice/credit-note/debit-note/receipt/payment numbering, stored at posting time and
   never re-derived at display time (C7).
 
-**Phase 4 (parity features, committed 2026-09-16 as three task-scoped commits — `T12`/`T13`/`T14`):**
-- **T12 — sales.** Walk-in customer seeded per tenant; `App\Support\SettlementNarration` (ledger
-  narration lines shared with purchases — exact `forMode()`/`line()` contract in `CONTRACTS.md`); service
+**Phase 4 (parity features, committed 2026-09-16 as three task-scoped commits - `T12`/`T13`/`T14`):**
+- **T12 - sales.** Walk-in customer seeded per tenant; `App\Support\SettlementNarration` (ledger
+  narration lines shared with purchases - exact `forMode()`/`line()` contract in `CONTRACTS.md`); service
   items post to their own posting account instead of the default sales account; MRP/VAT-inclusive entry
   on Sales/POS (browser-only, backs out `rate` via `money.js`'s `rateExcludingVat`, server never
   re-derives it); bonus/free quantity on sale lines (stock moves, money doesn't); unlinked sales returns
   (pre-cutover/walk-in sales with no bill) with an exact cash/bank split refund
   (`DocumentCalculator::assertExactSplit`); sales list Excel export + SQL-summed totals row + sort/search
   + "Save & Print N copies" (each copy logged via `PrintLog`, C9); saved note templates.
-- **T13 — purchase & inventory.** TDS on purchases (two-pass calculation so `settlement_due` accounts for
+- **T13 - purchase & inventory.** TDS on purchases (two-pass calculation so `settlement_due` accounts for
   its own TDS amount, capped at the base, never silently clamps a rate); PAN/non-VAT purchase mode;
   bonus/free quantity on purchase lines (average cost divides paid value by the *full* base quantity
   including bonus units, C10); unlinked purchase returns valued at an entered rate or
@@ -51,17 +51,17 @@ exact commits, not re-narrated here):**
   MRP, case-insensitive unique names, bulk mark-vatable, and a `GET /items/lookup-barcode` scan endpoint;
   stock adjustment alternate-unit entry; purchase/return/capital-purchase list exports with BS dates;
   purchase form polish (scan-to-add, per-line note, quick add-item); purchase-side ledger narrations.
-- **T14 — accounting.** Cash/bank journal voucher quick-create, fixed asset VAT handling, and new
+- **T14 - accounting.** Cash/bank journal voucher quick-create, fixed asset VAT handling, and new
   accounting report exports/PDFs (account book, balance sheet, day book, income statement, trial balance,
   cancelled documents).
 
 **Process note, worth keeping even though the audit is closed:** a subagent handed a whole multi-checkbox
 task file (9-11 items) grew past 450k tokens in its own transcript. The fix was structural, not
-behavioral — split every task into ~2-3-checkbox chunks up front, sequence chunks touching the same files
+behavioral - split every task into ~2-3-checkbox chunks up front, sequence chunks touching the same files
 serially, and cap each subagent's own transcript at ~150k tokens. This is now recorded durably in
 `.ai/rules/general.md` (read automatically by Laravel Boost) and in real `builder`/`builder-high`/
 `scaffolder` personas under `.claude/agents/`, not just this file. Every Phase 4 chunk run under that
-discipline landed at 74k-195k tokens per agent — worth reusing verbatim for the next multi-item plan.
+discipline landed at 74k-195k tokens per agent - worth reusing verbatim for the next multi-item plan.
 
 **Known follow-ups the audit itself surfaced but didn't require fixing to close** (not gaps in Phase 4's
 own scope, flagged by name so they aren't lost): `TdsReportController` could show the per-purchase
@@ -73,7 +73,7 @@ purchases on its own line.
 mischaracterization: this file's repeated "no real browser click-through has ever been done" framing
 (scattered across many historical entries, e.g. `goal.md`'s own "Still not manually smoke-tested in an
 actual browser" line) describes only **agent-session** testing (no browser automation tool available
-in-session). It does **not** mean the app is unverified — the user has been continuously testing and
+in-session). It does **not** mean the app is unverified - the user has been continuously testing and
 fixing issues in a real browser themselves, outside of what gets written up here. Don't re-cite the old
 "never browser tested" framing as if the system is unvalidated; it's about tooling access during agent
 sessions, not real-world verification status.
@@ -81,13 +81,13 @@ sessions, not real-world verification status.
 **Locked-in delivery strategy for upcoming sessions (user's stated priority order, supersedes any prior
 "strategy" discussion in this thread)**: the goal is to ship a complete, ready-to-use system ASAP. Work
 in this order, don't jump ahead:
-1. **Close remaining gaps against the legacy `day_khata` system first** — feature parity + fixing
+1. **Close remaining gaps against the legacy `day_khata` system first** - feature parity + fixing
    legacy's own known bugs, before anything else. (See `goal.md`'s non-goals list and the various
-   "deferred, not forgotten" flags throughout this file for what's still open — e.g. the ~79-key legacy
+   "deferred, not forgotten" flags throughout this file for what's still open - e.g. the ~79-key legacy
    privilege port, per-store financial reporting, MySQL production wiring.)
-2. **Then UI/UX improvement** — the user already has specific gaps/differences in mind from their own
+2. **Then UI/UX improvement** - the user already has specific gaps/differences in mind from their own
    hands-on use, not yet detailed in this file.
-3. **Then optimization and security** — N+1 query audit, thin-controller cleanup scoped to what's
+3. **Then optimization and security** - N+1 query audit, thin-controller cleanup scoped to what's
    actually found to be a problem (not a blanket rewrite-everything pass), tenant-isolation/authorization
    audit. Business logic is considered already written and correct; this phase is about hardening/
    modernizing it to current Laravel conventions, not rebuilding it.
@@ -96,11 +96,11 @@ in this order, don't jump ahead:
 task, both committed).** Ran alongside other concurrent sessions in this same unisolated tree (confirmed
 live: `SaleController`/`PurchaseController` picked up an `item_units` conversion feature from another
 session mid-edit, and a `git add`-broad commit from that session (`33a937d`) ended up including this
-session's own in-progress pagination edits to those two files — harmless (the changes were correct and
+session's own in-progress pagination edits to those two files - harmless (the changes were correct and
 already committed), but flagged here as a real gotcha: a concurrent session's broad `git add` can sweep up
 another session's uncommitted edits into its own commit).
 
-- **Part 1 — restored server-side filtering** on Sales/Purchases/Sales Returns/Purchase Returns/Quotations
+- **Part 1 - restored server-side filtering** on Sales/Purchases/Sales Returns/Purchase Returns/Quotations
   `index()`: all five were loading the entire unfiltered table via `->get()`, paginating only client-side in
   `DataTable`. Mirrors `Central\Tenants\TenantController::index()`'s established shape exactly: `from`/`to`
   date-range + `customer_id`/`supplier_id` applied via `->when()`, `paginate(25)->withQueryString()`, a
@@ -111,35 +111,35 @@ another session's uncommitted edits into its own commit).
   (`DataTable`'s own `page-size` set to the full page length to disable client paging). Pest coverage:
   `SaleListFilterTest`/`PurchaseListFilterTest` (date-range and party filters narrow correctly, no-filter
   returns everything). Committed as `79a973c`.
-- **Part 2 — Sales Return request/approval workflow.** Read legacy's actual flow first
+- **Part 2 - Sales Return request/approval workflow.** Read legacy's actual flow first
   (`StockOutController::approveReturnRequest`/`updateCancelResoanForSalesReturnRequest`,
   `reportsController::listreturnoutstockrequest`, `sales_return_requests` table): a request is a thin,
   single-item/quantity/reason intake row (no real line-item structure), `approveReturnRequest` is a **bare
   `is_request_accepted=1` flag flip with zero posting logic** (a real legacy gap, not a "post normally on
   approval" design as one might assume), and rejection just stores `reson_for_not_accept` + flag `2`.
   **Design decision: bolted a status state machine onto the existing `SalesReturn` model** (`'pending'` →
-  `'posted'`/`'rejected'`) rather than a new parallel model/table — chosen over a `SalesReturnRequest` model
+  `'posted'`/`'rejected'`) rather than a new parallel model/table - chosen over a `SalesReturnRequest` model
   because (a) `SalesReturn`/`SaleReturnLine` already have real per-line structure legacy's own request table
   lacks, so a separate table would just reintroduce legacy's own thinness; (b) `Quotation`'s own
   draft-that-becomes-real lifecycle (`QuotationStatus::Draft` → `Converted`/`Cancelled`, `convertToSale()`
   handing off to `Sale::post()`) is this app's own established precedent for exactly this shape, not a new
   pattern; (c) it gets the existing generic `ActivityLogObserver` (already attached to `SalesReturn`) for
-  free — every `approve()`/`reject()` write is auto-logged with no extra code. `status` stayed a **plain
-  string**, not a backed enum like `QuotationStatus` — existing `SalesReturnTest` assertions already compare
+  free - every `approve()`/`reject()` write is auto-logged with no extra code. `status` stayed a **plain
+  string**, not a backed enum like `QuotationStatus` - existing `SalesReturnTest` assertions already compare
   it as a raw string (`->toBe('cancelled')`), and switching the cast would break them for no behavioural
   gain.
   - **Migration** (`2026_09_09_200000_add_pending_workflow_to_sales_returns_table`): `journal_voucher_id`
-    made nullable (a `'pending'` row has no voucher yet — same `->nullable()->change()` pattern already
+    made nullable (a `'pending'` row has no voucher yet - same `->nullable()->change()` pattern already
     proven on `platform_admin_activity_logs.platform_admin_id`), plus a new `rejection_reason` text column.
   - **`SalesReturn` model**: `post()`'s inline validation/pricing logic extracted into two private static
-    helpers — `prepareLines()` (discount-ratio reconstruction + per-line validation/pricing, unchanged
-    logic, pure code motion) and `computeTotals()` (vat/total) — so the new `request()` can reuse the exact
+    helpers - `prepareLines()` (discount-ratio reconstruction + per-line validation/pricing, unchanged
+    logic, pure code motion) and `computeTotals()` (vat/total) - so the new `request()` can reuse the exact
     same math without duplicating it. New `request()` (persists a `'pending'` row + real `SaleReturnLine`
     rows, but posts **no** journal voucher and records **no** stock movement). New `approve(User $actor)`
     instance method: posts exactly what `post()` does in one step (voucher + one `ItemStockMovement` per
     stockable line + optional refund voucher), using the row's own already-computed amounts/persisted lines,
     dated against the return's own requested `date` (not "today"). New `reject(string $reason)`: records the
-    reason, flips to `'rejected'`, posts nothing — a dead end (never approvable or cancellable afterward).
+    reason, flips to `'rejected'`, posts nothing - a dead end (never approvable or cancellable afterward).
     `prepareLines()`'s "remaining returnable quantity" check now excludes both `'cancelled'` AND `'rejected'`
     prior returns (a rejected request must free up its claimed quantity), while still counting a `'pending'`
     one (two simultaneous pending requests can't jointly over-claim a line). `cancel()`'s guard changed from
@@ -149,19 +149,19 @@ another session's uncommitted edits into its own commit).
   - **`Sale::cancel()`'s existing partial-return guard** updated in the same spirit: excludes `'rejected'`
     returns (never posted, must not block) alongside the existing `'cancelled'` exclusion, but still
     deliberately blocks on a `'pending'` one (a live decision still pending against this exact sale).
-  - **Routes** (`routes/tenant-sales-returns.php`, already its own file — no `routes/tenant.php` edit
+  - **Routes** (`routes/tenant-sales-returns.php`, already its own file - no `routes/tenant.php` edit
     needed): `POST /sales-returns/request`, `POST /sales-returns/{salesReturn}/approve`,
     `POST /sales-returns/{salesReturn}/reject`, alongside the existing routes.
-  - **Controller**: `SalesReturnController::index()` now returns two props — `returns` (status
+  - **Controller**: `SalesReturnController::index()` now returns two props - `returns` (status
     posted/cancelled, paginated, unaffected by this feature) and `pendingRequests` (status pending/rejected,
-    plain unpaginated collection — a small actionable queue, not a growing log; mirrors legacy's own
+    plain unpaginated collection - a small actionable queue, not a growing log; mirrors legacy's own
     `listreturnoutstock` vs `listreturnoutstockrequest` split). New `requestReturn()`/`approve()`/`reject()`
     actions, `store()`'s validation extracted into a shared `validatedReturn()` helper reused by
-    `requestReturn()`. No new authorization gate — open to any authenticated tenant user, matching legacy's
+    `requestReturn()`. No new authorization gate - open to any authenticated tenant user, matching legacy's
     own open-to-anyone model and this app's existing day-to-day-transaction-entry posture; a real
     maker/checker RBAC split is flagged as a bigger, separate decision this task didn't attempt.
   - **Vue**: `Sales/Returns/Create.vue` gained a `mode` prop (`'post'` default, or `'request'`) controlling
-    its submit URL/heading/button label — same form either way, just posts to `/sales-returns/request`
+    its submit URL/heading/button label - same form either way, just posts to `/sales-returns/request`
     instead of `/sales-returns` in request mode. `Sales/Returns/Index.vue` gained a "Request return" button
     alongside "New return", a "Pending requests" `Card`/`DataTable` section (only rendered when non-empty)
     with Approve (`useConfirm`, same pattern `Quotations/Index.vue` already established for its own
@@ -175,15 +175,15 @@ another session's uncommitted edits into its own commit).
     but a rejected one doesn't, plus one full HTTP round-trip through the real `request`/`reject`/`approve`
     routes.
   - Committed as a separate commit right after Part 1's `79a973c` (see the repo's own git log for the exact
-    hash — this doc isn't re-edited after every commit to keep the hash current).
+    hash - this doc isn't re-edited after every commit to keep the hash current).
 - **Verification this session**: `php -l` on every touched/created PHP file (clean), `vendor/bin/pint`
   scoped to just those files (passed, one file needed `concat_space`/import-ordering fixes, applied). Manual
   end-to-end trace of both the filtered-list query path and the request→approve→post path done by re-reading
-  every changed file in full (not run — `php artisan test`/`tenants:migrate`/`npm run build` all
-  **deliberately not run**, per this repo's own "no heavy shell commands from an agent" standing rule) —
+  every changed file in full (not run - `php artisan test`/`tenants:migrate`/`npm run build` all
+  **deliberately not run**, per this repo's own "no heavy shell commands from an agent" standing rule) -
   flagged for the user's own verification pass, including running the new `2026_09_09_200000_...` tenant
   migration before trusting the pending-request flow against any real tenant database.
-- **`nav-items.js`/`routes/tenant.php`**: no changes needed for either part — Sales/Purchases/Returns/
+- **`nav-items.js`/`routes/tenant.php`**: no changes needed for either part - Sales/Purchases/Returns/
   Quotations were all already linked from the sidebar, and `routes/tenant-sales-returns.php` already had its
   own `require` line in `routes/tenant.php` from an earlier pass, so the 3 new routes just slotted into that
   same already-required file.
@@ -197,19 +197,19 @@ had real per-store stock (`Store`, `store_id` on Sale/Purchase/StockAdjustment/e
 `StockAdjustment` exactly as the structural template:
 
 - **Schema**: `stock_transfers` (date, from_store_id, to_store_id, note, total_value, status,
-  cancelled_by/at/reason, created_by — same shape as `stock_adjustments`, both FKs `restrictOnDelete()`
-  against `stores`) + `stock_transfer_lines` (item_id, quantity, unit_cost_rate, line_value, remarks — same
+  cancelled_by/at/reason, created_by - same shape as `stock_adjustments`, both FKs `restrictOnDelete()`
+  against `stores`) + `stock_transfer_lines` (item_id, quantity, unit_cost_rate, line_value, remarks - same
   shape as `stock_adjustment_lines` minus the direction/reason_type columns, which a transfer doesn't need
   since "out of `from_store_id`, into `to_store_id`" is unambiguous).
 - **`App\Models\StockTransfer::post()`** mirrors `StockAdjustment::post()`'s shape: never touches the
-  ledger (no `JournalVoucher::post()` call — relocating a business's own stock between its own stores has
+  ledger (no `JournalVoucher::post()` call - relocating a business's own stock between its own stores has
   no accounting impact, same reasoning `StockAdjustment` already documents). Each line writes **two**
-  `ItemStockMovement` rows via `Item::recordStockMovement()` — a new `StockMovementType::TransferOut`
+  `ItemStockMovement` rows via `Item::recordStockMovement()` - a new `StockMovementType::TransferOut`
   (direction -1) at `from_store_id`, a new `StockMovementType::TransferIn` (direction +1) at
-  `to_store_id` — both same date, both referencing the same `StockTransferLine` via the polymorphic
+  `to_store_id` - both same date, both referencing the same `StockTransferLine` via the polymorphic
   `reference` (so `cancel()` flips both with one query, verbatim copy of `StockAdjustment::cancel()`'s
   shape). Over-transfer guard is the **same `lockForUpdate()` pattern** `StockAdjustment::post()` uses for
-  its 'out' lines, scoped to `where('store_id', $fromStoreId)` — **deliberately unconditional, not gated by
+  its 'out' lines, scoped to `where('store_id', $fromStoreId)` - **deliberately unconditional, not gated by
   `CompanySetting::allow_negative_stock`** (unlike `Sale::post()`'s negative-stock check): that setting is
   a sales/overselling business policy, and there's no equivalent reason to let a transfer push a store's
   stock negative, so this follows `StockAdjustment`'s stricter, always-on precedent instead. Same-store
@@ -218,17 +218,17 @@ had real per-store stock (`Store`, `store_id` on Sale/Purchase/StockAdjustment/e
 - **Deliberately out of scope for this first cut** (flagged, not silently built): no fiscal-year
   reopened-for-correction posting path (`StockAdjustment` supports one via an optional `fiscal_year_id`
   param + `ClosedFiscalYearGuard`, but `stock_adjustments` itself has no stored `fiscal_year_id` column
-  either — a transfer needing to move stock into a closed, reopened year is a thin enough edge case to
-  defer). No admin-only gating — same open-to-any-authenticated-tenant-user access level `StockAdjustment`
+  either - a transfer needing to move stock into a closed, reopened year is a thin enough edge case to
+  defer). No admin-only gating - same open-to-any-authenticated-tenant-user access level `StockAdjustment`
   itself has.
 - **Cross-cutting fix so this doesn't silently break an existing report**: `StockMovementRegisterController
-  ::movementTypeLabel()` does an exhaustive `match($type)` with no `default` arm — adding `TransferIn`/
+  ::movementTypeLabel()` does an exhaustive `match($type)` with no `default` arm - adding `TransferIn`/
   `TransferOut` cases to `StockMovementType` without adding them there would throw `UnhandledMatchError`
   the first time a transfer movement showed up in the Stock Movement Register. Added both labels plus a
   `StockTransferLine` case to `referenceDescription()` (shows "Stock Transfer #N (From → To)"). Confirmed
   via grep that `StockValuationReportController`/`InventoryReportController`/`CategoryWiseReportController`
   only ever call `->direction()` on movement types (never an exhaustive label match), so they pick up
-  transfers automatically once `direction()` itself is extended — no further changes needed there.
+  transfers automatically once `direction()` itself is extended - no further changes needed there.
 - **Routes**: `routes/tenant-stock-transfers.php` (index/store/cancel, verbatim structural copy of
   `tenant-stock-adjustments.php`), required from `routes/tenant.php` right after the stock-adjustments
   line. **Nav**: "Stock Transfers" added to the INVENTORY group in `resources/js/lib/nav-items.js`, right
@@ -236,37 +236,37 @@ had real per-store stock (`Store`, `store_id` on Sale/Purchase/StockAdjustment/e
 - **Vue**: `Tenant/Inventory/StockTransfers/{Create,Index}.vue`, structural copy of the StockAdjustments
   pair (same `Card`/`DataTable`/`Modal`/`Combobox`/`NepaliDateInput` components, same cancel-modal flow,
   same Inertia-doesn't-remount flash-toast-via-`watch` convention) minus the direction/reason/opening-stock
-  machinery a transfer doesn't need — replaced with a from-store Combobox and a to-store Combobox, with a
+  machinery a transfer doesn't need - replaced with a from-store Combobox and a to-store Combobox, with a
   same-store frontend check mirroring the model-layer guard so the user sees the problem before submitting.
-- **Tests**: `tests/Feature/Tenant/Inventory/StockTransferTest.php` — transfer moves stock correctly
+- **Tests**: `tests/Feature/Tenant/Inventory/StockTransferTest.php` - transfer moves stock correctly
   between two stores (asserts exactly 2 `ItemStockMovement` rows with correct types/store_ids/dates),
   same-store transfer rejected, over-transfer rejected (and confirms stock at both stores is unchanged
   after the rejected attempt, proving the `DB::transaction()` rollback), cancel reverts both stores'
   stock and rejects double-cancellation, zero/negative quantity rejected at the model layer.
 - **Verification**: `php -l` on every touched/created file (clean), `vendor/bin/pint --test` scoped to just
-  these files (passed, no changes needed) — **deliberately not `--dirty`**: another session was
+  these files (passed, no changes needed) - **deliberately not `--dirty`**: another session was
   concurrently building an unrelated "Stock Conversion" feature (`StockConversionType` enum, `stock_
   conversions` migrations, edits to `SaleController`/`Sales/Create.vue`/`composer.json`) directly in this
-  same tree while this work was in progress (confirmed live via `git status` mid-session — both sets of
+  same tree while this work was in progress (confirmed live via `git status` mid-session - both sets of
   edits to the shared `StockMovementType` enum and `StockMovementRegisterController` landed cleanly
   side by side with no lost updates, checked by re-reading both files after the fact). `npm run build`/
   `php artisan test`/`php artisan tenants:migrate` **not run** (per this project's own "no shell commands
-  beyond php -l/Pint from an agent in this repo" standing rule) — flagged for the user's own verification
+  beyond php -l/Pint from an agent in this repo" standing rule) - flagged for the user's own verification
   pass, same posture as the Phase A-D invoicing-settings work above.
 
-**2026-09-08 entry (newest — read this first, older entries below are from the prior central-panel work
+**2026-09-08 entry (newest - read this first, older entries below are from the prior central-panel work
 and are unrelated to this one).** User asked for a gap analysis of the tenant-side app against the legacy
 `day_khata` predecessor (invoice settings, fiscal year, general settings, Add Sale/Add Purchase UX), then
-to execute the resulting plan. Full plan doc: `plans/invoicing-settings-sale-purchase-ux.md` — read it for
+to execute the resulting plan. Full plan doc: `plans/invoicing-settings-sale-purchase-ux.md` - read it for
 the "why", locked decisions, and non-goals before touching any of this area again.
 
 **All 4 phases built this session, via sequential in-tree subagents (not committed, not migrated to every
-tenant, not pint-formatted, not test-verified — see below):**
+tenant, not pint-formatted, not test-verified - see below):**
 - **Phase A**: `CompanySetting` gained logo upload, `default_vat_rate`, `allow_negative_stock`,
   `default_store_id`, per-invoice-type prefix/enabled columns (sale full/abbreviated/pan + purchase).
   Settings page rebuilt into Company Info / Invoicing / Stock & Discount Policy sections.
 - **Phase B**: invoice print prefixes now read from settings instead of hardcoded `match` statements;
-  company logo renders on PDFs (via a local filesystem path, not the `logo_url` accessor — DomPDF has
+  company logo renders on PDFs (via a local filesystem path, not the `logo_url` accessor - DomPDF has
   `enable_remote => false`, a real bug that was caught before shipping); a dead hardcoded "10% digital
   payment VAT rebate" block was removed from `pdf/sale.blade.php`; new thermal 58mm/80mm receipt paper
   size + `pdf/sale-receipt.blade.php`; POS now also opens the real print route on sale completion
@@ -275,99 +275,99 @@ tenant, not pint-formatted, not test-verified — see below):**
   `Purchases/Create.vue` (previously flat-only there, percent was POS-only and client-resolved); POS
   updated to submit the same `discount_type`+raw-value contract instead of pre-resolving to flat
   client-side; server-side negative-stock enforcement in `Sale::post()` gated by the new
-  `allow_negative_stock` setting (blocking by default — locked decision); `chalani_number` added
+  `allow_negative_stock` setting (blocking by default - locked decision); `chalani_number` added
   symmetrically to Sale and Purchase (legacy only ever had it on 3 of 6 sale screens, never on purchase);
   `barcode` column added to `Item`, wired into POS scan-to-add and the `Combobox` search on both plain
   forms; "Save & Print" button added to both Create forms; inline "add new customer/supplier" modal
   ported from POS to both plain Create forms. **A real bug this phase's own agent found and flagged but
   deliberately did not fix** (correctly, given its scope): `SalesReturn`/`PurchaseReturn` reconstructed
   the pre-discount subtotal as `taxable_amount + discount`, silently wrong once `discount` can mean "a
-  percentage" — fixed in an immediate same-session follow-up (see below).
+  percentage" - fixed in an immediate same-session follow-up (see below).
 - **Follow-up fix (between C and D)**: `SalesReturn`/`PurchaseReturn` now derive the discount-reversal
   ratio directly from the stored `discount_type`/`discount` (a percentage discount removes a uniform
-  `discount/100` fraction of every vatable rupee — no reconstruction of the unstored pre-discount subtotal
+  `discount/100` fraction of every vatable rupee - no reconstruction of the unstored pre-discount subtotal
   needed at all, a cleaner fix than the original plan envisioned). New `Sale::discountAmount()` /
   `Purchase::discountAmount()` accessors added so `pdf/sale.blade.php`/`pdf/purchase.blade.php` can print
   "Discount (20%): -Rs X.XX" instead of the raw percentage number where they used to print a Rs amount.
   Known edge case, documented not fixed: `discountAmount()` returns 0 at exactly 100% header discount
   (the pre-discount subtotal isn't stored, only derivable from `taxable_amount` which is itself 0 by then)
-  — display-only, doesn't affect the return-reconstruction fix, which never needs to invert this.
+  - display-only, doesn't affect the return-reconstruction fix, which never needs to invert this.
 - **Phase D**: `FiscalYear` gained `reopen()`/`relock()` (admin-only, mandatory reason, audit-logged via
-  the existing tenant `ActivityLog` mechanism) — a closed year can now be reopened for correction, with
+  the existing tenant `ActivityLog` mechanism) - a closed year can now be reopened for correction, with
   Purchase/Journal Voucher/Stock Adjustment postable into it (fiscal-year picker + reason field on those
   three create forms, reused rather than a parallel "post correction" flow) while **Sale stays permanently
   locked to the current year with no exception**, per the locked decision. New
   `App\Support\ClosedFiscalYearGuard` centralizes the eligibility check + correction logging.
   **Real behavior tightening on existing code, not just new capability**: `JournalVoucher` previously had
-  its own ad-hoc "any closed year, if admin+reason" override — replaced with the stricter guard, which now
+  its own ad-hoc "any closed year, if admin+reason" override - replaced with the stricter guard, which now
   requires the year to actually be in an active reopened-for-correction window, not just closed. 3
   pre-existing `JournalVoucherPostingTest` cases were updated to call `reopen()` first to match.
 
 **Standing rule that got tightened mid-session, applies going forward**: see the auto-memory feedback note
-(`feedback-no-heavy-commands`, outside this repo) — escalated from "no `php artisan test`/`npm run build`"
+(`feedback-no-heavy-commands`, outside this repo) - escalated from "no `php artisan test`/`npm run build`"
 to **no shell commands at all** from subagents in this repo, including `php -l`/`vendor/bin/pint`/
-`composer install`/`tenants:migrate`. Also: **avoid git-worktree isolation for subagents here** — a fresh
+`composer install`/`tenants:migrate`. Also: **avoid git-worktree isolation for subagents here** - a fresh
 worktree has no `vendor/`, so an agent in one reaches for `composer install`, which is exactly what
 triggered this tightening. Every phase above was built by an agent working directly in the main tree,
-sequentially (not in parallel — the tree isn't isolated, so simultaneous edits from multiple agents risk
+sequentially (not in parallel - the tree isn't isolated, so simultaneous edits from multiple agents risk
 clobbering each other; confirmed necessary the hard way when two `worktree`-isolated agents were launched
 in parallel for Phases B/C and both turned out to be based on `main`, not `development`, silently blind to
 this project's actual current state including Phase A).
 
-**Nothing verified this session — next session (or the user directly) must, before trusting any of the
+**Nothing verified this session - next session (or the user directly) must, before trusting any of the
 above works**: `vendor/bin/pint --dirty --format agent`; `php artisan tenants:migrate` (5+ new tenant
 migrations across all four phases: Phase A's company_settings columns, Phase C's
-chalani_number/discount_type/barcode columns, Phase D's fiscal_years reopen/correction columns — none
+chalani_number/discount_type/barcode columns, Phase D's fiscal_years reopen/correction columns - none
 have been applied to any tenant DB yet); `php artisan test --compact` filtered to at minimum
 `CompanySettingTest`, `SalePrintTest`, `PurchasePrintTest`, `SalePostingTest`, `PurchasePostingTest`,
 `ItemTest`, `SalesReturnTest`, `PurchaseReturnTest`, `FiscalYearReopenTest`, `JournalVoucherPostingTest`,
 plus the wider regression sweep Phase C's agent already identified as at-risk (`SaleStoreScopingTest`,
 `SaleControllerTest`, `PosTest`, `SaleCommissionTest`, `SalesReturnStoreScopingTest`, `QuotationTest`,
 `ActivityLogTest`, `CategoryWiseReportTest`); `npm run build`/`npm run dev` (all four phases touched Vue
-pages, none rendered/screenshotted). **Not committed** — same "everything uncommitted until reviewed"
+pages, none rendered/screenshotted). **Not committed** - same "everything uncommitted until reviewed"
 posture this project has used throughout; see `plans/invoicing-settings-sale-purchase-ux.md` for the
 phase-by-phase breakdown if a partial commit (e.g. just Phase A) is wanted before the rest is verified.
 
-**Last updated:** 2026-09-04 (second sitting, same day — resumed directly on top of the still-uncommitted
+**Last updated:** 2026-09-04 (second sitting, same day - resumed directly on top of the still-uncommitted
 work below rather than after a commit, so this is one continuous unbroken-by-commit stretch, not a fresh
 session boundary in the usual sense). **Git status: working tree has uncommitted changes, NOTHING committed
-across either sitting — confirm `git status`/`git log` still match this claim first before trusting it (see
+across either sitting - confirm `git status`/`git log` still match this claim first before trusting it (see
 the Phase A correction entry far below for why that check matters).** Everything below happened across two
 sittings and stacks in this order:
 
-1. **Phase E of `plans/central-panel-build.md`** (real dashboard + tenant search/pagination) — the last
+1. **Phase E of `plans/central-panel-build.md`** (real dashboard + tenant search/pagination) - the last
    phase of that plan. **All 5 phases (A-E) are now code-complete.**
 2. **A live-reported 404 bug fix**: the central domain's `/` route was rendering the stock, never-customized
    `resources/views/welcome.blade.php` scaffold, whose hardcoded `/dashboard` link 404'd (that route is
    tenant-side only). Fixed to redirect based on auth state, matching `routes/tenant.php`'s own root route.
 3. **A full UI/UX pass** (user-reported: no cursor pointer on buttons, no loading spinners, `Tenants/
    Show.vue` wasting half the screen, missing icons, no real table actions, no way to manage trial expiry or
-   force-resolve a stuck-Provisioning tenant) — see that entry for the owner-only trial-editing/provisioning-
+   force-resolve a stuck-Provisioning tenant) - see that entry for the owner-only trial-editing/provisioning-
    override decisions locked in with the user via `AskUserQuestion`.
 4. **A second live-reported crash fix**: `GET /tenants/{id}/users` 500'd with
    `TenantDatabaseDoesNotExistException` for a real dev tenant whose `status` claimed Active but whose
    database was never actually finished provisioning. New `Tenant::databaseExists()`, checked before every
    `$tenant->run()` call site instead of trusting `status`.
-5. **A button color hierarchy fix** (user-reported: Delete wasn't red, positive actions weren't green) —
+5. **A button color hierarchy fix** (user-reported: Delete wasn't red, positive actions weren't green) -
    `Button.vue` now supports `tone="danger"`/`tone="success"`, reusing the existing `--color-danger`/
    `--color-success` tokens `Badge.vue` already used.
 6. **Second sitting opened with an explicit bug-ticket workflow**: the user asked to work through reported
-   bugs one at a time via subagents that (a) verify the bug at the code level before touching anything —
+   bugs one at a time via subagents that (a) verify the bug at the code level before touching anything -
    never guess from the ticket description alone, (b) fix with production-quality code matching existing
    conventions, (c) skip writing/running tests but still run `php -l` + `vendor/bin/pint --dirty --format
-   agent` on every touched file. **Adopt this same flow for any further bug tickets next session too** —
+   agent` on every touched file. **Adopt this same flow for any further bug tickets next session too** -
    it's a standing preference, not a one-off for this sitting.
-7. **"Re-provision database" button did nothing — real root cause found via a subagent, not the frontend**:
+7. **"Re-provision database" button did nothing - real root cause found via a subagent, not the frontend**:
    the button/route/eligibility check were all already correct; `retryProvisioning()` fired
-   `event(new TenantCreated($tenant))`, whose listener is `->shouldBeQueued(true)` — with this app's real
+   `event(new TenantCreated($tenant))`, whose listener is `->shouldBeQueued(true)` - with this app's real
    `QUEUE_CONNECTION=database` (not the test suite's forced `sync`), that only *enqueues* the 4-job
    provisioning pipeline and does nothing without a worker actively draining it. Confirmed live: 4 real stuck
    `JobPipeline` rows in the `jobs` table since 2026-09-03, and a real dev tenant (`LLCa ge`) stuck exactly as
    reported. **Fixed**: for `active`/`suspended` tenants with a missing database (as opposed to still
    `Provisioning`), `retryProvisioning()` now runs the pipeline synchronously via `dispatch_sync(...)` instead
-   of relying on the queue — no worker required, and a failure now surfaces a real error instead of silently
+   of relying on the queue - no worker required, and a failure now surfaces a real error instead of silently
    doing nothing. The still-`Provisioning` path is untouched. **This same queue-needs-a-worker gap likely also
-   affects initial tenant creation** (identical event/listener) — flagged, not yet verified as a live problem,
+   affects initial tenant creation** (identical event/listener) - flagged, not yet verified as a live problem,
    worth its own ticket.
 8. **Tenant status filter** (user request, quick add): `TenantController::index()` gained a `status` query
    param validated via `TenantStatus::tryFrom()`, applied via `->when()` alongside the existing search; a new
@@ -379,11 +379,11 @@ sittings and stacks in this order:
    Vite-bundled imports (not raw `public/` files). Sidebar header (`AppLayout.vue`) now uses the real icon
    mark instead of a placeholder "DK" box. `AuthLayout.vue` (shared by both Login pages + the 2FA challenge
    page) rebuilt as a desktop split-screen: a left "ledger panel" ruled like the physical khata day-book this
-   product is named after (thin horizontal rules + a red margin line — deliberately the one bold visual
+   product is named after (thin horizontal rules + a red margin line - deliberately the one bold visual
    device, grounded in what "khata" literally means, not decoration for its own sake) showing the wordmark
    and an audience-specific tagline; collapses to just the icon mark + form on mobile. Built via the
    `frontend-design` skill, staying entirely within the existing token system (same purple/Inter/zero-radius
-   tokens, no new colors or fonts). Verified via `npm run build` only — **no browser/screenshot tool was
+   tokens, no new colors or fonts). Verified via `npm run build` only - **no browser/screenshot tool was
    available this sitting, so the visual result has not actually been seen rendered, only reasoned through
    from the code; worth an actual look before calling this done.**
 10. **Sidebar scroll bug + collapsible nav groups** (user request, planned via `AskUserQuestion` before
@@ -391,53 +391,53 @@ sittings and stacks in this order:
     instead of just the sidebar" was `min-h-screen` on `AppLayout.vue`'s root shell (lets the page grow past
     viewport height) combined with the sidebar `<nav>` never actually hitting a height limit despite its own
     `overflow-y-auto`. Fixed: root shell `h-screen overflow-hidden`, plus `min-h-0` added to both the sidebar
-    `<nav>` and the main `<main>` (the classic flexbox gotcha — a flex child won't shrink/scroll on its own
+    `<nav>` and the main `<main>` (the classic flexbox gotcha - a flex child won't shrink/scroll on its own
     `overflow-y-auto` unless told it's allowed to shrink below its content size). Tenant nav groups with 2+
     items (Accounting, Transactions, **Parties**, Inventory, Reports, Admin) are now click-to-expand
     accordions; single-item groups (Overview) and Central's short flat list are untouched. Per the user's
     locked-in answers: only the group containing the current page auto-opens by default, groups toggle
     independently (not mutually exclusive), and open/closed state persists across page navigations via
-    `localStorage` (`day-khata:sidebar-open-groups`) — needed because `AppLayout` re-mounts on every Inertia
+    `localStorage` (`day-khata:sidebar-open-groups`) - needed because `AppLayout` re-mounts on every Inertia
     page visit (it's wrapped per-page, not a persistent Inertia layout), so without persistence a manually
-    opened group would snap shut on the very next navigation. No changes needed to `lib/nav-items.js` — its
+    opened group would snap shut on the very next navigation. No changes needed to `lib/nav-items.js` - its
     existing group/items shape already matched what the accordion needed.
 
-**Next session — do this first, in order:**
+**Next session - do this first, in order:**
 1. `git status`/`git log` to confirm nothing has changed since this update (don't trust this doc blindly).
-2. **Two migration files show as modified that this session never touched** — see that entry below. Ask the
+2. **Two migration files show as modified that this session never touched** - see that entry below. Ask the
    user about `database/migrations/tenant/2026_09_03_100001_add_store_id_to_item_stock_movements_table.php`
    and `..._100010_add_store_id_to_sales_table.php` before doing anything that touches them (don't revert,
-   don't commit blindly — their origin is still unknown; still unresolved after two sittings now).
-3. **Actually look at the redesigned login pages + collapsible sidebar in a browser** — item 9's visual
+   don't commit blindly - their origin is still unknown; still unresolved after two sittings now).
+3. **Actually look at the redesigned login pages + collapsible sidebar in a browser** - item 9's visual
    result was never actually seen (no browser tool available), and item 10's collapse/scroll behavior was
    only reasoned through from the code, never clicked. Start the dev server and check both before trusting
    they work as intended.
 4. Once (2) and (3) are resolved, this whole two-sitting stretch of work (Phase E + all 9 subsequent
-   fixes/features) is ready to commit — nothing has been committed yet across either sitting.
+   fixes/features) is ready to commit - nothing has been committed yet across either sitting.
 5. Consider whether the "initial tenant creation may share the same queue-needs-a-worker gap" flag from
-   item 7 is worth its own ticket — not yet verified as a live problem.
-6. No new plan doc exists for whatever comes after `central-panel-build` — check `goal.md`'s roadmap once
+   item 7 is worth its own ticket - not yet verified as a live problem.
+6. No new plan doc exists for whatever comes after `central-panel-build` - check `goal.md`'s roadmap once
    everything above is committed.
-7. **Keep using the subagent bug-ticket workflow from item 6** for any new bug reports the user brings —
+7. **Keep using the subagent bug-ticket workflow from item 6** for any new bug reports the user brings -
    verify at the code level first, production-quality fix, no tests but `php -l` + Pint on every touched
    file.
 
 - **Real dashboard (item 16)**: new `App\Http\Controllers\Central\DashboardController@index` replaces the
   inline closure that used to live in `routes/central-auth.php` (`Route::get('/admin', function () {...})`)
-  — same route name (`central.dashboard`), same file (no new route file needed; the existing
+  - same route name (`central.dashboard`), same file (no new route file needed; the existing
   `central-auth.php` already owned this one route, so moving it to a controller was a same-file swap, not a
   restructure). Metrics: tenant counts by status (`Tenant::query()->toBase()->selectRaw('status,
-  count(*) as count')->groupBy('status')->pluck('count', 'status')` — **`toBase()` is load-bearing**: without
+  count(*) as count')->groupBy('status')->pluck('count', 'status')` - **`toBase()` is load-bearing**: without
   it, Eloquent hydrates each row as a model and `->status` comes back as a `TenantStatus` enum instance (the
   model's own cast), so `pluck('count', 'status')` would key the resulting collection by an enum object, not
   a string, and every `->get(TenantStatus::Active->value, 0)` lookup afterward would silently return the
   default instead of the real count. Caught before it shipped, not discovered as a bug.), created this
   week/month (plain `Tenant::where('created_at', '>=', now()->startOfWeek())->count()`), tenants past grace
-  period (small dataset at platform scale — loads all `suspended_at`-not-null tenants and filters in PHP via
+  period (small dataset at platform scale - loads all `suspended_at`-not-null tenants and filters in PHP via
   the same `isPastGracePeriod()` the tenant list/show pages already use, rather than duplicating its date
-  math in SQL), trials expiring within 7 days (`whereBetween('trial_ends_at', [now(), now()->addDays(7)])` —
+  math in SQL), trials expiring within 7 days (`whereBetween('trial_ends_at', [now(), now()->addDays(7)])` -
   deliberately excludes already-expired trials, which have their own `trial_expired` badge on the tenant
-  list/show pages already; this widget is specifically the Phase D item 12 deferral — see that phase's own
+  list/show pages already; this widget is specifically the Phase D item 12 deferral - see that phase's own
   entry below for why it landed here instead), and the 10 most recent `platform_admin_activity_logs` entries
   (same `->latest('created_at')->latest('id')` tie-break `TenantController::show()`'s `provisioning_error`
   lookup already established, reused rather than re-derived). `Central/Dashboard.vue` rebuilt from the old
@@ -447,32 +447,32 @@ sittings and stacks in this order:
 - **Tenant search + pagination (item 17)**: `TenantController::index()` changed from
   `Tenant::with('domains')->latest()->get()` (loads every tenant, no limit) to a `paginate(25)->withQueryString()`
   query, searchable by company name, contact email, or domain (`orWhereHas('domains', ...)` for the domain
-  leg, since domain lives on a related table, not a tenant column) — same shape
+  leg, since domain lives on a related table, not a tenant column) - same shape
   `ActivityLogController::index()` already established (search/filter via `when()`, `->through()` to map each
   row, `withQueryString()` so pagination links preserve the search term). `Tenants/Index.vue` gained a search
   box (`Input` with a `Search` icon, submits on Enter or a Search button, a Clear button appears only when a
   search is active) and the exact same hand-rolled prev/next pagination footer `ActivityLog/Index.vue` uses
   (`DataTable`'s own `page-size` prop is set to the full page length to disable its client-side paging, since
-  `DataTable` only paginates client-side over whatever array it's handed — real server-side paging needs the
+  `DataTable` only paginates client-side over whatever array it's handed - real server-side paging needs the
   hand-rolled links, same reasoning `ActivityLog/Index.vue` already documented).
 - **Breaking-shape ripple, caught before it shipped**: changing `tenants` from a plain array to a paginated
   object (`{data: [...], total, ...}`) meant every existing Inertia assertion reading `tenants.0.X` needed to
   become `tenants.data.0.X`. Found and fixed both pre-existing call sites: `GracePeriodTest`'s
   "the tenant list and show pages flag a tenant past its grace period" and `TrialTrackingTest`'s "the tenant
-  list and show pages surface trial_expired" — both updated in place, not left broken.
+  list and show pages surface trial_expired" - both updated in place, not left broken.
 - **Tests**: `tests/Feature/Central/DashboardControllerTest.php` (guest-blocked, status counts, past-grace-
   period filtering with a within-grace tenant that must NOT show up, trials-expiring-within-7-days excluding
   an already-expired one, recent-activity reverse-chronological ordering), `tests/Feature/Central/Tenants/
   TenantIndexTest.php` (guest-blocked, search-by-company-name, search-by-domain, search-by-contact-email, a
-  no-match search returns an empty page rather than erroring, pagination reaches a second page — same
+  no-match search returns an empty page rather than erroring, pagination reaches a second page - same
   30-rows/2-pages shape `ActivityLogControllerTest`'s own pagination test already uses). Both new test files
   construct tenants directly (`new Tenant([...])->save()` + `Queue::fake()`) rather than through the real
   provisioning HTTP flow, matching `ProvisioningFailureTest`/`TenantSuspensionTest`'s established convention
-  for tests that only care about a tenant's persisted-state behavior, not provisioning itself — provisioning
+  for tests that only care about a tenant's persisted-state behavior, not provisioning itself - provisioning
   through HTTP for 30 rows in the pagination test would also have been needlessly slow.
 - **One test-authoring bug caught by the coordinator's own first run (not the user this time)**: the initial
   `DashboardControllerTest` past-grace-period test set both the "overdue" and "within-grace" tenants'
-  `suspended_at` to the *same* `Carbon::setTestNow()` instant before jumping the clock forward — both ended
+  `suspended_at` to the *same* `Carbon::setTestNow()` instant before jumping the clock forward - both ended
   up equally overdue once the clock moved, so the "within grace" tenant wrongly showed up too (asserted
   count 1, got 2). Fixed by giving the within-grace tenant a *later* `suspended_at` (moved the fake clock
   forward a second time before creating it) so it's genuinely still inside the 30-day window when the
@@ -480,54 +480,54 @@ sittings and stacks in this order:
   distinct clock-anchored timestamps, not just two tenants sharing one.
 - **Verification**: `php -l` + `vendor/bin/pint --dirty --format agent` (passed) on every touched file,
   `npm run build` (succeeded). **Test-verified by the coordinator directly this time** (not deferred to the
-  user, same as Phase D) — `php artisan test --compact` on the full Phase-E-relevant scope
+  user, same as Phase D) - `php artisan test --compact` on the full Phase-E-relevant scope
   (`DashboardControllerTest`, `TenantIndexTest`, `GracePeriodTest`, `TrialTrackingTest`): **18/18 passing, 153
-  assertions**. Also ran the full `tests/Feature/Central` suite as a regression check: **87/93 passing** —
+  assertions**. Also ran the full `tests/Feature/Central` suite as a regression check: **87/93 passing** -
   the exact same 6 pre-existing failures flagged since the end of the Phase B entry below
   (`ActivityLogControllerTest` x1, `ImpersonationTest` x1, `TenantUserControllerTest` x4), confirmed by test
   name and, for `TenantUserControllerTest`, by re-running that file alone (4/4 fail there in isolation too,
-  same `Database connection [tenant] not configured` error every time — still not investigated, still out of
+  same `Database connection [tenant] not configured` error every time - still not investigated, still out of
   scope, same as every phase since Phase B first surfaced it). `ActivityLogControllerTest`'s single failure
   showed a *different* assertion value across two consecutive full-suite runs in this same session (`2
-  is identical to 1` once, `0 is identical to 1` the next) — consistent with a pre-existing test-isolation
+  is identical to 1` once, `0 is identical to 1` the next) - consistent with a pre-existing test-isolation
   flake (not this phase's own code, which that test file never touches), but worth a real look before it's
   trusted again; flagged, not investigated further here, same as it's been flagged since Phase B.
-- **A real, pre-existing bug found and fixed in the same session (not a Phase E regression — this predates
+- **A real, pre-existing bug found and fixed in the same session (not a Phase E regression - this predates
   the whole `central-panel-build` effort)**: the user reported a 404 opening the central panel at
   `/dashboard`. Root cause: `routes/central.php`'s `/` route still rendered the **stock, never-customized**
   `resources/views/welcome.blade.php` Laravel scaffold. That view's `@auth` block hardcodes
-  `href="{{ url('/dashboard') }}"` for its "Dashboard" link — but `/dashboard` only exists on the **tenant**
+  `href="{{ url('/dashboard') }}"` for its "Dashboard" link - but `/dashboard` only exists on the **tenant**
   side (`routes/tenant.php:57`, `tenant.dashboard`), actively blocked on the central domain by
   `PreventAccessFromCentralDomains`. The central dashboard has always lived at `/admin`
-  (`central.dashboard`) — unrelated to and unchanged by this session's Phase E work (which only swapped the
+  (`central.dashboard`) - unrelated to and unchanged by this session's Phase E work (which only swapped the
   `/admin` closure for a controller, same path). **Fixed** by replacing the static `view('welcome')` render
-  with a redirect based on `platform`-guard auth state — `central.dashboard` if authenticated, `login`
-  otherwise — the exact same pattern `routes/tenant.php`'s own root route (`$request->user('web') ? ...
+  with a redirect based on `platform`-guard auth state - `central.dashboard` if authenticated, `login`
+  otherwise - the exact same pattern `routes/tenant.php`'s own root route (`$request->user('web') ? ...
   tenant.dashboard : tenant.login`) already established; the central side just never got it. New tests in
   `tests/Feature/ExampleTest.php` (replacing the stock "returns 200" placeholder test, which the redirect
-  now genuinely breaks) assert both branches. **`resources/views/welcome.blade.php` is now dead — nothing
-  references it anymore (confirmed via grep)** — left in place rather than deleted without being asked, but
+  now genuinely breaks) assert both branches. **`resources/views/welcome.blade.php` is now dead - nothing
+  references it anymore (confirmed via grep)** - left in place rather than deleted without being asked, but
   worth removing next time that file is touched for any other reason.
-- **A real, pre-existing bug found and fixed in the same session (not a Phase E regression — this predates
+- **A real, pre-existing bug found and fixed in the same session (not a Phase E regression - this predates
   the whole `central-panel-build` effort)**: the user reported a 404 opening the central panel at
   `/dashboard`. Root cause: `routes/central.php`'s `/` route still rendered the **stock, never-customized**
   `resources/views/welcome.blade.php` Laravel scaffold. That view's `@auth` block hardcodes
-  `href="{{ url('/dashboard') }}"` for its "Dashboard" link — but `/dashboard` only exists on the **tenant**
+  `href="{{ url('/dashboard') }}"` for its "Dashboard" link - but `/dashboard` only exists on the **tenant**
   side (`routes/tenant.php:57`, `tenant.dashboard`), actively blocked on the central domain by
   `PreventAccessFromCentralDomains`. The central dashboard has always lived at `/admin`
-  (`central.dashboard`) — unrelated to and unchanged by this session's Phase E work (which only swapped the
+  (`central.dashboard`) - unrelated to and unchanged by this session's Phase E work (which only swapped the
   `/admin` closure for a controller, same path). **Fixed** by replacing the static `view('welcome')` render
-  with a redirect based on `platform`-guard auth state — `central.dashboard` if authenticated, `login`
-  otherwise — the exact same pattern `routes/tenant.php`'s own root route (`$request->user('web') ? ...
+  with a redirect based on `platform`-guard auth state - `central.dashboard` if authenticated, `login`
+  otherwise - the exact same pattern `routes/tenant.php`'s own root route (`$request->user('web') ? ...
   tenant.dashboard : tenant.login`) already established; the central side just never got it. New tests in
   `tests/Feature/ExampleTest.php` (replacing the stock "returns 200" placeholder test, which the redirect
-  now genuinely breaks) assert both branches. **`resources/views/welcome.blade.php` is now dead — nothing
-  references it anymore (confirmed via grep)** — left in place rather than deleted without being asked, but
+  now genuinely breaks) assert both branches. **`resources/views/welcome.blade.php` is now dead - nothing
+  references it anymore (confirmed via grep)** - left in place rather than deleted without being asked, but
   worth removing next time that file is touched for any other reason.
 
 ---
 
-**2026-09-04, same-session UI/UX pass (not a plan-doc phase — a direct user-reported polish request on top of
+**2026-09-04, same-session UI/UX pass (not a plan-doc phase - a direct user-reported polish request on top of
 the now-complete Phase E).** The user tried the finished central panel and reported: buttons lack a pointer
 cursor, "loading" is just a disabled button with no spinner, `Tenants/Show.vue` wastes the right half of the
 screen, buttons lack icons, the tenant table has no real row actions, there's no way to edit a tenant's trial
@@ -537,14 +537,14 @@ just visual polish): the provisioning override should offer **both** "force to A
 provisioning" (not just one), and both that override and trial-editing should be **owner-only**, matching
 tenant-delete's existing gating rather than support's routine-operations gating.
 
-- **`Button.vue` (global fix, not Central-only — the whole app inherits this)**: base classes gained
+- **`Button.vue` (global fix, not Central-only - the whole app inherits this)**: base classes gained
   `cursor-pointer`, and the disabled state gained an explicit `cursor-not-allowed` (previously only
-  `pointer-events-none opacity-50` — no cursor override at all, which is the literal bug the user saw). New
+  `pointer-events-none opacity-50` - no cursor override at all, which is the literal bug the user saw). New
   `loading` prop: renders a small `border-current border-t-transparent` spinner (CSS `@keyframes`, respects
   `prefers-reduced-motion`, same convention `Loader.vue` already established for its own full-page spinner)
   prepended before the slot content, and forces the same disabled/blocked behavior `disabled` already gave
   (`isInteractionBlocked = disabled || loading`). Grepped first for any existing loading-spinner-on-button
-  convention (`animate-spin`, `Loader2`, etc.) across the entire `resources/js` tree — **found none**; every
+  convention (`animate-spin`, `Loader2`, etc.) across the entire `resources/js` tree - **found none**; every
   existing form across both Central and Tenant sides only ever did `:disabled="form.processing"` with no
   visual feedback beyond that. This was a real, app-wide gap, not something Central-specific broke.
 - **Every interactive button across all 9 Central pages** (Tenants Index/Create/Edit/Show, PlatformAdmins
@@ -554,22 +554,22 @@ tenant-delete's existing gating rather than support's routine-operations gating.
   does), and got a leading icon where one was missing (Search/Clear/Apply/Filter/New tenant/New platform
   admin/Create/Save/Send test email). `Tenants/Index.vue`'s per-row action buttons and
   `PlatformAdmins/Index.vue`'s per-row Edit link use a `reactive({})` map keyed by row id so only the
-  specific row's button that was actually clicked shows a spinner — confirmed this is safe with `DataTable`'s
+  specific row's button that was actually clicked shows a spinner - confirmed this is safe with `DataTable`'s
   `FlexRender`-based cell rendering (reads inside a `cell()` closure are tracked the same as any other
   reactive read during that render pass, verified by reading `DataTable.vue` itself rather than assumed).
 - **`Tenants/Show.vue` layout rebuilt**: was two `max-w-lg`-constrained cards stacked in the left column only
-  (the exact bug reported — everything past ~32rem was empty on any real desktop width). Now a genuine
+  (the exact bug reported - everything past ~32rem was empty on any real desktop width). Now a genuine
   `grid-cols-1 lg:grid-cols-[2fr_1fr]` (same ratio `Tenant/Dashboard.vue`'s own two-column section already
   uses), left column = Details + primary actions, right column = Domains plus a new conditional
-  "Provisioning controls" card — the right column is real content, not decoration, matching the "visual
+  "Provisioning controls" card - the right column is real content, not decoration, matching the "visual
   structure is information" principle over adding a filler panel just to balance whitespace.
 - **Provisioning override (owner-gated per the user's answer above)**: new `TenantController::forceActive()`
-  — only valid while `status === Provisioning`, flips the status flag and nothing else, records
+  - only valid while `status === Provisioning`, flips the status flag and nothing else, records
   `tenant.force_active`. Deliberately documented as a footgun in its own docblock: forcing Active on a
   tenant whose database/admin user never actually finished creating leaves an Active tenant nobody can log
-  into — this is why it's gated `can:platform-owner` (new `POST /tenants/{tenant}/force-active` route,
+  into - this is why it's gated `can:platform-owner` (new `POST /tenants/{tenant}/force-active` route,
   same gating as tenant delete) rather than available to `support`. "Cancel provisioning" deliberately
-  reuses the **existing** `destroy()` action/route/confirmation-modal rather than adding a new endpoint —
+  reuses the **existing** `destroy()` action/route/confirmation-modal rather than adding a new endpoint -
   a stuck-provisioning tenant is still just a tenant, and Phase D's "type the company name" delete
   safeguard applies just as much here; the Show.vue UI relabels the same modal/button contextually
   (`deleteIntent` ref) instead of duplicating the flow. Both new controls only render (owner-gated in the
@@ -577,62 +577,62 @@ tenant-delete's existing gating rather than support's routine-operations gating.
   `PlatformAdmins/Index.vue` already established) inside a card that itself only shows while
   `status === 'provisioning'`.
 - **Trial expiry editing is genuinely owner-only, not just UI-hidden**: initially bundled `trial_ends_at`
-  into the existing (non-owner-gated) `edit`/`update` route, then caught that this only *looked* right —
+  into the existing (non-owner-gated) `edit`/`update` route, then caught that this only *looked* right -
   the user explicitly asked for owner-only, and that route has no `can:platform-owner` gate (a deliberate
   Phase A/B decision, since renaming a tenant isn't risky, so gating the whole form would have also blocked
   `support` from company-name/contact-email edits, which nothing asked for). **Corrected before shipping**:
   reverted `edit()`/`update()` to company_name/contact_email only (back to their Phase A shape) and gave
-  trial expiry its own action — new `TenantController::updateTrial()`, `PUT /tenants/{tenant}/trial`,
+  trial expiry its own action - new `TenantController::updateTrial()`, `PUT /tenants/{tenant}/trial`,
   gated `can:platform-owner` (same gate as delete/force-active). `Show.vue` gained a `v-if="isOwner"` "Trial
-  expiry" card in the right column (plain HTML `type="date"` input, not `NepaliDateInput` — that component
+  expiry" card in the right column (plain HTML `type="date"` input, not `NepaliDateInput` - that component
   is a tenant-business-data convention for BS-calendar transaction dates; nothing in Central uses it, and
-  this is a platform-admin control) — always available regardless of tenant status, unlike the Provisioning
+  this is a platform-admin control) - always available regardless of tenant status, unlike the Provisioning
   controls card. Clearing the field sets `trial_ends_at` to `null` via Laravel's default
   `ConvertEmptyStringsToNull` middleware (confirmed present in `bootstrap/app.php`'s default stack, not a
   special-cased empty-string check).
 - **Tests**: `TrialTrackingTest.php` gained 4 cases for `updateTrial()` (owner succeeds + activity log
   recorded, clearing sets null, a `support` admin gets 403, guest redirected to login).
   `ProvisioningFailureTest.php` gained 4 cases for `forceActive()` (owner succeeds + activity log recorded,
-  no-op on a non-Provisioning tenant, a `support` admin gets 403, guest redirected to login) — reused its
+  no-op on a non-Provisioning tenant, a `support` admin gets 403, guest redirected to login) - reused its
   existing `stuckProvisioningTenant()` helper rather than inventing a new one.
 - **Verification**: `php -l` + `vendor/bin/pint --dirty --format agent` (passed) on every touched file,
   `npm run build` (succeeded, no Vue compile errors from the new `h()`-based row-action cells or the
   reworked Show.vue). `php artisan test --compact` on the full Phase-relevant scope (`TrialTrackingTest`,
   `TenantUpdateTest`, `ProvisioningFailureTest`): **24/24 passing, 96 assertions**. Full
-  `tests/Feature/Central` + `ExampleTest` regression: **97/103 passing** — the same 6 pre-existing failures
+  `tests/Feature/Central` + `ExampleTest` regression: **97/103 passing** - the same 6 pre-existing failures
   (unchanged, same test names/errors as flagged since Phase B), plus 8 net new passing tests, zero
   regressions.
 - **A second real, pre-existing bug found and fixed in the same session (from a live user-reported crash,
   not a regression from anything above)**: `GET /tenants/{id}/users` 500'd with
   `Stancl\Tenancy\Exceptions\TenantDatabaseDoesNotExistException` in the browser. Root cause traced to a
   real tenant in the dev DB (`company_name: "LLCa ge"`, `status: active`) whose `pending_admin` was still
-  populated — only ever cleared by a successful `CreateTenantFirstAdmin` run — meaning its database was
+  populated - only ever cleared by a successful `CreateTenantFirstAdmin` run - meaning its database was
   never actually finished being provisioned, yet `status` claimed Active. `status` alone was never
   trustworthy enough to gate a tenant-database connection attempt on. **Fixed**:
-  - New `Tenant::databaseExists(): bool` — delegates to the tenant's own `TenantDatabaseManager`
+  - New `Tenant::databaseExists(): bool` - delegates to the tenant's own `TenantDatabaseManager`
     (`$this->database()->manager()->databaseExists(...)`), the same one `DatabaseTenancyBootstrapper` itself
     uses. Checked explicitly at the top of `TenantController::impersonate()` and
     `TenantUserController::index()` **before** calling `$tenant->run()`, redirecting with a friendly flash
-    message instead of letting the exception surface as a 500 — checked explicitly rather than caught as an
+    message instead of letting the exception surface as a 500 - checked explicitly rather than caught as an
     exception, since `TenantDatabaseDoesNotExistException` is only actually thrown by the bootstrapper in
     `local` environments (confirmed by reading `DatabaseTenancyBootstrapper::bootstrap()`); a production
     SQLite path would instead have PDO silently auto-create an empty file and fail confusingly later, which
     the explicit check now catches in both environments.
   - `TenantController::show()` now exposes `database_missing` (independent of `status`, and not computed
-    while genuinely still `Provisioning` — that state already has its own error-banner/retry flow, and no
+    while genuinely still `Provisioning` - that state already has its own error-banner/retry flow, and no
     database yet is expected mid-pipeline, not a fault). `Show.vue` gained a second red banner
     (`v-else-if`, alongside the existing provisioning-error one) with a "Re-provision database" action.
   - `TenantController::retryProvisioning()`'s eligibility relaxed from `status === Provisioning` only to
-    `status === Provisioning || ! databaseExists()` — safe because `pending_admin` survives regardless of
+    `status === Provisioning || ! databaseExists()` - safe because `pending_admin` survives regardless of
     how stale the status flag is, and it refuses (new message: "This tenant already has a database - nothing
     to retry.") whenever a real database exists, so it can never truncate a working tenant's data.
   - **Tests**: `Tenant::databaseExists()` and `show()`'s `database_missing` flag covered directly in
     `ProvisioningFailureTest.php` (3 new cases), plus one proving `retryProvisioning()` actually recreates
     the database AND the admin user for a tenant in exactly this broken state (built by provisioning for
-    real, then `deleteDatabase()` + restoring `pending_admin`) — `TenantUserControllerTest`/`ImpersonationTest`
+    real, then `deleteDatabase()` + restoring `pending_admin`) - `TenantUserControllerTest`/`ImpersonationTest`
     each gained a "returns a clean error instead of a crash" case for their own `$tenant->run()` call site.
   - **A test-authoring bug caught mid-debug, not an app bug**: the first draft of the `retryProvisioning()`
-    test used `$tenant->update(['pending_admin' => [...]])` to restore the broken state — silently a no-op,
+    test used `$tenant->update(['pending_admin' => [...]])` to restore the broken state - silently a no-op,
     since `pending_admin` isn't in `Tenant`'s `#[Fillable(...)]` list (mass assignment protection drops it),
     the exact same trap Phase B's `suspended_at` bug hit. Traced by writing a throwaway debug test that
     dumped intermediate state (role count, user count) rather than guessing, confirming `pending_admin` was
@@ -664,7 +664,7 @@ tenant-delete's existing gating rather than support's routine-operations gating.
   reverted, committed, or investigated, since touching unfamiliar in-progress changes without knowing their
   origin is exactly the kind of destructive-by-accident move this project's own safety conventions warn
   against.
-- **Not yet committed** — this is genuinely the state as of this update, not a stale claim (see the Phase A
+- **Not yet committed** - this is genuinely the state as of this update, not a stale claim (see the Phase A
   correction entry far below for why that distinction matters): the coordinator built, fixed, and verified
   Phase E, the root-route bug fix, the UI/UX pass, the database-missing crash fix, and the button color
   hierarchy fix all in one sitting and is updating this file immediately afterward rather than in a separate
@@ -679,56 +679,56 @@ tenant-delete's existing gating rather than support's routine-operations gating.
 - **Schema**: `tenants` gains `trial_ends_at` (nullable timestamp, set at creation from
   `platform_settings.default_trial_days`, same "surface only, never auto-act" posture as `suspended_at`/
   grace period). Added to `Tenant`'s `#[Fillable(...)]` and `getCustomColumns()` (the same
-  silently-non-persisting trap Phase B hit with `suspended_at` — caught this time before it needed a bug
+  silently-non-persisting trap Phase B hit with `suspended_at` - caught this time before it needed a bug
   report) and cast `datetime`. New `Tenant::isTrialExpired(): bool`, same shape as `isPastGracePeriod()`.
-- **Provisioning-failure visibility — the interesting part of this phase.** The `TenantCreated` job
+- **Provisioning-failure visibility - the interesting part of this phase.** The `TenantCreated` job
   pipeline (`TenancyServiceProvider`: `CreateDatabase`/`MigrateDatabase`/`SeedDatabase`/
   `CreateTenantFirstAdmin`) is a single `Stancl\JobPipeline\JobPipeline` queued job whose own `handle()`
   loops through those four sub-jobs and only swallows a sub-job's exception if that sub-job defines its
-  own `failed()` method — none of the four do, so any exception one throws re-throws out of
+  own `failed()` method - none of the four do, so any exception one throws re-throws out of
   `JobPipeline::handle()` uncaught, which fails the **outer** `JobPipeline` job and fires Laravel's
   `Illuminate\Queue\Events\JobFailed` (confirmed by reading `vendor/stancl/jobpipeline/src/JobPipeline.php`
   and all four job classes, not assumed). `App\Listeners\RecordProvisioningFailure` listens for that event
   globally (registered in `AppServiceProvider::boot()`), filters to just this pipeline via the failed
   job's own `payload()['displayName'] === JobPipeline::class`, then recovers the tenant by `unserialize()`-
-  ing `payload()['data']['command']` — the same serialized-command string `Illuminate\Queue\Queue::
+  ing `payload()['data']['command']` - the same serialized-command string `Illuminate\Queue\Queue::
   createObjectPayload()` puts there for every queue driver (`sync` and `database` alike, confirmed by
-  reading that method) — and reading `$command->passable[0]`, the tenant `JobPipeline`'s own `->send()`
+  reading that method) - and reading `$command->passable[0]`, the tenant `JobPipeline`'s own `->send()`
   callback stashed there. Deliberately **not** parsing the `failed_jobs` table (tenant id isn't a
-  queryable column there, and the payload shape is a queue-driver implementation detail) — this hooks the
+  queryable column there, and the payload shape is a queue-driver implementation detail) - this hooks the
   framework's own stable event instead. Records `provisioning.failed` to `platform_admin_activity_logs`
   with the tenant and the exception message. `TenantController::show()` surfaces the latest such entry as
   `provisioning_error` whenever the tenant is still `Provisioning`; a new `retryProvisioning()` action
-  (gated to `Provisioning`-status tenants only) re-fires `event(new TenantCreated($tenant))` — safe to
+  (gated to `Provisioning`-status tenants only) re-fires `event(new TenantCreated($tenant))` - safe to
   retry because `pending_admin` is only ever cleared once `CreateTenantFirstAdmin` actually succeeds, so
   it's still there regardless of which pipeline step failed.
 - **Domain management**: new `Central\Tenants\TenantDomainController` (`store`/`destroy`) on top of
-  `stancl/tenancy`'s existing `domains` table/`HasDomains` trait — no new schema needed. `destroy()` blocks
+  `stancl/tenancy`'s existing `domains` table/`HasDomains` trait - no new schema needed. `destroy()` blocks
   removing a tenant's last domain (blank subdomain routing would otherwise silently break) and 404s if the
   given domain doesn't actually belong to the given tenant (route-model-bound `{tenant}/domains/{domain}`
   doesn't enforce that relationship on its own). New UI section on `Tenants/Show.vue`: list + remove
   buttons (disabled with a tooltip on the last domain) + a small add-domain form.
-- **Stronger delete confirmation (UX only, per the plan doc's own framing — backend authorization was
+- **Stronger delete confirmation (UX only, per the plan doc's own framing - backend authorization was
   already correct)**: `Tenants/Show.vue`'s delete modal now requires typing the tenant's exact
-  `company_name` before the Delete button enables (`computed` equality check) — proportionate given this
+  `company_name` before the Delete button enables (`computed` equality check) - proportionate given this
   triggers a real `DROP DATABASE`. No backend test needed for this one; nothing server-side changed.
 - **Trial badge UI**: `Tenants/{Index,Show}.vue` gained a `trial_expired` warning badge next to the
   existing status/`past_grace_period` badges. **Deviation from the plan doc's literal wording** ("Surfaced
   on tenant list/show **+ dashboard**"): the dashboard half is deferred to Phase E, since the dashboard is
   still the inline closure in `routes/central-auth.php` this whole plan document itself flags for Phase E
-  item 16 to replace with a real controller — adding a trial-expiring widget to a placeholder that's about
+  item 16 to replace with a real controller - adding a trial-expiring widget to a placeholder that's about
   to be rebuilt would be wasted, throwaway work. Noted in the Phase E section of the plan doc as something
   that phase's dashboard build should pick up.
 - **Tests**: `TrialTrackingTest.php` (trial_ends_at set from settings on creation, `isTrialExpired()`
   before/after/never-set, surfaced on list+show), `ProvisioningFailureTest.php` (the `JobFailed`→activity-
   log path tested by constructing a real payload-shaped event rather than forcing an actual vendor-level DB
-  failure — deliberately more unit-ish than the rest of this suite's HTTP-driven style, because reliably
+  failure - deliberately more unit-ish than the rest of this suite's HTTP-driven style, because reliably
   forcing `CreateDatabase`/`MigrateDatabase` to fail against a real SQLite file without touching vendor
   code isn't practical; the retry-dispatch path itself IS tested through the real HTTP endpoint with
   `Queue::fake()` + `Queue::assertPushed()`, matching `TenantProvisioningTest`'s own established
   still-provisioning-tenant technique), `DomainManagementTest.php` (add/remove/last-domain-blocked/
   cross-tenant-404/unique/guest-blocked). No `App\Models\Tenant` factory exists (a stancl/tenancy base
-  model) — new tests construct tenants the same way `GracePeriodTest`/`TenantSuspensionTest` already do
+  model) - new tests construct tenants the same way `GracePeriodTest`/`TenantSuspensionTest` already do
   (provision through the real HTTP endpoint, or `new Tenant([...])->save()` + `Queue::fake()` for a
   genuinely-stuck-in-Provisioning tenant), not a new pattern.
 - **3 real bugs the user's first test run caught, all fixed this session** (same rhythm as Phase B's own
@@ -771,144 +771,144 @@ tenant-delete's existing gating rather than support's routine-operations gating.
 
 ---
 
-**2026-09-03 entry (Phase C — superseded by the Phase D entry above for "what's next," kept for the full
+**2026-09-03 entry (Phase C - superseded by the Phase D entry above for "what's next," kept for the full
 build detail).** **Git status at the time: working tree clean. Phase C of `plans/central-panel-build.md`
 (platform-admin management) is committed as `721193e` "Add platform-admin owner/support roles and
 management (Phase C)".** Built directly (no forking, same call as Phase B). This finally wires up the
-`platform-owner` Gate that Phase B deliberately deferred (see that entry below) — now meaningful, since a
+`platform-owner` Gate that Phase B deliberately deferred (see that entry below) - now meaningful, since a
 real owner/support distinction and a UI to set it both exist.
 
-- **Schema**: `platform_admins` gains `role` (string, `owner`|`support`, default `owner` — every
+- **Schema**: `platform_admins` gains `role` (string, `owner`|`support`, default `owner` - every
   pre-existing admin stays `owner`) and `is_active` (boolean, default `true`). New `App\Enums\
   PlatformAdminRole` (`Owner`/`Support`), cast on `PlatformAdmin::role`. `PlatformAdmin::isOwner(): bool`
   helper.
 - **The Gate, finally wired**: `Gate::define('platform-owner', fn (PlatformAdmin $admin) =>
-  $admin->isOwner())` registered in `AppServiceProvider::boot()` (this app has no `AuthServiceProvider` —
-  Laravel 11+ default skips it — so `AppServiceProvider` is the only registration point, same as the
+  $admin->isOwner())` registered in `AppServiceProvider::boot()` (this app has no `AuthServiceProvider` -
+  Laravel 11+ default skips it - so `AppServiceProvider` is the only registration point, same as the
   `ActivityLogObserver` registrations already there). Laravel's built-in `can:platform-owner` route
   middleware works correctly against the `platform` guard's user with **no explicit guard specified**,
-  confirmed by reading `Illuminate\Auth\Middleware\Authenticate::authenticate()` — it calls `Auth::
+  confirmed by reading `Illuminate\Auth\Middleware\Authenticate::authenticate()` - it calls `Auth::
   shouldUse($guard)` once a guard in its list authenticates, which flips `'platform'` to the *default*
   guard for the rest of that request; every central route is already wrapped in `auth:platform` first, so
   `can:` (which resolves the user via the default guard) sees the right user without needing `can:
   platform-owner,platform` or similar. Applied to exactly the 3 places the locked decision named: tenant
-  `destroy()` (routes/central-tenants.php), settings `update()`/`sendTestEmail()` (not `edit()` — viewing
-  settings is fine for `support`), and platform-admin `create/store/edit/update` (not `index()` — any
+  `destroy()` (routes/central-tenants.php), settings `update()`/`sendTestEmail()` (not `edit()` - viewing
+  settings is fine for `support`), and platform-admin `create/store/edit/update` (not `index()` - any
   admin can view the roster).
-- **`Central\PlatformAdmins\PlatformAdminController`** (index/create/store/edit/update, no `destroy()` —
+- **`Central\PlatformAdmins\PlatformAdminController`** (index/create/store/edit/update, no `destroy()` -
   same reasoning as `Tenant\Admin\UserController`: `platform_admin_activity_logs.platform_admin_id` is
   `restrictOnDelete()`, so an admin who's ever taken a logged action can never be hard-deleted anyway;
   deactivation via `update()`'s `is_active` field is the only lifecycle action). **Deviation from the plan
   doc's literal wording** ("plus a deactivate action"): folded deactivation into `update()` rather than a
   separate action, mirroring the tenant-side `UserController` precedent exactly rather than the plan
-  doc's abstract phrasing — consistency with an already-built, already-verified pattern wins over a
+  doc's abstract phrasing - consistency with an already-built, already-verified pattern wins over a
   wishlist doc written before that pattern existed. `guardLastActiveOwner()` (verbatim port of
   `UserController::guardLastActiveAdmin()`'s shape) blocks demoting-to-support or deactivating the sole
-  remaining active owner — this app has no separate "recover access" flow, so that would permanently lock
+  remaining active owner - this app has no separate "recover access" flow, so that would permanently lock
   the platform out of its own settings/tenant-delete/admin-management tooling.
 - **Login-flow rejection**: `AuthenticatedSessionController::store()` now also fails a deactivated admin
   with the exact same generic `auth.failed` message a wrong password gets (status can't be probed from
-  the form — same convention the tenant-side login already uses for `users.is_active`).
+  the form - same convention the tenant-side login already uses for `users.is_active`).
   `TwoFactorChallengeController::store()` gets the identical check too, defense in depth for the rare case
   of being deactivated by someone else in the few-minute window between the password step and completing
   the 2FA challenge.
 - **UI**: `Central/PlatformAdmins/{Index,Create,Edit}.vue`, separate-page shape (not the tenant side's
   single-page-modal shape) matching Central's own established convention (`Tenants/{Index,Create,Edit}.vue`
-  are already 3 separate pages) — the backend routes were already built that way before the UI, so this
+  are already 3 separate pages) - the backend routes were already built that way before the UI, so this
   followed naturally rather than being a separate style decision. `Index.vue` reads `page.props.auth.
   platformAdmin.role` (already shared by `HandleInertiaRequests`, and Eloquent's `attributesToArray()`
   auto-unwraps a `BackedEnum` cast to its raw scalar value during JSON serialization, confirmed rather
-  than assumed) to conditionally show the "New platform admin" button and per-row "Edit" links — UI-only
+  than assumed) to conditionally show the "New platform admin" button and per-row "Edit" links - UI-only
   convenience, the real enforcement is server-side. **"Platform admins" nav entry added to all 11 other
   Central Vue pages** (the 8 from Phase A/B plus Phase B's own `Settings/Edit.vue`, which needed the same
-  treatment) — this recurring per-page nav-array duplication (3rd time now touching every Central page for
+  treatment) - this recurring per-page nav-array duplication (3rd time now touching every Central page for
   one new nav entry) is worth flagging as a real refactor candidate (extract a shared `nav-items.js` like
   the tenant side already has) if a 4th phase needs it too; not done now, out of scope for this phase.
 - **Tests**: `tests/Feature/Central/PlatformAdmins/PlatformAdminControllerTest.php` (view-by-either-role,
   owner-can-create, support-blocked-403 on create/store/edit/update, owner-can-update-role-and-status,
-  last-active-owner guard both directions — demote and deactivate — rejected, same guard allowed when
+  last-active-owner guard both directions - demote and deactivate - rejected, same guard allowed when
   another active owner exists, guest/tenant-web-user blocked). Extended 3 existing files: `LoginTest.php`
   gained the deactivated-admin-rejected case, `TenantDeletionTest.php` gained a support-cannot-delete
   case, `PlatformSettingControllerTest.php` gained a support-can-view-but-not-mutate case.
   `PlatformAdminFactory` gained `support()`/`inactive()` states.
 - **Verification**: `php -l` + `vendor/bin/pint --format agent` on every touched file (one incidental
-  auto-fix in `TwoFactorChallengeController.php` — pre-existing style Pint flagged while formatting a
+  auto-fix in `TwoFactorChallengeController.php` - pre-existing style Pint flagged while formatting a
   file this phase already had to touch, not something this phase's own diff introduced), `php artisan
   migrate --pretend` then a real `migrate` against the dev central DB, `npm run build` (succeeded).
   `php artisan test --compact` on the full Phase C-relevant scope (Auth + Settings + Tenants +
-  PlatformAdmins + ActivityLogControllerTest): **59/65 passing** — the 6 failures are the exact same
+  PlatformAdmins + ActivityLogControllerTest): **59/65 passing** - the 6 failures are the exact same
   pre-existing-at-`87ebfb6` failures flagged at the end of the Phase B entry below, confirmed unchanged
   (same test names, same error messages) and untouched by this phase's own work.
 
 ---
 
-**2026-09-03 entry (Phase B — superseded by the Phase C entry above for "what's next," kept for the full
+**2026-09-03 entry (Phase B - superseded by the Phase C entry above for "what's next," kept for the full
 build detail).** **Git status at the time: working tree clean. Phase B of `plans/central-panel-build.md`
 (system settings) is committed as `c116337` "Add platform settings, mail, and tenant grace period (Phase
-B)".** Built directly (no forking — the work didn't split cleanly enough to be worth the coordination
+B)".** Built directly (no forking - the work didn't split cleanly enough to be worth the coordination
 overhead) right after Phase A's stale-doc correction (see the entry below this one for that correction
 and for Phase A's own content), then debugged/fixed against the user's real test run before committing
 (see the bug list below). All 4 of Phase B's plan items are done:
 
 - **`PlatformSetting` singleton** (`current()` = `firstOrCreate`, same pattern as tenant-side
-  `CompanySetting`) — mail_*, platform_name, support_email, default_trial_days,
+  `CompanySetting`) - mail_*, platform_name, support_email, default_trial_days,
   default_grace_period_days. `mail_password` is `encrypted`-cast; the edit form never round-trips the
   real value back (only a `mail_password_set` boolean), and a blank password field on update means
-  "leave the stored password alone," not "clear it" — same UX convention as this app's 2FA recovery
+  "leave the stored password alone," not "clear it" - same UX convention as this app's 2FA recovery
   codes never being re-displayed.
 - **Deliberate deviation from the plan doc**: the `platform-owner` Gate (and the `platform_admins.role`
   column it needs) was **not** built this phase, even though the plan doc said Settings should be
-  "gated platform-owner." Reasoning: every platform admin today is functionally identical — no Phase C
-  admin-management UI exists yet to ever actually set someone to `support` — so a gate that would
+  "gated platform-owner." Reasoning: every platform admin today is functionally identical - no Phase C
+  admin-management UI exists yet to ever actually set someone to `support` - so a gate that would
   evaluate true for 100% of current admins is dead schema with no real effect, which is exactly what
   this project's "no speculative abstractions" rule warns against. Settings is gated `auth:platform`
   only for now; the `role` column and gate land in Phase C alongside the UI that gives the distinction
   real meaning. Flagged explicitly in `plans/central-panel-build.md`'s Phase B status line so this isn't
   mistaken for an oversight later.
-- **`App\Support\PlatformMailer::apply()`** — reads `PlatformSetting::current()`, `Config::set()`s
+- **`App\Support\PlatformMailer::apply()`** - reads `PlatformSetting::current()`, `Config::set()`s
   `mail.default`/`mail.mailers.smtp.*`/`mail.from.*`, then calls `app()->forgetInstance('mail.manager')`
   (and `'mailer'`) to bust Laravel's cached mailer singleton. **Design deviation from the plan doc's
   literal text** ("register a boot-time hook e.g. `AppServiceProvider::boot()`"): a boot-time hook was
   rejected because a long-running `php artisan queue:work` process only boots providers once, so a
-  global hook would apply whatever settings were current at worker-start and never see later changes —
+  global hook would apply whatever settings were current at worker-start and never see later changes -
   a real staleness bug for exactly the audience (queued mail) it's meant to serve. Called explicitly
   right before every mail send in this app instead (3 call sites: test email, tenant welcome, tenant
-  suspension notice) — functionally equivalent, correctly reflects config at actual send time regardless
+  suspension notice) - functionally equivalent, correctly reflects config at actual send time regardless
   of process lifetime, and matches this app's general preference for explicit call sites over global
   magic where correctness is sensitive to it. This app has zero tenant-side mail to protect against, so
   there was nothing a "central-context-only" guard needed to avoid affecting.
 - **`Central\Settings\PlatformSettingController`** (edit/update/sendTestEmail) + `Central/Settings/
   Edit.vue`, gated `auth:platform` (see role deviation above). `sendTestEmail()` is synchronous (not
   queued) specifically so the admin gets immediate pass/fail feedback on whether the mail settings
-  actually work — a queued failure would surface nowhere useful. "Settings" nav entry added to all 8
+  actually work - a queued failure would surface nowhere useful. "Settings" nav entry added to all 8
   Central Vue pages (the 7 from Phase A plus `TwoFactorSetup.vue`, which Phase A's nav sync had
-  skipped — its nav was and still is missing "Activity log" too, a pre-existing gap not touched here,
+  skipped - its nav was and still is missing "Activity log" too, a pre-existing gap not touched here,
   out of scope for this phase). Used `watch(() => page.props.flash?.status, ...)` for the toast, not
-  `onMounted` — the update/test-email actions both redirect back to this same route, which is exactly
+  `onMounted` - the update/test-email actions both redirect back to this same route, which is exactly
   the scenario mem.md's documented Inertia gotcha bites (`onMounted` only fires once; Inertia patches
   same-route redirects instead of remounting). Notably, most of the *existing* Central pages (Show.vue,
-  Index.vue, etc.) still use the buggy `onMounted` pattern — not fixed here, out of scope, but worth
+  Index.vue, etc.) still use the buggy `onMounted` pattern - not fixed here, out of scope, but worth
   fixing opportunistically if one of those pages is touched again for other reasons.
 - **Grace period** (item 7): new `tenants.suspended_at` (nullable timestamp; central migration, added to
-  `Tenant::getCustomColumns()` and cast `datetime` — a real column, not swept into the virtual `data`
+  `Tenant::getCustomColumns()` and cast `datetime` - a real column, not swept into the virtual `data`
   JSON column). Set in `TenantController::suspend()`, cleared in `resume()`. New `Tenant::
-  isPastGracePeriod(int $gracePeriodDays): bool` — computed at read time (`now() > suspended_at + N
+  isPastGracePeriod(int $gracePeriodDays): bool` - computed at read time (`now() > suspended_at + N
   days`), never stored, so it can't drift out of sync with a later settings change. Clones the Carbon
-  instance before `addDays()` (`$this->suspended_at->clone()->addDays(...)`) — mutating in place would
+  instance before `addDays()` (`$this->suspended_at->clone()->addDays(...)`) - mutating in place would
   have corrupted the cached attribute on the model instance for any later access in the same request.
   `TenantController::index()`/`show()` pass `past_grace_period` (and `show()` also `suspended_at`) to
   the Vue pages; `Tenants/Index.vue`'s status column and `Show.vue`'s status row both render a red "Past
-  grace period" badge alongside the normal status badge when true. **Surfaced only — no auto-delete or
+  grace period" badge alongside the normal status badge when true. **Surfaced only - no auto-delete or
   any other automated action**, per the locked decision. `trial_ends_at` (the other shared-schema column
-  the plan doc bundled alongside `suspended_at`) was deliberately **not** added yet — it has zero
+  the plan doc bundled alongside `suspended_at`) was deliberately **not** added yet - it has zero
   consumers until Phase D actually sets/reads it, so adding it now would be the same "dead schema" smell
   the role-column deviation above avoided; Phase D adds its own small migration for it when needed.
-- **Mailables** (item 8, partial — provisioning-failed alert explicitly deferred to Phase D per the plan
+- **Mailables** (item 8, partial - provisioning-failed alert explicitly deferred to Phase D per the plan
   doc's own note that it "ties into Phase D item 12"): `TenantWelcomeMail` (sent from
   `CreateTenantFirstAdmin::handle()`, which is already inside a queued job, so sending synchronously
-  there adds no request-blocking latency — no need to make the mail itself `ShouldQueue` too) and
+  there adds no request-blocking latency - no need to make the mail itself `ShouldQueue` too) and
   `TenantSuspensionMail` (sent synchronously from `TenantController::suspend()`, only when the tenant has
-  a `contact_email`; skipped silently otherwise). Both wrapped in `try/catch (Throwable)` — a
+  a `contact_email`; skipped silently otherwise). Both wrapped in `try/catch (Throwable)` - a
   misconfigured SMTP setting must never block tenant provisioning or a suspend action, both of which
   already succeeded (DB-wise) before the mail send is attempted. Welcome mail's login URL is built with
   the same scheme/port-preserving `parse_url()` logic `impersonate()` already uses (mem.md's documented
@@ -916,26 +916,26 @@ and for Phase A's own content), then debugged/fixed against the user's real test
 - **Tests**: `tests/Feature/Central/Settings/PlatformSettingControllerTest.php` (view/update/validation/
   blank-password-keeps-existing/test-email/activity-log/guest+tenant-user-blocked),
   `tests/Feature/Central/Tenants/GracePeriodTest.php` (model-level boundary test using
-  `Carbon::setTestNow()` — false while inside the window, true one second past it — plus an HTTP-level
+  `Carbon::setTestNow()` - false while inside the window, true one second past it - plus an HTTP-level
   test that list/show actually expose the flag). Extended (not just added-to) 3 existing files:
   `TenantSuspensionTest.php` gained `suspended_at` set/cleared assertions plus 2 new tests for the
   suspension-mail send/no-send cases, `TenantProvisioningTest.php` gained a `Mail::assertSent
   (TenantWelcomeMail::class, ...)` assertion in its existing provisioning-success test.
 - **Verification: the user ran the Phase B test command and reported 5 failures back.** Diagnosed and
   fixed all 5 (all genuinely caused by Phase B code, confirmed by isolating each and, for the trickiest
-  one, `git stash`-ing back to the baseline commit to prove it — see below); a further 6 pre-existing
+  one, `git stash`-ing back to the baseline commit to prove it - see below); a further 6 pre-existing
   failures the user's run also surfaced (`ActivityLogControllerTest`, `ImpersonationTest`,
   `TenantUserControllerTest`) turned out to **already fail on the untouched `87ebfb6` baseline** (verified
-  the same way — stash, run, confirm identical failures, unstash) and are unrelated to Phase B; left
+  the same way - stash, run, confirm identical failures, unstash) and are unrelated to Phase B; left
   alone, flagged to the user rather than silently fixed (out of scope, and `ImpersonationTest`'s failure
-  looks environment-specific — a local `APP_URL` with a port vs. the test's hardcoded portless
+  looks environment-specific - a local `APP_URL` with a port vs. the test's hardcoded portless
   expectation). **Real Phase B bugs found and fixed**:
   - **`suspended_at` silently never persisted.** Added `suspended_at` to `Tenant::getCustomColumns()` (so
     it's a real column, not swept into the virtual `data` JSON) but forgot to also add it to the model's
-    `#[Fillable(...)]` attribute — Laravel's default mass-assignment behavior silently drops a non-fillable
+    `#[Fillable(...)]` attribute - Laravel's default mass-assignment behavior silently drops a non-fillable
     key rather than throwing, so `$tenant->update(['suspended_at' => now()])` in `suspend()` was a no-op
     every time. **Lesson: adding a column to `getCustomColumns()` and adding it to `#[Fillable(...)]` are
-    two separate steps on this model — forgetting the second one fails silently, not loudly**, exactly the
+    two separate steps on this model - forgetting the second one fails silently, not loudly**, exactly the
     kind of gap `php -l`/Pint/a dry-run migration can never catch (only an actual test assertion on the
     persisted value catches it, which is why `TenantSuspensionTest`'s new `suspended_at` assertions and
     `GracePeriodTest` both exist).
@@ -944,84 +944,84 @@ and for Phase A's own content), then debugged/fixed against the user's real test
     request.** 58 other test files in this suite already call `tenancy()->end()` (mostly via `afterEach()`,
     since most tests only ever touch a tenant domain once, at the very end). `TenantSuspensionTest`'s
     "resuming a suspended tenant..." test uniquely interleaves tenant-domain and central-domain requests
-    **twice each within one test method** — a request into a tenant domain that gets far enough to reach
+    **twice each within one test method** - a request into a tenant domain that gets far enough to reach
     the real route handler (post-resume, redirected to login rather than blocked by
     `AbortIfTenantSuspended`) leaves `tenancy()->initialized === true` and `config('database.default')`
     stuck on `'tenant'` for the rest of that same test method (confirmed by dumping both right before the
-    failing query) — nothing in `stancl/tenancy` auto-reverts this at request end; production doesn't need
+    failing query) - nothing in `stancl/tenancy` auto-reverts this at request end; production doesn't need
     it to, since every real HTTP request is a fresh PHP process, but a single test method sharing one
     process across multiple `$this->get()`/`$this->post()` calls does. Added explicit `tenancy()->end()`
     calls after both tenant-domain visits in that test (mid-test, not just `afterEach`, since the leak
-    bites *within* the same test method). **This was already broken on the `87ebfb6` baseline** — Phase A
+    bites *within* the same test method). **This was already broken on the `87ebfb6` baseline** - Phase A
     never actually exercised this exact path cleanly; not a Phase B regression, but Phase B's own new
     `suspended_at` assertions happened to be the ones that made the pre-existing gap visible by needing the
     connection to be correct at that point. **Lesson: any future central-side test that visits a tenant
     domain more than once, or does central-domain work after a tenant-domain visit within the same test
-    method, needs its own explicit `tenancy()->end()` — don't assume `afterEach` cleanup is enough if the
+    method, needs its own explicit `tenancy()->end()` - don't assume `afterEach` cleanup is enough if the
     leak would bite mid-test.**
   - **Welcome-mail domain lookup raced tenant provisioning's own event timing.** `CreateTenantFirstAdmin`
-    tried to read the tenant's domain via `$tenant->domains()->first()` — but `TenantController::store()`
+    tried to read the tenant's domain via `$tenant->domains()->first()` - but `TenantController::store()`
     calls `$tenant->save()` (which synchronously fires the queued `TenantCreated` pipeline under the
     `sync` test queue driver, running `CreateTenantFirstAdmin` immediately) **before** it calls
-    `$tenant->domains()->create(...)` a few lines later — so at the exact moment the job ran, the domain
+    `$tenant->domains()->create(...)` a few lines later - so at the exact moment the job ran, the domain
     genuinely didn't exist yet, and `sendWelcomeMail()`'s early-return-on-null-domain guard silently
-    skipped sending, with no exception (confirmed by temporarily rethrowing inside the catch block — zero
+    skipped sending, with no exception (confirmed by temporarily rethrowing inside the catch block - zero
     exceptions, proving it was a clean early return, not a swallowed error). Fixed by having `store()`
     stash the domain string directly into `pending_admin` (computed from `$validated['subdomain']`, which
-    it already has at that point) instead of `CreateTenantFirstAdmin` querying for it — sidesteps the
+    it already has at that point) instead of `CreateTenantFirstAdmin` querying for it - sidesteps the
     ordering dependency entirely rather than trying to reorder `store()`'s own transaction (which the
     existing rollback/cleanup logic is written around and shouldn't be touched without strong reason).
     **This exact race could in principle also bite production** under an extremely fast async queue (e.g.
     Redis + Horizon with near-zero latency) even though it's normally masked there by the queue's own
-    dispatch delay — the fix removes the dependency entirely rather than relying on that delay.
-  - All 3 fixes verified together: `php artisan test --compact` on the full Phase B-relevant file set —
+    dispatch delay - the fix removes the dependency entirely rather than relying on that delay.
+  - All 3 fixes verified together: `php artisan test --compact` on the full Phase B-relevant file set -
     **19/19 passed, 77 assertions**. `vendor/bin/pint --format agent` scoped to every touched file: clean.
 
 ---
 
-**2026-09-03, Phase A correction (this file was stale about its own commit status — a real gotcha worth
+**2026-09-03, Phase A correction (this file was stale about its own commit status - a real gotcha worth
 remembering).** This session opened by re-reading this file's own top entry, which claimed Phase A of
 `plans/central-panel-build.md` was "built, not yet committed." `git status`/`git log` told a different
-story: the working tree was clean, and a commit newer than this file's last update — `87ebfb6` "all
-checks green" — already contained every one of Phase A's files (the impersonate fix, activity-log table/
+story: the working tree was clean, and a commit newer than this file's last update - `87ebfb6` "all
+checks green" - already contained every one of Phase A's files (the impersonate fix, activity-log table/
 model/controller/UI, tenant edit, tenant users view) plus the user's own test-file additions, and this
-very `mem.md` file. **The user had run the full suite themselves, confirmed green, and committed — but
+very `mem.md` file. **The user had run the full suite themselves, confirmed green, and committed - but
 the session that made that commit never came back to update mem.md/the plan doc's status lines
 afterward.** Corrected both docs to say Phase A is DONE and committed as `87ebfb6`, removed the stale
 "not yet run through the user's test suite" language. **Lesson, worth repeating: never trust a memory
-doc's own status line at face value — always cross-check it against `git status`/`git log` first,
+doc's own status line at face value - always cross-check it against `git status`/`git log` first,
 especially after time has passed or when a session is starting fresh.** This is exactly the failure mode
 `mem.md`'s own closing "How we work on this project" section warns about ("stale memory is worse than no
-memory") — it happened here despite that section existing, because updating mem.md and committing were
+memory") - it happened here despite that section existing, because updating mem.md and committing were
 two separate steps and only one of them reliably happened.
 
 ---
 
-**2026-09-03 entry (superseded by the correction above — kept for the Phase A build detail it still has,
+**2026-09-03 entry (superseded by the correction above - kept for the Phase A build detail it still has,
 not for its stale status claims).** **Git status: working tree clean. Phase A of `plans/central-panel-build.md`
-(central panel build-out) is committed as `87ebfb6` "all checks green"** — the user ran the full test
+(central panel build-out) is committed as `87ebfb6` "all checks green"** - the user ran the full test
 command below plus Pint/build themselves and confirmed green before committing (this file previously said
-"not yet committed"/"not yet run through the user's test suite" — that was stale as of this update; always
+"not yet committed"/"not yet run through the user's test suite" - that was stale as of this update; always
 re-check `git status`/`git log` against this file's own claims, don't trust a memory doc's status line
 blindly). **Now starting Phase B (system settings).** Manual browser testing of the fully-committed
 `8482319` "gaps filled" state (see the entry below) surfaced that the central (platform-admin) panel was
 minimal: impersonation 404'd, no way to view a tenant's users, no persisted audit trail.
 `plans/central-panel-build.md` was written, scoped with the user (full 5-phase scope: A-E, locked
-decisions on admin roles and grace-period behavior — see that doc), and **Phase A was built and verified**:
-- Fixed the impersonate 404 — `TenantController::impersonate()` was dropping the port from `APP_URL`
+decisions on admin roles and grace-period behavior - see that doc), and **Phase A was built and verified**:
+- Fixed the impersonate 404 - `TenantController::impersonate()` was dropping the port from `APP_URL`
   when building the forced root URL (`parse_url(..., PHP_URL_SCHEME)` only grabs scheme); now carries
   the port through too.
 - New `platform_admin_activity_logs` table (central DB) + `App\Models\PlatformAdminActivityLog::record()`
-  — replaces the old `Log::info()` stopgap in `impersonate()`. Wired into every sensitive `TenantController`
+  - replaces the old `Log::info()` stopgap in `impersonate()`. Wired into every sensitive `TenantController`
   action: create/update/suspend/resume/delete/impersonate. The `destroy()` wiring records **before**
-  `$tenant->delete()` deliberately — `tenant_id` is a real FK (`nullOnDelete`), and this app's SQLite test
+  `$tenant->delete()` deliberately - `tenant_id` is a real FK (`nullOnDelete`), and this app's SQLite test
   suite actually enforces FKs (`config/database.php` default, not overridden in `phpunit.xml`), so
   recording after delete would either fail or lose the tenant reference.
-- Tenant edit (`central.tenants.edit`/`update` — company name + contact email only, domain/status
+- Tenant edit (`central.tenants.edit`/`update` - company name + contact email only, domain/status
   excluded deliberately) and a tenant users read-only view (`central.tenants.users`, runs
-  `$tenant->run(fn () => User::with('role')->get())` — the same `$tenant->run()` pattern `impersonate()`
-  already used) — both close gaps the user hit directly during testing.
-- A filterable, paginated activity-log page (`central.activity-log.index`) — reuses the existing
+  `$tenant->run(fn () => User::with('role')->get())` - the same `$tenant->run()` pattern `impersonate()`
+  already used) - both close gaps the user hit directly during testing.
+- A filterable, paginated activity-log page (`central.activity-log.index`) - reuses the existing
   tenant-side `Tenant/Admin/ActivityLogController`'s filter-bar/pagination pattern rather than inventing
   a new one (`DataTable` only paginates client-side over whatever array it's handed, so real server-side
   paging needed hand-rolled prev/next links, same as that existing page already does).
@@ -1039,109 +1039,109 @@ the plan doc; **Phase B now starting.**
 
 **2026-09-02 entry (prior state, kept for history).** **Git status: initialized, working tree clean.** The entire
 complete-system-build effort (Phase 0, Wave 2, Phase 1 Wave A/B, Sales Agent + PDF/print, and the
-Payment/Receipt module — everything described below as "uncommitted" as of the previous update) has now
+Payment/Receipt module - everything described below as "uncommitted" as of the previous update) has now
 been committed by the user as a single commit, `8482319` "gaps filled" (209 files changed,
-+15,697/-298), on top of `4a975b1`. No remote configured yet — this protects against a bad `git
++15,697/-298), on top of `4a975b1`. No remote configured yet - this protects against a bad `git
 clean`/`reset`/`checkout`, not disk loss.
 
 **Code-complete status**: per `plans/complete-system-build.md`, Phase 2 (full verification) was DONE
-before this commit — `vendor/bin/pint --dirty --format agent` clean, `php artisan test` 345/347 (2 real
+before this commit - `vendor/bin/pint --dirty --format agent` clean, `php artisan test` 345/347 (2 real
 bugs found and fixed, see the Phase 2 entry below), `npm run build` succeeded. The Payment/Receipt module
 was built after that Phase 2 run and wasn't covered by it; the user has since run its tests directly
 (`php artisan test tests/Feature/Tenant/Sales/ReceiptTest.php tests/Feature/Tenant/Purchases/
-PaymentTest.php`, 2026-09-03) — **all 21 green**. Every module in the effort is now verified. **The one
+PaymentTest.php`, 2026-09-03) - **all 21 green**. Every module in the effort is now verified. **The one
 gap called out repeatedly throughout this file and never yet closed: no actual browser click-through has
-been done** — everything server-side/data-level has been verified (Pest suite, one HTTP-level curl
+been done** - everything server-side/data-level has been verified (Pest suite, one HTTP-level curl
 walkthrough), but JS hydration/reactivity, console errors, and visual/CSS correctness across the ~20+
 pages added since the last real UI look have never been checked in a live browser. The user is now doing
-that manual browser test — this is the natural next/current step.
+that manual browser test - this is the natural next/current step.
 
-**2026-09-02, Phase 2 (full verification pass) — DONE, all green.** The user ran the full suite
+**2026-09-02, Phase 2 (full verification pass) - DONE, all green.** The user ran the full suite
 themselves: `vendor/bin/pint --dirty --format agent` clean, `php artisan test` **345/347 passed** (2
 real failures found and fixed, both below), `npm run build` succeeded. This closes out the entire
-`complete-system-build` effort (Phase 0 + Phase 1 + Phase 2) — see `plans/complete-system-build.md` for
-the full plan and every entry below this one for what was built. **Nothing has been committed yet** —
+`complete-system-build` effort (Phase 0 + Phase 1 + Phase 2) - see `plans/complete-system-build.md` for
+the full plan and every entry below this one for what was built. **Nothing has been committed yet** -
 next session should batch-commit (0A, 0B, then each Phase-1 item or small related group, per the plan
 doc's own stated approach), starting with the still-earlier uncommitted Payment/Receipt module.
 
-- **Bug 1 — `ImpersonationTest` > "a non-platform-admin cannot trigger impersonation" (test bug, not
+- **Bug 1 - `ImpersonationTest` > "a non-platform-admin cannot trigger impersonation" (test bug, not
   app bug)**: the test's own helper, `provisionImpersonationTestTenant()`, calls `$test->actingAs($admin,
   'platform')` to provision a tenant through the real HTTP flow. `actingAs()` mutates shared auth state
-  on the `TestCase`, not a per-request scope — so the platform guard stayed authenticated into the
+  on the `TestCase`, not a per-request scope - so the platform guard stayed authenticated into the
   test's own subsequent anonymous-request assertion, making a request that was supposed to prove
   "unauthenticated requests get redirected to login" actually run fully authenticated instead. **Fixed**
   by adding `Auth::guard('platform')->logout();` right before the assertion request. **Lesson: any test
   helper that calls `actingAs()` to provision fixtures via the real HTTP flow needs an explicit logout
-  afterward in any sibling test that specifically wants to assert anonymous/unauthorized behavior** —
+  afterward in any sibling test that specifically wants to assert anonymous/unauthorized behavior** -
   `actingAs()`'s effect outlives the call that made it, unlike a scoped guard swap.
-- **Bug 2 — `BackupTest` > "a non-admin cannot access any backup route"` (real app bug, security-relevant)**:
+- **Bug 2 - `BackupTest` > "a non-admin cannot access any backup route"` (real app bug, security-relevant)**:
   `BackupController::download()`/`destroy()` used implicit `{Backup}` route-model binding. Route-model
   binding resolves inside Laravel's `SubstituteBindings` middleware, which runs *before* this route's own
   `role:admin` middleware in the pipeline (group-appended route middleware sorts after the framework's
   built-in web-group middleware). A non-admin hitting `/backups/1/download` with no matching row got a
-  404 from the failed binding lookup before the role check ever ran — leaking "this id doesn't exist" to
+  404 from the failed binding lookup before the role check ever ran - leaking "this id doesn't exist" to
   an unauthorized user instead of a clean 403, and more importantly meaning the role gate wasn't actually
   the first thing to run for these two routes. **Fixed** by changing both methods to accept a raw
   `int $backup` and resolve it manually via `Backup::findOrFail($backup)` inside the method body, so
   `SubstituteBindings` has nothing to bind and the `role:admin` middleware is genuinely first. **Lesson:
   any route that mixes implicit Eloquent route-model binding with a custom authorization *route*
-  middleware (not a policy/gate inside the controller) should double check which actually runs first —
+  middleware (not a policy/gate inside the controller) should double check which actually runs first -
   don't assume group middleware ordering matches source order. Prefer manual resolution inside the
   action when the authorization check needs to be provably first**, same category of bug as the
   legacy-public-webroot backup issue this module was already built to avoid.
 
-**2026-09-02, complete-system-build Phase 0 (0A multi-store + 0B Nepali BS calendar) — built via 2
+**2026-09-02, complete-system-build Phase 0 (0A multi-store + 0B Nepali BS calendar) - built via 2
 parallel agents (0A itself spawned 2 more), all verified by hand-reading actual output, not
 self-reports.** See `plans/complete-system-build.md` for the full phase-by-phase plan this is part of.
 
-- **0A — real per-store stock, genuinely new design (legacy's "multi-store" was cosmetic, a label
+- **0A - real per-store stock, genuinely new design (legacy's "multi-store" was cosmetic, a label
   field only).** New `Store` model/CRUD (`app/Models/Store.php`, `StoreController`, mirrors
   `ItemCategoryController`'s shape), seeded with one default "Main Store" per fresh tenant.
   `item_stock_movements` gained a required `store_id` FK (`restrictOnDelete`). `Item::
   recordStockMovement()` gained a required `int $storeId` 4th positional arg (after `$date`, before
-  the existing optional `$reference`); `Item::currentStock(?int $storeId = null)` — filtered per-store
+  the existing optional `$reference`); `Item::currentStock(?int $storeId = null)` - filtered per-store
   when given, cross-store total when omitted (old callers keep working). `sales`/`purchases`/
   `stock_adjustments`/`sales_returns`/`purchase_returns` each gained a required `store_id` column.
   `users` gained a nullable `store_id` (soft default only, no new auth subsystem).
   - **Design amendment made before delegating, not in the original plan doc**: a grep found `Sale::
     post()`/`Purchase::post()`/`StockAdjustment::post()`/`SalesReturn::post()`/`PurchaseReturn::post()`
     called from 29 existing files (mostly Receipt/Payment/Quotation/report tests that don't know about
-    stores). Making `store_id` hard-required in each `post()`'s `$data` array — as the plan doc
-    originally specified — would have broken all 29 with no way for me to verify the fixes myself
+    stores). Making `store_id` hard-required in each `post()`'s `$data` array - as the plan doc
+    originally specified - would have broken all 29 with no way for me to verify the fixes myself
     (never run the suite). Amended: `$data['store_id']` is **optional** at the `post()` layer; when
     omitted it resolves to `Store::where('is_active', true)->orderBy('id')->value('id')` (the seeded
-    default store), throwing if none exists. The DB column stays real/required — only the caller-facing
-    contract is optional. Result: zero of the 29 existing call sites needed to change. **This pattern —
-    check the real blast radius via grep before committing to "required" in a shared method signature —
+    default store), throwing if none exists. The DB column stays real/required - only the caller-facing
+    contract is optional. Result: zero of the 29 existing call sites needed to change. **This pattern -
+    check the real blast radius via grep before committing to "required" in a shared method signature -
     is worth repeating for any future Phase-1 item that touches an already-widely-called method.**
   - Deliberately out of scope (flagged, not silently expanded): no per-store *financial* reporting
     (P&L/ledger stays tenant-wide). Fixed Assets/Quotations/Receipts/Payments are NOT store-scoped.
   - Report `store_id` filter sweep (17 methods) and the multi-store Vue UI polish are Wave 2, not done
-    yet — transactions currently default silently to "Main Store" unless a form explicitly picks one.
-- **0B — Nepali BS calendar, input/output-layer only (no DB migration, dates stay Gregorian in SQL).**
-  `App\Support\NepaliCalendar::adToBs()`/`bsToAd()` — pure PHP, table-driven, ported verbatim from
+    yet - transactions currently default silently to "Main Store" unless a form explicitly picks one.
+- **0B - Nepali BS calendar, input/output-layer only (no DB migration, dates stay Gregorian in SQL).**
+  `App\Support\NepaliCalendar::adToBs()`/`bsToAd()` - pure PHP, table-driven, ported verbatim from
   legacy's `Nepali_Calendar` (BS 2000–2090), verified against legacy's own algorithm across the full
   range (889 AD→BS + 1350 BS→AD points, zero mismatches) rather than trusted blindly. JS mirror at
   `resources/js/lib/nepali-calendar.js` (cross-checked against the PHP version, 3240-point round trip,
-  zero mismatches). `resources/js/components/ui/NepaliDateInput.vue` — masked BS input, drop-in
+  zero mismatches). `resources/js/components/ui/NepaliDateInput.vue` - masked BS input, drop-in
   replacement for `<Input type="date">` (still emits a plain AD `YYYY-MM-DD` string). `FiscalYear::
   $bs_label` accessor (e.g. `"2081/82"`), computed at read time from `start_date`, never stored.
   `App\Console\Commands\AutoStartFiscalYear` (`fiscal-year:auto-start`, scheduled daily in
-  `routes/console.php` — this app's actual scheduler-wiring convention, confirmed by checking first)
+  `routes/console.php` - this app's actual scheduler-wiring convention, confirmed by checking first)
   rolls every active tenant onto its next fiscal year at **Shrawan 1 (BS month 4)**, Nepal's real
-  fiscal-year start — confirmed against legacy's own command rather than assumed. Deliberately diverges
+  fiscal-year start - confirmed against legacy's own command rather than assumed. Deliberately diverges
   from legacy in one way: never bootstraps a tenant's very first fiscal year from nothing (no prior
-  year to carry forward from) — that stays a deliberate admin action via `FiscalYearController::store()`.
+  year to carry forward from) - that stays a deliberate admin action via `FiscalYearController::store()`.
   - Date-input retrofit sweep (swap existing pages' native date inputs for `NepaliDateInput`) is Wave 2,
     not done yet. Every Phase-1 module should use `NepaliDateInput` from the start instead.
 
-**2026-09-02, Wave 2 (report `store_id` filter sweep + date-input retrofit) — 4 parallel agents, all
+**2026-09-02, Wave 2 (report `store_id` filter sweep + date-input retrofit) - 4 parallel agents, all
 verified.** Report sweep split by risk: R1 (mechanical `->where('store_id', ...)` filter on 5
-Sale/Purchase-based report controllers — sales/purchase register, VAT books, aged receivables/payables,
+Sale/Purchase-based report controllers - sales/purchase register, VAT books, aged receivables/payables,
 item-wise sales/purchase, TDS, VAT summary) and R2 (4 inventory/stock reports needing real per-store
-stock math — category-wise, stock summary, stock valuation, stock movement register). A third agent did
+stock math - category-wise, stock summary, stock valuation, stock movement register). A third agent did
 the Nepali-date-input swap on the 12 existing transaction pages (Sales/Purchases/Returns/
-StockAdjustments/FixedAssets/Quotations/Receipts/Payments/JournalVouchers/FiscalYears) — deliberately
+StockAdjustments/FixedAssets/Quotations/Receipts/Payments/JournalVouchers/FiscalYears) - deliberately
 excluded from the report Vue pages in this same pass, since R1/R2 were touching those same files to add
 store filters; report-page date-input retrofit is next, now that's safe.
 
@@ -1150,19 +1150,19 @@ store filters; report-page date-input retrofit is next, now that's safe.
   calls going through `Sale::post()`/`Purchase::post()`/etc. Four report tests
   (`CategoryWiseReportTest`, `InventoryReportTest`, `StockValuationReportTest`,
   `StockMovementRegisterTest`) call `Item::recordStockMovement()`/`stockMovements()->create()`
-  *directly*, bypassing the fallback-store resolution entirely — those were left broken by 0A and R2
+  *directly*, bypassing the fallback-store resolution entirely - those were left broken by 0A and R2
   fixed them (supplied an explicit store id, no assertions touched). Confirmed via grep this was the
-  complete list — no other test file calls `recordStockMovement()` directly. **Lesson for any future
+  complete list - no other test file calls `recordStockMovement()` directly. **Lesson for any future
   signature change to a widely-used model method: grep for direct calls to the method itself, not just
-  calls to the higher-level `post()` wrapper — a lower-level primitive can have its own, disjoint set of
+  calls to the higher-level `post()` wrapper - a lower-level primitive can have its own, disjoint set of
   direct callers.**
 - R1's `VatSummaryReportController` also had to filter `SalesReturn`/`PurchaseReturn` by `store_id`, not
-  just `Sale`/`Purchase` — those return tables independently gained `store_id` from 0A's Child B, and a
+  just `Sale`/`Purchase` - those return tables independently gained `store_id` from 0A's Child B, and a
   VAT summary that filtered sales but not returns would net in every store's returns against one store's
   sales, producing a wrong figure. Caught before it shipped.
 - R2 confirmed its per-store math is a strict superset, not a behavior change: none of its 4 methods
   actually called `Item::currentStock()` (each reimplements the signed-movement-sum with extra as-of/
-  date filtering `currentStock()` doesn't support) — so it applied the same `store_id` filter directly
+  date filtering `currentStock()` doesn't support) - so it applied the same `store_id` filter directly
   to each method's own `stockMovements()` query, wrapped in `when($storeId !== null, ...)`, which is a
   no-op producing byte-identical output when no store filter is requested.
 - Report-page date-input retrofit (19 files, split 2 agents) landed clean. One cosmetic inconsistency
@@ -1173,22 +1173,22 @@ store filters; report-page date-input retrofit is next, now that's safe.
 - **Wave 2 complete.** Phase 0 (0A + 0B) and both Wave 2 sweeps are done and hand-verified. Next:
   Phase 1's 12 feature modules (see `plans/complete-system-build.md`).
 
-**2026-09-02, Phase 1 Wave A — 6 parallel agents, all independent (no shared-file overlap by design),
+**2026-09-02, Phase 1 Wave A - 6 parallel agents, all independent (no shared-file overlap by design),
 all verified.** Items 3, 6, 7, 8, 10, 11 from the plan's Phase-1 list. Items 1 (Sales Agent commission)
 and 4 (PDF/print) are deliberately held back to a later wave since both need to edit `Sale.php`/
-`SaleController.php` — running them alongside each other or alongside anything else touching those
+`SaleController.php` - running them alongside each other or alongside anything else touching those
 files risks a collision, so they're sequenced instead of parallelized.
 
 - **Settings/Invoice Setup**: `CompanySetting` singleton (`current()` = `firstOrCreate`), admin-only
   `/settings` edit form (company info + invoice footer note). Deliberately does NOT wire into actual
-  invoice-number generation (this app already has a separate `voucher_sequences` mechanism for that) —
+  invoice-number generation (this app already has a separate `voucher_sequences` mechanism for that) -
   flagged as future work, not silently built out.
 - **Item Varieties**: `ItemVariety` (name, sku_suffix, price_adjustment, is_active) belongs to `Item`.
   Touched `Item.php` for exactly one relation addition (`varieties(): HasMany`), nothing else. Display/
-  pricing sub-record only — deliberately NOT stock-tracked per-variety (would need a much bigger
+  pricing sub-record only - deliberately NOT stock-tracked per-variety (would need a much bigger
   `recordStockMovement()` redesign); flagged, not silently expanded.
 - **Activity log**: `ActivityLog` model + `ActivityLogObserver`, registered via `Model::observe()` in
-  `AppServiceProvider::boot()` for 11 financial models — **zero of those 11 models' own files were
+  `AppServiceProvider::boot()` for 11 financial models - **zero of those 11 models' own files were
   touched**, avoiding any collision with other passes that own them. `updated()` skips writing when the
   only change is `updated_at` (no no-op-touch log spam). This observer-registration pattern (one file,
   `AppServiceProvider`, owns cross-cutting behavior for N other models without opening any of them) is
@@ -1201,41 +1201,41 @@ files risks a collision, so they're sequenced instead of parallelized.
   no auth) has a regression test asserting the stored path never starts with `public_path()`.
 - **Admin impersonation**: central platform-admin → `POST /tenants/{tenant}/impersonate` finds the
   tenant's admin user, generates a 5-minute `URL::temporarySignedRoute()` targeting the *tenant's own
-  domain* (via `URL::forceRootUrl()`, reset immediately after — tenant routes aren't domain-scoped at
+  domain* (via `URL::forceRootUrl()`, reset immediately after - tenant routes aren't domain-scoped at
   registration time so there's no other way to target a specific tenant's subdomain from the central
   side), returns `Inertia::location($signedUrl)` (Inertia's mechanism for a full-page cross-origin
   redirect). New `routes/tenant-impersonation.php`, deliberately required OUTSIDE the `auth:web` group
   (the platform admin isn't logged into `web` yet) but still inside the outer tenancy-initializing
   group, so `User` route-model binding on the signed route resolves against the right tenant DB. Signed
   URLs are bound to the full request URL including host, so a captured link can't be replayed against a
-  different tenant's domain. Audit trail is a `Log::info()` stopgap with a `TODO` — `ActivityLog` (built
+  different tenant's domain. Audit trail is a `Log::info()` stopgap with a `TODO` - `ActivityLog` (built
   in this same wave, by a different agent) is tenant-DB-scoped and the wrong shape for a central-side,
   pre-tenancy-connection event; a proper cross-domain audit table is real follow-up work, not built yet.
 - **Dashboard notices**: `Notice` + `scopeCurrentlyActive()` using `whereDate()` (not raw string
-  comparison) against `starts_at`/`ends_at` — matters because SQLite stores a `date`-cast column as a
+  comparison) against `starts_at`/`ends_at` - matters because SQLite stores a `date`-cast column as a
   full `"Y-m-d H:i:s"` string that sorts lexicographically wrong against a bare `"Y-m-d"` boundary
   string; `whereDate()` sidesteps that portably. Dismissal is in-page-only (no persistence) per MVP
   scope. `DashboardController`/`Dashboard.vue` got additive-only changes (one new prop key, one new
-  banner block) — confirmed via re-read, nothing else in either file disturbed.
+  banner block) - confirmed via re-read, nothing else in either file disturbed.
 
-**2026-09-02, Phase 1 Wave B — 4 parallel agents (fiscal-year archive itself spawned 2 children), all
+**2026-09-02, Phase 1 Wave B - 4 parallel agents (fiscal-year archive itself spawned 2 children), all
 verified.** Items 2, 5, 9, 12.
 
-- **POS/walk-in**: genuinely frontend-only — `PosController` reuses `SaleController::index()`'s exact
+- **POS/walk-in**: genuinely frontend-only - `PosController` reuses `SaleController::index()`'s exact
   prop shape, submission goes through the unmodified `POST /sales`. No `barcode` column exists on
-  `Item` (confirmed, not added — out of scope for a frontend-only pass); "scan" is just a live-filter
+  `Item` (confirmed, not added - out of scope for a frontend-only pass); "scan" is just a live-filter
   text input, indistinguishable from a real barcode scanner's keyboard-emulation input. Solved a real
   UX problem (both `SaleController::store()` and `CustomerController::store()` redirect to their own
   index on success, which would normally bounce the cashier off `/pos`) with a `sessionStorage` snapshot
-  bridge across the redirect — frontend-only, no backend change.
+  bridge across the redirect - frontend-only, no backend change.
 - **Item expiry tracking**: the `expiry_date` column already existed on `Item` (an earlier pass added
-  it) but was completely dead — `ItemController` never validated it, no UI showed it. Wired end to end:
+  it) but was completely dead - `ItemController` never validated it, no UI showed it. Wired end to end:
   validation, a `NepaliDateInput` field, `scopeExpired()`/`scopeExpiringSoon()` (boundary rule: expiring
-  *today* counts as `expired`, not `expiringSoon` — the two scopes never overlap), Index badges, a
+  *today* counts as `expired`, not `expiringSoon` - the two scopes never overlap), Index badges, a
   Dashboard stat card. Caught and fixed a real latent bug while wiring the edit-modal: Eloquent
   serializes a `date`-cast column as a full ISO datetime, which would have silently blanked the BS date
   field on edit without a `.slice(0, 10)` truncation first.
-- **Fiscal-year archive DB**: flagged as the largest Phase-1 item, and it was — split into a
+- **Fiscal-year archive DB**: flagged as the largest Phase-1 item, and it was - split into a
   coordinator-owned core (migration, `FiscalYearArchive` model, `FiscalYearArchiver::archive()`/
   `connectionFor()`) plus 2 children (trigger endpoint; read-only browse UI). Read
   `../day_khata/migration_plan/01-architecture-tenancy.md` §3.4 first, then correctly recognized the
@@ -1244,98 +1244,98 @@ verified.** Items 2, 5, 9, 12.
   translated intent rather than porting mechanics: one standalone SQLite file per archived year under
   `storage/app/private/fiscal-year-archives/{tenant_id}/fy_{id}.sqlite`, synchronous (matching
   `BackupController`'s established convention), never wired into `FiscalYear::close()` (a separate,
-  later, manual admin action — adds zero risk to the existing P&L-sweep transaction). Archive is a
-  **copy**, never a move — live `journal_vouchers`/`journal_voucher_lines` are untouched; shrinking the
+  later, manual admin action - adds zero risk to the existing P&L-sweep transaction). Archive is a
+  **copy**, never a move - live `journal_vouchers`/`journal_voucher_lines` are untouched; shrinking the
   live DB is explicit future work, not attempted. Denormalizes account code/name and creator name onto
   archived rows (no FKs) so an archive file stays self-contained and queryable even if the live tenant
   DB later renumbers accounts. Read-only enforced at the SQLite level itself (`PRAGMA query_only = ON`
   on the browse connection), not just by controller convention. Hand-traced verification: the round-trip
   test computes live vs. archived debit/credit sums via two independent query paths and asserts equality
-  plus a per-line spot check — not a query matching itself.
+  plus a per-line spot check - not a query matching itself.
 - **CI skeleton**: genuinely greenfield (confirmed no `.github/workflows/` existed). New `ci.yml`, two
   jobs (PHP: Pint `--test` + full `php artisan test`; JS: `npm run build`), both with dependency caching.
-  Checked `composer.json`/`package.json` before assuming any tool existed — no static analysis config
+  Checked `composer.json`/`package.json` before assuming any tool existed - no static analysis config
   found, so none was added (would be a new dependency, needs approval); no JS lint script exists either,
   so none was invoked.
 - **Process gap worth remembering**: the fiscal-year-archive agent's children ran `php artisan test
   --filter=...` themselves (a *filtered*, not full, run), reasoning that only "the full suite" was
-  prohibited. That's not what was intended — the standing rule is **no test execution at all** by any
+  prohibited. That's not what was intended - the standing rule is **no test execution at all** by any
   agent, filtered or not; the user runs all tests themselves. Every future agent brief needs to say
   "never run `php artisan test` (not even with `--filter`)" explicitly rather than relying on "no heavy
   commands" being self-evidently total.
 
-**2026-09-02, Phase 1 finished — Sales Agent + commission, then PDF/print output (sequenced, both touch
+**2026-09-02, Phase 1 finished - Sales Agent + commission, then PDF/print output (sequenced, both touch
 `Sale.php`/`SaleController.php`).**
 
 - **Sales Agent + commission**: real FK (`agents` table, `Agent` model using `HasLedgerAccount`, filed
   under a new "Sales Agents" subgroup), `sales.agent_id`/`commission_amount`. Commission posts as two
   independent, self-balanced voucher lines (`debit EXE22 Sales Commission Expense`, `credit agent's own
-  ledger account`) — deliberately NOT netted against the customer like TDS is, since commission is a
+  ledger account`) - deliberately NOT netted against the customer like TDS is, since commission is a
   real expense/payable pair, not a customer-side adjustment. Hand-verified: with or without a commission
   line, total debits still equal total credits. Fixed an incidental latent gap while touching
   `Sales/Index.vue`: `stores`/`agents` weren't in its `defineProps` or forwarded to `<Create>` even
-  though the controller already sent `stores` — pre-existing gap from an earlier wave, caught and fixed
+  though the controller already sent `stores` - pre-existing gap from an earlier wave, caught and fixed
   as part of the same edit.
-- **PDF/print output**: `barryvdh/laravel-dompdf` (^3.1) — the user installed it themselves after I
+- **PDF/print output**: `barryvdh/laravel-dompdf` (^3.1) - the user installed it themselves after I
   flagged that a new Composer dependency needs approval per CLAUDE.md and I don't run
   composer/build commands myself; only proceeded once confirmed installed. One shared Blade layout
-  (`resources/views/pdf/layout.blade.php`, tables/floats only — dompdf has no flexbox/grid support) using
-  `CompanySetting::current()` for the letterhead. Built Sale's print view by hand first (most complex —
+  (`resources/views/pdf/layout.blade.php`, tables/floats only - dompdf has no flexbox/grid support) using
+  `CompanySetting::current()` for the letterhead. Built Sale's print view by hand first (most complex -
   VAT/TDS/payment-mode), then spawned 4 children for Purchase/SalesReturn/PurchaseReturn/Quotation
-  following that proven pattern — verified each one's Blade view actually matches its own model's real
+  following that proven pattern - verified each one's Blade view actually matches its own model's real
   columns rather than copy-pasting Sale's shape (returns have no line-level discount column; Quotation
   has no stored totals at all, so its `print()` computes them server-side using the exact same formula
-  `Quotations/Index.vue`'s `quotationTotal()` already uses client-side — confirmed identical by direct
+  `Quotations/Index.vue`'s `quotationTotal()` already uses client-side - confirmed identical by direct
   comparison, not just trusted).
-- **Phase 1 is now fully complete — every item in `plans/complete-system-build.md`'s Phase 1 list is
-  built.** Nothing has been committed. Nothing has been run through the user's test/build suite yet —
+- **Phase 1 is now fully complete - every item in `plans/complete-system-build.md`'s Phase 1 list is
+  built.** Nothing has been committed. Nothing has been run through the user's test/build suite yet -
   that's Phase 2, the last remaining step for the whole complete-system-build effort.
 
-**2026-09-02 session, second pass: Payment/Receipt module — closes the real, previously-documented
+**2026-09-02 session, second pass: Payment/Receipt module - closes the real, previously-documented
 Aged Receivables/Payables MVP gap, via 2 parallel forks.** Picked as `goal.md` roadmap item 9 right
 after the Fixed Assets/Quotations/Employee-mgmt pass below was verified green and committed. Full
 design (schema, allocation semantics, guard placement) was worked out in a plan-mode pass before any
-code was written — see the plan's "Design" section reasoning if touching this again, summarized here.
-Not yet verified by the user's own test/build run as of this update — ask before committing.
+code was written - see the plan's "Design" section reasoning if touching this again, summarized here.
+Not yet verified by the user's own test/build run as of this update - ask before committing.
 
 - **The core idea**: `Receipt` (customer money in) / `Payment` (supplier money out) are plain 2-line
   settlement vouchers (`[debit cash/bank, credit customer]` / `[debit supplier, credit cash/bank]`,
   `App\Enums\VoucherType::Receipt`/`Payment`), posted through the same `JournalVoucher::post()` every
   other module uses. Each may **optionally** allocate its amount against one or more specific
   outstanding `Sale`/`Purchase` invoices via a new `ReceiptAllocation`/`PaymentAllocation` table
-  (`receipt_id`/`payment_id`, `sale_id`/`purchase_id`, `amount` — header-level, not line-level like
+  (`receipt_id`/`payment_id`, `sale_id`/`purchase_id`, `amount` - header-level, not line-level like
   returns, since money settlement isn't about specific line quantities). **This is the first N:M
-  "one document settles against N of another" pattern in this codebase** — no precedent existed
+  "one document settles against N of another" pattern in this codebase** - no precedent existed
   before this (confirmed via research before designing). Allocations may sum to *less* than the
-  receipt/payment's own amount — the unapplied remainder is an accepted "on-account" payment not
+  receipt/payment's own amount - the unapplied remainder is an accepted "on-account" payment not
   netted against any invoice, the same honestly-documented-limitation shape as this app's other MVP
-  gaps — but a single allocation can never exceed that invoice's own remaining outstanding, nor can
+  gaps - but a single allocation can never exceed that invoice's own remaining outstanding, nor can
   the allocation sum exceed the receipt/payment's own amount (both guarded in `Receipt::post()`/
   `Payment::post()` with a 0.01 rounding tolerance, matching `Sale::post()`'s own partial-payment
   tolerance).
 - **New shared helper, built by the coordinator before forking (so both forks and the report can
-  never drift apart)**: `Sale::outstandingAmount()`/`Purchase::outstandingAmount()` — `total` minus
+  never drift apart)**: `Sale::outstandingAmount()`/`Purchase::outstandingAmount()` - `total` minus
   every non-cancelled return minus every non-cancelled receipt/payment allocation against it, rounded
   2dp. `SalesPurchaseReportController::agedReceivables()`/`agedPayables()` now call this instead of
   duplicating the formula inline, and their docblocks' "no payment-receipt feature" caveat is removed
-  — it's genuinely closed now, as long as payment is recorded through Receipt/Payment rather than a
+  - it's genuinely closed now, as long as payment is recorded through Receipt/Payment rather than a
   raw Journal Voucher (which still bypasses this, unavoidably, same as before).
   - **A real, pre-existing bug fixed incidentally while extracting this formula**: `agedReceivables()`/
     `agedPayables()`'s old inline formula (`$sale->total - $sale->returns->sum('total')`) summed
-    **every** return regardless of status, including cancelled ones — so a return that was itself
+    **every** return regardless of status, including cancelled ones - so a return that was itself
     cancelled (reversing the reversal) still permanently reduced the invoice's reported outstanding
     balance forever. `SalesReturn`/`PurchaseReturn`'s own "already returned" guard already excluded
     cancelled returns (`whereHas('salesReturn', fn ($q) => $q->where('status', '!=', 'cancelled'))`)
-    — `outstandingAmount()` now applies that same filter to the returns sum too, closing the gap.
+    - `outstandingAmount()` now applies that same filter to the returns sum too, closing the gap.
   - **Guard added to `Sale::cancel()`/`Purchase::cancel()`** (the only changes to those two
     pre-existing files, mirroring their own existing return-reference guard verbatim): blocks
-    cancelling an invoice that has a live (non-cancelled) receipt/payment allocated against it —
+    cancelling an invoice that has a live (non-cancelled) receipt/payment allocated against it -
     prevents cancelling money already collected/paid out from under a settlement.
-- **A real spec inconsistency caught in review, not by either fork (both built exactly to spec —
+- **A real spec inconsistency caught in review, not by either fork (both built exactly to spec -
   the spec itself was wrong)**: the build brief told both forks `Receipt::cancel()`/`Payment::
   cancel()` take no `$reason` parameter (modeled loosely on `FixedAsset::dispose()`, which has none).
-  But every *actual* "cancel and reverse a voucher" method in this app —
-  `Sale::cancel()`/`Purchase::cancel()`/`SalesReturn::cancel()`/`PurchaseReturn::cancel()` — requires
+  But every *actual* "cancel and reverse a voucher" method in this app -
+  `Sale::cancel()`/`Purchase::cancel()`/`SalesReturn::cancel()`/`PurchaseReturn::cancel()` - requires
   one, and `Receipt`/`Payment::cancel()` are in that same family (a voucher-reversal, not a
   status-flip like `FixedAsset::dispose()`). One fork explicitly flagged this exact inconsistency in
   its own report rather than silently picking a side. Fixed post-fork: both now take
@@ -1348,87 +1348,87 @@ Not yet verified by the user's own test/build run as of this update — ask befo
   `Tenant\Purchases\PaymentController` (index/store/cancel only, matching voucher immutability),
   `routes/tenant-{receipts,payments}.php`. `index()` passes a flat `outstandingSales`/
   `outstandingPurchases` array (every non-cancelled credit invoice with `outstandingAmount() > 0.01`)
-  alongside the usual `customers`/`suppliers`/`accounts` lists — the Vue `Create.vue` filters this
+  alongside the usual `customers`/`suppliers`/`accounts` lists - the Vue `Create.vue` filters this
   client-side by the selected customer/supplier, matching every existing create form's "pass full
   reference lists up front" convention (no async search pattern exists anywhere in this app).
   TRANSACTIONS nav gained "Receipts" (`Banknote` icon) / "Payments" (`Wallet` icon).
 - **Tests**: `tests/Feature/Tenant/Sales/ReceiptTest.php` (11), `tests/Feature/Tenant/Purchases/
-  PaymentTest.php` (10) — balanced-voucher construction, full/partial allocation nets
+  PaymentTest.php` (10) - balanced-voucher construction, full/partial allocation nets
   `outstandingAmount()` correctly, over-allocation (both per-invoice and sum-vs-receipt-amount)
   rejected, cross-customer/supplier allocation rejected, cancel-reverses-and-restores-outstanding,
   cancelling an invoice with a live allocation rejected, bank-mode-without-account rejected, HTTP
   round-trips.
 - **Build process note**: this was the first pass to combine plan-mode design with the established
-  2-parallel-fork convention — the coordinator did ALL shared-file work (both migrations pairs, both
+  2-parallel-fork convention - the coordinator did ALL shared-file work (both migrations pairs, both
   `VoucherType` cases, both `outstandingAmount()` helpers + both `cancel()` guards on `Sale`/
   `Purchase`, both stub route files + nav entries, and the `agedReceivables`/`agedPayables` refactor)
   before forking, specifically so each fork's file set was 100% disjoint from the other fork's AND
-  from every pre-existing shared file — confirmed via `git status` after both forks landed: zero
+  from every pre-existing shared file - confirmed via `git status` after both forks landed: zero
   overlapping edits, exactly the file set the coordinator specified. Worked cleanly; recommend this
   "coordinator owns every shared/pre-existing file, forks only ever create new files" split for any
   future mirror-symmetric module pair.
 - **Not yet done**: not committed (ask before committing), not verified by the user's own
   Pint/test-suite/build run (only `php -l` + a file-scoped `vendor/bin/pint --format agent` run by the
-  coordinator so far — passed clean), no browser smoke-test.
+  coordinator so far - passed clean), no browser smoke-test.
 
 **2026-09-02 session, first pass: verified, not built, a prior session's uncommitted Fixed Assets / Quotations /
-Employee-management pass — found it essentially complete.** This session started from a fresh context
+Employee-management pass - found it essentially complete.** This session started from a fresh context
 with a large uncommitted working tree already on disk (commit `2a78704` "Fix tenant-guard ambiguity in
 root route; prep for Fixed Assets/Quotations/Employee-mgmt" had landed the route/nav scaffolding; the
 actual feature build happened after that commit but was never committed or written up here). Rather than
-assume it was unfinished, this session did a full read-through of every touched/new file — models,
-controllers, migrations, routes, Vue pages, tests — before writing anything. **The user explicitly asked
+assume it was unfinished, this session did a full read-through of every touched/new file - models,
+controllers, migrations, routes, Vue pages, tests - before writing anything. **The user explicitly asked
 not to run `php artisan test`/`npm run build` this session** (they run those themselves), so this was a
-static-reasoning review only, same caveat as every "not yet re-verified" note elsewhere in this file —
+static-reasoning review only, same caveat as every "not yet re-verified" note elsewhere in this file -
 **ask the user to run the suite/build before trusting this is green**, then commit.
 - **Fixed Assets** (`app/Models/{FixedAsset,FixedAssetDepreciation}.php`,
   `App\Http\Controllers\Tenant\Assets\FixedAssetController`, migrations `2026_08_30_100100`/`_100101`,
-  `Tenant/Assets/FixedAssets/{Index,Create}.vue`, `tests/Feature/Tenant/Assets/FixedAssetTest.php` — 8
+  `Tenant/Assets/FixedAssets/{Index,Create}.vue`, `tests/Feature/Tenant/Assets/FixedAssetTest.php` - 8
   tests): each asset gets its own ledger `Account` under the `"Fixed Assets"` group (no subgroup, matches
   that group having none), posts through the same `JournalVoucher::post()`/`write()` engine as everything
   else. Three new `VoucherType` cases (`FixedAssetPurchase`/`Depreciation`/`AssetDisposal`) and 4 new seeded
   accounts (`AS31` Accumulated Depreciation, `EXE20` Depreciation Expense, `EXE21` Loss on Disposal, `INI30`
-  Gain on Disposal — added to `ChartOfAccountsSeeder`, all under pre-existing groups). Supports SLM (flat %
+  Gain on Disposal - added to `ChartOfAccountsSeeder`, all under pre-existing groups). Supports SLM (flat %
   of depreciable base) and WDV (% of opening WDV) methods against 5 statutory Nepali depreciation pools
-  (`App\Enums\DepreciationPool`, Pool A-D have fixed default rates, Pool E has none — amortised over useful
+  (`App\Enums\DepreciationPool`, Pool A-D have fixed default rates, Pool E has none - amortised over useful
   life instead). `dispose()`'s gain/loss math hand-verified algebraically (debits always equal credits for
   gain/loss/break-even cases: `diff = proceeds + accumulated - cost`, and each branch's line set reduces to
   exactly `cost` on both sides) and the test file covers all three cases numerically too.
   - **`FiscalYear::close()` now posts every active asset's depreciation before the P&L sweep** (`FixedAsset::
-    postDepreciationForFiscalYear()` called first inside `close()`'s transaction) — correct ordering, since
+    postDepreciationForFiscalYear()` called first inside `close()`'s transaction) - correct ordering, since
     depreciation must reduce the year's profit before that profit is swept to "Profit & Loss". A
     `fixed_asset_depreciations` unique constraint on `(fixed_asset_id, fiscal_year_id)` is the "already posted
     this year" guard, checked explicitly rather than relying on the DB to reject a duplicate mid-transaction.
   - Manual "Post Depreciation" admin action exists too (`role:admin`-gated route, mirrors legacy's
-    superadmin-gated equivalent) for posting ahead of year-end if ever needed — same underlying method.
+    superadmin-gated equivalent) for posting ahead of year-end if ever needed - same underlying method.
 - **Quotations** (`app/Models/{Quotation,QuotationLine}.php`, `App\Http\Controllers\Tenant\Sales\
   QuotationController`, migrations `2026_08_30_100300`/`_100301`, `Tenant/Quotations/{Index,Create}.vue`,
-  `tests/Feature/Tenant/Sales/QuotationTest.php` — 5 tests): a quotation never touches the ledger or stock —
+  `tests/Feature/Tenant/Sales/QuotationTest.php` - 5 tests): a quotation never touches the ledger or stock -
   draft/converted/cancelled lifecycle only (`App\Enums\QuotationStatus`). Consolidates legacy's separate,
   behaviorally-identical "Order" module into this one concept (deliberate, not an oversight). `convertToSale()`
   hands off entirely to the existing `Sale::post()` (always as a `credit`/`full`-invoice sale, since a
-  quotation never captures a real payment method) rather than reimplementing any sale logic — only a draft
+  quotation never captures a real payment method) rather than reimplementing any sale logic - only a draft
   quotation with ≥1 line can convert, and a converted/cancelled quotation is immutable afterward (verified via
   both model-level and HTTP-level tests, including the HTTP update/delete-on-a-converted-quotation rejection
   path).
 - **Employee/user management** (`App\Http\Controllers\Tenant\Admin\UserController`, `Tenant/Admin/Users.vue`
   rewritten from a placeholder page into a real CRUD-minus-delete UI, `tests/Feature/Tenant/Admin/
-  UserManagementTest.php` — 6 tests): resolves the phase-plan's previously-open "no owning phase for employee/
+  UserManagementTest.php` - 6 tests): resolves the phase-plan's previously-open "no owning phase for employee/
   privilege management" item. `users` gained `is_active` (migration `2026_08_30_100300_add_is_active_to_users_
-  table`, defaults `true`) — deactivation, not deletion, is the only lifecycle action, since every
+  table`, defaults `true`) - deactivation, not deletion, is the only lifecycle action, since every
   `created_by` FK in this app (`journal_vouchers`, `sales`, `purchases`, ...) is `restrictOnDelete()` so a user
   who ever posted anything can never be hard-deleted anyway (same reasoning already applied to Customer/
   Supplier). `AuthenticatedSessionController::store()` now rejects an inactive employee's login with the exact
   same generic `auth.failed` message a wrong password gets (no distinct message, so a deactivated account's
   status can't be probed from the login form). `UserController::guardLastActiveAdmin()` blocks demoting or
-  deactivating the sole remaining active admin — this tenant has no platform-admin impersonation or
+  deactivating the sole remaining active admin - this tenant has no platform-admin impersonation or
   password-reset flow, so that would permanently lock the tenant out of its own admin tooling.
 - **A real, already-fixed bug this pass's prep commit (`2a78704`) caught and fixed**: `routes/tenant.php`'s
   root route resolved `$request->user()` via the ambiguous default auth guard, which can be temporarily
-  `Auth::shouldUse('platform')`-switched elsewhere in the same worker/process — a tenant root-route hit right
+  `Auth::shouldUse('platform')`-switched elsewhere in the same worker/process - a tenant root-route hit right
   after that could incorrectly treat a platform admin's session as a tenant user's and redirect to the tenant
   dashboard. Caught by `TenantSuspensionTest` failing after a prior session's redirect-based root-route change.
-  Fixed by explicitly resolving `$request->user('web')` everywhere a tenant route checks the current user —
+  Fixed by explicitly resolving `$request->user('web')` everywhere a tenant route checks the current user -
   this same explicit-guard pattern was then also applied to `EnsureUserHasRole` middleware in this pass's own
   uncommitted diff, for the identical reason (defense in depth, not a second instance of the bug actually
   firing).
@@ -1436,33 +1436,33 @@ static-reasoning review only, same caveat as every "not yet re-verified" note el
   `routes/tenant-{fixed-assets,quotations,employees}.php` and pre-added all 3 nav entries before the actual
   feature build, so whichever session/agent(s) built the three features never risked a route-boot race or a
   shared-file conflict. (Unclear from the diff alone whether the actual build was one session or parallel
-  forks — no fork-coordination notes were left in this uncommitted work the way prior multi-fork passes
+  forks - no fork-coordination notes were left in this uncommitted work the way prior multi-fork passes
   documented themselves in this file. Worth asking the user, or just noting for next time: leave a mem.md
-  entry immediately after a build pass, even if committing is deferred — this session had to reconstruct the
+  entry immediately after a build pass, even if committing is deferred - this session had to reconstruct the
   full picture from raw `git diff`/file reads instead of a written record.)
 - **Verified and committed**: the user ran `vendor/bin/pint --dirty --format agent`, `php artisan test
   --compact`, and `npm run build` themselves and confirmed all green (exact new pass/assertion counts not
-  reported back — if a future session needs the precise number, rerun the suite rather than trust this line).
+  reported back - if a future session needs the precise number, rerun the suite rather than trust this line).
   Committed as `5d6b506` "Add Fixed Assets, Quotations, and Employee management modules" (34 files changed,
   3034 insertions), on top of the prep commit `2a78704`.
 - **Not yet done**: no browser smoke-test of the 3 new pages. `goal.md` does not mention Fixed Assets/
-  Quotations/Employee-management anywhere — this was scoped and built outside that roadmap doc, so `goal.md`
+  Quotations/Employee-management anywhere - this was scoped and built outside that roadmap doc, so `goal.md`
   may be worth updating too, or treated as confirmation the roadmap doc itself needs a refresh pass.
 
 **2026-08-29, fourth session: first-ever HTTP-level smoke test of the whole app, found a real
 year-end-closing bug tests could never have caught.** No browser automation tool is available in this
 session (Laravel Boost MCP failed to connect; no Playwright/browser MCP configured), so per user
 choice this was a curl-driven HTTP walkthrough against the real running dev server instead of an
-actual browser click-through — a real but strictly weaker substitute (catches server-side/data bugs,
-not JS/console/visual ones). Delegated to a single fork (not parallelized — the golden path is
+actual browser click-through - a real but strictly weaker substitute (catches server-side/data bugs,
+not JS/console/visual ones). Delegated to a single fork (not parallelized - the golden path is
 inherently sequential: fiscal year before vouchers, customer/item before a sale, etc.).
 
 - **Environment setup, by the coordinator before forking**: reset both `admin@example.com` (platform)
   and `admin@acme.localhost` (tenant, id `c1ba1318-ce0f-4afa-a9e8-4dd57431c227`) passwords to a known
   value for testing (both had no 2FA enrolled, so no TOTP flow blocked login) and ran
-  `php artisan tenants:migrate` — this discovered the acme/test tenants' DBs predated several
+  `php artisan tenants:migrate` - this discovered the acme/test tenants' DBs predated several
   migrations from later sessions and needed catching up before they were usable at all. **If a future
-  session needs to manually test against these dev tenants, always run `tenants:migrate` first** — an
+  session needs to manually test against these dev tenants, always run `tenants:migrate` first** - an
   existing dev tenant's schema silently lagging behind `database/migrations/tenant` is exactly the
   scenario that caused the bug below.
 - **The golden path walked, all passing** (central: login/tenant-list/tenant-detail/create-tenant-via-
@@ -1472,40 +1472,40 @@ inherently sequential: fiscal year before vouchers, customer/item before a sale,
   fiscal year → closed-year correction voucher → roll-forward → logout). Every one of the 8 vouchers
   posted during the walkthrough was independently confirmed balanced; VAT Summary and TDS Report were
   hand-verified against manual calculation and matched exactly.
-- **Real, pre-existing bug found by the walkthrough, not by any Pest test — and structurally
+- **Real, pre-existing bug found by the walkthrough, not by any Pest test - and structurally
   invisible to Pest**: `FiscalYear::close()` silently does nothing (no `ClosingEntry` posted, no net
   profit swept into "Profit & Loss") on any tenant provisioned before
-  `2026_08_25_100009_add_is_profit_and_loss_to_account_heads_table` — that migration added the
+  `2026_08_25_100009_add_is_profit_and_loss_to_account_heads_table` - that migration added the
   `is_profit_and_loss` column with `default(false)` and **no backfill**, so a pre-existing tenant's
   "Income"/"Expenses" heads are stuck at `false` forever, and `postClosingEntries()` finds nothing
   flagged to sweep. The closed year's Balance Sheet then goes silently unbalanced (caught via a real
   50-unit Assets-vs-Liabilities+Capital discrepancy on the acme dev tenant after closing a year with
   real activity). **`RefreshDatabase`-based tests can never reproduce this**: every test tenant is
-  provisioned fresh against current migrations/seeders, so it always gets the correct flag — this bug
+  provisioned fresh against current migrations/seeders, so it always gets the correct flag - this bug
   only bites a tenant that already existed before a later migration/seeder fix landed, which is
   exactly what a real running dev/production tenant is and a test factory never is. This is the
   concrete argument for why "tests green" and "smoke-tested against real, aged data" are genuinely
   different bars, not redundant ones.
   - **Fix**: new data-only migration
-    `2026_08_29_100200_backfill_is_profit_and_loss_on_account_heads_table.php` — flips
+    `2026_08_29_100200_backfill_is_profit_and_loss_on_account_heads_table.php` - flips
     `is_profit_and_loss=true` for `AccountHead` rows named "Income"/"Expenses" wherever still `false`
     (exactly the two names `ChartOfAccountsSeeder` itself flags, confirmed by reading the seeder, not
     guessed). Deliberately irreversible (`down()` is a no-op with a docblock explaining why: there's no
     way to tell a head this migration flipped from one that was already correctly `true`). Applied via
-    `tenants:migrate` to both real dev tenants (acme/test) — confirmed via tinker both now read
+    `tenants:migrate` to both real dev tenants (acme/test) - confirmed via tinker both now read
     `{"Income":true,"Expenses":true}`.
   - **Test**: `tests/Feature/Tenant/Accounting/FiscalYearClosingTest.php` gained `'a tenant with stale
-    is_profit_and_loss flags gets backfilled and closes correctly'` — since `RefreshDatabase` can't
+    is_profit_and_loss flags gets backfilled and closes correctly'` - since `RefreshDatabase` can't
     naturally produce the stale state, the test manually corrupts the flags back to `false` right after
     provisioning, then directly `require`s and invokes the migration's `up()`, then proves both the
     flag fix and that a subsequent `close()` now posts a real `ClosingEntry` with the correct
     net-profit sweep. Full suite after merge: **185/185 tests, 1713 assertions** (up from 184/1709).
   - **Residual, not fixed, dev-only**: the acme dev tenant's FY2026 was already closed in its broken
-    state before the fix (from earlier ad-hoc testing) and can't be re-closed through the normal API —
+    state before the fix (from earlier ad-hoc testing) and can't be re-closed through the normal API -
     its Balance Sheet stays unbalanced. Local dev data only, not production; left as-is rather than
     hacked around via tinker.
 - **A stale-documentation bug also caught and fixed**: `goal.md`'s "Explicit non-goals" section still
-  claimed "Async/queued tenant provisioning — currently synchronous (`shouldBeQueued(false)`)" — this
+  claimed "Async/queued tenant provisioning - currently synchronous (`shouldBeQueued(false)`)" - this
   directly contradicted `goal.md`'s own item 7 two sections above ("queued (not synchronous) tenant
   provisioning... Built 2026-08-26") and the actual code
   (`TenancyServiceProvider.php`: `shouldBeQueued(true)` on both `TenantCreated`/`TenantDeleted`
@@ -1515,11 +1515,11 @@ inherently sequential: fiscal year before vouchers, customer/item before a sale,
   self-contradicting doc.
 - **Aside, unrelated to correctness, not acted on**: `database/` has ~1160 orphaned
   `tenant<uuid>.sqlite` files left behind by past test runs whose tenant DB file was never cleaned up
-  (a `RefreshDatabase`/tenant-testing gotcha — the physical file outlives the test). Pure disk clutter,
+  (a `RefreshDatabase`/tenant-testing gotcha - the physical file outlives the test). Pure disk clutter,
   not a bug affecting the app; flagged to the user, not touched without explicit sign-off.
 
 **2026-08-29, third session: VAT Summary + Stock Movement Register, via 2 parallel forks.** After the
-5-report batch below, the user asked for more legacy reports again — rather than build the whole
+5-report batch below, the user asked for more legacy reports again - rather than build the whole
 remaining ~30-method list speculatively, this session first read every remaining legacy
 `reportsController.php` method and dedup'd them: most are either filter-variant duplicates of reports
 already built, already covered by the existing generic Account Ledger page, or tied to business
@@ -1528,7 +1528,7 @@ concepts this app deliberately doesn't model (sales agents, capital/service purc
 the user picked both. Report count now **20**. This time the coordinator pre-created valid *stub*
 route files (not just the `require` lines in `routes/tenant.php`) up front, specifically to avoid the
 prior batch's route-boot race where a faster fork's test run could fail because a slower sibling's
-route file didn't exist yet — worked as intended, no race this time. Full suite after merge:
+route file didn't exist yet - worked as intended, no race this time. Full suite after merge:
 **184/184 tests, 1709 assertions** (up from 171/1513).
 
 - **VAT Summary** (`VatSummaryReportController::index`, `routes/tenant-reports-vat-summary.php`,
@@ -1536,27 +1536,27 @@ route file didn't exist yet — worked as intended, no race this time. Full suit
   neither the existing Sales VAT Book nor Purchase VAT Book computes (they list gross VAT only, no
   return-netting). Output VAT = posted `Sale.vat_amount` in range minus non-cancelled
   `SalesReturn.vat_amount` (a stored column on the return itself, not recomputed) **whose own date**
-  falls in range — deliberately netted by the return's period, not the original sale's period, since
+  falls in range - deliberately netted by the return's period, not the original sale's period, since
   that's how a real VAT return filing works (a return processed in period B reduces period B's
   liability). Input VAT mirrors this via Purchase/PurchaseReturn. `netVatPayable = outputVat.net -
   inputVat.net`; positive is owed, negative is refundable/carry-forward, and the UI labels/colors it
   accordingly rather than showing a bare signed number.
 - **Stock Movement Register** (`StockMovementRegisterController::index`,
   `routes/tenant-reports-stock-movement-register.php`, `Tenant/Reports/StockMovementRegister.vue`):
-  the inventory-side sibling of Day Book — one row per non-cancelled `ItemStockMovement` in a date
+  the inventory-side sibling of Day Book - one row per non-cancelled `ItemStockMovement` in a date
   range (optionally filtered to one item), chronological, with a signed quantity
   (`quantity * movement_type->direction()`, `quantity` is stored as a positive magnitude) and a
   human-readable reference description resolved from the polymorphic `reference` relation
-  (`SaleLine`→"Sale #N · Customer", `PurchaseReturnLine`→"Purchase Return #N (Purchase #M)", etc.) —
+  (`SaleLine`→"Sale #N · Customer", `PurchaseReturnLine`→"Purchase Return #N (Purchase #M)", etc.) -
   verified against what `Sale::post()`/`Purchase::post()`/`SalesReturn::post()`/
   `PurchaseReturn::post()`/`StockAdjustment::post()` actually pass to `recordStockMovement()`, not
   guessed.
 - **A real bug caught in verification, not in either fork's own tests**: `VatSummary.vue`'s
-  `defineProps()` used `default: zeroVatBlock` referencing a locally-declared arrow function — Vue's
+  `defineProps()` used `default: zeroVatBlock` referencing a locally-declared arrow function - Vue's
   `<script setup>` compiler hoists `defineProps()`'s argument out of setup scope, so it can't
   reference local variables (`[@vue/compiler-sfc] defineProps() ... cannot reference locally declared
   variables`). This only surfaces at `npm run build` time, which the fork was deliberately told not to
-  run (to avoid concurrent-build races) — a real gap in the "Pest tests pass" signal for Vue-only
+  run (to avoid concurrent-build races) - a real gap in the "Pest tests pass" signal for Vue-only
   bugs. Fixed by inlining the default as `() => ({ gross: 0, returns: 0, net: 0 })` directly in both
   `outputVat`/`inputVat` prop definitions. **Lesson for future forks that touch `.vue` files under a
   no-build constraint: either allow one `npm run build` right after each Vue-touching fork lands (cheap,
@@ -1566,10 +1566,10 @@ route file didn't exist yet — worked as intended, no race this time. Full suit
 **2026-08-29, second session: 5 more legacy reports (TDS, Stock Valuation, Item-wise Sales/Purchase,
 Category-wise rollups), via 5 parallel forks.** Report count now **18**. User picked all three
 candidate batches offered from a deduplicated read of legacy's `reportsController.php` (~70 methods,
-mostly date-filter variants of the same underlying report — dedup'd down to real distinct types
+mostly date-filter variants of the same underlying report - dedup'd down to real distinct types
 before asking). Coordinator pre-stubbed both shared files before forking (the `require` lines in
 `routes/tenant.php`, the 7 new nav entries in `resources/js/lib/nav-items.js`) so all 5 forks'
-controller/route/Vue/test files were fully disjoint — confirmed via `git status` after merge, zero
+controller/route/Vue/test files were fully disjoint - confirmed via `git status` after merge, zero
 overlapping edits. Each fork was told to scope its post-work `pint` run to its own exact file list
 (not `--dirty`) specifically to avoid the cross-fork pint-collision gotcha from the prior session's
 4-fork batch. Full suite after merge: **171/171 tests, 1513 assertions** (up from 151/1004),
@@ -1578,7 +1578,7 @@ overlapping edits. Each fork was told to scope its post-work `pint` run to its o
 - **TDS Report** (`TdsReportController::index`, `routes/tenant-reports-tds.php`,
   `Tenant/Reports/TdsReport.vue`): lists every posted Sale/Purchase with a `tds_account_id` in a date
   range, split into "TDS on Sales" (a claimable credit) and "TDS on Purchases" (a liability owed to
-  the tax authority), each row showing **net** TDS — `tds_amount` minus the sum of every non-cancelled
+  the tax authority), each row showing **net** TDS - `tds_amount` minus the sum of every non-cancelled
   return's proportional `tdsShare = round(tds_amount * (return.total/total), 2)` reversed against it,
   the exact formula `SalesReturn::post()`/`PurchaseReturn::post()` use. Hand-verified directly (not
   just trusted): a cancelled return is excluded from the reversal sum because `cancel()` already
@@ -1588,12 +1588,12 @@ overlapping edits. Each fork was told to scope its post-work `pint` run to its o
   `routes/tenant-reports-stock-valuation.php`, `Tenant/Reports/StockValuation.vue`): a single
   `as_of`-date snapshot (not a range) of on-hand quantity × weighted-average cost per stockable item,
   sorted by valuation descending. Reuses `InventoryReportController::stockSummary()`'s exact
-  weighted-average-cost algorithm collapsed to one cutoff instead of a from/to range — deliberately
+  weighted-average-cost algorithm collapsed to one cutoff instead of a from/to range - deliberately
   duplicated rather than shared, matching this app's existing per-controller-file convention.
 - **Item-wise Sales / Item-wise Purchase** (`ItemWiseSalesReportController`/
   `ItemWisePurchaseReportController`, routes `tenant-reports-item-wise-{sales,purchase}.php`, pages
   `Tenant/Reports/ItemWise{Sales,Purchase}.vue`): the item-level counterpart to the existing
-  invoice-level Sales/Purchase Register — aggregates `SaleLine`/`PurchaseLine.line_total` (not
+  invoice-level Sales/Purchase Register - aggregates `SaleLine`/`PurchaseLine.line_total` (not
   `quantity * rate`, since `line_total` already has the line discount baked in) grouped by item over a
   date range, posted-only. Built via portable query-builder joins + `selectRaw` SUM/COUNT aggregates
   (no vendor-specific SQL), verified against both SQLite (tests) and the portability rule.
@@ -1603,13 +1603,13 @@ overlapping edits. Each fork was told to scope its post-work `pint` run to its o
   `ItemSubcategory` breakdown; Stock is the same `as_of` weighted-average-valuation snapshot as the
   Stock Valuation report above, just summed into category/subcategory buckets instead of listed
   per-item. Every category is always shown (even zero-activity ones), and `item_category_id` is a
-  **required, non-nullable FK** on `Item` (confirmed via migration) — so there is no "uncategorized
+  **required, non-nullable FK** on `Item` (confirmed via migration) - so there is no "uncategorized
   item" edge case that could silently drop money from the grand total; an item with no *subcategory*
   rolls into its category's own total and only surfaces its own "Uncategorized" sub-row when nonzero.
 - **A real gotcha from running 5 forks instead of 4**: `routes/tenant.php` unconditionally requires
   all 5 new route files up front (pre-stubbed before forking, per the file-ownership convention), so
-  until every fork had actually created its own route file, **every test in the whole suite** —
-  not just the slow fork's — failed at route-boot time whenever a faster fork ran `php artisan test`
+  until every fork had actually created its own route file, **every test in the whole suite** -
+  not just the slow fork's - failed at route-boot time whenever a faster fork ran `php artisan test`
   first. Every fork independently noticed and correctly diagnosed this as a transient sibling-race,
   not their own bug; one fork briefly stubbed the missing file to unblock its own verification and
   deleted the stub immediately after. No real conflict resulted (confirmed via the final disjoint
@@ -1619,21 +1619,21 @@ overlapping edits. Each fork was told to scope its post-work `pint` run to its o
 
 **2026-08-29, first session: 5 new reports + return fidelity gaps closed, via 4 parallel forks.** Picked by
 the user from goal.md's open-items list after re-verifying (not just trusting) the prior session's
-"134/134, not yet committed" claim — confirmed green and committed it first as two logical commits
+"134/134, not yet committed" claim - confirmed green and committed it first as two logical commits
 (`36f24b8` the missing-tenant-DB regression fix, `e02fa9d` the closed-year correction UI +
 `rollForward()` bug fix), THEN fanned out. Nav entries for all 5 new reports were pre-added by the
 coordinator to `resources/js/lib/nav-items.js` before forking (mem.md gotcha #5's convention) so the
 two reports forks never touched the same file. Full suite after merge: **151/151 tests, 1004
 assertions** (up from 134), `npm run build` succeeds, `vendor/bin/pint --dirty` clean. All 4 forks'
-file sets were fully disjoint — confirmed via `git status` after merge, zero overlapping edits.
+file sets were fully disjoint - confirmed via `git status` after merge, zero overlapping edits.
 
 - **Day Book / Cash Book / Bank Book** (`AccountingReportController::{dayBook,cashBook,bankBook}`,
   routes in `routes/tenant-reports-accounting.php`, pages `Tenant/Reports/{DayBook,CashBook,
   BankBook}.vue`): Day Book is a date-range chronological diary of every voucher (deliberately does
-  NOT exclude `ClosingEntry`/`OpeningBalance` — it's a complete audit trail, not a balance
+  NOT exclude `ClosingEntry`/`OpeningBalance` - it's a complete audit trail, not a balance
   computation, unlike Trial Balance/Income Statement). Cash Book is hardcoded to the seeded `AS1`
   account (matches this app's existing hardcoded-account-code convention). **Bank Book has no way to
-  auto-detect "which account is a bank account"** — there's no `is_bank` flag anywhere on `Account` —
+  auto-detect "which account is a bank account"** - there's no `is_bank` flag anywhere on `Account` -
   so it's a plain account picker excluding `AS1`, a real deliberate scope decision, not an oversight;
   revisit if a real bank-account classification is ever added. Both Cash/Bank Book compute an
   **opening balance from all activity strictly before the date range** (not fiscal-year-boxed like
@@ -1643,59 +1643,59 @@ file sets were fully disjoint — confirmed via `git status` after merge, zero o
   `Tenant/Reports/{AgedReceivables,AgedPayables}.vue`): buckets `credit`-mode, `posted` Sale/Purchase
   invoices by age (Current 0-30 / 31-60 / 61-90 / 90+ days as of a query-param `as_of` date, default
   today) into per-customer/supplier rows. Outstanding per invoice = `total - sum(returns against that
-  specific invoice)` — exact, no FIFO needed, since returns already FK-reference one specific
+  specific invoice)` - exact, no FIFO needed, since returns already FK-reference one specific
   sale/purchase. **Real, explicitly documented MVP gap**: this app has NO dedicated
-  payment-receipt/supplier-payment feature anywhere (confirmed via grep — no `Receipt`/`Payment`
+  payment-receipt/supplier-payment feature anywhere (confirmed via grep - no `Receipt`/`Payment`
   model exists), so a credit invoice settled later via a generic Journal Voucher will keep aging here
-  forever even though it's actually been paid — same honesty-over-silence category as the
+  forever even though it's actually been paid - same honesty-over-silence category as the
   discount/TDS gaps below were before this pass. Revisit if a real payment-receipt feature is ever
   built.
-- **Sales/Purchase Return fidelity — all three previously-documented gaps closed**: cancel-a-return,
+- **Sales/Purchase Return fidelity - all three previously-documented gaps closed**: cancel-a-return,
   proportional header-discount/TDS reversal, and an optional cash/bank refund voucher, mirrored
   independently by two separate forks (Sales Return: `app/Models/SalesReturn.php`
   `App\Http\Controllers\Tenant\Sales\SalesReturnController`; Purchase Return: the `PurchaseReturn`
-  equivalents) — verified by reading both models' final `post()`/`cancel()` code directly (not just
+  equivalents) - verified by reading both models' final `post()`/`cancel()` code directly (not just
   trusting each fork's self-report) and hand-tracing the double-entry math.
   - **Cancel-a-return**: both `SalesReturn`/`PurchaseReturn` gained a `status` column (migrations
     `2026_08_29_100000_...sales_returns...`/`2026_08_29_100130_...purchase_returns...`) and a
     `cancel(User $actor, string $reason)` method mirroring `Sale::cancel()`/`Purchase::cancel()`'s
-    exact shape: mirrors the original voucher's lines (debit/credit swapped) into a new voucher —
+    exact shape: mirrors the original voucher's lines (debit/credit swapped) into a new voucher -
     reusing `VoucherType::Sale`/`VoucherType::Purchase` for the reversal (the mirror image of why
     `Sale::cancel()`/`Purchase::cancel()` reuse the *Return* type for theirs) rather than adding new
-    enum cases — and flags the return's own stock movements cancelled. The `alreadyReturned` quantity
+    enum cases - and flags the return's own stock movements cancelled. The `alreadyReturned` quantity
     guard in both `post()` methods now excludes cancelled returns, and `Sale::cancel()`/
     `Purchase::cancel()`'s own "block if any return references this" guard now excludes cancelled
     returns too, so a sale/purchase becomes cancellable again once every return against it is itself
     cancelled.
-  - **Header-discount reversal**: Sales — `Sale::post()` applies the header discount only against the
+  - **Header-discount reversal**: Sales - `Sale::post()` applies the header discount only against the
     vatable subtotal before crediting Sales Revenue; `SalesReturn::post()` now reconstructs
     `vatableSubtotalBeforeDiscount = sale.taxable_amount + sale.discount` and backs out each returned
     vatable line's proportional share (`discount * (lineTotal / vatableSubtotalBeforeDiscount)`)
-    before crediting Sales Revenue back. Purchases — `Purchase::post()`'s discount mechanism is a
+    before crediting Sales Revenue back. Purchases - `Purchase::post()`'s discount mechanism is a
     **uniform ratio of the vatable subtotal applied per item-account** (different shape than Sales'
     single lump account, per the real bug mem.md already documents fixing here); `PurchaseReturn::
     post()` mirrors that exact ratio in reverse, per item account.
   - **TDS reversal**: both compute `tdsShare = tds_amount * (returnTotal / originalTotal)` and split
-    it out of the customer/supplier line rather than adding a same-side extra line — Sales credits
+    it out of the customer/supplier line rather than adding a same-side extra line - Sales credits
     `[customer: total - tdsShare, tds_account: tdsShare]`; Purchases debits
-    `[supplier: total - tdsShare, tds_account: tdsShare]` — both pairs still sum to the return's own
+    `[supplier: total - tdsShare, tds_account: tdsShare]` - both pairs still sum to the return's own
     `total`, so the voucher balances for any `tdsShare` value without a separate correction line.
   - **Cash/bank refund voucher**: an optional `refund_account_id` (new nullable FK column, both
     tables, `nullOnDelete()` matching this app's existing optional-account-FK convention) triggers a
     **second** `VoucherType::Journal` voucher immediately after the return's own voucher, settling
     exactly the amount that moved onto the customer's/supplier's account (Sales: `[debit customer,
     credit refund_account]` for `total - tdsShare`; Purchases: `[debit refund_account, credit
-    supplier]` for the same) — correctly using the post-TDS-split amount, not the raw `total`, so it
+    supplier]` for the same) - correctly using the post-TDS-split amount, not the raw `total`, so it
     stays correct even when combined with a TDS reversal.
   - **A genuine, non-obvious design gap both forks independently caught and fixed identically** (same
     convergent-fix pattern mem.md has recorded before, e.g. the missing `HasFactory` trait fix during
     the Sales/Purchase/Stock-Adjustment pass): if a refunded return is later cancelled, reversing only
     the return's own voucher would leave the customer's/supplier's ledger wrong, since the refund cash
     already moved. Both models gained a `refund_journal_voucher_id` column (not in the original task
-    spec — a real gap the forks found mid-build) so `cancel()` reverses **both** vouchers' lines
+    spec - a real gap the forks found mid-build) so `cancel()` reverses **both** vouchers' lines
     together into one new voucher when a refund was posted. Hand-traced concretely: for a cash sale +
     full return + refund + cancel, the net effect correctly nets the customer's ledger back to exactly
-    its post-sale balance and brings the refunded cash back in — verified by tracing the mirrored line
+    its post-sale balance and brings the refunded cash back in - verified by tracing the mirrored line
     set by hand, not just trusting the passing tests.
   - Routes: `POST /sales-returns/{salesReturn}/cancel`, `POST /purchase-returns/{purchaseReturn}/
     cancel`. Frontend: both `Returns/Index.vue` pages gained a status column + cancel action
@@ -1703,7 +1703,7 @@ file sets were fully disjoint — confirmed via `git status` after merge, zero o
     cancel-a-sale/purchase UX), both `Returns/Create.vue` pages gained an optional "Refund via"
     account picker.
 - **A recurring parallel-work gotcha surfaced again this pass**: `vendor/bin/pint --dirty` operates
-  repo-wide over every uncommitted file, not just the files the invoking fork itself touched — one
+  repo-wide over every uncommitted file, not just the files the invoking fork itself touched - one
   fork's pint run cosmetically reformatted a sibling fork's in-flight, not-yet-complete file (a
   `phpdoc_align` whitespace tweak, harmless here since the sibling's substantive edits were already
   on disk by then, but a future batch with tighter timing could see one fork's uncommitted edits
@@ -1714,13 +1714,13 @@ file sets were fully disjoint — confirmed via `git status` after merge, zero o
 **2026-08-27 session, second entry: closed-year correction UI (frontend) + a real roll-forward bug
 found by testing it end-to-end.** Backend for posting a correcting journal voucher into a closed
 fiscal year already existed and needed zero changes (`JournalVoucher::post()` +
-`JournalVoucherController::store()`, see the ledger engine section below) — this was purely a
+`JournalVoucherController::store()`, see the ledger engine section below) - this was purely a
 frontend + test-coverage gap. Added: `Index.vue` now passes the already-fetched `fiscalYears` prop
 through to `Create.vue`; `Create.vue` shows an **admin-only** fiscal-year `Select` (closed years
 labeled), and when a closed year is picked, a warning callout (reusing the existing
 `--color-warning-bg`/`--color-warning-text` tokens, previously unused outside `Badge.vue`) plus a
 required `reason` `<textarea>` (no dedicated `Textarea.vue` component exists in this codebase, so a
-raw element styled to match `Input.vue`/`Select.vue` was used) — non-admins never see the picker at
+raw element styled to match `Input.vue`/`Select.vue` was used) - non-admins never see the picker at
 all, so they can't get partway through a voucher before learning at submit time that it's rejected.
 Added 2 new HTTP-level tests in `LedgerControllerTest.php` (the closed-year path was previously only
 tested at the model layer, never through the actual `POST /journal-vouchers` route).
@@ -1729,39 +1729,39 @@ Writing the "admin posts a correction, it rolls forward" HTTP test caught a **re
 undetected bug** in `JournalVoucher::rollForward()` (`app/Models/JournalVoucher.php`): it selected
 "subsequent fiscal years" via `FiscalYear::where('start_date', '>', $correctedYear->start_date->toDateString())`.
 Under SQLite, a `date`-cast column is actually stored as a full `"Y-m-d H:i:s"` string (a known
-Laravel+SQLite quirk — the grammar's date format applies to `date` columns too, not just
+Laravel+SQLite quirk - the grammar's date format applies to `date` columns too, not just
 `datetime`), which is lexicographically *greater than* the truncated `"Y-m-d"` string being compared
 against. So the corrected (closed) year matched its own `start_date > ...` filter and got a
 **second, spurious roll-forward voucher posted into itself**, on top of the correction voucher
-already there — silently corrupting the closed year's own figures with a self-referential
+already there - silently corrupting the closed year's own figures with a self-referential
 "correction of a correction." The existing model-level test for this
 (`JournalVoucherPostingTest.php`) never caught it because it only asserted the *open* year got the
 right roll-forward voucher, never that the *closed* year stayed at exactly one voucher. **Fix**:
 excluded the corrected year explicitly by id (`FiscalYear::whereKeyNot($correctedYear->id)`) rather
-than relying on the date comparison alone — safe because the model already forbids two fiscal years
+than relying on the date comparison alone - safe because the model already forbids two fiscal years
 sharing a `start_date` (see `FiscalYear::saving()`'s overlap check), so once self is excluded by id,
 the date-string comparison is reliable for every other row. Strengthened the model-level test with
 an explicit "closed year has exactly 1 voucher" assertion so this can't regress silently again.
-**Verified**: full suite **134/134 passing, 819 assertions** (up from 132/132 — 2 new tests), `npm
+**Verified**: full suite **134/134 passing, 819 assertions** (up from 132/132 - 2 new tests), `npm
 run build` succeeds, `vendor/bin/pint --dirty` clean. **Not yet committed, not yet browser-verified**
-— ask before committing.
+- ask before committing.
 - **Lesson**: a Laravel `date` cast does not guarantee a bare `Y-m-d` string in the database on
-  SQLite — comparing a cast column against a manually truncated string (`->toDateString()`) can
+  SQLite - comparing a cast column against a manually truncated string (`->toDateString()`) can
   silently misbehave in self-referential queries. Prefer excluding the current row by primary key
   explicitly rather than trusting a strict date inequality to do it, especially in code executed
   during money-affecting operations. Also: a test that only checks "the right thing showed up"
-  without also checking "nothing extra showed up" will miss exactly this class of bug — this is the
+  without also checking "nothing extra showed up" will miss exactly this class of bug - this is the
   second time in this project a stricter assertion (not a different code path) is what surfaced a
   real defect.
 
 **2026-08-27 session: found and fixed a real regression, not documented anywhere before this.** A
-fresh session started by re-verifying mem.md's claims against actual repo state (a good habit —
+fresh session started by re-verifying mem.md's claims against actual repo state (a good habit -
 don't trust a stale "not yet verified" note at face value) and found the full suite at **21/132
-passing, 111 errors** — dramatically worse than the "5/132 failed" mem.md had last recorded after
+passing, 111 errors** - dramatically worse than the "5/132 failed" mem.md had last recorded after
 post-hoc fix #6. Root cause (new, distinct from fixes #1–#6 above, though the same underlying vendor
 gap): `DatabaseTenancyBootstrapper::bootstrap()` (vendor code) only checks "does the tenant database
 exist" and throws a clean `TenantDatabaseDoesNotExistException` when `app()->environment('local')`
-— under `testing` (and `production`) it skips that check and goes straight to
+- under `testing` (and `production`) it skips that check and goes straight to
 `connectToTenant()`, so a real inbound request into a still-`Provisioning` tenant (whose database
 genuinely doesn't exist yet) made `tenancy()->initialize()` throw a raw, uncaught SQLite "database
 file does not exist" exception, in `InitializeTenancyByDomain::handle()`, before
@@ -1777,17 +1777,17 @@ an unrecognized domain normally) and checks status **before** tenancy is ever in
 Provisioning/Suspended tenant is rejected without ever attempting to connect to its (possibly
 nonexistent) database. Moved to run before `InitializeTenancyByDomain` in both
 `TenancyServiceProvider::makeTenancyMiddlewareHighestPriority()`'s priority list and `routes/tenant.php`'s
-declared order (the priority list is what actually controls execution order — the route's own array
+declared order (the priority list is what actually controls execution order - the route's own array
 order is cosmetic once middleware is in that list, but kept in sync for readability). This still
 only ever fires for genuine inbound HTTP requests (not the provisioning pipeline's own internal
-`$tenant->run()` calls), same reasoning as post-hoc fix #6 — see that middleware's own docblock.
+`$tenant->run()` calls), same reasoning as post-hoc fix #6 - see that middleware's own docblock.
 **Verified**: full suite now **132/132 passing, 811 assertions** (up from the pre-hardening-pass
-121/121 — the hardening pass added 11 tests), `npm run build` succeeds, `vendor/bin/pint --dirty`
-clean. This is a genuinely new fix, not a re-verification of fix #6 — fix #6 was correct and
+121/121 - the hardening pass added 11 tests), `npm run build` succeeds, `vendor/bin/pint --dirty`
+clean. This is a genuinely new fix, not a re-verification of fix #6 - fix #6 was correct and
 necessary but insufficient; it fixed the *internal pipeline* self-abort bug, not this separate
 *external request during the missing-DB window* bug. Touched files:
 `app/Http/Middleware/AbortIfTenantSuspended.php`, `app/Providers/TenancyServiceProvider.php`,
-`routes/tenant.php`. **Not yet committed as of this update** — ask before committing/pushing.
+`routes/tenant.php`. **Not yet committed as of this update** - ask before committing/pushing.
 
 ---
 
@@ -1795,21 +1795,21 @@ necessary but insufficient; it fixed the *internal pipeline* self-abort bug, not
 
 - Laravel 13.17, PHP 8.3/8.4.
 - `stancl/tenancy` v3.10.1, multi-database mode.
-- `inertiajs/inertia-laravel` ^3.3, `@inertiajs/vue3`, `vue` 3, `reka-ui` (v2.10.3 — flat named
+- `inertiajs/inertia-laravel` ^3.3, `@inertiajs/vue3`, `vue` 3, `reka-ui` (v2.10.3 - flat named
   exports from `'reka-ui'`, e.g. `import { DialogRoot, SelectRoot } from 'reka-ui'`, not
   namespaced).
-- `@tanstack/vue-table` — **v9 is installed**, not v8. v9 is a rewrite: features are declared via
+- `@tanstack/vue-table` - **v9 is installed**, not v8. v9 is a rewrite: features are declared via
   `tableFeatures({...})` + `createSortedRowModel()`/`createPaginatedRowModel()`, there's no
   `getState()` (state lives in `table.atoms.*`, read directly so Vue's reactivity tracks it), and
   templates render via `<FlexRender :header="header" />` / `<FlexRender :cell="cell" />` rather than
   a bare `flexRender` helper. Any AI-generated or copy-pasted TanStack example is almost certainly
-  v8 API and will not compile — verify against `node_modules/@tanstack/vue-table` first.
-- `@lucide/vue` for icons — **not** `lucide-vue-next`, which is deprecated (was installed once,
+  v8 API and will not compile - verify against `node_modules/@tanstack/vue-table` first.
+- `@lucide/vue` for icons - **not** `lucide-vue-next`, which is deprecated (was installed once,
   swapped out same day).
-- `clsx` + `tailwind-merge`, combined into `resources/js/lib/utils.js`'s `cn()` helper — the
+- `clsx` + `tailwind-merge`, combined into `resources/js/lib/utils.js`'s `cn()` helper - the
   standard shadcn-vue pattern, used for merging class props across every `ui/` component.
 - Pest ^5.1 + pest-plugin-laravel, `phpunit.xml` uses `DB_CONNECTION=sqlite`,
-  `DB_DATABASE=:memory:`, `CACHE_STORE=array`. RefreshDatabase is fine and expected here — this is
+  `DB_DATABASE=:memory:`, `CACHE_STORE=array`. RefreshDatabase is fine and expected here - this is
   **not** the sibling `day_khata` repo's live-MySQL/no-RefreshDatabase test setup, don't apply that
   constraint here.
 
@@ -1818,29 +1818,29 @@ necessary but insufficient; it fixed the *internal pipeline* self-abort bug, not
 ### Backend: tenancy, auth, tenant management
 
 - **Central DB tables**: `tenants`, `domains` (stancl's own, `App\Models\Tenant` extends stancl's
-  base and adds `company_name`/`status`/`contact_email` as real columns — see gotcha below),
-  `platform_admins` (+ `App\Models\PlatformAdmin`), `sessions` (central-only — platform admin
+  base and adds `company_name`/`status`/`contact_email` as real columns - see gotcha below),
+  `platform_admins` (+ `App\Models\PlatformAdmin`), `sessions` (central-only - platform admin
   sessions), `cache`/`cache_locks`, `jobs`/`job_batches`/`failed_jobs`.
 - **Guards** (`config/auth.php`): `platform` → `platform_admins` provider → `PlatformAdmin`
   (central). `web` → `tenant_users` provider → `App\Models\User` (tenant DB). Never conflate these;
   a tenant route must never check the `platform` guard or vice versa.
 - **Central auth**: `App\Http\Controllers\Central\Auth\AuthenticatedSessionController`. Login at
-  `/login` (on any `central_domains` entry — currently `127.0.0.1`, `localhost`), rate-limited
+  `/login` (on any `central_domains` entry - currently `127.0.0.1`, `localhost`), rate-limited
   (`throttle:5,1`), generic failure message. Seeder: `database/seeders/PlatformAdminSeeder.php`,
-  standalone (not in root `DatabaseSeeder`), creates `admin@example.com` / `password` — **local dev
+  standalone (not in root `DatabaseSeeder`), creates `admin@example.com` / `password` - **local dev
   only, not a real credential, don't treat as a secret, but don't ship it as a prod default
   either.**
 - **Tenant management**: `App\Http\Controllers\Central\Tenants\TenantController`
   (index/create/store/show/suspend/resume/destroy), all behind `auth:platform`, routes in
   `routes/central-tenants.php`. Provisioning flow: create `Tenant` row → stancl's `TenantCreated`
   pipeline fires `CreateDatabase` → `MigrateDatabase` → `SeedDatabase` (synchronous,
-  `shouldBeQueued(false)` — see `goal.md` production-hardening item) → create `Domain`
+  `shouldBeQueued(false)` - see `goal.md` production-hardening item) → create `Domain`
   (`{subdomain}.localhost`) → `$tenant->run(fn () => ...)` creates the first admin `User` against
   the seeded `admin` role. A listener (`app/Listeners/AbortIfTenantSuspended.php`, registered on
   `TenancyInitialized`) 403s any request to a suspended tenant before its DB/cache/filesystem
   connections bootstrap.
 - **Tenant DB tables** (`database/migrations/tenant/`): `roles`, `permissions`,
-  `permission_role`, `users` (`role_id` FK), `sessions` (tenant-local — see cache/jobs gotcha),
+  `permission_role`, `users` (`role_id` FK), `sessions` (tenant-local - see cache/jobs gotcha),
   `cache`/`cache_locks`, `jobs`/`job_batches`/`failed_jobs`.
 - **Tenant auth**: `App\Http\Controllers\Tenant\Auth\AuthenticatedSessionController`, `web` guard,
   routes in `routes/tenant.php` inside the existing `InitializeTenancyByDomain` +
@@ -1848,15 +1848,15 @@ necessary but insufficient; it fixed the *internal pipeline* self-abort bug, not
   registered in `bootstrap/app.php`), demo gated route at `/admin/users`.
 - **`TenantDatabaseSeeder`** (`database/seeders/Tenant/TenantDatabaseSeeder.php`, the exact class
   `config/tenancy.php`'s `seeder_parameters.--class` points at): seeds a handful of permissions and
-  exactly two roles — **`admin`** (all permissions) and **`staff`** (none). The `admin` slug is a
+  exactly two roles - **`admin`** (all permissions) and **`staff`** (none). The `admin` slug is a
   load-bearing contract: `TenantController::store()` looks it up by that exact string to assign the
   provisioned tenant's first user. Don't rename it without updating the other side.
 
 ### Frontend: Inertia + Vue 3 + Tailwind v4 + Reka UI
 
-- `resources/css/app.css` — the full `@theme` token block ported verbatim from
+- `resources/css/app.css` - the full `@theme` token block ported verbatim from
   `../day_khata/design-preference.md` / the (already-corrected) sibling `03-design-system-frontend.md`
-  §2. `--radius-*` scale is redefined to `0px` across the board except `--radius-full` (9999px) —
+  §2. `--radius-*` scale is redefined to `0px` across the board except `--radius-full` (9999px) -
   flat corners come from plain `rounded`/`rounded-lg` utilities for free, no need to fight Tailwind.
 - `resources/js/components/ui/`: `Button`, `Input`, `Select`, `Combobox`, `Badge`, `Loader`,
   `Modal`, `Toaster` (+ `resources/js/composables/useToast.js`), `Tabs`, `DropdownMenu` +
@@ -1870,7 +1870,7 @@ necessary but insufficient; it fixed the *internal pipeline* self-abort bug, not
 - `HandleInertiaRequests` shares `auth.platformAdmin`, `auth.user`, and `flash.status` (for
   `session()->with('status', ...)` messages, e.g. after provisioning/suspend/resume/delete) on
   every page by default.
-- **Client-facing demo**: `docs/day-khata-design-system.html` — a standalone, self-contained HTML
+- **Client-facing demo**: `docs/day-khata-design-system.html` - a standalone, self-contained HTML
   style guide (no build step, sent to the client directly) covering every token and component. Keep
   it in sync manually if the real component library's visuals diverge; it is *not* generated from
   the Vue components, it's a hand-authored parallel reference.
@@ -1880,7 +1880,7 @@ necessary but insufficient; it fixed the *internal pipeline* self-abort bug, not
 Tenant-DB master data, `goal.md` roadmap item 2. Backend AND frontend now both built (frontend
 landed 2026-08-25 in a second pass, via 3 parallel agents - see "Frontend: business schema pages"
 below). Also **no permission-gating** wired to these routes beyond `auth:web` (any authenticated
-tenant user) — matches the existing MVP baseline in `TenantDatabaseSeeder`, not a decision to gate
+tenant user) - matches the existing MVP baseline in `TenantDatabaseSeeder`, not a decision to gate
 later.
 
 - **Chart of accounts** (`app/Models/{AccountHead,AccountGroup,AccountSubgroup,Account}.php`,
@@ -1889,32 +1889,32 @@ later.
   the legacy `day_khata` app's `accountheadsetup`/`accountgroup`/`accountsubgroup`/`mainaccount`
   tables, which matched rows by denormalized string columns (`accounthead`/`groups`/`subgroups`
   copied onto every row) instead of foreign keys. This is a deliberate squash/redesign, not a
-  literal port — explicitly permitted by `../day_khata/migration_plan/04-data-schema-provisioning.md`
+  literal port - explicitly permitted by `../day_khata/migration_plan/04-data-schema-provisioning.md`
   §2 ("fresh, consolidated migrations... not a literal port").
   - `accounts.account_group_id` and `accounts.account_subgroup_id` are **both nullable, and
-    exactly one must be set** — some legacy account groups (e.g. "Sales Accounts") have no
+    exactly one must be set** - some legacy account groups (e.g. "Sales Accounts") have no
     subgroup level at all, others (e.g. "Current Assets") do. Enforced in `Account::booted()`'s
-    `saving` hook (throws `InvalidArgumentException`), **not** a DB CHECK constraint — kept
+    `saving` hook (throws `InvalidArgumentException`), **not** a DB CHECK constraint - kept
     app-level to stay SQLite/MySQL portable per the "Stay portable" rule in `goal.md`.
 - **`ChartOfAccountsSeeder`** (`database/seeders/Tenant/ChartOfAccountsSeeder.php`, called from
   `TenantDatabaseSeeder::run()`): seeds the 5 fixed account heads (Assets/Liabilities/Income/
   Expenses/Capital), 8 groups, 5 subgroups, and 9 default leaf accounts, ported from the legacy
   app's `database/seeders/DefaultMainAccountSeeder.php`. **`"Sundry Debtors"` and `"Sundry
-  Creditors"` subgroup names are a load-bearing contract** — looked up by exact string in
+  Creditors"` subgroup names are a load-bearing contract** - looked up by exact string in
   `App\Models\Concerns\HasLedgerAccount`. Don't rename without updating that trait.
   Deliberately **not** ported from the legacy seeder: Fixed Asset/TDS/asset-disposal default
-  accounts (Accumulated Depreciation, TDS Receivable/Payable, Gain/Loss on Asset Disposal) — those
+  accounts (Accumulated Depreciation, TDS Receivable/Payable, Gain/Loss on Asset Disposal) - those
   belong to the Fixed Assets phase (`05-phase-plan.md` Phase 3), add them when that phase starts.
-  Also **not** ported: the legacy "Walk-in" customer auto-seed (POS anonymous-sale customer) —
+  Also **not** ported: the legacy "Walk-in" customer auto-seed (POS anonymous-sale customer) -
   that's a Sales/POS bootstrapping concern (Phase 2), not core master data.
 - **`App\Models\Concerns\HasLedgerAccount`** trait, used by `Customer` and `Supplier`: on
   `creating`, auto-creates a linked `Account` under the model's `ledgerAccountSubgroupName()`
   (`'Sundry Debtors'` / `'Sundry Creditors'`) and sets `account_id`; on `updated`, syncs
   name/phone/address into the linked account if any of those changed. Ports the legacy
   `CustomerController`/`SupplierController`'s `DB::table('mainaccount')->insert(...)`
-  side-effect (string-matched) onto a real FK relationship — this is the "creates a
+  side-effect (string-matched) onto a real FK relationship - this is the "creates a
   chart-of-account entry" behavior `05-phase-plan.md` Phase 1 explicitly calls out.
-  `customers.account_id`/`suppliers.account_id` are **non-nullable, `restrictOnDelete()`** — an
+  `customers.account_id`/`suppliers.account_id` are **non-nullable, `restrictOnDelete()`** - an
   `Account` can never be deleted while a customer/supplier still references it; deleting the
   customer/supplier itself leaves the ledger account orphaned-but-intact (correct: never silently
   delete financial records).
@@ -1924,32 +1924,32 @@ later.
   legacy columns that were ecommerce-only (`thumbnail`, `rating_count`, `sell_count`, `features`,
   `publish_for_ecommerce`, `keep_item_for_sell`, `commonCode`, `beIn`, `purchaseStatus`) per the
   ecommerce non-goal in `00-overview.md` §3, and `company_id`/`store_id` (multi-company/multi-store
-  concepts superseded by tenancy itself / not yet in scope — flagged here, not silently dropped).
+  concepts superseded by tenancy itself / not yet in scope - flagged here, not silently dropped).
   `items.account_id` (nullable, optional inventory/COGS ledger link) is a plain manual FK, **not**
-  auto-created like customers/suppliers — matches the legacy `inventorysettings.accno` behavior
+  auto-created like customers/suppliers - matches the legacy `inventorysettings.accno` behavior
   (a user-assigned code, not an auto-generated one).
 - **Routes**: `routes/tenant-business.php` (new file, `require`d from `routes/tenant.php` inside
-  its `auth:web` group) — `account-groups`, `account-subgroups`, `accounts`, `customers`,
+  its `auth:web` group) - `account-groups`, `account-subgroups`, `accounts`, `customers`,
   `suppliers`, `item-categories`, `item-subcategories`, `items`, each with
-  index/store/update/destroy only (no create/edit/show — simple master-data CRUD, forms are
+  index/store/update/destroy only (no create/edit/show - simple master-data CRUD, forms are
   expected to be inline modals once the frontend pass builds them, matching the existing
   `central-tenants.php` explicit-route style rather than `Route::resource`).
-- **Controllers**: `app/Http/Controllers/Tenant/{Accounting,Parties,Inventory}/*Controller.php` —
-  8 controllers, all thin (inline `$request->validate()`, no Form Request classes — matches this
+- **Controllers**: `app/Http/Controllers/Tenant/{Accounting,Parties,Inventory}/*Controller.php` -
+  8 controllers, all thin (inline `$request->validate()`, no Form Request classes - matches this
   project's existing convention, there are none anywhere else in the codebase either). All business
   logic (ledger auto-linking, the group-xor-subgroup invariant) lives in the models, not here.
 - **Tests**: `tests/Feature/Tenant/{Accounting/ChartOfAccountsTest,Parties/{CustomerTest,
-  SupplierTest},Inventory/ItemTest}.php` — 18 focused tests covering seeding, the
+  SupplierTest},Inventory/ItemTest}.php` - 18 focused tests covering seeding, the
   group-xor-subgroup guard, ledger auto-link + sync-on-update, mobile-uniqueness, cross-field
   subcategory-belongs-to-category validation, and full HTTP CRUD round-trips. Run in isolation
-  first (per that session's instruction), then verified against the full 44-test suite together —
+  first (per that session's instruction), then verified against the full 44-test suite together -
   all green.
 
 ### Frontend: business schema pages
 
 Built 2026-08-25 in a second pass, immediately after the backend above, via **3 parallel
 subagents** (one per module: chart of accounts, parties, inventory) each owning a disjoint
-directory — no shared nav/config file, every page defines its own `navItems` locally (matching the
+directory - no shared nav/config file, every page defines its own `navItems` locally (matching the
 existing per-page convention) using an identical hardcoded block so the sidebar is consistent
 across all 8 pages without any of the three agents touching the same file.
 
@@ -1967,8 +1967,8 @@ across all 8 pages without any of the three agents touching the same file.
 - **Known gotcha this pass surfaced and fixed (don't rediscover it)**: create/edit/delete on these
   pages redirect back to the *same* route/component that's already mounted. Inertia's Vue adapter
   patches the existing component instance rather than remounting it, so a plain
-  `onMounted(() => { if (flash.status) toast(...) })` — the pattern every pre-existing page in this
-  app uses — only ever fires on the very first load of the page, never again after an in-place
+  `onMounted(() => { if (flash.status) toast(...) })` - the pattern every pre-existing page in this
+  app uses - only ever fires on the very first load of the page, never again after an in-place
   modal action. (`Central/Tenants/Show.vue`'s delete looks similar but isn't: it redirects to a
   *different* route/component, `Index`, so a real remount happens there and `onMounted` is fine.)
   Two of the three parallel agents independently caught this and fixed it; the third didn't, and
@@ -1979,7 +1979,7 @@ across all 8 pages without any of the three agents touching the same file.
 - **`tests/Feature/Tenant/BusinessPagesRenderTest.php`** (new, not per-agent): one test hitting all
   8 routes as an authenticated user and asserting `assertInertia(fn ($page) => $page->component(...))`
   matches exactly. This is the guard against the controller's `Inertia::render('Tenant/.../Index')`
-  string and the actual `.vue` file path silently drifting apart — there's no compile-time link
+  string and the actual `.vue` file path silently drifting apart - there's no compile-time link
   between them, a typo either side would 200 with the wrong (or a broken) component and nothing
   else in the suite would catch it. Verified passing (all 8) after the parallel frontend pass.
 - `npm run build` succeeds with all 8 new pages bundled. Full suite green: 45/45 (44 backend +
@@ -1996,44 +1996,44 @@ following foundational pieces I built myself first so the agents had a fixed sha
 build against instead of inventing one each:
 
 - **`resources/css/app.css`**: added `--shadow-xs`, `--shadow-sm`, `--shadow-primary-sm` to the
-  `@theme` block, same "single place definition" pattern as the existing `--radius-*` tokens —
+  `@theme` block, same "single place definition" pattern as the existing `--radius-*` tokens -
   Tailwind v4 auto-generates the matching `shadow-xs`/`shadow-sm`/`shadow-primary-sm` utilities.
-- **`resources/js/lib/nav-items.js`** (new): `navGroups(isAdmin)` — the one source of truth for
+- **`resources/js/lib/nav-items.js`** (new): `navGroups(isAdmin)` - the one source of truth for
   the tenant sidebar nav, grouped (`OVERVIEW`/`ACCOUNTING`/`PARTIES`/`INVENTORY`/`ADMIN`). Replaces
   the identical hardcoded flat `navItems` block that used to be copy-pasted into all 8 business
   pages + `Tenant/Dashboard.vue`. **Central (platform-admin) pages still pass their own flat,
-  ungrouped `navItems` array locally** — untouched, different nav entirely, not migrated to this
+  ungrouped `navItems` array locally** - untouched, different nav entirely, not migrated to this
   module on purpose.
-- **`resources/js/layouts/AppLayout.vue`**: redesigned shell — sidebar widened to 264px with a
+- **`resources/js/layouts/AppLayout.vue`**: redesigned shell - sidebar widened to 264px with a
   logo mark, grouped nav (via `nav-items.js` for tenant pages), static user-info footer chip;
-  topbar keeps the page `<h1>{{ title }}</h1>` on the left (Central pages depend on it — the
+  topbar keeps the page `<h1>{{ title }}</h1>` on the left (Central pages depend on it - the
   mockup's title-less topbar was NOT ported as-is for this reason), adds a centered *decorative,
   `disabled`* search input (no backend, deliberately marked non-functional rather than looking
-  broken), a `Tooltip`-wrapped notification bell (no fake unread badge — no notification feature
+  broken), a `Tooltip`-wrapped notification bell (no fake unread badge - no notification feature
   exists yet), and an avatar+name+chevron `DropdownMenu` trigger holding the one "Log out" entry
   point (the old always-visible topbar Log-out `Button` was removed). **Key contract**: `navItems`
-  prop accepts EITHER shape — grouped `[{label, items}]` (tenant) or legacy flat `[{label,href,icon}]`
-  (Central) — normalized internally via `Array.isArray(navItems[0]?.items)`. Any new page can pass
+  prop accepts EITHER shape - grouped `[{label, items}]` (tenant) or legacy flat `[{label,href,icon}]`
+  (Central) - normalized internally via `Array.isArray(navItems[0]?.items)`. Any new page can pass
   either shape safely.
-- **`resources/js/components/ui/Tooltip.vue`** (new): generic reusable tooltip — `label` prop,
+- **`resources/js/components/ui/Tooltip.vue`** (new): generic reusable tooltip - `label` prop,
   `side` prop (`'top'`|`'bottom'`, default `'top'`), wraps trigger via default slot, dark flat pill
   styled off `bg-toast-bg` (matches `Toaster.vue`'s real color, not a new one). Used by
   `RowActions.vue`, `DataTable.vue`'s pagination prev/next buttons, and `AppLayout.vue`'s bell icon.
 - **`resources/js/components/ui/RowActions.vue`** (new): the fix for "edit and delete look the
-  same" — two icon buttons (`Pencil`/`Trash2` from `@lucide/vue`), each `Tooltip`-wrapped. Edit
+  same" - two icon buttons (`Pencil`/`Trash2` from `@lucide/vue`), each `Tooltip`-wrapped. Edit
   stays accent-tinted (`bg-primary-tint text-primary`, routine action); Delete is neutral by
   default (`bg-bg-subtle text-text-faint`) and only turns red on hover (`hover:bg-danger-bg
   hover:text-danger`) so a destructive action never looks pre-armed. Emits `edit`/`delete` (Vue
   maps these to `onEdit`/`onDelete` when used via `h(RowActions, {...})` in a TanStack column
   `cell` renderer). All 8 business `Index.vue` pages now use this instead of hand-rolled
   Edit/Delete buttons (some were plain text links, some were two visually-identical `Button
-  variant="icon"` instances — same underlying bug either way).
-- **`Button.vue`**: removed the primary variant's `shadow-[0_4px_14px_rgba(102,0,255,.35)]` — user
+  variant="icon"` instances - same underlying bug either way).
+- **`Button.vue`**: removed the primary variant's `shadow-[0_4px_14px_rgba(102,0,255,.35)]` - user
   feedback on the mockup was that it visually bled onto neighboring elements; primary buttons now
   have no shadow at all, not a lighter one.
 - **`Card.vue`**: panel variant gained `shadow-xs`. **`DataTable.vue`**: pagination prev/next
   buttons wrapped in `Tooltip`.
-- **`app/Http/Middleware/HandleInertiaRequests.php`**: added a shared `tenant` prop —
+- **`app/Http/Middleware/HandleInertiaRequests.php`**: added a shared `tenant` prop -
   `{ company_name } | null`, non-null only when `tenancy()->initialized`. Lets `AppLayout.vue`'s
   sidebar subtext show the real tenant company name without fabricating one on Central pages.
 - **Real dashboard** (`app/Http/Controllers/Tenant/DashboardController.php`, new;
@@ -2041,7 +2041,7 @@ build against instead of inventing one each:
   (customers/suppliers/items totals + real "this week" counts via `created_at >= now()->subWeek()`,
   plus a ledger-accounts total), last-5 `recentCustomers` (name/mobile/ledger code/relative time),
   and `accountHeadBreakdown` (per-`AccountHead` leaf-account counts, computed at runtime via
-  `whereHas('group', ...)->orWhereHas('subgroup.accountGroup', ...)` — not hardcoded to the 5
+  `whereHas('group', ...)->orWhereHas('subgroup.accountGroup', ...)` - not hardcoded to the 5
   seeded head names). `resources/js/pages/Tenant/Dashboard.vue` rebuilt to render all of it; no
   fabricated/placeholder numbers anywhere in this page.
 - **`tests/Feature/Tenant/DashboardTest.php`** (new): same tenant-provisioning pattern as
@@ -2050,18 +2050,18 @@ build against instead of inventing one each:
 - Verified after all 4 agents landed: `php artisan test tests/Feature/Tenant` → 32/32 (up from the
   prior 18 + `BusinessPagesRenderTest`, now also includes `DashboardTest`). `npm run build`
   succeeds. Manually re-read `AppLayout.vue`, `Dashboard.vue`, `DashboardController.php`, and two
-  representative `Index.vue` pages end-to-end after the parallel pass — all correctly wired, no
+  representative `Index.vue` pages end-to-end after the parallel pass - all correctly wired, no
   agent left a stray unused import or a wrong function-name reference in the `RowActions` wiring
-  (function names differ per file — `destroy`, `destroyCustomer`, `destroySupplier` — each agent
+  (function names differ per file - `destroy`, `destroyCustomer`, `destroySupplier` - each agent
   matched the real name rather than assuming one).
 - **Not yet done**: no live browser check of the redesign (only automated tests + a manual code
-  read) — the user still needs to eyeball this in an actual browser before considering it final.
+  read) - the user still needs to eyeball this in an actual browser before considering it final.
 
 ## Gotchas discovered the hard way (don't rediscover these)
 
 1. **Tenant DBs need their own `cache` and `jobs` tables.** `CACHE_STORE=database` and
    `QUEUE_CONNECTION=database` in `.env` resolve against whatever the *default* connection is,
-   which is the tenant connection for any request inside tenant context — including the
+   which is the tenant connection for any request inside tenant context - including the
    database-backed rate limiter on login throttling. Missed this in the original foundational setup
    (only central got these tables at first); surfaced as a 500 on tenant login that the automated
    suite never caught because `phpunit.xml` uses `CACHE_STORE=array`. Fixed via
@@ -2070,7 +2070,7 @@ build against instead of inventing one each:
    "database," ask whether it needs a tenant-side migration too.
 2. **`stancl`'s base `Tenant` model sweeps unlisted attributes into a `data` JSON column** (the
    `VirtualColumn`/`HasDataColumn` mechanism). `App\Models\Tenant` overrides `getCustomColumns()` to
-   list `id`, `company_name`, `status`, `contact_email` explicitly — without that override, those
+   list `id`, `company_name`, `status`, `contact_email` explicitly - without that override, those
    three columns silently stop being real, queryable SQL columns and every `Tenant::where(...)`
    query against them breaks silently (not an error, just always empty).
 3. **Tenancy doesn't auto-revert the DB connection at the end of an HTTP test request.** After a
@@ -2078,7 +2078,7 @@ build against instead of inventing one each:
    the rest of that test *and can leak into the next one*, since `RefreshDatabase`'s rollback
    re-evaluates which connection to roll back at teardown time. Every tenant-context feature test
    needs `afterEach(fn () => tenancy()->end())`. Forgetting this doesn't fail the test that forgot
-   it — it corrupts the *next* test's central-DB isolation, so the failure looks unrelated.
+   it - it corrupts the *next* test's central-DB isolation, so the failure looks unrelated.
 4. **The default guest-redirect only knows one `login` route name.** Laravel's
    `redirectGuestsTo` defaults to the route named `login`, which is the *central* login here. Fixed
    in `bootstrap/app.php` with a closure that checks `tenancy()->initialized` to send tenant
@@ -2089,9 +2089,9 @@ build against instead of inventing one each:
    `routes/central.php` (requires the two below) → `routes/central-auth.php` (platform-admin auth
    only) + `routes/central-tenants.php` (tenant CRUD only). `routes/tenant.php` is separate again
    (stancl-generated, tenant-domain-only). Keep this split even if it looks like unnecessary
-   indirection for a single session working alone — it's what makes multi-agent fan-out safe here.
+   indirection for a single session working alone - it's what makes multi-agent fan-out safe here.
 6. **`stancl/tenancy`'s per-tenant SQLite files have no file extension** (`database/tenant<uuid>`,
-   not `.sqlite`) — `database/.gitignore`'s original `*.sqlite*` pattern missed them entirely. They
+   not `.sqlite`) - `database/.gitignore`'s original `*.sqlite*` pattern missed them entirely. They
    got swept into the initial `git add -A` (36 files, ~4.3MB of dev-only data from manual
    provisioning tests) and had to be untracked in a follow-up commit. Fixed by adding `/tenant*` to
    `database/.gitignore`. If tenancy config ever changes where per-tenant SQLite files land, check
@@ -2101,9 +2101,9 @@ build against instead of inventing one each:
 
 ```
 cd D:\Projects\day-khata\day-khata-multi-tenant
-npm run build              # must succeed — last verified 2026-08-29
+npm run build              # must succeed - last verified 2026-08-29
 php artisan test --compact # 151/151 as of 2026-08-29 (1004 assertions)
-php artisan serve --port=8123   # then curl through it — see below
+php artisan serve --port=8123   # then curl through it - see below
 ```
 
 A known-good local tenant exists from manual smoke testing: `Acme Inc`, domain
@@ -2113,7 +2113,7 @@ via `POST /tenants` as the seeded platform admin). Central platform admin:
 you `php artisan db:seed --class=PlatformAdminSeeder`).
 
 To confirm a page is actually rendering the right Vue component (not just returning HTTP 200):
-fetch the response and look for `<script data-page="app" type="application/json">` — it contains
+fetch the response and look for `<script data-page="app" type="application/json">` - it contains
 the raw Inertia payload (`component`, `props`) even though curl can't execute the Vue mount itself.
 This caught nothing wrong so far, but it's the fast way to tell "wrong component rendered" from
 "right component, JS just didn't run under curl."
@@ -2121,42 +2121,42 @@ This caught nothing wrong so far, but it's the fast way to tell "wrong component
 ## Backend + Frontend: ledger / journal voucher posting engine
 
 Built 2026-08-25, right after the enterprise-UI pass. This is `goal.md` roadmap item 3
-(ledger/financial-transaction engine) — a **from-scratch, portable schema**, not a port of the
+(ledger/financial-transaction engine) - a **from-scratch, portable schema**, not a port of the
 legacy `mainaccountledger`/`mainaccountledgerdetails` tables (whose column layout is inverted and
 confusing). Two design questions were resolved with the user before building: (1) fiscal-year
 enforcement is Eloquent-portable (global invariant + model events + one posting method) rather
 than the legacy MySQL view/trigger/session-variable mechanism, so it runs identically on SQLite
-(tests) and MySQL (prod); (2) the user chose full fidelity on scope — both the closed-year
+(tests) and MySQL (prod); (2) the user chose full fidelity on scope - both the closed-year
 super-admin correction override (with multi-year roll-forward) and automatic P&L year-end closing
 are built now, not deferred. Full design record: the plan file this was built from is quoted in
 full in the session transcript if the exact reasoning is ever needed again.
 
 - **Schema** (5 new tenant migrations, `2026_08_25_100009` through `_100013`): `account_heads`
-  gained `is_profit_and_loss` (boolean) — `Income`/`Expenses` are `true`, everything else `false`
-  (set in `ChartOfAccountsSeeder`, which is the ONLY place head classification is decided — never
+  gained `is_profit_and_loss` (boolean) - `Income`/`Expenses` are `true`, everything else `false`
+  (set in `ChartOfAccountsSeeder`, which is the ONLY place head classification is decided - never
   string-match head names elsewhere). New tables: `fiscal_years` (name/start_date/end_date/status),
   `voucher_sequences` (per fiscal-year, per voucher-type sequential counters), `journal_vouchers`
   (header: fiscal_year_id/voucher_type/voucher_number/date/narration/reason/created_by),
   `journal_voucher_lines` (account_id/debit/credit/narration). **Posted vouchers are never
-  edited or deleted** — every correction, including the closed-year override, is a new voucher.
+  edited or deleted** - every correction, including the closed-year override, is a new voucher.
 - **`App\Models\FiscalYear`**: `saving` hook enforces at most one `open` row and no overlapping
-  date ranges (same app-level-invariant style as `Account`'s group-xor-subgroup rule — no DB CHECK
+  date ranges (same app-level-invariant style as `Account`'s group-xor-subgroup rule - no DB CHECK
   constraints, stays portable). `FiscalYear::current()` resolves the one open row (throws
-  `ModelNotFoundException` if none exists — a fresh tenant must create its first fiscal year
+  `ModelNotFoundException` if none exists - a fresh tenant must create its first fiscal year
   manually, nothing auto-creates one). `FiscalYear::close($next, $actor)` is the year-end engine:
   computes every P&L account's net balance for the closing year, zeroes each one via one
   consolidated `ClosingEntry` voucher with the net profit/loss credited/debited to the seeded
-  `"Profit & Loss"` account (code `CA2`, under Capital — reused as the retained-earnings target,
+  `"Profit & Loss"` account (code `CA2`, under Capital - reused as the retained-earnings target,
   no new account was seeded for this), then carries every nonzero Balance Sheet account's ending
   balance forward as one consolidated `OpeningBalance` voucher into `$next`. Both consolidated
   vouchers are mathematically guaranteed to balance on their own (proven in the model's docblock
-  comments) — worth reading `app/Models/FiscalYear.php` directly rather than re-deriving the sign
+  comments) - worth reading `app/Models/FiscalYear.php` directly rather than re-deriving the sign
   logic from scratch if touching this again.
 - **`App\Models\JournalVoucher::post($header, $lines, $actor)`** is the one user-facing entry
   point (thin controllers call this, no business logic duplicated in controllers, matching the
   house style). Validates double-entry shape (≥2 lines, each line exactly one of debit/credit,
   total debit = total credit), resolves the target fiscal year (defaults to `FiscalYear::current()`
-  unless `fiscal_year_id` is explicitly passed), and — if that year is `closed` — requires a
+  unless `fiscal_year_id` is explicitly passed), and - if that year is `closed` - requires a
   `reason` AND an `admin`-role actor (reusing the existing `role:admin` gate, same one `/admin/users`
   uses) before allowing it. A closed-year posting triggers `rollForward()`: it replays the
   correcting voucher's own lines with each line's account swapped to `"Profit & Loss"` when that
@@ -2164,20 +2164,20 @@ full in the session transcript if the exact reasoning is ever needed again.
   left as-is for a Balance Sheet account, and posts that replayed (automatically still-balanced)
   line set into every fiscal year after the corrected one up to and including the currently open
   one. There's a low-level `JournalVoucher::write()` used internally by both `post()` and
-  `FiscalYear::close()`/`rollForward()` for the actual numbering+creation — `close()`'s two
+  `FiscalYear::close()`/`rollForward()` for the actual numbering+creation - `close()`'s two
   consolidated vouchers deliberately bypass `post()`'s fiscal-year-resolution/closed-year gate
   since they're routine system bookkeeping, not a user-initiated correction.
 - **Voucher numbering**: `VoucherSequence::firstOrCreate` + `lockForUpdate()` + `increment()`,
-  per `(fiscal_year_id, voucher_type)` — this is the first `DB::transaction`/`lockForUpdate` usage
-  anywhere in this codebase (confirmed via search before building — no prior pattern to match).
+  per `(fiscal_year_id, voucher_type)` - this is the first `DB::transaction`/`lockForUpdate` usage
+  anywhere in this codebase (confirmed via search before building - no prior pattern to match).
   `lockForUpdate()` is a no-op on SQLite (tests) but does real row locking on MySQL (prod); this is
   expected/portable Laravel behavior, not a bug. A genuine concurrent-race edge case on the very
   first voucher of a brand-new `(fiscal_year_id, voucher_type)` pair could raise a unique-constraint
-  `QueryException` that aborts the whole `DB::transaction` — documented as an accepted, not
+  `QueryException` that aborts the whole `DB::transaction` - documented as an accepted, not
   bulletproofed, limitation (matches the legacy app's own level of protection here).
-- **Controllers/routes**: `FiscalYearController` (index/store/close — `close` is `role:admin`-gated
+- **Controllers/routes**: `FiscalYearController` (index/store/close - `close` is `role:admin`-gated
   and additionally rejects targeting a `$next` year that already has vouchers posted, to stop
-  double-seeding opening balances), `JournalVoucherController` (index/store — no update/destroy,
+  double-seeding opening balances), `JournalVoucherController` (index/store - no update/destroy,
   vouchers are immutable), and a `ledger` method added to the existing `AccountController` (a
   read-only per-account, per-fiscal-year statement with a running balance, computed server-side).
   All wired in a new `routes/tenant-ledger.php`, required from `routes/tenant.php` right after
@@ -2185,16 +2185,16 @@ full in the session transcript if the exact reasoning is ever needed again.
 - **Frontend**: `Tenant/Accounting/FiscalYears/Index.vue` (list + create modal + a "Close" action
   on the open row that opens a small modal to pick the next fiscal year), `JournalVouchers/Index.vue`
   + `JournalVouchers/Create.vue` (read-only list with a per-voucher line-detail modal, and a
-  dynamic multi-line create form with live Dr/Cr balance feedback — **note**: there is no
+  dynamic multi-line create form with live Dr/Cr balance feedback - **note**: there is no
   `GET /journal-vouchers/create` route; `Create.vue` is a plain component `Index.vue` toggles to
   in-place via a local ref, not a separate page, since adding a new route was out of scope for that
   build pass), and `Accounts/Ledger.vue` (per-account statement, fiscal-year picker) plus a small
   "Ledger" link added to `Accounts/Index.vue`'s row actions. "Fiscal Years" and "Journal Vouchers"
   were added to `resources/js/lib/nav-items.js`'s `ACCOUNTING` group (the shared nav module from
-  the enterprise-UI pass) — no per-account ledger nav entry, it's reached only from the Accounts
+  the enterprise-UI pass) - no per-account ledger nav entry, it's reached only from the Accounts
   list.
 - **Tests**: `tests/Feature/Tenant/Accounting/{FiscalYearTest,JournalVoucherPostingTest,
-  FiscalYearClosingTest,LedgerControllerTest}.php` — 28 tests covering the invariants, the full
+  FiscalYearClosingTest,LedgerControllerTest}.php` - 28 tests covering the invariants, the full
   posting engine including the closed-year override + roll-forward cascade, the P&L sweep +
   opening-balance-carry-forward math (verified against a concrete numeric scenario: 1000 cash
   sale, 400 cash expense → 600 net profit correctly credited to Profit & Loss and carried forward
@@ -2203,8 +2203,8 @@ full in the session transcript if the exact reasoning is ever needed again.
   an actual browser (same caveat as the enterprise-UI pass above).
 - **Deliberately out of scope for this pass** (real future work, not forgotten): a fresh tenant
   has to create its own first fiscal year manually (nothing auto-creates one during provisioning);
-  no UI exists yet for the closed-year super-admin override path (the backend fully supports it —
-  see `JournalVoucher::post()`'s `fiscal_year_id`/`reason` params — but `JournalVoucherController`'s
+  no UI exists yet for the closed-year super-admin override path (the backend fully supports it -
+  see `JournalVoucher::post()`'s `fiscal_year_id`/`reason` params - but `JournalVoucherController`'s
   create form only ever posts into the current open year); sales/purchase modules (which will post
   vouchers through this same `JournalVoucher::post()` engine) are the next roadmap slice now that
   the engine exists.
@@ -2213,10 +2213,10 @@ full in the session transcript if the exact reasoning is ever needed again.
 
 Built via 2 parallel forks (Sales, Purchase) the same day the ledger engine landed, then a follow-up
 pass added Stock Adjustment via a 3rd fork alongside 3 more forks building the Reporting MVP (see
-next section) — 4 forks running concurrently, zero file conflicts, via the established
+next section) - 4 forks running concurrently, zero file conflicts, via the established
 pre-stub-routes-and-nav-myself-then-fork convention (mem.md gotcha #5).
 
-- **Periodic, not perpetual, inventory accounting** — confirmed from an explicit docblock in
+- **Periodic, not perpetual, inventory accounting** - confirmed from an explicit docblock in
   legacy's `StockAdjustmentController`. Sales/Purchase/Stock Adjustment **never** post an
   inventory-asset/COGS ledger line; they only post money-side journal voucher lines
   (debtor/creditor, income/purchase, VAT, optional TDS). Stock quantity lives entirely in a new,
@@ -2225,7 +2225,7 @@ pre-stub-routes-and-nav-myself-then-fork convention (mem.md gotcha #5).
   AdjustmentOut`, each with `direction(): int` (+1/-1). **`App\Models\ItemStockMovement`**:
   `item_id`, `movement_type`, `quantity` (decimal 4dp), `unit_cost_rate` (decimal 4dp, nullable),
   polymorphic `reference` (points at the SaleLine/PurchaseLine/StockAdjustmentLine that generated
-  it), `date`, `cancelled` (bool — flipped true on cancel rather than writing inverse rows),
+  it), `date`, `cancelled` (bool - flipped true on cancel rather than writing inverse rows),
   `narration`. **`App\Models\Item`** gained `stockMovements()`, `recordStockMovement(type, qty,
   date, reference, ?unitCostRate)`, and `currentStock()` (sums signed quantities of non-cancelled
   movements via `movement_type->direction()`).
@@ -2234,13 +2234,13 @@ pre-stub-routes-and-nav-myself-then-fork convention (mem.md gotcha #5).
   balanced voucher-line set, posts one `JournalVoucher`, creates the header + line rows, records a
   stock movement per stockable line. **Purchase unifies stock/service/capital purchase lines into
   one shape** by reusing `Item.account_id` (falls back to the seeded `EXE8` Purchases Account if
-  null) — no `purchase_type` discriminator column, deliberately. **TDS is fully optional** —  a TDS
+  null) - no `purchase_type` discriminator column, deliberately. **TDS is fully optional** -  a TDS
   leg only posts if the client supplies `tds_account_id` + `tds_amount > 0`, no hardcoded TDS
   account (none seeded yet). **Two `VoucherType` cases for Sale** (`Sale`/`SaleAbbreviated`) so
   Nepali dual invoice-numbering gets its own `VoucherSequence` counter per type, for free.
 - **`Sale::cancel()`/`Purchase::cancel()`**: full-invoice cancellation only in this pass (no
-  partial-line returns — see `goal.md` roadmap item 4 for that as a real, explicitly-deferred next
-  slice). Posts a brand-new reversing voucher (every original line's debit/credit swapped) — the
+  partial-line returns - see `goal.md` roadmap item 4 for that as a real, explicitly-deferred next
+  slice). Posts a brand-new reversing voucher (every original line's debit/credit swapped) - the
   original voucher is **never** edited, matching the app-wide voucher-immutability rule. Flags
   every stock movement the sale/purchase generated as `cancelled=true` rather than writing inverse
   movement rows.
@@ -2251,34 +2251,34 @@ pre-stub-routes-and-nav-myself-then-fork convention (mem.md gotcha #5).
 - **A legacy bug deliberately NOT carried forward**: legacy's `saveServicePurchaseReturn` credited
   VAT Payable (`LIA20`) instead of crediting back VAT Receivable (`ASA23`) on a service purchase
   return. **A legacy gap NOT carried forward**: normal stock-purchase cancellation was never
-  actually wired up in legacy (dead table/controller) — this rewrite built it fresh.
+  actually wired up in legacy (dead table/controller) - this rewrite built it fresh.
 - **`App\Models\StockAdjustment`** (`app/Models/{StockAdjustment,StockAdjustmentLine}.php`,
   `app/Enums/StockAdjustmentReason.php`: `Damage|Lost|Correction|Found|Opening|Other`, with
   `isZeroValue(): bool` true for Damage/Lost): `post()` mirrors `Sale::post()`'s shape but **never**
   touches the ledger. Forces `direction='in'` when `reason_type==='opening'` (opening stock is just
-  another adjustment reason, not a separate bulk-import flow, unlike legacy's Excel-import screen —
+  another adjustment reason, not a separate bulk-import flow, unlike legacy's Excel-import screen -
   a deliberate simplification). Forces zero cost/value for Damage/Lost reasons server-side
   regardless of client input (matches legacy). Guards `out` lines against overselling via
   `lockForUpdate()` on the item's own `item_stock_movements` rows (same portable no-op-on-SQLite/
-  real-on-MySQL pattern `VoucherSequence` already uses) — checked against `Item::currentStock()`.
+  real-on-MySQL pattern `VoucherSequence` already uses) - checked against `Item::currentStock()`.
   Rejects zero/negative quantity **at the model layer**, not just HTTP validation (a real legacy bug
   class: a negative `out` quantity once slipped past a client-only check and added stock instead of
-  removing it). `cancel()` mirrors `Sale::cancel()` — **no edit method at all**, which sidesteps a
+  removing it). `cancel()` mirrors `Sale::cancel()` - **no edit method at all**, which sidesteps a
   separate real legacy bug (an edit-in-place path once wrote through a fiscal-year-filtered VIEW
   that silently matched zero rows for non-current-year records, leaving a cancelled header with
   stock still live).
 - **Routes**: `routes/tenant-sales.php`, `routes/tenant-purchase.php`,
-  `routes/tenant-stock-adjustments.php` (index/store/cancel each — no update, matching
+  `routes/tenant-stock-adjustments.php` (index/store/cancel each - no update, matching
   voucher-immutability). Nav: a new "TRANSACTIONS" group (Sales, Purchases) and a "Stock
   Adjustments" entry added to the existing "INVENTORY" group.
 - **Tests**: `tests/Feature/Tenant/{Sales/{SalePostingTest,SaleControllerTest},
-  Purchases/*,Inventory/StockAdjustmentTest}.php` — 25 tests total across the three modules
-  (10 Sales, 15 Purchase, 7 Stock Adjustment — some overlap in the full-suite count below since
+  Purchases/*,Inventory/StockAdjustmentTest}.php` - 25 tests total across the three modules
+  (10 Sales, 15 Purchase, 7 Stock Adjustment - some overlap in the full-suite count below since
   route/controller tests are separate files).
 - **A test-authoring gotcha from parallel Eloquent model work**: `AccountHead`/`AccountGroup`/
   `AccountSubgroup` were missing `use HasFactory;` (a pre-existing gap since nothing needed
-  `::factory()` for them before) — needed for bank-account test fixtures. **Two independent forks
-  fixed this identically with zero conflict** — worth knowing if a future fork hits the same
+  `::factory()` for them before) - needed for bank-account test fixtures. **Two independent forks
+  fixed this identically with zero conflict** - worth knowing if a future fork hits the same
   missing-trait error on these models, it's a real gap, not a fork mistake.
 
 ## Backend + Frontend: Reporting MVP (2026-08-26)
@@ -2286,48 +2286,48 @@ pre-stub-routes-and-nav-myself-then-fork convention (mem.md gotcha #5).
 Roadmap item 6. Legacy has a ~52-report `reportsController.php` (3,413 LOC, confirmed via research
 pass); rather than port all of it speculatively, the user chose to build a prioritized MVP subset
 first, re-evaluating what's next against actual usage. Built via 3 parallel forks (Accounting /
-Sales-Purchase / Inventory), running alongside the Stock Adjustment fork above — 4 forks, disjoint
+Sales-Purchase / Inventory), running alongside the Stock Adjustment fork above - 4 forks, disjoint
 files, verified zero conflicts.
 
-- **8 reports shipped**: Trial Balance, Income Statement (P&L), Balance Sheet (accounting reports —
+- **8 reports shipped**: Trial Balance, Income Statement (P&L), Balance Sheet (accounting reports -
   the 3 characterization-tested financial statements legacy's own migration plan calls out as exit
   criteria), Sales Register, Purchase Register, Sales VAT Book, Purchase VAT Book (Nepali
   VAT-compliance-mandatory tax-filing formats), Stock Summary (per-item opening/in/out/closing
   quantity + weighted-average valuation over a date range).
-- **Zero new DB tables** — every report is a pure aggregation over `JournalVoucher`/
+- **Zero new DB tables** - every report is a pure aggregation over `JournalVoucher`/
   `JournalVoucherLine`, `Account`→`AccountGroup`→`AccountSubgroup`→`AccountHead`, `Sale`/`SaleLine`,
   `Purchase`/`PurchaseLine`, `ItemStockMovement`. Legacy's equivalent queries were raw joins across
   `mainaccountledger`/`mainaccountledgerdetails` with a typo-repairing `normaliseAccountHead()`
   string-matcher and hacky date-boundary "opening bucket" logic to simulate a per-fiscal-year
-  opening balance — none of that ugliness was needed here because the ledger engine already has
+  opening balance - none of that ugliness was needed here because the ledger engine already has
   real primitives (`FiscalYear`, an actual carried-forward `OpeningBalance` voucher) for what legacy
   had to fake.
 - **Load-bearing correctness point, don't re-derive from scratch if touching these reports again**:
   computing "an account's balance in fiscal year N" means summing `journal_voucher_lines` scoped to
-  `journal_voucher.fiscal_year_id === N` only (not across all years — the `OpeningBalance` voucher
+  `journal_voucher.fiscal_year_id === N` only (not across all years - the `OpeningBalance` voucher
   already carries the prior cumulative Balance Sheet position into year N). But if year N has been
   closed, a `ClosingEntry` voucher was posted **into that same year**, zeroing every P&L account
-  within that year's own line set — so **Trial Balance and Income Statement must exclude
+  within that year's own line set - so **Trial Balance and Income Statement must exclude
   `ClosingEntry`-type voucher lines**, or a closed year's P&L wrongly reports zero. **Balance Sheet
-  must NOT exclude anything** — `ClosingEntry` only touches P&L accounts (not shown on a Balance
+  must NOT exclude anything** - `ClosingEntry` only touches P&L accounts (not shown on a Balance
   Sheet) plus the seeded `"Profit & Loss"` retained-earnings account (`CA2`, correctly needs the
   closing entry's net-income effect folded in). This is tested directly: `AccountingReportTest`
   posts P&L activity, closes the year, and asserts the Income Statement for the now-closed year
   still shows the real net profit, not zero.
 - **A real, deliberate deviation from the build brief, worth knowing about**: the Balance Sheet
-  report adds a virtual `currentYearEarnings` line for a still-**open** fiscal year — computed as
+  report adds a virtual `currentYearEarnings` line for a still-**open** fiscal year - computed as
   the same Income-minus-Expenses net used by the Income Statement (excluding `ClosingEntry`).
   Without it, Assets vs. Liabilities+Capital only balances *after* `FiscalYear::close()` sweeps net
-  profit into `"Profit & Loss"` — an open year's unswept profit would otherwise just vanish from the
+  profit into `"Profit & Loss"` - an open year's unswept profit would otherwise just vanish from the
   Balance Sheet rather than merely be unbalanced. The virtual line disappears automatically once the
-  year is closed (the real `ClosingEntry`-driven balance takes over) — verified in
+  year is closed (the real `ClosingEntry`-driven balance takes over) - verified in
   `AccountingReportTest`.
 - **A real bug caught in the merge, not shipped**: `AccountingReportTest`'s `assertInertia`
-  assertions initially compared float literals like `1000.0` against JSON-decoded values — PHP's
+  assertions initially compared float literals like `1000.0` against JSON-decoded values - PHP's
   `json_encode` drops the `.0` from whole-number floats, so the wire value comes back as an int
   `1000`, and Inertia's `where()` assertion does strict (`===`) comparison. Found by a sibling fork
   running the full suite mid-merge, fixed by the owning fork before final report. If a future report
-  test asserts an exact numeric value via `assertInertia`, watch for this — cast/round on both sides
+  test asserts an exact numeric value via `assertInertia`, watch for this - cast/round on both sides
   or compare loosely.
 - **Routes**: `routes/tenant-reports-{accounting,sales-purchase,inventory}.php`, all under a shared
   `/reports/*` prefix and `tenant.reports.*` name group. Nav: a new "REPORTS" group with all 8
@@ -2335,12 +2335,12 @@ files, verified zero conflicts.
 - **Frontend pattern**: all 8 pages extend the existing `Accounts/Ledger.vue` template (a filter →
   `router.get(window.location.pathname, {...}, {preserveState:true, preserveScroll:true})` →
   `Card variant="panel"` wrapper) rather than inventing a new report-page shape. The 3 accounting
-  reports render a hierarchical head→group→subgroup→account tree manually (not `DataTable` — flat
+  reports render a hierarchical head→group→subgroup→account tree manually (not `DataTable` - flat
   tables don't fit a nested statement); the other 5 are flat and use `DataTable` + a totals row.
 - **Tests**: `tests/Feature/Tenant/Reports/{AccountingReportTest,SalesPurchaseReportTest,
   InventoryReportTest}.php`.
 - **Deliberately out of scope for this pass**: the remaining ~44 legacy report views (Day Book,
-  Cash Book, Bank Book, age-wise receivables/payables, item/group-wise breakdowns, etc.) — re-evaluate
+  Cash Book, Bank Book, age-wise receivables/payables, item/group-wise breakdowns, etc.) - re-evaluate
   priority against real usage before picking the next batch, don't build speculatively.
 
 ## Backend + Frontend: partial-line Sales/Purchase Returns (2026-08-26)
@@ -2348,7 +2348,7 @@ files, verified zero conflicts.
 Built via 2 parallel forks (Sales Return, Purchase Return) same day as the above, in a follow-up
 pass after the user picked this as the next roadmap slice over more reports / a browser smoke-test
 pass / committing. Upgrades cancel-only (full-invoice) voiding with real credit-note/debit-note
-documents against specific original line quantities — closer legacy parity.
+documents against specific original line quantities - closer legacy parity.
 
 - **`App\Models\SalesReturn`/`SaleReturnLine`, `App\Models\PurchaseReturn`/`PurchaseReturnLine`**
   (new tables, each mirrors its parent Sale/Purchase's line shape plus a `rate`/`line_total` snapshot
@@ -2356,37 +2356,37 @@ documents against specific original line quantities — closer legacy parity.
   calling convention as `Sale::post()`/`Purchase::post()`): per return-line, guards over-return by
   summing prior return quantities against the same original line (`$remaining = original.quantity -
   sum(existing returns for this line)`), computes the returned amount from the original line's
-  **post-discount effective unit price** (`line_total / quantity`), NOT a fresh rate — so multiple
+  **post-discount effective unit price** (`line_total / quantity`), NOT a fresh rate - so multiple
   partial returns against the same line stay consistent with what was actually charged.
 - **Money side**: Sales Return debits Sales Revenue (`INI20`) + VAT Payable (`LIA20`, reversing the
-  original credit) and credits the Customer's account (a credit note — reduces receivable, or
+  original credit) and credits the Customer's account (a credit note - reduces receivable, or
   creates a customer credit balance if the sale was already cash/bank-settled). Purchase Return
   credits back the SAME per-item accounts the original purchase debited (grouped by
-  `item.account_id ?? EXE8`, matching `Purchase::post()`'s own grouping — not a single hardcoded
-  account) + credits VAT Receivable (`ASA23`, correctly — not `LIA20`, avoiding the exact legacy bug
+  `item.account_id ?? EXE8`, matching `Purchase::post()`'s own grouping - not a single hardcoded
+  account) + credits VAT Receivable (`ASA23`, correctly - not `LIA20`, avoiding the exact legacy bug
   `Purchase::post()`'s own docblock already warns against) and debits the Supplier's account (a
   debit note).
 - **Stock side**: writes a brand-new `StockMovementType::SaleReturn` (direction `+1`, goods
   physically return to stock) or `PurchaseReturn` (direction `-1`, goods physically leave stock)
-  movement per returned line — this is the first code to actually use those two enum cases (Stock
+  movement per returned line - this is the first code to actually use those two enum cases (Stock
   Adjustment only used `Opening`/`AdjustmentIn`/`AdjustmentOut`). Deliberately does NOT flag the
   original Sale/Purchase movement `cancelled=true` (unlike full `cancel()`) since only part of its
-  quantity came back — the two movements coexist, netting out correctly in `Item::currentStock()`.
+  quantity came back - the two movements coexist, netting out correctly in `Item::currentStock()`.
 - **Two deliberate, documented simplifications (real gaps, not oversights)**: neither return
   proportionally reverses the ORIGINAL invoice's header-level discount (only the line's own
   rate/discount is used); neither reverses any TDS withheld on the original sale/purchase. Also: no
-  return auto-generates a cash/bank refund voucher — it only posts the credit/debit note against the
+  return auto-generates a cash/bank refund voucher - it only posts the credit/debit note against the
   customer's/supplier's own account; an actual cash refund is a separate, manual follow-up action
   (out of scope for this pass).
 - **Guard added to `Sale::cancel()`/`Purchase::cancel()`** (the only change made to those two
   existing files): both now throw `InvalidArgumentException` if any return line already references
-  one of the original invoice's lines — prevents a full-invoice cancel from double-reversing money
+  one of the original invoice's lines - prevents a full-invoice cancel from double-reversing money
   a partial return already reversed. Both models gained a `returns(): HasMany` relation.
 - **Routes**: `routes/tenant-sales-returns.php`, `routes/tenant-purchase-returns.php`
-  (index/store only — returns are themselves immutable in this pass, no cancel-a-return; that's a
+  (index/store only - returns are themselves immutable in this pass, no cancel-a-return; that's a
   real, deliberately deferred next layer if it's ever needed). Nav: "Sales Returns"/"Purchase
   Returns" added to the existing TRANSACTIONS group.
-- **Tests**: `tests/Feature/Tenant/{Sales/SalesReturnTest,Purchases/PurchaseReturnTest}.php` — 10
+- **Tests**: `tests/Feature/Tenant/{Sales/SalesReturnTest,Purchases/PurchaseReturnTest}.php` - 10
   tests total (5 each): balanced voucher + correct stock direction on a partial return, over-return
   rejection, return-against-already-cancelled-invoice rejection, cancel-after-return rejection,
   HTTP round-trip. Purchase Return's test additionally asserts VAT credits `ASA23` not `LIA20` and
@@ -2397,18 +2397,18 @@ documents against specific original line quantities — closer legacy parity.
 `goal.md` roadmap item 7, picked as the next slice ahead of the browser smoke-test and the remaining
 report batch. Built via 3 parallel forks on completely disjoint files (queued provisioning / 2FA /
 CSP+headers), same convention as prior multi-fork passes. **Not yet verified by the test suite or
-build** as of this update — the user asked this session to stop running `php artisan test`/`npm run
+build** as of this update - the user asked this session to stop running `php artisan test`/`npm run
 build` itself and will run them manually; all three forks confirmed `php -l` clean and did targeted
 sanity checks (route registration, a real `tinker` round-trip through the TOTP/QR pipeline) instead.
 
 - **Queued tenant provisioning**: `app/Providers/TenancyServiceProvider.php` flips both
   `shouldBeQueued(false)` → `true` (`TenantCreated` and `TenantDeleted` pipelines). A new
   `App\Jobs\CreateTenantFirstAdmin` job is appended to the `TenantCreated` pipeline after
-  `SeedDatabase` — it re-fetches the tenant fresh (not the job-pipeline-passed instance, to sidestep
+  `SeedDatabase` - it re-fetches the tenant fresh (not the job-pipeline-passed instance, to sidestep
   any doubt about `data`-column decode state surviving queue serialization), creates the first admin
   user from a `pending_admin` payload, then flips the tenant to `Active`. `TenantStatus` gained a
   `Provisioning` case (initial state now, not `Active`). `TenantController::store()` no longer
-  creates the admin user synchronously inside the request — it hashes the password immediately and
+  creates the admin user synchronously inside the request - it hashes the password immediately and
   stashes `name`/`email`/already-hashed `password` as `$tenant->pending_admin`, which
   `Tenant::getCustomColumns()` not listing it means it's swept into the `data` JSON column
   automatically (`vendor/stancl/virtualcolumn`'s `VirtualColumn` trait) and read back by the job once
@@ -2418,64 +2418,64 @@ sanity checks (route registration, a real `tinker` round-trip through the TOTP/Q
   `Show.vue` render a third `provisioning` badge state and hide suspend/resume while provisioning.
   Tests: extended `TenantProvisioningTest.php`, including a new test using `Queue::fake()` to
   actually freeze a tenant in `Provisioning` and confirm a request into its domain gets a clean 403
-  rather than a missing-database error — not just relying on the `sync` test-queue driver making the
+  rather than a missing-database error - not just relying on the `sync` test-queue driver making the
   gap invisible.
-- **2FA for platform admins only** (not tenant users — matches `goal.md`'s explicit scope and the
+- **2FA for platform admins only** (not tenant users - matches `goal.md`'s explicit scope and the
   security doc's "central app is the highest-value target" reasoning). New `pragmarx/google2fa` +
-  `bacon/bacon-qr-code` deps (QR rendered as an inline SVG data URI, no external QR image API — keeps
+  `bacon/bacon-qr-code` deps (QR rendered as an inline SVG data URI, no external QR image API - keeps
   it compatible with the new strict CSP's `img-src`). `platform_admins` gained
   `two_factor_secret`/`two_factor_recovery_codes` (both `encrypted`/`encrypted:array` casts, both in
   `PlatformAdmin`'s `#[Hidden]`) and `two_factor_confirmed_at` (a secret alone, pre-confirmation,
-  doesn't count as enabled — `PlatformAdmin::hasTwoFactorEnabled()` checks the confirmed timestamp).
-  Opt-in, not forced enrollment — the seeded dev admin keeps working unchanged until 2FA is
+  doesn't count as enabled - `PlatformAdmin::hasTwoFactorEnabled()` checks the confirmed timestamp).
+  Opt-in, not forced enrollment - the seeded dev admin keeps working unchanged until 2FA is
   deliberately turned on. Login flow: `AuthenticatedSessionController::store()` no longer calls
   `Auth::attempt()`; it validates credentials via the guard's provider directly
-  (`retrieveByCredentials`/`validateCredentials`) so a 2FA-enabled admin isn't logged in yet — instead
+  (`retrieveByCredentials`/`validateCredentials`) so a 2FA-enabled admin isn't logged in yet - instead
   the pending admin id + `remember` flag + a 5-minute expiry go into session, and the request redirects
   to a new `TwoFactorChallengeController` (also under the existing `guest:platform` route group, since
   the admin genuinely isn't authenticated yet). The challenge accepts either a live TOTP code or a
   one-time recovery code (consumed from the stored array on use, can't be replayed); both the
   `login.store` and `central.two-factor.challenge.store` routes carry the same `throttle:5,1` this app
   already used for plain login. New `TwoFactorAuthenticationController` (behind `auth:platform`) owns
-  enroll/confirm/disable — confirm issues 8 recovery codes shown exactly once in that response;
+  enroll/confirm/disable - confirm issues 8 recovery codes shown exactly once in that response;
   disable requires re-entering the current password (`current_password:platform` validation rule) so a
   hijacked-but-still-open session can't silently strip the protection. New pages
   `Central/Auth/{TwoFactorChallenge,TwoFactorSetup}.vue`; one new link in the shared `AppLayout.vue`
   avatar dropdown (previously only "Log out"), gated on `auth.platformAdmin` being present. Tests: 8
   cases in `TwoFactorAuthenticationTest.php`, all driven through the real HTTP flow rather than direct
-  model writes — enroll/confirm/recovery-codes-shown-once, invalid code rejected, disable requires
+  model writes - enroll/confirm/recovery-codes-shown-once, invalid code rejected, disable requires
   password, a non-2FA login is unaffected, a 2FA login is redirected to the challenge instead of
   establishing a session, the challenge itself accepts/rejects TOTP and recovery codes correctly, and
   a used recovery code can't be replayed.
 - **CSP + security headers**: new `app/Http/Middleware/SecurityHeaders.php`, appended in
   `bootstrap/app.php` alongside `HandleInertiaRequests`, applied to every response **except** when
-  `app()->environment('local')` — Vite's dev-mode client injects a cross-origin `<script src>` for HMR
+  `app()->environment('local')` - Vite's dev-mode client injects a cross-origin `<script src>` for HMR
   that a strict `script-src 'self'` would block, and there's no browser available in-session to verify
   a dev-mode carve-out empirically, so local is simply exempted rather than guessed at (verify this
   properly the first time it actually matters). Ships `Content-Security-Policy: default-src 'self';
   script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self';
   connect-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'` (confirmed via grep
-  there's no Ziggy, no `v-html`, no external font CDN, and no inline script anywhere — `script-src`
+  there's no Ziggy, no `v-html`, no external font CDN, and no inline script anywhere - `script-src`
   stays strict; `style-src` needs `'unsafe-inline'` because of one real `:style=` binding in
   `Tenant/Dashboard.vue`), plus `X-Content-Type-Options: nosniff` and
   `Referrer-Policy: strict-origin-when-cross-origin` (`frame-ancestors 'none'` already covers what
   `X-Frame-Options: DENY` would). Test: `SecurityHeadersTest.php` asserts headers present under
   `production`, absent under `local`.
-- **MySQL credential-role separation — scoped down to docs only, deliberately not app code**: new
+- **MySQL credential-role separation - scoped down to docs only, deliberately not app code**: new
   `deploy/mysql-credentials.md` + `deploy/mysql-grants.sql`. This can't be functionally built or
   tested right now (dev is SQLite, which has no concept of DB users/roles at all), and the security
   doc's own §7 says a single shared runtime DB user is an acceptable MVP default anyway. The docs cover
-  only the two roles that actually apply to this rewrite — `tenant_provisioner` (CREATE/DROP DATABASE
+  only the two roles that actually apply to this rewrite - `tenant_provisioner` (CREATE/DROP DATABASE
   + schema DDL, used only by the provisioning job pipeline) and a least-privilege runtime app user
-  (DML+SELECT only) — **not** the security doc's third `tenant_ddl_owner` role, since this rewrite
+  (DML+SELECT only) - **not** the security doc's third `tenant_ddl_owner` role, since this rewrite
   deliberately never uses MySQL triggers/views (confirmed via `grep -rn "CREATE TRIGGER\|CREATE
-  VIEW\|DB::statement" database/ app/` — zero matches, this is a locked-in `goal.md` architecture
+  VIEW\|DB::statement" database/ app/` - zero matches, this is a locked-in `goal.md` architecture
   decision, not an oversight). Actually wiring the `.env`/`config/database.php` split is real future
-  work once there's a MySQL deployment target to verify against — not built this pass.
+  work once there's a MySQL deployment target to verify against - not built this pass.
 - **Incidental side effect, not a deliberate change**: `composer require`ing the 2FA packages
   triggered Laravel Boost's own post-autoload hook, which auto-regenerated parts of `CLAUDE.md` and
   `boost.json` and added `.claude/skills/inertia-vue-development/` (a lowercase `pages/` path fix and
-  a new skill-activation guideline). Harmless, unrelated to the app itself — left as-is.
+  a new skill-activation guideline). Harmless, unrelated to the app itself - left as-is.
 - **Post-hoc fix #1 (same day, before first test run): `CreateTenantFirstAdmin` crashed on tenants
   created outside `TenantController::store()`.** The user ran the suite manually as instructed and hit
   115/132 failures, virtually all `ErrorException: Trying to access array offset on null` at
@@ -2485,12 +2485,12 @@ sanity checks (route registration, a real `tinker` round-trip through the TOTP/Q
   controller) and separately `User::factory()->create()` inside `$tenant->run()`. With
   `shouldBeQueued(true)` now on and `QUEUE_CONNECTION=sync` in `phpunit.xml`, `CreateTenantFirstAdmin`
   runs inline as part of that `Tenant::create()` call and blew up on the null payload, taking down the
-  tenant setup for nearly every feature test in the suite — not a provisioning-only bug. Fixed by
+  tenant setup for nearly every feature test in the suite - not a provisioning-only bug. Fixed by
   guarding `handle()`: if `pending_admin` is null, skip the `User::create()` step entirely but still
-  flip the tenant to `Active` (so directly-created tenants — tests, tinker, future admin tooling —
+  flip the tenant to `Active` (so directly-created tenants - tests, tinker, future admin tooling -
   aren't left stuck in `Provisioning` forever). Confirmed via `git blame`-equivalent reasoning that the
   DB default for `status` is `'active'`, so these test tenants were never actually `Provisioning` in
-  the first place — only the crash inside the pipeline was new. `php -l` clean.
+  the first place - only the crash inside the pipeline was new. `php -l` clean.
 - **Post-hoc fix #2 (same day, second test run): `TenantCouldNotBeIdentifiedById` on ~59 unrelated
   tenant tests.** After fix #1, the user re-ran the suite and hit a second, much wider regression:
   nearly every test that provisions a tenant (Sales/Purchase/Reports/Items/Customers/Suppliers/Ledger/
@@ -2501,45 +2501,45 @@ sanity checks (route registration, a real `tinker` round-trip through the TOTP/Q
   automatically when processed. Flipping `shouldBeQueued(true)` (this pass) changed the pipeline's
   dispatch from `dispatch_sync()` (bypasses the queue system's payload-creation hooks entirely) to a
   real `dispatch()` (goes through `Queue::createPayloadUsing()`, exactly what `QueueTenancyBootstrapper`
-  hooks into) — so this tagging machinery was never exercised before this pass. If tenancy is left
+  hooks into) - so this tagging machinery was never exercised before this pass. If tenancy is left
   initialized at the moment a job payload is built (e.g. mid-pipeline, around `CreateTenantFirstAdmin`'s
   own `$tenant->run()` call, or any of the many pre-existing tests that do `$tenant->run(...)` around
   something that happens to dispatch a job), the job gets tagged with whatever tenant was active; once
   that tenant is gone (rolled back by test isolation) by the time the job is *processed*, re-identifying
   it throws.
-  **First attempt was wrong and had zero effect** — added a `queue.connections.*.central` section
+  **First attempt was wrong and had zero effect** - added a `queue.connections.*.central` section
   inside `config/tenancy.php`, reasoning by analogy with `tenancy.database.central_connection` etc. But
   `QueueTenancyBootstrapper::getPayload()` reads `$this->config["queue.connections.$connection.central"]`
   off the **root** config `Repository` (it's typehinted `Illuminate\Config\Repository`, not scoped to
-  the `tenancy` namespace) — that key resolves to `config/queue.php`, not `config/tenancy.php`. Confirmed
+  the `tenancy` namespace) - that key resolves to `config/queue.php`, not `config/tenancy.php`. Confirmed
   by reading `vendor/stancl/tenancy/assets/config.php` (the package's own stub): it has no `queue`
   section at all, so this was never meant to live in `config/tenancy.php`. The user's third test run
-  (56 failed, 76 passed — down from 59 only because fix #3 landed; the `TenantCouldNotBeIdentifiedById`
+  (56 failed, 76 passed - down from 59 only because fix #3 landed; the `TenantCouldNotBeIdentifiedById`
   list was byte-for-byte the same as the previous run) is what surfaced that the first attempt did
   nothing. **Actual fix**: added `'central' => true` directly to the `sync` and `database` connection
   arrays in `config/queue.php` (Laravel ignores unknown keys in a connection array for everything except
   this one listener) and removed the dead section from `config/tenancy.php`. This is the documented
   stancl/tenancy opt-out for connections used by central/administrative pipelines. Safe here because
-  there are currently no genuinely tenant-scoped queued jobs in this app — both
+  there are currently no genuinely tenant-scoped queued jobs in this app - both
   `App\Jobs\CreateTenantFirstAdmin` and stancl's own `CreateDatabase`/`MigrateDatabase`/`SeedDatabase`/
   `DeleteDatabase` already receive their `Tenant` directly via the constructor rather than relying on
   this bootstrapper's auto re-initialization. **This will need revisiting if a real tenant-scoped
   background job is ever added on these connections.** Lesson: when a package config key's *name*
   suggests a natural home in a related config file, verify where the code actually reads it (check the
-  `$config[...]` scoping) rather than assuming — this cost a whole extra test run.
+  `$config[...]` scoping) rather than assuming - this cost a whole extra test run.
 - **Post-hoc fix #3 (same run): 3 failing tests in `TwoFactorAuthenticationTest`, unrelated to fixes
   #1/#2.** A genuine test-isolation bug, not app code: the `twoFactorTestEnable()` helper calls
   `actingAs($admin, 'platform')` to drive enrollment through the real HTTP flow, but `actingAs()` leaves
   the `platform` guard authenticated for the rest of that test. The 3 failing tests all call the helper
-  then immediately do a plain (non-`actingAs`) `POST /login` expecting a genuine guest request — instead
+  then immediately do a plain (non-`actingAs`) `POST /login` expecting a genuine guest request - instead
   `guest:platform` middleware saw the still-authenticated admin and redirected away before
   `AuthenticatedSessionController::store()` ever ran, so the 2FA-redirect/challenge assertions failed.
   (Test 7 already worked around this *between its own two internal logins* with an explicit
-  `Auth::guard('platform')->logout(); session()->flush();` — just not right after the helper.) Fixed by
+  `Auth::guard('platform')->logout(); session()->flush();` - just not right after the helper.) Fixed by
   adding that same logout+session-flush to the end of `twoFactorTestEnable()` itself, so every caller
   starts from a clean guest state. `php -l` clean on all files touched by fixes #2/#3.
 - **Post-hoc fix #4 (fourth test run, after the corrected fix #2 landed): 5 failures**, all real tenant
-  provisioning through the HTTP endpoint (`TenantProvisioningTest`, `TenantSuspensionTest`) —
+  provisioning through the HTTP endpoint (`TenantProvisioningTest`, `TenantSuspensionTest`) -
   `Stancl\Tenancy\Resolvers\Contracts\CachedTenantResolver::__construct(): Argument #1 ($cache) must be
   of type Illuminate\Contracts\Cache\Factory, null given`, plus two knock-on `ModelNotFoundException`s
   in `TenantSuspensionTest` where the provisioning helper's `Tenant::where(...)->firstOrFail()` found
@@ -2548,7 +2548,7 @@ sanity checks (route registration, a real `tinker` round-trip through the TOTP/Q
   (used by stancl's base `Tenant`/`Domain` models, which `App\Models\Tenant` and this app's `domain_model`
   extend): every `saved`/`deleting` event on a Tenant or Domain unconditionally constructs
   `DomainTenantResolver`/`PathTenantResolver`/`RequestDataTenantResolver` (each needs `Factory $cache`
-  injected) to invalidate a resolver cache — even though `CachedTenantResolver::$shouldCache` defaults
+  injected) to invalidate a resolver cache - even though `CachedTenantResolver::$shouldCache` defaults
   to `false` and this app never touches it, so the invalidation itself is always a no-op; the crash is
   purely in constructing the resolver. `CacheTenancyBootstrapper` is the only code in this whole
   codebase that ever touches the `'cache'` container binding (via `Container::extend()` in its
@@ -2556,27 +2556,27 @@ sanity checks (route registration, a real `tinker` round-trip through the TOTP/Q
   exact `Container::extend()`/`resolve()` mechanics at length (confirmed bootstrappers ARE registered as
   real singletons in `TenancyServiceProvider`, confirmed `Factory::class` aliases to `'cache'` via
   `registerCoreContainerAliases()`, confirmed each bootstrap/revert pair looks self-balanced in
-  isolation) without being able to pin the *exact* line that corrupts the binding to literal `null` —
+  isolation) without being able to pin the *exact* line that corrupts the binding to literal `null` -
   the new piece this pass introduced is that `tenancy()->initialize()/end()` now cycles multiple times
   per request (once each for `Artisan::call('tenants:migrate'/'tenants:seed', ...)` inside
   `MigrateDatabase`/`SeedDatabase`, then again for `CreateTenantFirstAdmin`'s own `$tenant->run()`) where
   before this pass admin creation was a single synchronous call and Domain::create() always ran *before*
   tenancy was ever initialized at all, never exercising this interaction. Also independently confirmed a
   real, separate latent hazard while tracing this: `Stancl\Tenancy\Database\Concerns\TenantRun::run()`
-  and `Tenancy::runForMultiple()` have **no try/finally** — if the wrapped callback throws, `tenancy()->
+  and `Tenancy::runForMultiple()` have **no try/finally** - if the wrapped callback throws, `tenancy()->
   end()` is simply never called, leaving the DB/filesystem/cache bindings stuck mid-swap for the rest of
   the request. Not currently triggered (no evidence anything throws inside `CreateTenantFirstAdmin`'s
-  callback — the seeder unconditionally creates the `admin` role), but worth remembering as a real vendor
+  callback - the seeder unconditionally creates the `admin` role), but worth remembering as a real vendor
   gap if a future job's callback can fail. **Fix applied**: confirmed via a full grep of `app/` that this
   app has zero direct `Cache::`/`cache()` usage anywhere, so tenant-scoped cache tagging has no
   functional value here. Removed `CacheTenancyBootstrapper::class` from the `bootstrappers` array in
-  `config/tenancy.php` (and its now-unused `use` import) — this removes the only code path that ever
+  `config/tenancy.php` (and its now-unused `use` import) - this removes the only code path that ever
   swaps the `'cache'` binding, eliminating the crash's mechanism outright rather than chasing the exact
   corruption point. Revisit only if this app ever adds real tenant-scoped `Cache::` usage that needs
   isolation. `php -l` clean.
-- **Post-hoc fix #5 (fifth test run, after fix #4): same 5 failures, different crash — "Undefined array
+- **Post-hoc fix #5 (fifth test run, after fix #4): same 5 failures, different crash - "Undefined array
   key 'local'"** at the exact same call sites (`TenantProvisioningTest`/`TenantSuspensionTest` real
-  provisioning). Fix #4 was correct and DID work (confirmed — the `CachedTenantResolver`/Factory$cache
+  provisioning). Fix #4 was correct and DID work (confirmed - the `CachedTenantResolver`/Factory$cache
   crash is completely gone), but it only removed ONE symptom of a more general defect, which then
   surfaced through the next stateful bootstrapper in line. Root cause (now understood precisely, thanks
   to the crash moving rather than disappearing): `Stancl\Tenancy\Database\Concerns\TenantRun::run()` and
@@ -2585,64 +2585,64 @@ sanity checks (route registration, a real `tinker` round-trip through the TOTP/Q
   `Artisan::call()`) wrap their callback with **no try/finally**. Before this pass, admin creation was
   ONE synchronous `$tenant->run()` call and nothing else ever cycled tenancy state. Now the pipeline
   cycles `tenancy()->initialize()/end()` three separate times per provision (`tenants:migrate`,
-  `tenants:seed`, then `CreateTenantFirstAdmin`'s own `$tenant->run()`) — and if anything throws inside
+  `tenants:seed`, then `CreateTenantFirstAdmin`'s own `$tenant->run()`) - and if anything throws inside
   ANY of those wrapped callbacks, `end()` is simply never called, `Tenancy::$initialized` stays stuck
   `true`, and the *next* initialize()/end() transition anywhere in the request unconditionally reverts
-  **every** configured bootstrapper — including ones whose per-cycle "restore to this" state was never
+  **every** configured bootstrapper - including ones whose per-cycle "restore to this" state was never
   (re)captured this time. `CacheTenancyBootstrapper` hit this first (fix #4). With Cache removed,
   `FilesystemTenancyBootstrapper` hit the identical class of bug next: its `revert()` reads
-  `$originalPaths['disks'][$disk]`, populated per-disk inside `bootstrap()` — when that capture never
+  `$originalPaths['disks'][$disk]`, populated per-disk inside `bootstrap()` - when that capture never
   ran, `$disk = 'local'` (first in `config('tenancy.filesystem.disks')`) is the first missing key,
-  matching the exact error. **Fix applied**: same grep-verified reasoning as fix #4 — this app also has
+  matching the exact error. **Fix applied**: same grep-verified reasoning as fix #4 - this app also has
   zero `Storage::`/`storage_path()` usage anywhere (no tenant-scoped file storage exists), so
   `FilesystemTenancyBootstrapper` has no functional value either. Removed it from `config/tenancy.php`'s
   `bootstrappers` array (and its `use` import); confirmed the vendor's own `globalUrl` singleton
   registration in `TenancyServiceProvider::boot()` already guards with `$app->bound(FilesystemTenancyBoot
   strapper::class)`, so removing it from the list is safe on that front too. Remaining bootstrappers are
-  `DatabaseTenancyBootstrapper` (its `revert()` — `reconnectToCentral()` — doesn't depend on any
+  `DatabaseTenancyBootstrapper` (its `revert()` - `reconnectToCentral()` - doesn't depend on any
   per-cycle captured state, just repoints to a fixed connection name, so it's immune to this defect
   class) and `QueueTenancyBootstrapper` (bootstrap()/revert() are literal no-ops). Neither can crash this
-  way, so this should close out the whole defect class rather than just relocating it again — but that
+  way, so this should close out the whole defect class rather than just relocating it again - but that
   couldn't be fully confirmed without a fifth test run. The underlying vendor gap (missing try/finally)
   is NOT fixed and can't be from application code; documented in `config/tenancy.php`'s comment as a
   reason to reconsider before ever re-enabling either bootstrapper. `php -l` clean.
 
 - **Post-hoc fix #6 (sixth test run, after fix #5): same "5 failed" count but a completely different
-  failure shape** — `ModelNotFoundException`/"No query results for model [App\Models\Tenant]" in
+  failure shape** - `ModelNotFoundException`/"No query results for model [App\Models\Tenant]" in
   `TenantDeletionTest`, `TenantProvisioningTest`, and both `TenantSuspensionTest` cases (all of which
   provision a tenant via `central.tenants.store` first), plus "Session is missing expected key [errors]"
-  in the subdomain-uniqueness test. Fix #5 genuinely worked (the Filesystem crash is gone) — this is a
+  in the subdomain-uniqueness test. Fix #5 genuinely worked (the Filesystem crash is gone) - this is a
   different, **pre-existing self-inflicted bug** in this same hardening pass, just unmasked once the
   bootstrapper crashes stopped hiding it. Root cause: `App\Listeners\AbortIfTenantSuspended` (added earlier in this same pass, for the "block
   requests into a still-provisioning tenant" feature) was registered
   as a listener on the generic `Events\TenancyInitialized` event in `TenancyServiceProvider`. That event
   fires for **every** `tenancy()->initialize()`/`$tenant->run()` call, including the ones the provisioning
   pipeline makes on itself (`tenants:migrate`, `tenants:seed`, `CreateTenantFirstAdmin`'s own
-  `$tenant->run()`) — not just real inbound HTTP requests through `InitializeTenancyByDomain`. Since a
+  `$tenant->run()`) - not just real inbound HTTP requests through `InitializeTenancyByDomain`. Since a
   brand-new tenant's `status` is `Provisioning` for the tenant's *entire* provisioning pipeline, the
   listener's own `abort(403, '...still being set up...')` branch fired on the very first internal
-  initialize (inside `MigrateDatabase`'s `tenants:migrate` call) — killing the pipeline immediately. That
+  initialize (inside `MigrateDatabase`'s `tenants:migrate` call) - killing the pipeline immediately. That
   `HttpException` bubbles up through the synchronous `dispatch()` (queue = `sync` in tests) and through
   `$tenant->save()` in `TenantController::store()`, into its `catch (Throwable $e)` block, which
-  `rollBack()`s the wrapping transaction and re-throws — so the tenant row never really exists, the
+  `rollBack()`s the wrapping transaction and re-throws - so the tenant row never really exists, the
   response Laravel renders is a 403 (not a redirect), and every test that provisions-then-looks-up a
   tenant hits `ModelNotFoundException`. The "subdomain must be unique" test failed for the identical
   reason: the *first* tenant in that test never actually persisted either, so the second POST found
   nothing to collide with. **Fix applied**: moved the check out of the `TenancyInitialized` event
-  entirely and turned it into real HTTP route middleware — new `App\Http\Middleware\AbortIfTenantSuspended`
+  entirely and turned it into real HTTP route middleware - new `App\Http\Middleware\AbortIfTenantSuspended`
   (`handle(Request $request, Closure $next)`, reads `tenant()` directly), registered in
   `routes/tenant.php`'s middleware group right after `InitializeTenancyByDomain::class` (the only tenant
-  entry point in this app — confirmed via grep, no `InitializeTenancyBySubdomain` usage anywhere). Removed
+  entry point in this app - confirmed via grep, no `InitializeTenancyBySubdomain` usage anywhere). Removed
   the old `App\Listeners\AbortIfTenantSuspended` file and its `TenancyInitialized` registration (with an
   explanatory comment) in `TenancyServiceProvider`. Because it's now route middleware instead of a global
-  tenancy event listener, it only ever sees genuine inbound requests into a tenant's domain — internal
+  tenancy event listener, it only ever sees genuine inbound requests into a tenant's domain - internal
   pipeline-driven `$tenant->run()` calls never go through HTTP routing, so they're no longer affected.
   Also fixed a now-stale comment in `TenantProvisioningTest.php` referencing the old "before any route
   middleware runs" framing. `php -l` clean on all four touched/added files. **Not yet re-verified by the
-  user** — this was root-caused and fixed via pure static reasoning about the event vs. middleware timing
+  user** - this was root-caused and fixed via pure static reasoning about the event vs. middleware timing
   difference, same as every other fix in this pass; no test was executed by the assistant.
   - **Lesson**: a `TenancyInitialized` (or any tenancy lifecycle event) listener that's meant to gate
-    *end-user requests* must be scoped to the HTTP middleware layer, not the underlying tenancy event —
+    *end-user requests* must be scoped to the HTTP middleware layer, not the underlying tenancy event -
     the same event also fires for every internal/programmatic `$tenant->run()` call the app itself makes
     (migrations, seeding, background provisioning, admin tooling), and a status guard meant for requests
     will incorrectly fire there too, especially for a tenant whose current status is exactly the
@@ -2650,7 +2650,7 @@ sanity checks (route registration, a real `tinker` round-trip through the TOTP/Q
 
 ## How to verify the app is actually working, updated (2026-08-27)
 
-Full suite: **132/132 tests, 811 assertions**, `npm run build` succeeding — verified directly by an
+Full suite: **132/132 tests, 811 assertions**, `npm run build` succeeding - verified directly by an
 assistant session on 2026-08-27 (not just relayed from the user), after finding and fixing the
 regression described in the top-of-file 2026-08-27 entry. This closes out the whole post-hoc
 fix #1–#6 saga above: every failure mode hit during the hardening pass (queue tenant tagging,
@@ -2658,20 +2658,20 @@ the two vendor-bootstrapper try/finally crashes, the 2FA test-isolation bug, the
 provisioning-guard-fires-on-internal-calls bug, and this session's
 missing-database-file-crashes-before-the-guard-runs bug) is now fixed and covered by a passing
 suite. If a future session sees a "not yet re-verified" note like the ones above again, don't just
-trust it — rerun the suite first, the way this session did, since it already caught one place where
+trust it - rerun the suite first, the way this session did, since it already caught one place where
 the actual state was much worse than what was written down.
 
-**171/171 tests, 1513 assertions as of 2026-08-29 (second session)** — `npm run build` succeeds,
+**171/171 tests, 1513 assertions as of 2026-08-29 (second session)** - `npm run build` succeeds,
 `vendor/bin/pint --dirty` clean, re-verified directly (not relayed) after the 5-fork reports batch
 above.
 
-**184/184 tests, 1709 assertions as of 2026-08-29 (third session)** — `npm run build` succeeds (after
+**184/184 tests, 1709 assertions as of 2026-08-29 (third session)** - `npm run build` succeeds (after
 fixing the `VatSummary.vue` `defineProps()` bug described above), `vendor/bin/pint --dirty` clean.
 
-**185/185 tests, 1713 assertions as of 2026-08-29 (fourth session)** — after the first-ever real
+**185/185 tests, 1713 assertions as of 2026-08-29 (fourth session)** - after the first-ever real
 HTTP-level smoke test found and fixed the `is_profit_and_loss` backfill bug described above.
 `vendor/bin/pint --dirty` clean. This was also the first session to verify actual runtime behavior
-against real (non-`RefreshDatabase`) tenant data, not just the automated suite — worth repeating
+against real (non-`RefreshDatabase`) tenant data, not just the automated suite - worth repeating
 periodically against the two persistent dev tenants (`acme.localhost`/`test.localhost`) rather than
 relying on the suite alone, since this bug is proof a green suite can hide a real defect that only
 aged, pre-existing data exposes.
@@ -2679,24 +2679,24 @@ aged, pre-existing data exposes.
 ## Open items (also see `goal.md` roadmap)
 
 - Chart-of-accounts/customers/suppliers/items, the enterprise UI redesign, the ledger/journal
-  voucher posting engine, Sales/Purchase/Stock Adjustment, the Reporting MVP (now **20 reports** — the
+  voucher posting engine, Sales/Purchase/Stock Adjustment, the Reporting MVP (now **20 reports** - the
   original 8, Day/Cash/Bank Book and Aged Receivables/Payables, TDS, Stock Valuation, Item-wise
   Sales/Purchase, Sales/Purchase/Stock-by-Category, then VAT Summary and Stock Movement Register),
   partial-line Sales/Purchase Returns, and the return-fidelity fixes (cancel-a-return, discount/TDS
   reversal, cash/bank refund) are all backend AND frontend complete, verified via the automated suite
   (185/185) and `npm run build`. **A real HTTP-level (curl-driven) smoke test of the golden path was
-  done 2026-08-29 (fourth session) — see above — and it found a real bug (`is_profit_and_loss`
+  done 2026-08-29 (fourth session) - see above - and it found a real bug (`is_profit_and_loss`
   backfill) the automated suite structurally could not catch.** This was NOT a real browser
-  click-through, though — no JS execution, no console-error/visual/CSS check, no proof the Vue side
+  click-through, though - no JS execution, no console-error/visual/CSS check, no proof the Vue side
   actually hydrates and reacts correctly (only that the server returns correct Inertia JSON). **A true
   browser-based pass is still open** and worth doing once a browser automation tool (Playwright MCP or
-  similar) is available in a session — every other item below is either a documented, deliberate scope
+  similar) is available in a session - every other item below is either a documented, deliberate scope
   limit or genuinely blocked on infrastructure that doesn't exist yet (a real MySQL target).
 - ~~Aged Receivables/Payables MVP gap (no payment-receipt feature)~~ **Closed 2026-09-02** by the
   Payment/Receipt module (`Receipt`/`Payment` models + `ReceiptAllocation`/`PaymentAllocation`,
-  `Sale::outstandingAmount()`/`Purchase::outstandingAmount()`) — see the 2026-09-02 section above and
+  `Sale::outstandingAmount()`/`Purchase::outstandingAmount()`) - see the 2026-09-02 section above and
   `goal.md` roadmap item 9. **Narrower caveat still true**: this only nets correctly as long as
-  payment is recorded through Receipt/Payment — an invoice settled via a raw Journal Voucher still
+  payment is recorded through Receipt/Payment - an invoice settled via a raw Journal Voucher still
   bypasses `outstandingAmount()` and keeps aging forever in the report.
 - The remaining ~28ish legacy report views beyond the now-20-report set (invoice print list, ledger
   summary/sub-ledger, sales/purchase-with-notes, agent charges, capital services, damage-stock,
@@ -2704,22 +2704,22 @@ aged, pre-existing data exposes.
   duplicates of reports already built, already covered by the existing generic Account Ledger page, or
   tied to business concepts this app deliberately doesn't model (sales agents, capital/service purchase
   splits, item "company"/brand groupings) that would need a real feature decision first, not just a
-  report — see legacy `app/Http/Controllers/reportsController.php` in the
+  report - see legacy `app/Http/Controllers/reportsController.php` in the
   sibling `../day_khata` repo for the full method list, most of which are date-filter variants of a
   smaller set of real report types). Re-evaluate priority against actual usage before picking the next
   batch, same as every prior reporting pass.
-- No UI yet for the closed-year correction override — **this is now DONE**, see the 2026-08-27
+- No UI yet for the closed-year correction override - **this is now DONE**, see the 2026-08-27
   session entry near the top of this file (was still open as of the last mem.md revision).
-- MySQL credential-role separation is docs-only (`deploy/mysql-credentials.md`/`mysql-grants.sql`) —
+- MySQL credential-role separation is docs-only (`deploy/mysql-credentials.md`/`mysql-grants.sql`) -
   actually wiring dual DB connections is real future work, needs a real MySQL target to verify against.
 - Queued/async operational pieces still missing: 2FA is opt-in (no forced-enrollment UX), and there's
   no queue-worker supervision/monitoring guidance yet for running `php artisan queue:work` in
   production now that tenant provisioning genuinely depends on a worker being alive. **Confirmed
   concretely, not just in theory, by the 2026-08-29 (fourth session) smoke test**: creating a tenant via
-  the real HTTP flow does nothing until a `queue:work` process actually drains the job — this is
+  the real HTTP flow does nothing until a `queue:work` process actually drains the job - this is
   exactly the missing-supervision risk this bullet already flagged, now with a first-hand repro.
 - `database/` has ~1160 orphaned `tenant<uuid>.sqlite` files from past test runs whose physical DB file
   was never cleaned up (found during the 2026-08-29 fourth-session smoke test, not acted on). Pure disk
-  clutter, not a correctness bug — safe to bulk-delete any `tenant*.sqlite` file whose UUID doesn't
+  clutter, not a correctness bug - safe to bulk-delete any `tenant*.sqlite` file whose UUID doesn't
   match a real row in the central `tenants` table, but do that only with explicit user sign-off, not
   unilaterally.

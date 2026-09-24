@@ -72,7 +72,7 @@ class TenancyServiceProvider extends ServiceProvider
             Events\TenancyInitialized::class => [
                 // Suspended/still-provisioning tenants are blocked via the
                 // App\Http\Middleware\AbortIfTenantSuspended route middleware
-                // (routes/tenant.php), not here — this event also fires for
+                // (routes/tenant.php), not here - this event also fires for
                 // every internal tenancy()->initialize()/$tenant->run() call
                 // the provisioning pipeline itself makes, which must be able
                 // to proceed while status is still Provisioning.
@@ -141,7 +141,7 @@ class TenancyServiceProvider extends ServiceProvider
             // Even higher priority than the initialization middleware
             Middleware\PreventAccessFromCentralDomains::class,
 
-            // Must run before any tenancy-initialization middleware below —
+            // Must run before any tenancy-initialization middleware below -
             // see AbortIfTenantSuspended's own docblock for why.
             AbortIfTenantSuspended::class,
 

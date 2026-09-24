@@ -7,6 +7,8 @@ import { useLayoutChrome } from '@/composables/useLayoutChrome';
 import Card from '@/components/ui/Card.vue';
 import Button from '@/components/ui/Button.vue';
 import Badge from '@/components/ui/Badge.vue';
+import PageHeader from '@/components/ui/PageHeader.vue';
+import Tooltip from '@/components/ui/Tooltip.vue';
 import Input from '@/components/ui/Input.vue';
 import Modal from '@/components/ui/Modal.vue';
 import DataTable from '@/components/ui/DataTable.vue';
@@ -84,23 +86,23 @@ const columns = [
         id: 'supplier',
         header: 'Supplier',
         numeric: false,
-        cell: ({ row }) => row.original.supplier?.name ?? '—',
+        cell: ({ row }) => row.original.supplier?.name ?? '-',
     },
     {
         id: 'amount',
-        header: 'Amount',
+        header: 'Amount paid (Rs.)',
         numeric: true,
         cell: ({ row }) => formatMoney(row.original.amount),
     },
     {
         id: 'payment_mode',
-        header: 'Mode',
+        header: 'Paid by',
         numeric: false,
         cell: ({ row }) => (row.original.payment_mode === 'bank' ? 'Bank' : 'Cash'),
     },
     {
         id: 'allocated',
-        header: 'Allocated',
+        header: 'Applied to bills (Rs.)',
         numeric: true,
         // Exact addition of the stored 2dp strings, not a float reduce.
         cell: ({ row }) => formatMoney(sumMoney(row.original.allocations.map((a) => a.amount))),
@@ -110,7 +112,7 @@ const columns = [
         header: 'Status',
         numeric: false,
         cell: ({ row }) =>
-            h(Badge, { variant: statusVariants[row.original.status] ?? 'neutral' }, () => statusLabels[row.original.status] ?? row.original.status),
+            h(Badge, { pill: true, variant: statusVariants[row.original.status] ?? 'neutral' }, () => statusLabels[row.original.status] ?? row.original.status),
     },
     {
         id: 'actions',
@@ -118,13 +120,16 @@ const columns = [
         numeric: false,
         cell: ({ row }) =>
             row.original.status === 'posted'
-                ? h(Button, {
-                      variant: 'secondary',
-                      tone: 'purple',
-                      type: 'button',
-                      onClick: () => openCancel(row.original),
-                  }, () => 'Cancel')
-                : '—',
+                ? h(Tooltip, { label: 'Cancel this payment and reverse its entries' }, () =>
+                      h(Button, {
+                          variant: 'secondary',
+                          tone: 'purple',
+                          type: 'button',
+                          'aria-label': `Cancel payment to ${row.original.supplier?.name ?? 'supplier'}`,
+                          onClick: () => openCancel(row.original),
+                      }, () => 'Cancel'),
+                  )
+                : '-',
     },
 ];
 </script>
@@ -142,23 +147,30 @@ const columns = [
         </template>
 
         <template v-else>
-            <div class="mb-4 flex items-center justify-between">
-                <h2 class="text-base font-bold text-text-strong">Payments</h2>
+            <PageHeader title="Supplier payments" description="Money paid to suppliers against their bills. Cancel a payment entered in error.">
                 <Button variant="primary" tone="purple" @click="showCreateForm = true">
-                    <Plus class="size-4" />
+                    <Plus class="size-4" aria-hidden="true" />
                     New payment
                 </Button>
-            </div>
+            </PageHeader>
 
             <Card variant="panel">
-                <DataTable :columns="columns" :data="payments" :page-size="10" empty-message="No payments yet" />
+                <div v-if="payments.length === 0" class="py-10 text-center">
+                    <p class="text-sm font-semibold text-text-strong">No payments yet</p>
+                    <p class="mt-1 text-sm text-text-muted">Record the first payment you made to a supplier.</p>
+                    <Button class="mt-3" variant="primary" tone="purple" type="button" @click="showCreateForm = true">
+                        <Plus class="size-4" aria-hidden="true" />
+                        New payment
+                    </Button>
+                </div>
+                <DataTable v-else :columns="columns" :data="payments" :page-size="10" empty-message="No payments yet" />
             </Card>
         </template>
 
         <Modal :open="!!cancelling" title="Cancel payment" size="compact" @update:open="onCancelOpenChange">
             <form class="flex flex-col gap-4" @submit.prevent="submitCancel">
                 <p class="text-sm text-text-muted">
-                    This posts a reversing entry for this payment. This cannot be undone.
+                    Cancelling this payment posts a reversing entry and reopens the supplier bills it was applied to. This cannot be undone.
                 </p>
                 <div>
                     <label class="mb-1 block text-sm font-semibold text-text-base">Reason <span class="text-danger">*</span></label>
@@ -168,9 +180,9 @@ const columns = [
             </form>
 
             <template #footer>
-                <Button variant="secondary" tone="purple" type="button" @click="cancelling = null">Back</Button>
-                <Button variant="primary" tone="purple" type="button" :disabled="cancelForm.processing" @click="submitCancel">
-                    Confirm cancellation
+                <Button variant="secondary" tone="purple" type="button" @click="cancelling = null">Keep payment</Button>
+                <Button variant="primary" tone="purple" type="button" :loading="cancelForm.processing" @click="submitCancel">
+                    Cancel this payment
                 </Button>
             </template>
         </Modal>

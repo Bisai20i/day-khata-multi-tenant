@@ -133,6 +133,108 @@ class CapitalPurchase extends Model
     }
 
     /**
+     * @return HasMany<CapitalPurchaseSettlement, $this>
+     */
+    public function settlements(): HasMany
+    {
+        return $this->hasMany(CapitalPurchaseSettlement::class);
+    }
+
+    /**
+     * What was still owed to the supplier the moment the bill was posted:
+     * the whole total for a credit bill, the unpaid part for a partial one,
+     * nothing for cash or bank.
+     */
+    public function initialUnpaidAmount(): Money
+    {
+        return match ($this->payment_mode) {
+            'credit' => Money::of($this->total),
+            'partial' => Money::of($this->total)
+                ->minus(Money::of($this->cash_amount ?? 0))
+                ->minus(Money::of($this->bank_amount ?? 0)),
+            default => Money::zero(),
+        };
+    }
+
+    /**
+     * Sum of live (not cancelled) later settlements.
+     */
+    public function settledAmount(): Money
+    {
+        return Money::sum(
+            $this->settlements()->where('status', 'posted')->pluck('amount')
+                ->map(static fn ($amount): Money => Money::of($amount))
+        );
+    }
+
+    /**
+     * Unpaid balance still owed on this bill. Zero for a cancelled bill.
+     * Callers that then write must hold a lock on this row (see
+     * CapitalPurchaseSettlement::settle()).
+     */
+    public function outstandingAmount(): Money
+    {
+        if ($this->status === 'cancelled') {
+            return Money::zero();
+        }
+
+        return Money::max(Money::zero(), $this->initialUnpaidAmount()->minus($this->settledAmount()));
+    }
+
+    /**
+     * Accounts that may hold the payment (cash or bank): never a Profit and
+     * Loss account, a party ledger, a supplier/customer control account or
+     * Input VAT (audit CS-03).
+     *
+     * @throws InvalidArgumentException
+     */
+    public static function assertPaymentAccount(int $accountId): void
+    {
+        $account = Account::with(['group.accountHead', 'subgroup.accountGroup.accountHead'])->find($accountId);
+
+        if ($account === null) {
+            throw new InvalidArgumentException('The selected payment account does not exist.');
+        }
+
+        if ($account->isProfitAndLoss() || static::isReservedAccount($account)) {
+            throw new InvalidArgumentException("\"{$account->name}\" cannot be used as a cash or bank payment account.");
+        }
+    }
+
+    /**
+     * Expense/asset line accounts must not be Input VAT, a party ledger or
+     * the account the payment is drawn from (audit CS-03).
+     *
+     * @throws InvalidArgumentException
+     */
+    public static function assertLineAccount(int $accountId, ?int $paymentAccountId = null): void
+    {
+        $account = Account::with(['group', 'subgroup'])->find($accountId);
+
+        if ($account === null) {
+            throw new InvalidArgumentException('A line account does not exist.');
+        }
+
+        if (static::isReservedAccount($account) || $account->code === 'AS1' || ($paymentAccountId !== null && $paymentAccountId === $account->id)) {
+            throw new InvalidArgumentException("\"{$account->name}\" cannot be used as an expense or asset account on a capital purchase.");
+        }
+    }
+
+    private static function isReservedAccount(Account $account): bool
+    {
+        if ($account->code === 'ASA23') {
+            return true;
+        }
+
+        if (in_array($account->subgroup?->name, ['Sundry Debtors', 'Sundry Creditors', 'Sales Agents'], true)) {
+            return true;
+        }
+
+        return Supplier::where('account_id', $account->id)->exists()
+            || Customer::where('account_id', $account->id)->exists();
+    }
+
+    /**
      * The value written into the unique `bill_number_guard` column while a
      * purchase is live, or null when there is nothing to protect.
      *
@@ -184,6 +286,14 @@ class CapitalPurchase extends Model
 
             $supplierId = $data['supplier_id'] ?? null;
             $supplier = $supplierId ? Supplier::findOrFail($supplierId) : null;
+
+            $paymentAccountId = ! empty($data['bank_account_id']) ? (int) $data['bank_account_id'] : null;
+            if ($paymentAccountId !== null) {
+                static::assertPaymentAccount($paymentAccountId);
+            }
+            foreach ($lines as $line) {
+                static::assertLineAccount((int) $line['account_id'], $paymentAccountId);
+            }
 
             $billNumber = isset($data['bill_number']) ? trim((string) $data['bill_number']) : '';
             $billNumber = $billNumber === '' ? null : $billNumber;
@@ -493,11 +603,32 @@ class CapitalPurchase extends Model
                 throw new InvalidArgumentException('The cancellation reason cannot be longer than 500 characters.');
             }
 
+            if ($capitalPurchase->settlements()->where('status', 'posted')->exists()) {
+                throw new InvalidArgumentException('This capital purchase has settlements against it. Cancel those settlements first.');
+            }
+
+            $assets = FixedAsset::query()
+                ->whereIn('id', $capitalPurchase->lines()->whereNotNull('fixed_asset_id')->pluck('fixed_asset_id'))
+                ->lockForUpdate()
+                ->get();
+
+            foreach ($assets as $asset) {
+                if ($asset->status === 'disposed' || $asset->depreciations()->exists()) {
+                    throw new InvalidArgumentException(
+                        "Fixed asset {$asset->asset_code} from this purchase has been depreciated or disposed. Reverse those entries first."
+                    );
+                }
+            }
+
             $reversal = JournalVoucher::reverse(
                 $capitalPurchase->journalVoucher()->firstOrFail(),
                 $actor,
                 "Cancellation of capital purchase #{$capitalPurchase->id}: {$reason}",
             );
+
+            foreach ($assets as $asset) {
+                $asset->update(['status' => 'cancelled']);
+            }
 
             $capitalPurchase->update([
                 'status' => 'cancelled',

@@ -2,6 +2,7 @@
 import { computed, reactive, watch } from 'vue';
 import { useForm } from '@inertiajs/vue3';
 import Card from '@/components/ui/Card.vue';
+import PageHeader from '@/components/ui/PageHeader.vue';
 import Button from '@/components/ui/Button.vue';
 import Input from '@/components/ui/Input.vue';
 import Select from '@/components/ui/Select.vue';
@@ -103,13 +104,13 @@ function submit() {
 
 <template>
     <Card variant="panel">
-        <div class="mb-4 flex items-center justify-between">
-            <h3 class="text-base font-bold text-text-strong">New payment</h3>
+        <PageHeader title="New supplier payment" description="Record money paid to a supplier, and optionally apply it to their outstanding bills. Fields marked * are required.">
             <Button variant="secondary" tone="purple" type="button" @click="emit('cancel')">Cancel</Button>
-        </div>
+        </PageHeader>
 
         <form class="flex flex-col gap-4" @submit.prevent="submit">
-            <div class="grid grid-cols-3 gap-4">
+            <h4 class="border-b-[1.5px] border-border pb-1 text-sm font-bold text-text-strong">Supplier &amp; payment</h4>
+            <div class="grid grid-cols-1 gap-4 sm:grid-cols-3">
                 <div>
                     <label class="mb-1 block text-sm font-semibold text-text-base">Supplier <span class="text-danger">*</span></label>
                     <Combobox
@@ -121,17 +122,17 @@ function submit() {
                     <p v-if="form.errors.supplier_id" class="mt-1 text-sm text-danger">{{ form.errors.supplier_id }}</p>
                 </div>
                 <div>
-                    <label class="mb-1 block text-sm font-semibold text-text-base">Date <span class="text-danger">*</span></label>
+                    <label class="mb-1 block text-sm font-semibold text-text-base">Payment date (BS) <span class="text-danger">*</span></label>
                     <NepaliDateInput v-model="form.date" required />
                     <p v-if="form.errors.date" class="mt-1 text-sm text-danger">{{ form.errors.date }}</p>
                 </div>
                 <div>
-                    <label class="mb-1 block text-sm font-semibold text-text-base">Amount <span class="text-danger">*</span></label>
+                    <label class="mb-1 block text-sm font-semibold text-text-base">Amount paid (Rs.) <span class="text-danger">*</span></label>
                     <Input v-model="form.amount" type="number" min="0.01" step="0.01" placeholder="0.00" required />
                     <p v-if="form.errors.amount" class="mt-1 text-sm text-danger">{{ form.errors.amount }}</p>
                 </div>
                 <div>
-                    <label class="mb-1 block text-sm font-semibold text-text-base">Mode <span class="text-danger">*</span></label>
+                    <label class="mb-1 block text-sm font-semibold text-text-base">Paid by <span class="text-danger">*</span></label>
                     <Select
                         :model-value="form.payment_mode"
                         :options="paymentModeOptions"
@@ -139,7 +140,7 @@ function submit() {
                     />
                 </div>
                 <div v-if="showBankAccount">
-                    <label class="mb-1 block text-sm font-semibold text-text-base">Bank Account <span class="text-danger">*</span></label>
+                    <label class="mb-1 block text-sm font-semibold text-text-base">Bank account <span class="text-danger">*</span></label>
                     <Combobox
                         :model-value="form.bank_account_id"
                         :options="bankAccountOptions"
@@ -149,26 +150,26 @@ function submit() {
                     <p v-if="form.errors.bank_account_id" class="mt-1 text-sm text-danger">{{ form.errors.bank_account_id }}</p>
                 </div>
                 <div>
-                    <label class="mb-1 block text-sm font-semibold text-text-base">Reference #</label>
-                    <Input v-model="form.reference_number" type="text" maxlength="255" placeholder="Optional" />
+                    <label class="mb-1 block text-sm font-semibold text-text-base">Reference number</label>
+                    <Input v-model="form.reference_number" type="text" maxlength="255" placeholder="Cheque or transfer number (optional)" />
                 </div>
-                <div class="col-span-3">
-                    <label class="mb-1 block text-sm font-semibold text-text-base">Narration</label>
-                    <Input v-model="form.narration" type="text" maxlength="255" placeholder="Optional" />
+                <div class="sm:col-span-3">
+                    <label class="mb-1 block text-sm font-semibold text-text-base">Notes (narration)</label>
+                    <Input v-model="form.narration" type="text" maxlength="255" placeholder="Optional note kept with this payment" />
                 </div>
             </div>
 
             <div v-if="form.supplier_id" class="border-t-[1.5px] border-border pt-4">
-                <p class="mb-2 text-sm font-semibold text-text-base">Allocate against outstanding bills (optional)</p>
+                <h4 class="mb-2 border-b-[1.5px] border-border pb-1 text-sm font-bold text-text-strong">Apply to outstanding bills (optional)</h4>
                 <p v-if="supplierPurchases.length === 0" class="text-sm text-text-muted">No outstanding bills for this supplier.</p>
 
                 <div v-else class="flex flex-col gap-2">
                     <div class="grid grid-cols-[120px_1fr_110px_110px_130px] gap-2 text-[10px] font-bold tracking-[.8px] text-text-muted uppercase">
                         <span>Date (BS)</span>
-                        <span>Bill #</span>
-                        <span>Total</span>
-                        <span>Outstanding</span>
-                        <span>Allocate</span>
+                        <span>Supplier bill no.</span>
+                        <span>Bill total</span>
+                        <span>Still owed</span>
+                        <span>Apply (Rs.)</span>
                     </div>
                     <div
                         v-for="purchase in supplierPurchases"
@@ -188,6 +189,7 @@ function submit() {
                             :max="purchase.outstanding"
                             step="0.01"
                             placeholder="0.00"
+                            :aria-label="`Amount to apply to bill ${purchase.bill_number ? purchase.bill_number : `Purchase #${purchase.id}`}`"
                         />
                     </div>
                 </div>
@@ -208,6 +210,7 @@ function submit() {
                     variant="primary"
                     tone="purple"
                     type="submit"
+                    :loading="form.processing"
                     :disabled="form.processing || !form.supplier_id || overAllocated"
                 >
                     Record payment

@@ -45,7 +45,7 @@ test('creating a tenant via the endpoint provisions a working tenant database wi
     // the test suite runs on the `sync` queue connection, so by the time the
     // request above returns, CreateDatabase/MigrateDatabase/SeedDatabase/
     // CreateTenantFirstAdmin have already all run inline and the tenant is
-    // already Active — this is exercising the real pipeline, not a stub.
+    // already Active - this is exercising the real pipeline, not a stub.
     expect($tenant->status)->toBe(TenantStatus::Active);
     expect($tenant->pending_admin)->toBeNull();
     expect($tenant->contact_email)->toBe('billing@acme.test');
@@ -78,7 +78,7 @@ test('creating a tenant via the endpoint provisions a working tenant database wi
 test('a request into a still-provisioning tenant is blocked instead of hitting a missing database', function () {
     // Fake the queue so the TenantCreated pipeline (CreateDatabase/
     // MigrateDatabase/SeedDatabase/CreateTenantFirstAdmin) never actually
-    // runs, leaving the tenant stuck in Provisioning — exactly the window a
+    // runs, leaving the tenant stuck in Provisioning - exactly the window a
     // real deployment has between the store() request returning and a queue
     // worker picking the job up.
     Queue::fake();
@@ -98,14 +98,14 @@ test('a request into a still-provisioning tenant is blocked instead of hitting a
 
     expect($tenant->status)->toBe(TenantStatus::Provisioning);
     // Nothing was ever created for this tenant, so there's no database file
-    // on disk to clean up — the afterEach's Tenant::delete() call is a no-op
+    // on disk to clean up - the afterEach's Tenant::delete() call is a no-op
     // database-file-wise here (also queued/faked), which is fine.
     expect(file_exists(database_path($tenant->database()->getName())))->toBeFalse();
 
     // Matches the existing convention in TenantSuspensionTest (status-only,
     // hitting the public root route rather than an auth-gated one, since the
     // abort fires from AbortIfTenantSuspended, which runs early in the tenant
-    // route middleware stack — right after tenancy is initialized).
+    // route middleware stack - right after tenancy is initialized).
     $this->get('http://stillcooking.localhost/')->assertStatus(403);
 });
 

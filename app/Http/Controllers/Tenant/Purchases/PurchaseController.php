@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers\Tenant\Purchases;
 
+use App\Enums\FiscalYearStatus;
 use App\Exports\PurchaseListExport;
 use App\Http\Controllers\Controller;
 use App\Models\Account;
@@ -13,6 +14,7 @@ use App\Models\PrintLog;
 use App\Models\Purchase;
 use App\Models\Store;
 use App\Models\Supplier;
+use App\Rules\AccountUnderHead;
 use App\Support\AmountInWords;
 use App\Support\Billing\BillingException;
 use App\Support\Money\Money;
@@ -107,13 +109,15 @@ class PurchaseController extends Controller
             // lock, for the two-clerks-at-once race this cannot see.
             'bill_number' => [
                 'nullable', 'string', 'max:255',
-                Rule::unique('purchases', 'bill_number_key')->where('supplier_id', $request->input('supplier_id')),
+                Rule::unique('purchases', 'bill_number_key')
+                    ->where('supplier_id', $request->input('supplier_id'))
+                    ->where('fiscal_year_id', $this->targetFiscalYearId($request)),
             ],
             'pan_number' => ['nullable', 'string', 'max:50'],
             'chalani_number' => ['nullable', 'string', 'max:100'],
             'date' => ['required', 'date'],
             'payment_mode' => ['required', 'in:cash,bank,partial,credit'],
-            'bank_account_id' => ['nullable', 'exists:accounts,id'],
+            'bank_account_id' => ['nullable', 'exists:accounts,id', new AccountUnderHead('Assets')],
             'store_id' => ['nullable', 'integer', 'exists:stores,id'],
             // decimal:0,N mirrors the column: a value with more decimals than
             // the column can hold used to be charged for and then silently
@@ -128,7 +132,7 @@ class PurchaseController extends Controller
             'force_non_taxable' => ['nullable', 'boolean'],
             'cash_amount' => ['nullable', 'numeric', 'min:0', 'decimal:0,2'],
             'bank_amount' => ['nullable', 'numeric', 'min:0', 'decimal:0,2'],
-            'tds_account_id' => ['nullable', 'exists:accounts,id'],
+            'tds_account_id' => ['nullable', 'exists:accounts,id', new AccountUnderHead('Liabilities')],
             // TDS (item 1): a rate takes precedence over a typed amount -
             // Purchase::post() computes the amount itself as
             // (taxable + nontaxable) x rate. `max:100` is what keeps that
@@ -296,6 +300,20 @@ class PurchaseController extends Controller
             'vat_amount' => Money::round($row->vat_amount)->toString(),
             'total' => Money::round($row->total)->toString(),
         ];
+    }
+
+    /**
+     * The fiscal year this bill will be posted into: the one named by the form
+     * (a correction posting) or else the open year. Bill numbers are unique
+     * per supplier within this year only.
+     */
+    private function targetFiscalYearId(Request $request): ?int
+    {
+        if ($request->filled('fiscal_year_id')) {
+            return (int) $request->input('fiscal_year_id');
+        }
+
+        return FiscalYear::query()->where('status', FiscalYearStatus::Open)->value('id');
     }
 
     /**

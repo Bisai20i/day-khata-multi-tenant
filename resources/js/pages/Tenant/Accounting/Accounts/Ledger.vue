@@ -3,6 +3,7 @@ import { computed, h, ref } from 'vue';
 import { router } from '@inertiajs/vue3';
 import AppLayout from '@/layouts/AppLayout.vue';
 import { useLayoutChrome } from '@/composables/useLayoutChrome';
+import PageHeader from '@/components/ui/PageHeader.vue';
 import Card from '@/components/ui/Card.vue';
 import Select from '@/components/ui/Select.vue';
 import Button from '@/components/ui/Button.vue';
@@ -48,7 +49,7 @@ const props = defineProps({
     },
 });
 
-useLayoutChrome(() => `Ledger — ${props.account.name}`);
+useLayoutChrome(() => `Ledger - ${props.account.name}`);
 
 // An arbitrary date window inside the chosen fiscal year (T14 task 3) - the
 // backend clamps whatever is sent here to the year's own start/end and
@@ -63,6 +64,12 @@ function applyWindow() {
         { fiscal_year_id: props.fiscalYearId, from: from.value ?? undefined, to: to.value ?? undefined },
         { preserveState: true, preserveScroll: true },
     );
+}
+
+function clearWindow() {
+    from.value = null;
+    to.value = null;
+    applyWindow();
 }
 
 function printUrl() {
@@ -134,7 +141,7 @@ const columns = [
         id: 'dateBs',
         header: 'Date (BS)',
         numeric: false,
-        cell: ({ row }) => formatBsDate(row.original.date) || '—',
+        cell: ({ row }) => formatBsDate(row.original.date) || '-',
     },
     { accessorKey: 'date', header: 'Date (AD)' },
     {
@@ -147,7 +154,7 @@ const columns = [
         accessorKey: 'narration',
         header: 'Narration',
         numeric: false,
-        cell: ({ row }) => row.original.narration ?? '—',
+        cell: ({ row }) => row.original.narration ?? '-',
     },
     {
         accessorKey: 'debit',
@@ -161,62 +168,69 @@ const columns = [
     },
     {
         accessorKey: 'balance',
-        header: 'Running Balance',
+        header: 'Running balance',
         cell: ({ row }) => formatMoney(row.original.balance),
     },
     {
         id: 'document',
-        header: 'Source Document',
+        header: 'Source document',
         numeric: false,
         cell: ({ row }) =>
             row.original.document
                 ? row.original.document.url
                     ? h('a', { href: row.original.document.url, target: '_blank', rel: 'noopener', class: 'text-primary underline' }, row.original.document.label)
                     : row.original.document.label
-                : '—',
+                : '-',
     },
 ];
 </script>
 
 <template>
     <div>
-        <div class="mb-4 flex flex-wrap items-center justify-between gap-3">
-            <div>
-                <h2 class="text-base font-bold text-text-strong">
-                    {{ account.name }} <span class="font-normal text-text-muted">· {{ account.code ?? '—' }}</span>
-                </h2>
-            </div>
-            <div v-if="fiscalYearId !== null" class="flex flex-wrap items-end gap-2">
+        <PageHeader
+            :title="`Ledger: ${account.name}${account.code ? ' (' + account.code + ')' : ''}`"
+            description="Every debit and credit posted to this account, with a running balance. Pick a fiscal year and optionally narrow to a date range."
+            back-href="/accounts"
+            back-label="Back to accounts"
+        >
+            <template v-if="fiscalYearId !== null">
+                <a :href="printUrl()" target="_blank" rel="noopener"><Button variant="secondary" tone="purple">Print ledger</Button></a>
+                <a :href="exportUrl()"><Button variant="secondary" tone="purple">Export ledger</Button></a>
+            </template>
+        </PageHeader>
+
+        <Card v-if="fiscalYearId !== null" variant="panel" class="mb-4">
+            <div class="flex flex-wrap items-end gap-3">
                 <div class="w-56">
-                    <label class="mb-1 block text-xs font-semibold text-text-muted">Fiscal Year</label>
+                    <label class="mb-1 block text-xs font-semibold text-text-muted">Fiscal year</label>
                     <Select :model-value="fiscalYearId" :options="fiscalYearOptions" @update:model-value="onFiscalYearChange" />
                 </div>
                 <div>
-                    <label class="mb-1 block text-xs font-semibold text-text-muted">From</label>
+                    <label class="mb-1 block text-xs font-semibold text-text-muted">From date</label>
                     <NepaliDateInput v-model="from" />
                 </div>
                 <div>
-                    <label class="mb-1 block text-xs font-semibold text-text-muted">To</label>
+                    <label class="mb-1 block text-xs font-semibold text-text-muted">To date</label>
                     <NepaliDateInput v-model="to" />
                 </div>
-                <Button variant="primary" tone="purple" @click="applyWindow">Apply</Button>
-                <a :href="printUrl()" target="_blank" rel="noopener"><Button variant="secondary" tone="purple">Print</Button></a>
-                <a :href="exportUrl()"><Button variant="secondary" tone="purple">Export</Button></a>
+                <Button variant="primary" tone="purple" @click="applyWindow">Apply filters</Button>
+                <Button v-if="from || to" variant="secondary" tone="purple" @click="clearWindow">Clear filters</Button>
             </div>
-        </div>
+            <p class="mt-2 text-xs text-text-muted">Dates outside the chosen fiscal year are trimmed to its start and end. The opening balance adjusts to your From date.</p>
+        </Card>
 
         <Card v-if="fiscalYearId !== null" variant="panel" class="mb-4">
-            <div class="flex flex-wrap justify-end gap-6 text-[12.5px]">
-                <div><span class="text-text-muted">Opening Balance:</span> <span class="font-semibold">{{ formatMoney(openingBalance) }}</span></div>
-                <div><span class="text-text-muted">Closing Balance:</span> <span class="font-semibold">{{ formatMoney(closingBalance) }}</span></div>
+            <div class="flex flex-wrap justify-end gap-6 text-[13px]">
+                <div><span class="text-text-muted">Opening balance:</span> <span class="font-semibold tabular-nums">{{ formatMoney(openingBalance) }}</span></div>
+                <div><span class="text-text-muted">Closing balance:</span> <span class="font-semibold tabular-nums">{{ formatMoney(closingBalance) }}</span></div>
             </div>
         </Card>
 
         <Card variant="panel">
             <p v-if="fiscalYearId === null" class="px-1 py-6 text-center text-[13px] text-text-muted">
-                No fiscal year has been created yet.
+                No fiscal year has been created yet. Create one under Fiscal Years to start seeing ledger activity here.
             </p>
-            <DataTable v-else :columns="columns" :data="entries" :page-size="25" empty-message="No activity in this fiscal year" />
+            <DataTable v-else :columns="columns" :data="entries" :page-size="25" empty-message="No activity in this period. Try a wider date range or another fiscal year." />
         </Card>
     </div>
 </template>

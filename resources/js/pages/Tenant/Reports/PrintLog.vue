@@ -5,6 +5,7 @@ import AppLayout from '@/layouts/AppLayout.vue';
 import { useLayoutChrome } from '@/composables/useLayoutChrome';
 import Card from '@/components/ui/Card.vue';
 import Button from '@/components/ui/Button.vue';
+import PageHeader from '@/components/ui/PageHeader.vue';
 import Select from '@/components/ui/Select.vue';
 import NepaliDateInput from '@/components/ui/NepaliDateInput.vue';
 import Badge from '@/components/ui/Badge.vue';
@@ -63,18 +64,19 @@ function clearFilter() {
 
 <template>
     <div>
-        <div class="mb-4 flex items-center justify-between">
-            <h2 class="text-base font-bold text-text-strong">Print Log</h2>
-        </div>
+        <PageHeader
+            title="Print Log"
+            description="Who printed which document and when. Reprints are marked as copies of the original."
+        />
 
         <Card variant="panel" class="mb-4">
             <div class="flex flex-wrap items-end gap-3">
                 <div>
-                    <label class="mb-1 block text-xs font-semibold text-text-muted">From</label>
+                    <label class="mb-1 block text-xs font-semibold text-text-muted">From date (BS)</label>
                     <NepaliDateInput v-model="from" />
                 </div>
                 <div>
-                    <label class="mb-1 block text-xs font-semibold text-text-muted">To</label>
+                    <label class="mb-1 block text-xs font-semibold text-text-muted">To date (BS)</label>
                     <NepaliDateInput v-model="to" />
                 </div>
                 <div class="min-w-[180px]">
@@ -85,14 +87,17 @@ function clearFilter() {
                     <input v-model="copiesOnly" type="checkbox" class="h-3.5 w-3.5 accent-primary" />
                     Reprints only
                 </label>
-                <Button variant="primary" tone="purple" @click="applyFilter">Apply</Button>
-                <Button variant="secondary" tone="purple" @click="clearFilter">Clear</Button>
+                <Button variant="primary" tone="purple" @click="applyFilter">Generate report</Button>
+                <Button variant="secondary" tone="purple" @click="clearFilter">Reset</Button>
             </div>
+            <p v-if="from || to" class="mt-2 text-[12px] text-text-muted">
+                Showing report for {{ from || 'the beginning' }} to {{ to || 'today' }}
+            </p>
         </Card>
 
         <Card variant="panel">
             <p v-if="logs.data.length === 0" class="px-1 py-6 text-center text-[13px] text-text-muted">
-                No documents printed in this range.
+                No transactions in this period. Try widening the date range or resetting the filters.
             </p>
 
             <div v-else class="w-full overflow-x-auto">

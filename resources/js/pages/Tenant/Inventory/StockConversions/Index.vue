@@ -4,6 +4,7 @@ import { useForm, usePage } from '@inertiajs/vue3';
 import { Ban, Plus, Printer } from '@lucide/vue';
 import AppLayout from '@/layouts/AppLayout.vue';
 import { useLayoutChrome } from '@/composables/useLayoutChrome';
+import PageHeader from '@/components/ui/PageHeader.vue';
 import Card from '@/components/ui/Card.vue';
 import Button from '@/components/ui/Button.vue';
 import Input from '@/components/ui/Input.vue';
@@ -48,8 +49,8 @@ const typeLabels = {
 
 function linesSummary(conversion, direction) {
     const lines = (conversion.lines ?? []).filter((line) => line.direction === direction);
-    if (!lines.length) return '—';
-    return lines.map((line) => `${line.item?.name ?? '—'} (${formatQuantity(line.quantity)})`).join(', ');
+    if (!lines.length) return '-';
+    return lines.map((line) => `${line.item?.name ?? '-'} (${formatQuantity(line.quantity)})`).join(', ');
 }
 
 const cancelling = ref(null);
@@ -98,7 +99,7 @@ const columns = [
         id: 'store',
         header: 'Store',
         numeric: false,
-        cell: ({ row }) => row.original.store?.name ?? '—',
+        cell: ({ row }) => row.original.store?.name ?? '-',
     },
     {
         id: 'inputs',
@@ -179,16 +180,15 @@ const columns = [
         </template>
 
         <template v-else>
-            <div class="mb-4 flex items-center justify-between">
-                <h2 class="text-base font-bold text-text-strong">Production & Refining</h2>
+            <PageHeader title="Production & Refining" description="Production & refining: convert input stock into output stock, such as raw material into finished goods.">
                 <Button variant="primary" tone="purple" @click="showCreateForm = true">
                     <Plus class="size-4" />
                     New entry
                 </Button>
-            </div>
+            </PageHeader>
 
             <Card variant="panel">
-                <DataTable :columns="columns" :data="stockConversions" :page-size="10" empty-message="No production or refining entries yet" />
+                <DataTable :columns="columns" :data="stockConversions" :page-size="10" empty-message="No production or refining entries yet. Use 'New entry' above to record one." />
             </Card>
         </template>
 

@@ -17,9 +17,7 @@ use Illuminate\Support\Facades\Storage;
 #[Fillable([
     'company_name', 'address', 'phone', 'email', 'pan_vat_number', 'invoice_footer_note', 'print_paper_size',
     'default_vat_rate', 'allow_negative_stock', 'default_store_id',
-    'sale_full_prefix', 'sale_full_enabled',
-    'sale_abbreviated_prefix', 'sale_abbreviated_enabled',
-    'sale_pan_prefix', 'sale_pan_enabled',
+    'sale_full_prefix', 'sale_abbreviated_prefix', 'sale_pan_prefix', 'active_invoice_type',
     'purchase_prefix', 'sale_return_prefix', 'purchase_return_prefix',
 ])]
 class CompanySetting extends Model
@@ -39,9 +37,6 @@ class CompanySetting extends Model
             // SQLite hands these back as 0 and 1, MySQL as a tinyint. Casting
             // here means a caller can trust the value without its own (bool).
             'allow_negative_stock' => 'boolean',
-            'sale_full_enabled' => 'boolean',
-            'sale_abbreviated_enabled' => 'boolean',
-            'sale_pan_enabled' => 'boolean',
         ];
     }
 
@@ -56,7 +51,7 @@ class CompanySetting extends Model
 
     public static function current(): self
     {
-        return static::firstOrCreate([], ['company_name' => 'My Company']);
+        return static::firstOrCreate([], ['company_name' => 'My Company', 'active_invoice_type' => 'full']);
     }
 
     /**

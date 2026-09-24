@@ -35,7 +35,7 @@ const modelValue = computed({
     <SelectRoot v-model="modelValue" :disabled="disabled">
         <SelectTrigger
             :class="cn(
-                'flex w-full items-center justify-between border-[1.5px] border-border bg-bg-subtle px-3 py-2 text-[13px] text-text-base outline-none transition-colors duration-150',
+                'flex h-9 w-full items-center justify-between border-[1.5px] border-border bg-bg-subtle px-3 text-[13px] text-text-base outline-none transition-colors duration-150',
                 'data-[state=open]:border-primary data-[state=open]:bg-white data-[state=open]:[box-shadow:0_0_0_3px_var(--color-primary-focus-ring)]',
                 'disabled:cursor-not-allowed disabled:opacity-50',
                 props.class,

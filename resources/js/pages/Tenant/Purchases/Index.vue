@@ -7,6 +7,9 @@ import { useLayoutChrome } from '@/composables/useLayoutChrome';
 import Card from '@/components/ui/Card.vue';
 import Button from '@/components/ui/Button.vue';
 import Input from '@/components/ui/Input.vue';
+import PageHeader from '@/components/ui/PageHeader.vue';
+import Badge from '@/components/ui/Badge.vue';
+import Tooltip from '@/components/ui/Tooltip.vue';
 import Modal from '@/components/ui/Modal.vue';
 import DataTable from '@/components/ui/DataTable.vue';
 import NepaliDateInput from '@/components/ui/NepaliDateInput.vue';
@@ -195,19 +198,19 @@ const columns = [
         id: 'supplier',
         header: 'Supplier',
         numeric: false,
-        cell: ({ row }) => row.original.supplier?.name ?? '—',
+        cell: ({ row }) => row.original.supplier?.name ?? '-',
     },
     {
         id: 'bill_number',
-        header: 'Bill #',
+        header: 'Supplier bill no.',
         numeric: false,
-        cell: ({ row }) => row.original.bill_number ?? '—',
+        cell: ({ row }) => row.original.bill_number ?? '-',
     },
     {
         id: 'items',
         header: 'Items',
         numeric: false,
-        cell: ({ row }) => itemSummary(row.original) || '—',
+        cell: ({ row }) => itemSummary(row.original) || '-',
     },
     {
         id: 'payment_mode',
@@ -217,7 +220,7 @@ const columns = [
     },
     {
         id: 'total',
-        header: 'Total',
+        header: 'Total (Rs.)',
         numeric: true,
         cell: ({ row }) => formatMoney(row.original.total),
     },
@@ -226,9 +229,11 @@ const columns = [
         header: 'Status',
         numeric: false,
         cell: ({ row }) =>
-            row.original.status === 'cancelled'
-                ? 'Cancelled'
-                : 'Posted',
+            h(
+                Badge,
+                { pill: true, variant: row.original.status === 'cancelled' ? 'danger' : 'success' },
+                () => (row.original.status === 'cancelled' ? 'Cancelled' : 'Posted'),
+            ),
     },
     {
         id: 'actions',
@@ -236,25 +241,31 @@ const columns = [
         numeric: false,
         cell: ({ row }) =>
             h('div', { class: 'flex items-center gap-2' }, [
-                h(
-                    Button,
-                    {
-                        as: 'a',
-                        variant: 'secondary',
-                        tone: 'purple',
-                        href: `/purchases/${row.original.id}/print`,
-                        target: '_blank',
-                        rel: 'noopener',
-                    },
-                    () => 'Print',
+                h(Tooltip, { label: 'Open a printable copy in a new tab' }, () =>
+                    h(
+                        Button,
+                        {
+                            as: 'a',
+                            variant: 'secondary',
+                            tone: 'purple',
+                            href: `/purchases/${row.original.id}/print`,
+                            target: '_blank',
+                            rel: 'noopener',
+                            'aria-label': `Print purchase from ${row.original.supplier?.name ?? 'supplier'}`,
+                        },
+                        () => 'Print',
+                    ),
                 ),
                 row.original.status === 'posted'
-                    ? h(Button, {
-                          variant: 'secondary',
-                          tone: 'purple',
-                          type: 'button',
-                          onClick: () => openCancel(row.original),
-                      }, () => 'Cancel')
+                    ? h(Tooltip, { label: 'Cancel this purchase and reverse its entries' }, () =>
+                          h(Button, {
+                              variant: 'secondary',
+                              tone: 'purple',
+                              type: 'button',
+                              'aria-label': `Cancel purchase from ${row.original.supplier?.name ?? 'supplier'}`,
+                              onClick: () => openCancel(row.original),
+                          }, () => 'Cancel'),
+                      )
                     : null,
             ]),
     },
@@ -280,22 +291,21 @@ const columns = [
         </template>
 
         <template v-else>
-            <div class="mb-4 flex items-center justify-between">
-                <h2 class="text-base font-bold text-text-strong">Purchases</h2>
+            <PageHeader title="Purchases" description="Bills received from suppliers. Filter, print or export them, and cancel a purchase posted in error.">
                 <Button variant="primary" tone="purple" @click="openCreateForm">
-                    <Plus class="size-4" />
+                    <Plus class="size-4" aria-hidden="true" />
                     New purchase
                 </Button>
-            </div>
+            </PageHeader>
 
             <Card variant="panel" class="mb-4">
                 <div class="flex flex-wrap items-end gap-3">
                     <div class="min-w-[160px]">
-                        <label class="mb-1 block text-xs font-semibold text-text-muted">From</label>
+                        <label class="mb-1 block text-xs font-semibold text-text-muted">From date (BS)</label>
                         <NepaliDateInput v-model="filterState.from" />
                     </div>
                     <div class="min-w-[160px]">
-                        <label class="mb-1 block text-xs font-semibold text-text-muted">To</label>
+                        <label class="mb-1 block text-xs font-semibold text-text-muted">To date (BS)</label>
                         <NepaliDateInput v-model="filterState.to" />
                     </div>
                     <div class="min-w-[220px]">
@@ -304,24 +314,39 @@ const columns = [
                     </div>
                     <Button variant="primary" tone="purple" :loading="filtering" @click="applyFilters">
                         <Search class="size-4" />
-                        Filter
+                        Apply filters
                     </Button>
                     <Button v-if="hasActiveFilters" variant="secondary" tone="purple" @click="clearFilters">
                         <X class="size-4" />
-                        Clear
+                        Clear filters
                     </Button>
                     <a :href="exportUrl">
-                        <Button variant="secondary" tone="purple" type="button">Export</Button>
+                        <Button variant="secondary" tone="purple" type="button">Export filtered list</Button>
                     </a>
                 </div>
             </Card>
 
             <Card variant="panel">
-                <DataTable :columns="columns" :data="purchases.data" :page-size="Math.max(purchases.data.length, 1)" empty-message="No purchases yet" />
+                <div v-if="purchases.data.length === 0" class="py-10 text-center">
+                    <template v-if="hasActiveFilters">
+                        <p class="text-sm font-semibold text-text-strong">No purchases match these filters</p>
+                        <p class="mt-1 text-sm text-text-muted">Try a wider date range or a different supplier.</p>
+                        <Button class="mt-3" variant="secondary" tone="purple" type="button" @click="clearFilters">Clear filters</Button>
+                    </template>
+                    <template v-else>
+                        <p class="text-sm font-semibold text-text-strong">No purchases yet</p>
+                        <p class="mt-1 text-sm text-text-muted">Record the first bill you received from a supplier.</p>
+                        <Button class="mt-3" variant="primary" tone="purple" type="button" @click="openCreateForm">
+                            <Plus class="size-4" aria-hidden="true" />
+                            New purchase
+                        </Button>
+                    </template>
+                </div>
+                <DataTable v-else :columns="columns" :data="purchases.data" :page-size="Math.max(purchases.data.length, 1)" empty-message="No purchases yet" />
 
                 <!-- Server-computed SQL sums for the whole filtered set, not
                      just this page (item 8, "totals row"). -->
-                <div class="mt-3 grid grid-cols-4 gap-3 border-t-[1.5px] border-border pt-3 text-sm">
+                <div class="mt-3 grid grid-cols-2 gap-3 sm:grid-cols-4 border-t-[1.5px] border-border pt-3 text-sm">
                     <div>
                         <p class="text-[10px] font-bold tracking-[.8px] text-text-muted uppercase">Taxable (filtered)</p>
                         <p class="font-bold text-text-strong">{{ formatMoney(totals.taxable_amount) }}</p>
@@ -340,7 +365,7 @@ const columns = [
                     </div>
                 </div>
 
-                <div v-if="purchases.data.length > 0" class="mt-3 flex flex-wrap items-center justify-between gap-3">
+                <nav v-if="purchases.data.length > 0" aria-label="Purchases pagination" class="mt-3 flex flex-wrap items-center justify-between gap-3">
                     <p class="text-xs text-text-muted">Showing {{ purchases.from }}–{{ purchases.to }} of {{ purchases.total }}</p>
                     <div class="flex items-center gap-2">
                         <Link
@@ -375,7 +400,7 @@ const columns = [
                             Next
                         </span>
                     </div>
-                </div>
+                </nav>
             </Card>
         </template>
 
@@ -387,8 +412,8 @@ const columns = [
         >
             <div v-if="cancelling" class="flex flex-col gap-4">
                 <p class="text-sm text-text-muted">
-                    This posts a reversing voucher for the purchase from {{ cancelling.supplier?.name }}
-                    ({{ formatMoney(cancelling.total) }}). This cannot be undone.
+                    Cancelling the purchase from {{ cancelling.supplier?.name }}
+                    ({{ formatMoney(cancelling.total) }}) posts a reversing entry and reduces stock. This cannot be undone.
                 </p>
                 <div>
                     <label class="mb-1 block text-sm font-semibold text-text-base">Reason <span class="text-danger">*</span></label>
@@ -398,9 +423,9 @@ const columns = [
             </div>
 
             <template #footer>
-                <Button variant="secondary" tone="purple" type="button" @click="cancelling = null">Back</Button>
-                <Button variant="primary" tone="purple" type="button" :disabled="reasonForm.processing" @click="submitCancel">
-                    Confirm cancellation
+                <Button variant="secondary" tone="purple" type="button" @click="cancelling = null">Keep purchase</Button>
+                <Button variant="primary" tone="purple" type="button" :loading="reasonForm.processing" @click="submitCancel">
+                    Cancel this purchase
                 </Button>
             </template>
         </Modal>

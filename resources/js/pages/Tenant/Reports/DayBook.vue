@@ -7,6 +7,7 @@ import Card from '@/components/ui/Card.vue';
 import NepaliDateInput from '@/components/ui/NepaliDateInput.vue';
 import Select from '@/components/ui/Select.vue';
 import Button from '@/components/ui/Button.vue';
+import PageHeader from '@/components/ui/PageHeader.vue';
 import { formatMoney, isZeroMoney } from '@/lib/money.js';
 import { formatBsDate } from '@/lib/format.js';
 
@@ -119,34 +120,36 @@ function voucherLabel(voucher) {
 
 <template>
     <div>
-        <div class="mb-4 flex items-center justify-between">
-            <h2 class="text-base font-bold text-text-strong">Day Book</h2>
-            <div v-if="fiscalYearId !== null" class="flex items-center gap-2">
+        <PageHeader title="Day Book" description="Every voucher posted in the period, listed by date with its debit and credit lines.">
+            <template v-if="fiscalYearId !== null">
                 <a :href="printUrl()" target="_blank" rel="noopener"><Button variant="secondary" tone="purple">Print</Button></a>
                 <a :href="exportUrl()"><Button variant="secondary" tone="purple">Export</Button></a>
-            </div>
-        </div>
+            </template>
+        </PageHeader>
 
         <Card variant="panel" class="mb-4">
             <div class="flex flex-wrap items-end gap-3">
                 <div class="w-56">
-                    <label class="mb-1 block text-xs font-semibold text-text-muted">Fiscal Year</label>
+                    <label class="mb-1 block text-xs font-semibold text-text-muted">Fiscal year</label>
                     <Select v-model="fiscalYear" :options="fiscalYearOptions" />
                 </div>
                 <div>
-                    <label class="mb-1 block text-xs font-semibold text-text-muted">From</label>
+                    <label class="mb-1 block text-xs font-semibold text-text-muted">From date (BS)</label>
                     <NepaliDateInput v-model="from" />
                 </div>
                 <div>
-                    <label class="mb-1 block text-xs font-semibold text-text-muted">To</label>
+                    <label class="mb-1 block text-xs font-semibold text-text-muted">To date (BS)</label>
                     <NepaliDateInput v-model="to" />
                 </div>
                 <div class="w-56">
-                    <label class="mb-1 block text-xs font-semibold text-text-muted">Voucher Type</label>
+                    <label class="mb-1 block text-xs font-semibold text-text-muted">Voucher type</label>
                     <Select v-model="voucherType" :options="voucherTypeFilterOptions" />
                 </div>
-                <Button variant="primary" tone="purple" @click="applyFilter">Apply</Button>
+                <Button variant="primary" tone="purple" @click="applyFilter">Generate report</Button>
             </div>
+            <p v-if="from && to" class="mt-2 text-[12px] text-text-muted">
+                Showing report for {{ formatBsDate(from) }} to {{ formatBsDate(to) }} BS
+            </p>
         </Card>
 
         <Card variant="panel">
@@ -155,7 +158,7 @@ function voucherLabel(voucher) {
             </p>
 
             <p v-else-if="vouchers.length === 0" class="px-1 py-6 text-center text-[13px] text-text-muted">
-                No vouchers posted in this range.
+                No transactions in this period. Try widening the date range.
             </p>
 
             <div v-else class="divide-y divide-border">
@@ -165,14 +168,14 @@ function voucherLabel(voucher) {
                             {{ formatBsDate(voucher.date) }} <span class="font-normal text-text-muted">({{ voucher.date }})</span> ·
                             {{ voucherLabel(voucher) }}
                         </div>
-                        <div class="text-[12.5px] text-text-muted">{{ voucher.narration ?? '—' }}</div>
+                        <div class="text-[12.5px] text-text-muted">{{ voucher.narration ?? '-' }}</div>
                     </div>
 
                     <div class="flex items-center px-1 pb-1 pl-4 text-[10px] font-bold tracking-[.8px] text-text-muted uppercase">
                         <div class="flex-1">Account</div>
                         <div class="w-40 text-text-muted normal-case">Narration</div>
-                        <div class="w-28 text-right">Debit</div>
-                        <div class="w-28 text-right">Credit</div>
+                        <div class="w-28 text-right">Debit (Dr)</div>
+                        <div class="w-28 text-right">Credit (Cr)</div>
                     </div>
 
                     <div
@@ -180,17 +183,17 @@ function voucherLabel(voucher) {
                         :key="index"
                         class="flex items-center px-1 py-1 pl-4 text-[13px] text-text-base"
                     >
-                        <div class="flex-1">{{ line.accountName }} <span class="text-text-muted">· {{ line.accountCode ?? '—' }}</span></div>
-                        <div class="w-40 truncate text-[12.5px] text-text-muted">{{ line.narration ?? '—' }}</div>
-                        <div class="w-28 text-right">{{ isZeroMoney(line.debit) ? '—' : formatMoney(line.debit) }}</div>
-                        <div class="w-28 text-right">{{ isZeroMoney(line.credit) ? '—' : formatMoney(line.credit) }}</div>
+                        <div class="flex-1">{{ line.accountName }} <span class="text-text-muted">· {{ line.accountCode ?? '-' }}</span></div>
+                        <div class="w-40 truncate text-[12.5px] text-text-muted">{{ line.narration ?? '-' }}</div>
+                        <div class="w-28 text-right">{{ isZeroMoney(line.debit) ? '-' : formatMoney(line.debit) }}</div>
+                        <div class="w-28 text-right">{{ isZeroMoney(line.credit) ? '-' : formatMoney(line.credit) }}</div>
                     </div>
                 </div>
             </div>
 
             <div v-if="vouchers.length > 0" class="mt-3 flex flex-wrap justify-end gap-6 border-t-[1.5px] border-border pt-3 text-[12.5px]">
-                <div><span class="text-text-muted">Total Debit:</span> <span class="font-semibold">{{ formatMoney(totalDebit) }}</span></div>
-                <div><span class="text-text-muted">Total Credit:</span> <span class="font-semibold">{{ formatMoney(totalCredit) }}</span></div>
+                <div><span class="font-bold text-text-strong">Total Debit (Dr):</span> <span class="font-bold">{{ formatMoney(totalDebit) }}</span></div>
+                <div><span class="font-bold text-text-strong">Total Credit (Cr):</span> <span class="font-bold">{{ formatMoney(totalCredit) }}</span></div>
             </div>
         </Card>
     </div>

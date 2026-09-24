@@ -4,6 +4,7 @@ import { Link } from '@inertiajs/vue3';
 import { Archive } from '@lucide/vue';
 import AppLayout from '@/layouts/AppLayout.vue';
 import { useLayoutChrome } from '@/composables/useLayoutChrome';
+import PageHeader from '@/components/ui/PageHeader.vue';
 import Card from '@/components/ui/Card.vue';
 import DataTable from '@/components/ui/DataTable.vue';
 import Badge from '@/components/ui/Badge.vue';
@@ -50,7 +51,7 @@ function voucherHref(voucherId) {
 }
 
 const columns = [
-    { accessorKey: 'date', header: 'Date', numeric: false, cell: ({ row }) => formatBsDate(row.original.date) },
+    { accessorKey: 'date', header: 'Date (BS)', numeric: false, cell: ({ row }) => formatBsDate(row.original.date) },
     {
         id: 'voucher',
         header: 'Voucher',
@@ -63,7 +64,7 @@ const columns = [
             ),
     },
     { accessorKey: 'narration', header: 'Narration' },
-    { accessorKey: 'createdByName', header: 'Created By' },
+    { accessorKey: 'createdByName', header: 'Created by' },
     {
         id: 'totalDebit',
         header: 'Debit',
@@ -81,32 +82,33 @@ const columns = [
 
 <template>
     <div>
-        <div class="mb-4 flex items-center justify-between">
-            <div>
-                <h2 class="text-base font-bold text-text-strong">{{ fiscalYear.name }}</h2>
-                <p class="text-xs text-text-muted">{{ fiscalYear.bsLabel }} &middot; {{ formatBsDate(fiscalYear.startDate) }} to {{ formatBsDate(fiscalYear.endDate) }} BS</p>
-            </div>
+        <PageHeader
+            :title="`Archived year: ${fiscalYear.name}`"
+            :description="`${fiscalYear.bsLabel} · ${formatBsDate(fiscalYear.startDate)} to ${formatBsDate(fiscalYear.endDate)} (BS). A read-only copy of this closed year's vouchers.`"
+            back-href="/fiscal-years"
+            back-label="Back to fiscal years"
+        >
             <Badge variant="neutral" pill>
                 <Archive class="h-3 w-3" aria-hidden="true" />
-                Archived Snapshot
+                Archived snapshot
             </Badge>
-        </div>
+        </PageHeader>
 
         <Card variant="panel" class="mb-4">
-            <p class="mb-3 text-[12.5px] text-text-muted">
+            <p class="mb-3 text-[13px] text-text-muted">
                 This fiscal year has been copied out to cold storage and is shown here read-only. The live ledger
                 for this year is untouched; nothing on this page can be edited, deleted, or re-posted.
             </p>
-            <div class="flex flex-wrap gap-x-8 gap-y-2 text-[12.5px]">
-                <div><span class="text-text-muted">Archived on:</span> <span class="font-semibold">{{ archive.archivedAt }}</span></div>
-                <div><span class="text-text-muted">Archived by:</span> <span class="font-semibold">{{ archive.archivedBy }}</span></div>
-                <div><span class="text-text-muted">Vouchers:</span> <span class="font-semibold">{{ archive.voucherCount }}</span></div>
-                <div><span class="text-text-muted">Lines:</span> <span class="font-semibold">{{ archive.lineCount }}</span></div>
-            </div>
+            <dl class="grid grid-cols-2 gap-4 text-[13px] sm:grid-cols-4">
+                <div><dt class="text-[10px] font-bold tracking-[.8px] text-text-muted uppercase">Archived on</dt><dd class="font-semibold">{{ archive.archivedAt }}</dd></div>
+                <div><dt class="text-[10px] font-bold tracking-[.8px] text-text-muted uppercase">Archived by</dt><dd class="font-semibold">{{ archive.archivedBy }}</dd></div>
+                <div><dt class="text-[10px] font-bold tracking-[.8px] text-text-muted uppercase">Vouchers</dt><dd class="font-semibold">{{ archive.voucherCount }}</dd></div>
+                <div><dt class="text-[10px] font-bold tracking-[.8px] text-text-muted uppercase">Voucher lines</dt><dd class="font-semibold">{{ archive.lineCount }}</dd></div>
+            </dl>
         </Card>
 
         <Card variant="panel">
-            <DataTable :columns="columns" :data="vouchers" :page-size="25" empty-message="No vouchers in this archive" />
+            <DataTable :columns="columns" :data="vouchers" :page-size="25" empty-message="This archive contains no vouchers." />
         </Card>
     </div>
 </template>

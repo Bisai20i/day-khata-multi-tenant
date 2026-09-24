@@ -3,6 +3,7 @@ import { h, ref, watch } from 'vue';
 import { router, useForm, usePage } from '@inertiajs/vue3';
 import AppLayout from '@/layouts/AppLayout.vue';
 import { useLayoutChrome } from '@/composables/useLayoutChrome';
+import PageHeader from '@/components/ui/PageHeader.vue';
 import Card from '@/components/ui/Card.vue';
 import Button from '@/components/ui/Button.vue';
 import Badge from '@/components/ui/Badge.vue';
@@ -89,7 +90,7 @@ function submit() {
 }
 
 async function destroy(notice) {
-    if (!(await confirm({ message: 'Delete this notice?', tone: 'danger', confirmLabel: 'Delete' }))) return;
+    if (!(await confirm({ title: 'Delete notice?', message: `"${notice.title}" will no longer be shown to any user. This cannot be undone.`, tone: 'danger', confirmLabel: 'Delete notice' }))) return;
     router.delete(`/notices/${notice.id}`);
 }
 
@@ -99,7 +100,7 @@ const columns = [
         id: 'window',
         header: 'Active window',
         numeric: false,
-        cell: ({ row }) => (row.original.starts_at ?? '—') + ' → ' + (row.original.ends_at ?? '—'),
+        cell: ({ row }) => (row.original.starts_at ?? '-') + ' → ' + (row.original.ends_at ?? '-'),
     },
     {
         id: 'status',
@@ -125,10 +126,9 @@ const columns = [
 
 <template>
     <div>
-        <div class="mb-4 flex items-center justify-between">
-            <h2 class="text-base font-bold text-text-strong">Notices</h2>
+        <PageHeader title="Notices" description="Announcements shown to all users of your company.">
             <Button variant="primary" tone="purple" @click="openCreate">New notice</Button>
-        </div>
+        </PageHeader>
 
         <Card variant="panel">
             <DataTable :columns="columns" :data="notices" :page-size="10" />
@@ -180,6 +180,7 @@ const columns = [
                 <div class="flex items-center gap-2">
                     <input id="is_active" v-model="form.is_active" type="checkbox" class="size-4 border-[1.5px] border-border" />
                     <label for="is_active" class="text-sm font-semibold text-text-base">Active</label>
+                    <span class="text-xs text-text-faint">(inactive notices are not shown to users)</span>
                 </div>
             </form>
 
@@ -192,7 +193,7 @@ const columns = [
                     form="notice-form"
                     :disabled="form.processing"
                 >
-                    {{ editing ? 'Save changes' : 'Create notice' }}
+                    {{ form.processing ? 'Saving...' : editing ? 'Save notice' : 'Create notice' }}
                 </Button>
             </template>
         </Modal>

@@ -4,6 +4,7 @@ import { router, useForm, usePage } from '@inertiajs/vue3';
 import { Plus } from '@lucide/vue';
 import AppLayout from '@/layouts/AppLayout.vue';
 import { useLayoutChrome } from '@/composables/useLayoutChrome';
+import PageHeader from '@/components/ui/PageHeader.vue';
 import Card from '@/components/ui/Card.vue';
 import Button from '@/components/ui/Button.vue';
 import Input from '@/components/ui/Input.vue';
@@ -99,7 +100,7 @@ function submit() {
 }
 
 async function destroy(subgroup) {
-    if (!(await confirm({ message: 'Delete this account subgroup?', tone: 'danger', confirmLabel: 'Delete' }))) return;
+    if (!(await confirm({ message: `Delete account subgroup "${subgroup.name}"? This cannot be undone, and it will be refused if accounts still use it.`, tone: 'danger', confirmLabel: 'Delete' }))) return;
     router.delete(`/account-subgroups/${subgroup.id}`, {
         onSuccess: () => toast({ message: 'Account subgroup deleted', variant: 'success' }),
     });
@@ -111,7 +112,7 @@ const columns = [
         id: 'group',
         header: 'Account Group',
         numeric: false,
-        cell: ({ row }) => row.original.account_group?.name ?? '—',
+        cell: ({ row }) => row.original.account_group?.name ?? '-',
     },
     {
         id: 'actions',
@@ -132,16 +133,15 @@ const columns = [
 
 <template>
     <div>
-        <div class="mb-4 flex items-center justify-between">
-            <h2 class="text-base font-bold text-text-strong">Account Subgroups</h2>
+        <PageHeader title="Account Subgroups" description="Finer divisions inside an account group (for example Bank Accounts under Current Assets). Individual accounts are placed in a subgroup.">
             <Button v-if="isAdmin" variant="primary" tone="purple" @click="openCreate">
                 <Plus class="size-4" />
                 New subgroup
             </Button>
-        </div>
+        </PageHeader>
 
         <Card variant="panel">
-            <DataTable :columns="columns" :data="subgroups" :page-size="10" empty-message="No account subgroups found" />
+            <DataTable :columns="columns" :data="subgroups" :page-size="10" empty-message="No account subgroups yet. Use New subgroup to add one under a group." />
         </Card>
 
         <Modal :open="showModal" :title="editing ? 'Edit Account Subgroup' : 'New Account Subgroup'" @update:open="onModalOpenChange">
@@ -154,6 +154,7 @@ const columns = [
                         :options="groupOptions"
                         placeholder="Select account group"
                     />
+                    <p class="mt-1 text-xs text-text-muted">The account group this subgroup sits under.</p>
                     <p v-if="form.errors.account_group_id" class="mt-1 text-sm text-danger">{{ form.errors.account_group_id }}</p>
                 </div>
 

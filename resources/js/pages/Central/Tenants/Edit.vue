@@ -1,11 +1,12 @@
 <script setup>
 import { useForm, Link } from '@inertiajs/vue3';
-import { ArrowLeft, Check } from '@lucide/vue';
+import { Check } from '@lucide/vue';
 import AppLayout from '@/layouts/AppLayout.vue';
 import { useLayoutChrome } from '@/composables/useLayoutChrome';
 import Card from '@/components/ui/Card.vue';
 import Input from '@/components/ui/Input.vue';
 import Button from '@/components/ui/Button.vue';
+import PageHeader from '@/components/ui/PageHeader.vue';
 
 defineOptions({ layout: AppLayout });
 
@@ -30,35 +31,38 @@ function submit() {
 
 <template>
     <div>
-        <Link :href="`/tenants/${tenant.id}`" class="mb-2 inline-flex items-center gap-1 text-sm font-semibold text-primary">
-            <ArrowLeft class="size-4" />
-            Back to tenant
-        </Link>
+        <PageHeader
+            :title="`Edit ${tenant.company_name}`"
+            description="Update the company's name and contact details. Domains are managed on the tenant page. Fields marked * are required."
+            :back-href="`/tenants/${tenant.id}`"
+            :back-label="`Back to ${tenant.company_name}`"
+        />
 
-        <Card variant="panel" class="max-w-lg">
-            <form class="flex flex-col gap-4" @submit.prevent="submit">
-                <div>
-                    <label for="company_name" class="mb-1 block text-sm font-semibold text-text-base">Company name <span class="text-danger">*</span></label>
-                    <Input id="company_name" v-model="form.company_name" type="text" placeholder="e.g. Acme Traders" required />
-                    <p v-if="form.errors.company_name" class="mt-1 text-sm text-danger">{{ form.errors.company_name }}</p>
-                </div>
+        <form class="max-w-lg" @submit.prevent="submit">
+            <Card variant="panel" title="Company">
+                <div class="flex flex-col gap-4">
+                    <div>
+                        <label for="company_name" class="mb-1 block text-sm font-semibold text-text-base">Company name <span class="text-danger">*</span></label>
+                        <Input id="company_name" v-model="form.company_name" type="text" placeholder="e.g. Acme Traders" required :aria-describedby="form.errors.company_name ? 'company_name-error' : undefined" />
+                        <p v-if="form.errors.company_name" id="company_name-error" class="mt-1 text-sm text-danger">{{ form.errors.company_name }}</p>
+                    </div>
 
-                <div>
-                    <label for="contact_email" class="mb-1 block text-sm font-semibold text-text-base">Contact email</label>
-                    <Input id="contact_email" v-model="form.contact_email" type="email" placeholder="you@example.com" />
-                    <p v-if="form.errors.contact_email" class="mt-1 text-sm text-danger">{{ form.errors.contact_email }}</p>
-                </div>
+                    <div>
+                        <label for="contact_email" class="mb-1 block text-sm font-semibold text-text-base">Contact email</label>
+                        <Input id="contact_email" v-model="form.contact_email" type="email" placeholder="you@example.com" :aria-describedby="form.errors.contact_email ? 'contact_email-error' : 'contact_email-help'" />
+                        <p v-if="form.errors.contact_email" id="contact_email-error" class="mt-1 text-sm text-danger">{{ form.errors.contact_email }}</p>
+                        <p v-else id="contact_email-help" class="mt-1 text-xs text-text-muted">Optional. Used to reach the company about their account.</p>
+                    </div>
 
-                <div class="flex gap-2">
-                    <Button type="submit" variant="primary" tone="purple" :loading="form.processing" class="flex-1">
-                        <Check class="size-4" />
-                        Save
-                    </Button>
-                    <Button :as="Link" :href="`/tenants/${tenant.id}`" variant="secondary" tone="purple" class="flex-1 justify-center">
-                        Cancel
-                    </Button>
+                    <div class="flex gap-2">
+                        <Button type="submit" variant="primary" tone="purple" :loading="form.processing">
+                            <Check class="size-4" />
+                            Save changes
+                        </Button>
+                        <Button :as="Link" :href="`/tenants/${tenant.id}`" variant="secondary" tone="purple">Cancel</Button>
+                    </div>
                 </div>
-            </form>
-        </Card>
+            </Card>
+        </form>
     </div>
 </template>

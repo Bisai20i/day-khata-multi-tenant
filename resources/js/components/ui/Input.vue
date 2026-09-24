@@ -28,7 +28,14 @@ function onInput(event) {
 </script>
 
 <template>
-    <div class="relative flex w-full items-center">
+    <div
+        :class="cn(
+            'relative flex w-full items-center',
+            $slots.addon
+                ? 'h-9 border-[1.5px] border-border bg-bg-subtle transition-colors duration-150 focus-within:border-primary focus-within:bg-white focus-within:[box-shadow:0_0_0_3px_var(--color-primary-focus-ring)]'
+                : '',
+        )"
+    >
         <component
             :is="icon"
             v-if="icon"
@@ -41,13 +48,20 @@ function onInput(event) {
             :placeholder="placeholder"
             :disabled="disabled"
             :class="cn(
-                'w-full border-[1.5px] border-border bg-bg-subtle px-3 py-2 text-[13px] text-text-base transition-colors duration-150 outline-none placeholder:text-text-faint',
-                'focus:border-primary focus:bg-white focus:[box-shadow:0_0_0_3px_var(--color-primary-focus-ring)]',
-                'disabled:cursor-not-allowed disabled:opacity-50',
+                'h-9 w-full px-3 text-[13px] text-text-base outline-none placeholder:text-text-faint',
+                $slots.addon
+                    ? 'border-0 bg-transparent'
+                    : 'border-[1.5px] border-border bg-bg-subtle transition-colors duration-150 focus:border-primary focus:bg-white focus:[box-shadow:0_0_0_3px_var(--color-primary-focus-ring)] disabled:cursor-not-allowed disabled:opacity-50',
                 icon ? 'pl-[28px]' : '',
                 props.class,
             )"
             @input="onInput"
         />
+        <!-- Trailing action tied to this specific field (e.g. a discount-type
+             toggle or a "+ add" shortcut) - rendered inside the same bordered
+             box instead of floating beside it as its own button. -->
+        <div v-if="$slots.addon" class="flex h-9 shrink-0 items-center border-l-[1.5px] border-border">
+            <slot name="addon" />
+        </div>
     </div>
 </template>

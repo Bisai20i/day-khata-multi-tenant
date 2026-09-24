@@ -1,10 +1,11 @@
 <script setup>
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue';
-import { router, useForm, usePage } from '@inertiajs/vue3';
+import { Link, router, useForm, usePage } from '@inertiajs/vue3';
 import {
+    ChevronDown,
+    ChevronLeft,
     CircleHelp,
     CirclePause,
-    Delete,
     Maximize2,
     Merge,
     Minimize2,
@@ -27,6 +28,7 @@ import Modal from '@/components/ui/Modal.vue';
 import Tooltip from '@/components/ui/Tooltip.vue';
 import NepaliDateInput from '@/components/ui/NepaliDateInput.vue';
 import { useToast } from '@/composables/useToast';
+import { useConfirm } from '@/composables/useConfirm';
 import {
     addMoney,
     calculateDocument,
@@ -56,19 +58,23 @@ import { todayInKathmandu } from '@/lib/format';
  * bridge across an unavoidable server redirect, not a new backend feature.
  *
  * The layout, cart-line editing, payment panel, and cart-tab workflow are a
- * deliberate replica of the legacy day_khata POS
+ * close, IA-level replica of the legacy day_khata POS
  * (resources/views/outStock/new-pos.blade.php + pos-modules/*, and
- * docs/pos_user_manual.md / docs/pos_workflow.md) rebuilt with this app's own
+ * docs/pos_user_manual.md / docs/pos_workflow.md), rebuilt with this app's own
  * design tokens and reka-ui-backed components rather than legacy's Bootstrap
- * markup: a wide product-tile browser (search + category chips + a VAT-
- * badged, stock-aware tile grid) next to a narrower cart/checkout column
- * (draft tabs, customer, cart lines with an inline qty stepper and a %/Rs
- * discount toggle, a single always-visible cash+bank payment panel with
- * quick-fill buttons and a due/change banner, split/merge between cart tabs,
- * and F-key shortcuts matching legacy's bindings). Cart tabs are additionally
- * persisted to localStorage (legacy's "Hold" and its automatic draft
- * caching) so a refresh or accidental tab close doesn't lose an in-progress
- * sale.
+ * markup, but matching legacy's always-visible terminal interaction model
+ * (top bar with dashboard exit/FY/help/date/invoice-type badge; a 60/40
+ * product-grid/cart split; two separate search + barcode boxes; a fixed
+ * 2x2 payment grid; a Hold/Save/Save & Print action row) instead of the
+ * progressive-disclosure layout an earlier pass shipped (hidden numpad,
+ * required Date buried under an options toggle, one blocking modal per
+ * action) - see the multi-tenant repo's POS UX rebuild plan for the full
+ * comparison. Three spots are a deliberate, confirmed departure from legacy
+ * rather than a gap: "+ New customer" stays a modal (legacy's new-tab flow
+ * has no way back to the cart), cart drafts are still persisted to
+ * localStorage (legacy's "Hold" is a no-op toast - drafts vanish on refresh),
+ * and the invoice-type badge is read-only (legacy's live ABIT/TAX/PAN switch
+ * needs backend work this screen-level rebuild doesn't attempt).
  */
 defineOptions({ layout: AppLayout });
 
@@ -83,14 +89,14 @@ const props = defineProps({
     // every fresh cart defaults to it below, since a counter sale usually
     // has nobody to name; still freely changeable per cart.
     walkInCustomerId: { type: Number, default: null },
+    // Legacy's top bar shows "FY: <label>" (new-pos.blade.php) - display only.
+    currentFiscalYear: { type: String, default: '' },
     invoiceSettings: {
         type: Object,
         default: () => ({
             default_vat_rate: '13.00',
             default_store_id: null,
-            sale_full_enabled: true,
-            sale_abbreviated_enabled: true,
-            sale_pan_enabled: true,
+            active_invoice_type: 'full',
         }),
     },
 });
@@ -98,30 +104,26 @@ const props = defineProps({
 const page = usePage();
 const { toast } = useToast();
 const layoutChrome = useLayoutChrome('POS');
+const { confirm } = useConfirm();
 
 const PENDING_RECEIPT_KEY = 'pos-last-receipt';
 const PENDING_CUSTOMER_KEY = 'pos-pending-customer';
 const CARTS_STORAGE_KEY = 'day-khata:pos-carts';
 
-const customerOptions = computed(() => props.customers.map((c) => ({ value: c.id, label: c.name })));
+// Legacy searches customers by name OR mobile via two separate boxes; this
+// single Combobox field covers both by feeding mobile_no into searchValue
+// alongside the label, so typing a phone number still finds the customer.
+const customerOptions = computed(() =>
+    props.customers.map((c) => ({ value: c.id, label: c.name, searchValue: `${c.name} ${c.mobile_no ?? ''}`.trim() })),
+);
 const storeOptions = computed(() => props.stores.map((s) => ({ value: s.id, label: s.name })));
 const bankAccountOptions = computed(() =>
-    props.bankAccounts.map((a) => ({ value: a.id, label: a.code ? `${a.code} — ${a.name}` : a.name })),
+    props.bankAccounts.map((a) => ({ value: a.id, label: a.code ? `${a.code} - ${a.name}` : a.name })),
 );
 const tdsAccountOptions = computed(() =>
-    props.tdsAccounts.map((a) => ({ value: a.id, label: a.code ? `${a.code} — ${a.name}` : a.name })),
+    props.tdsAccounts.map((a) => ({ value: a.id, label: a.code ? `${a.code} - ${a.name}` : a.name })),
 );
 const itemsById = computed(() => Object.fromEntries(props.items.map((i) => [i.id, i])));
-
-// Only the invoice types the tenant has switched on in Settings - the server
-// rejects a disabled type as well, this just keeps it off the cashier's list.
-const invoiceTypeOptions = computed(() =>
-    [
-        { value: 'full', label: 'Full tax invoice', enabled: props.invoiceSettings.sale_full_enabled },
-        { value: 'abbreviated', label: 'Abbreviated tax invoice', enabled: props.invoiceSettings.sale_abbreviated_enabled },
-        { value: 'pan', label: 'PAN invoice', enabled: props.invoiceSettings.sale_pan_enabled },
-    ].filter((option) => option.enabled),
-);
 
 // --- Exact quantity arithmetic (4 decimals) --------------------------------
 // resources/js/lib/money.js parses and formats quantities but exposes no
@@ -191,7 +193,6 @@ function stepQuantity(value, delta) {
 const CART_FORM_FIELDS = [
     'customer_id',
     'store_id',
-    'invoice_type',
     'chalani_number',
     'date',
     'bank_account_id',
@@ -213,7 +214,6 @@ function freshCartData() {
         // "Sales") - still freely changeable per cart.
         customer_id: props.walkInCustomerId ?? null,
         store_id: null,
-        invoice_type: invoiceTypeOptions.value[0]?.value ?? 'full',
         chalani_number: '',
         // Asia/Kathmandu, not UTC: a toISOString() default dated every sale
         // struck between midnight and 05:45 local time to the previous day.
@@ -243,7 +243,6 @@ const activeCartIndex = ref(0);
 const form = useForm({
     customer_id: carts.value[0].customer_id,
     store_id: carts.value[0].store_id,
-    invoice_type: carts.value[0].invoice_type,
     chalani_number: carts.value[0].chalani_number,
     date: carts.value[0].date,
     bank_account_id: carts.value[0].bank_account_id,
@@ -271,7 +270,6 @@ function loadCartIntoForm(cart) {
         form[field] = cart[field];
     }
     form.clearErrors();
-    activeTarget.value = null;
 }
 
 function cartCustomerId(cart, index) {
@@ -296,7 +294,7 @@ function switchToCart(index) {
     syncActiveCartFromForm();
     activeCartIndex.value = index;
     loadCartIntoForm(carts.value[index]);
-    scanQuery.value = '';
+    searchQuery.value = '';
 }
 
 function addCart() {
@@ -304,7 +302,7 @@ function addCart() {
     carts.value.push(makeCart());
     activeCartIndex.value = carts.value.length - 1;
     loadCartIntoForm(carts.value[activeCartIndex.value]);
-    scanQuery.value = '';
+    searchQuery.value = '';
 }
 
 function closeCart(index) {
@@ -312,7 +310,7 @@ function closeCart(index) {
         carts.value[0] = makeCart();
         activeCartIndex.value = 0;
         loadCartIntoForm(carts.value[0]);
-        scanQuery.value = '';
+        searchQuery.value = '';
         return;
     }
 
@@ -322,24 +320,57 @@ function closeCart(index) {
     if (wasActive) {
         activeCartIndex.value = Math.min(index, carts.value.length - 1);
         loadCartIntoForm(carts.value[activeCartIndex.value]);
-        scanQuery.value = '';
+        searchQuery.value = '';
     } else if (index < activeCartIndex.value) {
         activeCartIndex.value -= 1;
     }
 }
 
+/** Cancels a held cart from the tab strip, asking first when it holds items. */
+async function confirmCloseCart(index) {
+    const count = cartLineCount(carts.value[index], index);
+
+    if (count > 0) {
+        const ok = await confirm({
+            title: 'Cancel this held sale?',
+            message: `“${cartLabel(carts.value[index], index)}” has ${count} item${count === 1 ? '' : 's'}. Cancelling removes them and cannot be undone.`,
+            tone: 'danger',
+            confirmLabel: 'Cancel sale',
+            cancelLabel: 'Keep sale',
+        });
+        if (!ok) return;
+    }
+
+    closeCart(index);
+}
+
+/** Clears every line from the active cart after confirming. */
+async function clearCart() {
+    if (form.lines.length === 0) return;
+
+    const ok = await confirm({
+        title: 'Clear the cart?',
+        message: `This removes all ${form.lines.length} item${form.lines.length === 1 ? '' : 's'} from this sale. It cannot be undone.`,
+        tone: 'danger',
+        confirmLabel: 'Clear cart',
+    });
+    if (!ok) return;
+
+    form.lines = [];
+}
+
 const showAdvanced = ref(false);
 
-// --- Item search / "barcode scan" input --------------------------------
-// A barcode scanner just types digits into whatever text input is focused
-// and then sends Enter, indistinguishable from a cashier typing - so this
-// is a plain text field that live-filters the tile grid by name or barcode,
-// and on Enter adds the best match to the cart (mirroring a real scan). A
-// barcode match takes priority over a name match, both here and in
-// onScanKeydown() below, since a scanned code is far more likely to be a
-// barcode than to coincidentally match part of an item's name.
-const scanQuery = ref('');
-const scanFieldWrapper = ref(null);
+// --- Item search + separate barcode scan input --------------------------
+// Legacy (new-pos.blade.php) keeps these as two distinct always-visible
+// boxes rather than one combined field: a search box that live-filters the
+// tile grid by name, and a dedicated barcode box a scanner's Enter-terminated
+// input goes into, which does an exact-match lookup and adds straight to the
+// cart without touching the grid filter at all.
+const searchQuery = ref('');
+const searchFieldWrapper = ref(null);
+const barcodeQuery = ref('');
+const barcodeFieldWrapper = ref(null);
 
 // Category filter row above the item grid (skipped entirely when there are
 // no categories to show). Clicking the active chip again clears the filter
@@ -351,15 +382,13 @@ function selectCategory(id) {
 }
 
 const filteredItems = computed(() => {
-    const q = scanQuery.value.trim().toLowerCase();
+    const q = searchQuery.value.trim().toLowerCase();
 
     return props.items.filter((item) => {
         if (activeCategoryId.value !== null && item.item_category_id !== activeCategoryId.value) return false;
         if (!q) return true;
 
-        const barcodeMatch = item.barcode && item.barcode.toLowerCase().includes(q);
-        const nameMatch = item.name.toLowerCase().includes(q);
-        return barcodeMatch || nameMatch;
+        return item.name.toLowerCase().includes(q);
     });
 });
 
@@ -413,22 +442,32 @@ function warnIfOverstock(itemId) {
     }
 }
 
-function onScanKeydown(event) {
+function onSearchKeydown(event) {
     if (event.key !== 'Enter') return;
     event.preventDefault();
 
-    const q = scanQuery.value.trim().toLowerCase();
+    const q = searchQuery.value.trim().toLowerCase();
     if (!q) return;
 
-    // Barcode match takes priority (exact match, like a real scanner would
-    // resolve), falling back to an exact name match and then the top of the
-    // already-filtered tile grid.
-    const barcodeExact = props.items.find((item) => item.barcode && item.barcode.toLowerCase() === q);
     const nameExact = props.items.find((item) => item.name.toLowerCase() === q);
-    const match = barcodeExact ?? nameExact ?? filteredItems.value[0];
+    const match = nameExact ?? filteredItems.value[0];
 
     if (match) addToCart(match);
-    scanQuery.value = '';
+    searchQuery.value = '';
+}
+
+/** Dedicated barcode box: exact match only, never falls back to the grid filter. */
+function onBarcodeSubmit() {
+    const q = barcodeQuery.value.trim().toLowerCase();
+    if (!q) return;
+
+    const match = props.items.find((item) => item.barcode && item.barcode.toLowerCase() === q);
+    if (match) {
+        addToCart(match);
+    } else {
+        toast({ message: `No item found for barcode "${barcodeQuery.value.trim()}".`, variant: 'danger' });
+    }
+    barcodeQuery.value = '';
 }
 
 // --- Cart (form.lines) ---------------------------------------------------
@@ -442,7 +481,6 @@ function addToCart(item) {
 
     if (index !== -1) {
         form.lines[index].quantity = stepQuantity(form.lines[index].quantity, 1) ?? form.lines[index].quantity;
-        activeTarget.value = { type: 'quantity', index };
         warnIfOverstock(item.id);
         return;
     }
@@ -455,14 +493,12 @@ function addToCart(item) {
     // the preview below never sees it. `mrp` is a browser-only entry aid that
     // fills `rate` and is never submitted (see applyLineMrp()).
     const rate = item.sale_rate != null ? String(item.sale_rate) : '';
-    form.lines.push({ item_id: item.id, quantity: '1', bonus_quantity: '', mrp: '', rate, discount: '', discountType: 'fixed' });
-    activeTarget.value = { type: 'rate', index: form.lines.length - 1 };
+    form.lines.push({ item_id: item.id, quantity: '1', bonus_quantity: '', mrp: '', rate, discount: '', discountType: 'fixed', showMore: false });
     warnIfOverstock(item.id);
 }
 
 function removeLine(index) {
     form.lines.splice(index, 1);
-    activeTarget.value = null;
 }
 
 function incrementQty(index) {
@@ -482,10 +518,6 @@ function decrementQty(index) {
 
     line.quantity = next;
     warnIfOverstock(line.item_id);
-}
-
-function focusTarget(type, index) {
-    activeTarget.value = { type, index };
 }
 
 /**
@@ -538,7 +570,10 @@ function enteredQuantity(value) {
 // audit found quick-pay filling 56.49 against a bill the server booked at
 // 56.50, leaving the drawer a paisa short on every sale (P0-8).
 
-const isPanInvoice = computed(() => form.invoice_type === 'pan');
+// The invoice type is never a form field - it's fixed per tenant by the
+// platform admin (TenantCompanySettingController), so this just reads the
+// value the server already applies to every sale (see Sale::post()).
+const isPanInvoice = computed(() => props.invoiceSettings.active_invoice_type === 'pan');
 
 // Never editable and never sent: the server always uses the tenant's
 // configured rate, and a PAN invoice carries no VAT at all.
@@ -565,7 +600,23 @@ const preview = computed(() =>
 );
 
 const totals = computed(() => (preview.value.ok ? preview.value.totals : null));
-const previewError = computed(() => (preview.value.ok || form.lines.length === 0 ? null : preview.value.message));
+/** A cart line whose rate was never filled in (items with no sale price start blank). */
+function isRateMissing(line) {
+    return line.rate === '' || line.rate === null || line.rate === undefined;
+}
+
+const previewError = computed(() => {
+    if (preview.value.ok || form.lines.length === 0) return null;
+
+    const unpriced = form.lines.filter(isRateMissing);
+    if (unpriced.length > 0) {
+        const names = unpriced.map((line) => itemsById.value[line.item_id]?.name ?? 'an item');
+
+        return `Enter a rate for ${names.join(', ')} to see the total.`;
+    }
+
+    return preview.value.message;
+});
 
 /** A cart line's own total, or null while that line is still incomplete. */
 function lineTotal(index) {
@@ -593,6 +644,11 @@ function toggleLineDiscountType(index) {
 
     line.discount = '';
     line.discountType = 'percent';
+}
+
+/** Reveals a cart line's MRP/free-units row - collapsed by default since they're edited rarely. */
+function toggleLineMore(line) {
+    line.showMore = !line.showMore;
 }
 
 function toggleHeaderDiscountType() {
@@ -704,68 +760,6 @@ function quickPayReset() {
     form.bank_amount = '';
 }
 
-// --- On-screen numpad ------------------------------------------------------
-// Targets whichever field was last focused/tapped: a cart line's quantity,
-// free units or rate, or the cash-paid box. Typing directly into those Input
-// fields still works too - the numpad just writes into the same reactive
-// value, which is why `type` is the line's own field name.
-//
-// The MRP box is deliberately NOT a numpad target: it is not a stored field,
-// it only feeds applyLineMrp(), and writing into it here would set a number
-// nothing ever reads while leaving the rate untouched.
-const activeTarget = ref(null);
-
-const LINE_TARGET_LABELS = { quantity: 'Quantity', bonus_quantity: 'Free units', rate: 'Rate' };
-
-const activeTargetLabel = computed(() => {
-    const t = activeTarget.value;
-    if (!t) return 'Tap a quantity, rate, or cash-paid field';
-    if (t.type === 'cash') return 'Cash paid';
-    const line = form.lines[t.index];
-    const name = line ? (itemsById.value[line.item_id]?.name ?? 'Item') : 'Item';
-    return `${name} — ${LINE_TARGET_LABELS[t.type] ?? 'Rate'}`;
-});
-
-function currentTargetValue() {
-    const t = activeTarget.value;
-    if (!t) return '';
-    if (t.type === 'cash') return form.cash_amount;
-    return form.lines[t.index]?.[t.type] ?? '';
-}
-
-function setTargetValue(value) {
-    const t = activeTarget.value;
-    if (!t) return;
-    if (t.type === 'cash') {
-        form.cash_amount = value;
-        return;
-    }
-    if (form.lines[t.index]) form.lines[t.index][t.type] = value;
-}
-
-function pressDigit(digit) {
-    if (!activeTarget.value) return;
-    const current = String(currentTargetValue() ?? '');
-
-    if (digit === '.') {
-        if (current.includes('.')) return;
-        setTargetValue((current === '' ? '0' : current) + '.');
-        return;
-    }
-
-    setTargetValue(current === '0' ? String(digit) : current + String(digit));
-}
-
-function pressBackspace() {
-    if (!activeTarget.value) return;
-    setTargetValue(String(currentTargetValue() ?? '').slice(0, -1));
-}
-
-function pressClear() {
-    if (!activeTarget.value) return;
-    setTargetValue('');
-}
-
 // --- Split a cart line into a new cart tab ---------------------------------
 // Mirrors legacy's per-row split icon: peel off part of a line's quantity
 // into a brand-new draft cart (same customer/store/invoice type), leaving
@@ -809,7 +803,6 @@ function confirmSplit() {
     const newCart = makeCart();
     newCart.customer_id = form.customer_id;
     newCart.store_id = form.store_id;
-    newCart.invoice_type = form.invoice_type;
     // The free units stay with the line they were entered on: splitting a
     // paid quantity in two must not hand the customer twice the bonus stock,
     // and splitting bonus units proportionally would need a division nobody
@@ -912,7 +905,7 @@ function restoreCartsFromStorage() {
 
 function holdCarts() {
     persistCartsNow();
-    toast({ message: 'Carts held — safe if you refresh or close this tab.', variant: 'success' });
+    toast({ message: 'Carts held - safe if you refresh or close this tab.', variant: 'success' });
 }
 
 watch(() => [carts.value, form.lines, form.customer_id], () => schedulePersist(), { deep: true });
@@ -990,8 +983,7 @@ function resetForNextSale() {
     form.clearErrors();
     form.date = todayInKathmandu();
     form.lines = [];
-    activeTarget.value = null;
-    scanQuery.value = '';
+    searchQuery.value = '';
     syncActiveCartFromForm();
     // The posted cart must not survive in localStorage: the audit found the
     // print step throwing before any reset ran, leaving a cart that had
@@ -999,7 +991,12 @@ function resetForNextSale() {
     persistCartsNow();
 }
 
-function completeSale() {
+/**
+ * `action` mirrors legacy's distinct Save vs Save & Print buttons (both post
+ * the identical /sales payload; only whether the print window opens after a
+ * successful save differs).
+ */
+function completeSale(action = 'print') {
     if (!totals.value) return;
 
     const expectedTotal = totals.value.total;
@@ -1055,7 +1052,7 @@ function completeSale() {
             // behind.
             resetForNextSale();
 
-            if (created?.print_url) window.open(created.print_url, '_blank');
+            if (action === 'print' && created?.print_url) window.open(created.print_url, '_blank');
 
             router.visit('/pos', { onSuccess: applyPendingReceipt });
         },
@@ -1094,6 +1091,21 @@ function closeReceipt() {
     receipt.value = null;
 }
 
+/** Plain-words reason Complete sale is disabled, or '' when it can proceed. */
+const submitBlockedReason = computed(() => {
+    if (form.processing) return '';
+    if (form.lines.length === 0) return 'Add at least one item to the cart to complete the sale.';
+    if (!form.customer_id) return 'Select a customer to complete the sale.';
+    if (!form.date) return 'Choose a sale date in the top bar.';
+    if (!totals.value) return previewError.value ?? 'Fix the highlighted line details to see the total.';
+
+    const mode = resolvedPaymentMode.value;
+    if ((mode === 'bank' || mode === 'partial') && !form.bank_account_id) return 'Select a bank account for the bank payment.';
+    if (mode === 'partial' && !paymentBalanced.value) return 'Cash plus bank must equal the total due exactly.';
+
+    return '';
+});
+
 const canSubmit = computed(() => {
     if (form.processing || !form.customer_id || !form.date || form.lines.length === 0) return false;
     if (!totals.value) return false;
@@ -1106,21 +1118,20 @@ const canSubmit = computed(() => {
 });
 
 // --- Keyboard shortcuts ----------------------------------------------------
-// Global while this page is mounted. Bindings replicate the legacy POS's
-// F-key scheme (docs/pos_user_manual.md): F1 help, F2/F7 search/scan
-// (legacy splits these across a search box and a separate barcode box; this
-// page uses one combined field for both, so both keys focus it), F4
-// customer, F8 save & print (this page's closest equivalent is completing
-// the sale and showing its receipt), F9 hold, Esc clear. Legacy's "new
-// cart"/"+" action has no dedicated hotkey there either - it stays a
-// mouse-only tab-strip button here too.
+// Global while this page is mounted. Matches legacy's F-key scheme exactly
+// (docs/pos_user_manual.md): F1 help, F2 search, F7 barcode (now genuinely
+// separate fields, see searchQuery/barcodeQuery above), F4 customer, F8
+// save & print, F9 hold, Esc clear. Legacy's "new cart"/"+" action has no
+// dedicated hotkey there either - it stays a mouse-only tab-strip button here
+// too.
 const shortcutsOpen = ref(false);
 
 const shortcutList = [
     { key: 'F1', description: 'Open this shortcuts help' },
-    { key: 'F2 / F7', description: 'Focus item search / scan field' },
+    { key: 'F2', description: 'Focus product search' },
+    { key: 'F7', description: 'Focus barcode scan' },
     { key: 'F4', description: 'Focus customer field' },
-    { key: 'F8', description: 'Complete sale' },
+    { key: 'F8', description: 'Save & print' },
     { key: 'F9', description: 'Hold carts (saved to this browser)' },
     { key: 'Esc', description: 'Clear focus' },
 ];
@@ -1136,9 +1147,15 @@ function onGlobalKeydown(event) {
         return;
     }
 
-    if (event.key === 'F2' || event.key === 'F7') {
+    if (event.key === 'F2') {
         event.preventDefault();
-        scanFieldWrapper.value?.querySelector('input')?.focus();
+        searchFieldWrapper.value?.querySelector('input')?.focus();
+        return;
+    }
+
+    if (event.key === 'F7') {
+        event.preventDefault();
+        barcodeFieldWrapper.value?.querySelector('input')?.focus();
         return;
     }
 
@@ -1150,7 +1167,7 @@ function onGlobalKeydown(event) {
 
     if (event.key === 'F8') {
         event.preventDefault();
-        if (canSubmit.value) completeSale();
+        if (canSubmit.value) completeSale('print');
         return;
     }
 
@@ -1166,28 +1183,24 @@ function onGlobalKeydown(event) {
 }
 
 // --- Focus mode / full screen ------------------------------------------------
-// Toggles two things together, closest this Inertia-page-inside-AppLayout
-// setup can get to the legacy POS's dedicated full-viewport app shell:
-//  1. `fullscreen` on AppLayout, which hides Day Khata's own sidebar and top
-//     navbar so the POS content fills the whole viewport (the actual point
-//     of this toggle).
-//  2. The browser Fullscreen API, best-effort - some embedding contexts
-//     (iframes without `allow="fullscreen"`, some browsers) reject it, which
-//     is fine; the chrome-hiding above still works either way.
-// `isFullscreen` drives both, so it's set directly on click rather than only
-// from the `fullscreenchange` event - but that event still syncs it back to
-// false if the browser exits native full screen on its own (e.g. the user
-// presses the native Esc-to-exit prompt), which also exits focus mode.
+// `layoutChrome.fullscreen` (hides Day Khata's own sidebar and top navbar so
+// the POS content fills the whole viewport, closest this Inertia-page-
+// inside-AppLayout setup can get to the legacy POS's dedicated full-viewport
+// app shell) is ON by default for the whole time this page is mounted - the
+// point is a viewport-locked terminal, not something the cashier opts into
+// every visit. The Maximize2/Minimize2 button is a separate, purely optional
+// layer on top: the real browser Fullscreen API, best-effort (some embedding
+// contexts reject it, which is fine, chrome-hiding above already applies
+// either way) - `isFullscreen` only tracks *that*, not the sidebar/navbar.
 const isFullscreen = ref(false);
 
 function toggleFullscreen() {
     isFullscreen.value = !isFullscreen.value;
-    layoutChrome.fullscreen = isFullscreen.value;
 
     if (isFullscreen.value) {
         document.documentElement.requestFullscreen?.().catch(() => {
-            // Fullscreen API unavailable/denied - chrome-hiding above still
-            // applies, so this isn't fatal to the feature.
+            // Fullscreen API unavailable/denied - not fatal, the sidebar/navbar
+            // stay hidden regardless via layoutChrome.fullscreen above.
         });
     } else if (document.fullscreenElement) {
         document.exitFullscreen?.();
@@ -1195,13 +1208,14 @@ function toggleFullscreen() {
 }
 
 function onFullscreenChange() {
-    if (!document.fullscreenElement) {
-        isFullscreen.value = false;
-        layoutChrome.fullscreen = false;
-    }
+    if (!document.fullscreenElement) isFullscreen.value = false;
 }
 
 onMounted(() => {
+    layoutChrome.fullscreen = true;
+    // Legacy's #npos is a true height:100vh, zero-padding terminal - AppLayout
+    // otherwise always keeps some padding on <main>, even in fullscreen mode.
+    layoutChrome.padded = false;
     restoreCartsFromStorage();
     applyPendingCustomer();
     applyPendingReceipt();
@@ -1217,104 +1231,119 @@ onUnmounted(() => {
     // way out - otherwise leaving POS while in focus mode would leave the
     // next page's sidebar/navbar hidden too.
     layoutChrome.fullscreen = false;
+    layoutChrome.padded = true;
 });
 </script>
 
 <template>
-    <div>
-        <div class="flex flex-col gap-3">
-            <!-- Cart tabs + toolbar -->
-            <div class="flex items-center gap-2 overflow-x-auto pb-1">
-                <button
-                    v-for="(cart, index) in carts"
-                    :key="cart.id"
-                    type="button"
-                    class="flex shrink-0 items-center gap-2 border-[1.5px] px-3 py-1.5 text-xs font-bold whitespace-nowrap transition-colors duration-150"
-                    :class="
-                        index === activeCartIndex
-                            ? 'border-primary bg-primary-tint text-primary'
-                            : 'border-border bg-bg-subtle text-text-muted hover:text-text-base'
-                    "
-                    @click="switchToCart(index)"
-                >
-                    <span>{{ cartLabel(cart, index) }}</span>
-                    <span v-if="cartLineCount(cart, index) > 0" class="text-[10px] font-semibold opacity-70">
-                        ({{ cartLineCount(cart, index) }})
-                    </span>
-                    <X
-                        v-if="carts.length > 1"
-                        class="h-3 w-3 text-text-faint hover:text-danger"
-                        @click.stop="closeCart(index)"
-                    />
-                </button>
-                <button
-                    type="button"
-                    class="flex shrink-0 items-center gap-1 border-[1.5px] border-dashed border-border px-3 py-1.5 text-xs font-bold text-text-muted hover:border-primary hover:text-primary"
-                    @click="addCart"
-                >
-                    <Plus class="h-3.5 w-3.5" /> New sale
-                </button>
-
-                <div class="ml-auto flex shrink-0 items-center gap-2">
-                    <Tooltip label="Merge another cart into this one">
-                        <button
-                            type="button"
-                            class="flex h-7 w-7 items-center justify-center border-[1.5px] border-border bg-bg-subtle text-text-muted hover:border-primary hover:text-primary"
-                            @click="openMergeModal"
-                        >
-                            <Merge class="h-3.5 w-3.5" />
-                        </button>
-                    </Tooltip>
-                    <Tooltip label="Hold carts (F9)">
-                        <button
-                            type="button"
-                            class="flex h-7 w-7 items-center justify-center border-[1.5px] border-border bg-bg-subtle text-text-muted hover:border-primary hover:text-primary"
-                            @click="holdCarts"
-                        >
-                            <CirclePause class="h-3.5 w-3.5" />
-                        </button>
-                    </Tooltip>
-                    <Tooltip :label="isFullscreen ? 'Exit full screen' : 'Full screen'">
-                        <button
-                            type="button"
-                            class="flex h-7 w-7 items-center justify-center border-[1.5px] border-border bg-bg-subtle text-text-muted hover:border-primary hover:text-primary"
-                            @click="toggleFullscreen"
-                        >
-                            <Minimize2 v-if="isFullscreen" class="h-3.5 w-3.5" />
-                            <Maximize2 v-else class="h-3.5 w-3.5" />
-                        </button>
-                    </Tooltip>
-                    <Tooltip label="Keyboard shortcuts (F1)">
-                        <button
-                            type="button"
-                            class="flex h-7 w-7 items-center justify-center border-[1.5px] border-border bg-bg-subtle text-text-muted hover:border-primary hover:text-primary"
-                            @click="shortcutsOpen = true"
-                        >
-                            <CircleHelp class="h-3.5 w-3.5" />
-                        </button>
-                    </Tooltip>
-                </div>
+    <div class="pos-root flex h-full min-h-0 flex-col overflow-y-auto lg:overflow-hidden">
+        <!-- Top bar: always-visible dashboard exit, FY, help, date, invoice type, hints -->
+        <div class="pos-bar flex shrink-0 flex-col lg:flex-row">
+          <div class="pos-bar-section pos-bar-section--products flex items-center gap-2.5 overflow-x-auto">
+            <Link href="/dashboard" aria-label="Back to dashboard" class="pos-bar-btn">
+                <ChevronLeft class="h-4 w-4" /> <span class="hidden sm:inline">Dashboard</span>
+            </Link>
+            <div class="pos-bar-divider" />
+            <span
+                class="pos-fy-badge"
+                :title="currentFiscalYear ? 'Current fiscal year' : 'No fiscal year is set up for this date - ask an admin to create one before selling.'"
+            >
+                FY: {{ currentFiscalYear || 'Not set' }}
+            </span>
+            <div class="pos-bar-divider" />
+            <button type="button" class="pos-bar-btn" @click="shortcutsOpen = true">
+                <CircleHelp class="h-4 w-4" /> <span class="hidden sm:inline">Shortcuts</span> <kbd class="pos-bar-kbd">F1</kbd>
+            </button>
+            <div class="pos-bar-divider" />
+            <div class="pos-date-box">
+                <label>DATE</label>
+                <NepaliDateInput v-model="form.date" required class="pos-date-input" />
             </div>
+            <div class="pos-bar-divider" />
+            <span class="pos-bill-badge" :title="isPanInvoice ? 'PAN invoices (no VAT) - set by your admin' : 'Tax invoices (VAT) - set by your admin'">
+                {{ isPanInvoice ? 'PAN' : 'TAX' }} invoice
+            </span>
 
-            <div class="grid grid-cols-1 gap-3 lg:grid-cols-[1fr_420px]">
-                <!-- LEFT — product browser -->
-                <div class="flex min-w-0 flex-col gap-3">
-                    <Card variant="panel">
-                        <div ref="scanFieldWrapper">
-                            <Input
-                                v-model="scanQuery"
-                                type="text"
-                                placeholder="Search or scan an item… (F2)"
-                                :icon="ScanBarcode"
-                                @keydown="onScanKeydown"
-                            />
-                        </div>
-                    </Card>
+            <Tooltip :label="isFullscreen ? 'Exit full screen' : 'Full screen'">
+                <button type="button" :aria-label="isFullscreen ? 'Exit full screen' : 'Full screen'" class="pos-bar-btn pos-bar-btn--icon" @click="toggleFullscreen">
+                    <Minimize2 v-if="isFullscreen" class="h-4 w-4" />
+                    <Maximize2 v-else class="h-4 w-4" />
+                </button>
+            </Tooltip>
+          </div>
 
-                    <div v-if="categories.length" class="flex flex-wrap gap-1.5">
+          <!-- Draft-cart tabs: sit over the cart column, product tools over the product column -->
+          <div class="pos-bar-section pos-bar-section--carts flex items-end gap-1.5 overflow-x-auto">
+            <button
+                v-for="(cart, index) in carts"
+                :key="cart.id"
+                type="button"
+                class="pos-cart-tab flex shrink-0 cursor-pointer items-center gap-2 px-3.5 text-xs font-bold whitespace-nowrap transition-colors duration-150 focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-primary"
+                :class="index === activeCartIndex ? 'pos-cart-tab--active' : 'pos-cart-tab--idle'"
+                :aria-pressed="index === activeCartIndex"
+                @click="switchToCart(index)"
+            >
+                <span>{{ cartLabel(cart, index) }}</span>
+                <span v-if="cartLineCount(cart, index) > 0" class="text-[10px] font-semibold opacity-70">
+                    ({{ cartLineCount(cart, index) }})
+                </span>
+                <span
+                    v-if="carts.length > 1"
+                    role="button"
+                    tabindex="0"
+                    :aria-label="`Cancel held sale ${cartLabel(cart, index)}`"
+                    title="Cancel this held sale"
+                    class="flex h-6 w-6 cursor-pointer items-center justify-center opacity-60 hover:opacity-100 focus-visible:outline-2 focus-visible:outline-primary"
+                    @click.stop="confirmCloseCart(index)"
+                    @keydown.enter.stop.prevent="confirmCloseCart(index)"
+                >
+                    <X class="h-3.5 w-3.5" />
+                </span>
+            </button>
+            <Tooltip label="Merge another cart into this one">
+                <button type="button" aria-label="Merge another cart into this one" class="pos-draft-btn pos-draft-btn--merge" @click="openMergeModal">
+                    <Merge class="h-4 w-4" />
+                </button>
+            </Tooltip>
+            <button type="button" aria-label="New sale (F9 holds the current one first)" class="pos-draft-btn" @click="addCart">
+                <Plus class="h-4 w-4" />
+            </button>
+          </div>
+        </div>
+
+        <div class="pos-body flex min-h-0 flex-1 flex-col gap-3 lg:flex-row lg:gap-0">
+            <div class="pos-left flex min-w-0 shrink-0 flex-col gap-3 p-3 lg:h-full lg:min-h-0 lg:shrink lg:overflow-hidden">
+                <div class="flex shrink-0 gap-2">
+                    <div ref="searchFieldWrapper" class="relative min-w-0 flex-1">
+                        <Input
+                            v-model="searchQuery"
+                            type="text"
+                            placeholder="Search products… (F2)"
+                            aria-label="Search products (F2)"
+                            :icon="ScanBarcode"
+                            class="pr-9"
+                            @keydown="onSearchKeydown"
+                        />
+                        <kbd class="pointer-events-none absolute top-1/2 right-2.5 -translate-y-1/2 font-mono text-[10px] font-normal text-text-faint">F2</kbd>
+                    </div>
+                    <div ref="barcodeFieldWrapper" class="relative w-[155px] shrink-0">
+                        <Input
+                            v-model="barcodeQuery"
+                            type="text"
+                            placeholder="Barcode… (F7)"
+                            aria-label="Scan a barcode (F7)"
+                            class="pr-9"
+                            @keydown.enter.prevent="onBarcodeSubmit"
+                            @change="onBarcodeSubmit"
+                        />
+                        <kbd class="pointer-events-none absolute top-1/2 right-2.5 -translate-y-1/2 font-mono text-[10px] font-normal text-text-faint">F7</kbd>
+                    </div>
+                </div>
+
+                    <div v-if="categories.length" class="flex shrink-0 gap-1.5 overflow-x-auto pb-1">
                         <button
                             type="button"
-                            class="border-[1.5px] px-2.5 py-1 text-xs font-bold transition-colors duration-150"
+                            class="shrink-0 cursor-pointer border-[1.5px] px-2.5 py-1 text-xs font-bold whitespace-nowrap transition-colors duration-150 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
                             :class="
                                 activeCategoryId === null
                                     ? 'border-primary bg-primary-tint text-primary'
@@ -1328,7 +1357,7 @@ onUnmounted(() => {
                             v-for="category in categories"
                             :key="category.id"
                             type="button"
-                            class="border-[1.5px] px-2.5 py-1 text-xs font-bold transition-colors duration-150"
+                            class="shrink-0 cursor-pointer border-[1.5px] px-2.5 py-1 text-xs font-bold whitespace-nowrap transition-colors duration-150 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
                             :class="
                                 activeCategoryId === category.id
                                     ? 'border-primary bg-primary-tint text-primary'
@@ -1340,54 +1369,70 @@ onUnmounted(() => {
                         </button>
                     </div>
 
-                    <div class="grid grid-cols-[repeat(auto-fill,minmax(112px,1fr))] gap-2.5">
+                    <div class="pos-grid grid content-start gap-2.5 lg:min-h-0 lg:flex-1 lg:overflow-y-auto">
                         <Card
                             v-for="item in visibleItems"
                             :key="item.id"
                             variant="product"
                             class="relative"
-                            :class="isOutOfStock(item) ? 'pointer-events-none opacity-50' : 'cursor-pointer select-none'"
+                            :class="[
+                                isOutOfStock(item) ? 'pointer-events-none opacity-50' : 'cursor-pointer select-none',
+                                hasQuantityInCart(item.id) ? 'border-primary hover:border-primary' : '',
+                            ]"
                             @click="addToCart(item)"
                         >
-                            <Badge :variant="item.is_vatable ? 'tax' : 'free'" class="absolute top-1.5 right-1.5">
-                                {{ item.is_vatable ? 'TAX' : 'FREE' }}
+                            <Badge :variant="item.is_vatable ? 'tax' : 'free'" class="absolute top-1.5 right-1.5 z-10">
+                                {{ item.is_vatable ? 'TAX' : 'VAT-FREE' }}
                             </Badge>
-                            <img
-                                v-if="item.image_path"
-                                :src="`/storage/${item.image_path}`"
-                                :alt="item.name"
-                                class="mb-2 h-16 w-full rounded-none border-[1.5px] border-border object-cover"
-                            />
-                            <div
-                                v-else
-                                class="mb-2 flex h-16 w-full items-center justify-center border-[1.5px] border-border bg-bg-subtle text-text-faint"
-                            >
-                                <Package class="h-6 w-6" />
+                            <div class="relative mb-2">
+                                <img
+                                    v-if="item.image_path"
+                                    :src="`/storage/${item.image_path}`"
+                                    :alt="item.name"
+                                    class="h-16 w-full rounded-none border-[1.5px] border-border object-cover"
+                                />
+                                <div
+                                    v-else
+                                    class="flex h-16 w-full items-center justify-center border-[1.5px] border-border bg-bg-subtle text-text-faint"
+                                >
+                                    <Package class="h-6 w-6" />
+                                </div>
+                                <span
+                                    v-if="hasQuantityInCart(item.id)"
+                                    class="absolute right-1 bottom-1 flex h-5 min-w-5 items-center justify-center bg-primary px-1 text-[11px] font-bold text-white"
+                                    :title="`${formatQuantity(quantityInCart(item.id))} in cart`"
+                                >
+                                    {{ formatQuantity(quantityInCart(item.id)) }}
+                                </span>
                             </div>
                             <p class="text-sm font-bold text-text-strong">{{ item.name }}</p>
-                            <p class="mt-1 text-xs text-text-muted">{{ item.unit }}</p>
-                            <p v-if="item.sale_rate != null" class="mt-1 text-xs font-semibold text-text-base">
+                            <p v-if="item.sale_rate != null" class="mt-1 text-sm font-bold text-primary tabular-nums">
                                 {{ formatRate(item.sale_rate) }}
                             </p>
-                            <p v-if="item.is_stockable" class="mt-1 text-[10px] text-text-faint">
+                            <p v-else class="mt-1 inline-block bg-warning-bg px-1.5 py-0.5 text-[11px] font-bold text-warning-text">No price set</p>
+                            <p v-if="isOutOfStock(item)" class="mt-1 text-[10px] font-bold text-danger uppercase">Out of stock</p>
+                            <p v-else-if="item.is_stockable" class="mt-1 text-[10px] text-text-faint">
                                 Stock: {{ formatQuantity(item.current_stock) }}
                             </p>
-                            <p v-if="hasQuantityInCart(item.id)" class="mt-2 text-xs font-bold text-primary">
-                                {{ formatQuantity(quantityInCart(item.id)) }} in cart
-                            </p>
                         </Card>
-                        <p v-if="filteredItems.length === 0" class="col-span-full text-sm text-text-faint">No items match.</p>
+                        <div v-if="filteredItems.length === 0" class="col-span-full flex flex-col items-center gap-1 py-8 text-center">
+                            <Package class="h-8 w-8 text-text-faint" />
+                            <p class="text-sm font-semibold text-text-base">
+                                {{ searchQuery.trim() ? `No items match “${searchQuery.trim()}”` : 'No items in this category' }}
+                            </p>
+                            <p class="text-xs text-text-faint">Check the spelling or barcode, or clear the search and category filter.</p>
+                        </div>
                     </div>
-                    <p v-if="filteredItems.length > ITEM_TILE_CAP" class="text-xs text-text-faint">
-                        Showing {{ visibleItems.length }} of {{ filteredItems.length }} items — refine your search to see more.
+                    <p v-if="filteredItems.length > ITEM_TILE_CAP" class="shrink-0 text-xs text-text-faint">
+                        Showing {{ visibleItems.length }} of {{ filteredItems.length }} items - refine your search to see more.
                     </p>
-                </div>
+            </div>
 
-                <!-- RIGHT — cart & checkout -->
-                <div class="flex min-w-0 flex-col gap-3">
-                    <Card variant="panel" title="Customer">
-                        <div class="flex gap-2">
-                            <div ref="customerFieldWrapper" class="flex-1">
+            <!-- RIGHT - cart & checkout -->
+            <div class="pos-right flex min-w-0 shrink-0 flex-col gap-3 p-3 lg:h-full lg:min-h-0 lg:shrink lg:overflow-y-auto">
+                    <div class="shrink-0">
+                        <div class="flex items-center gap-2">
+                            <div ref="customerFieldWrapper" class="relative flex-1">
                                 <Combobox
                                     :model-value="form.customer_id"
                                     :options="customerOptions"
@@ -1395,130 +1440,172 @@ onUnmounted(() => {
                                     @update:model-value="(v) => (form.customer_id = v)"
                                 />
                             </div>
-                            <Button variant="secondary" tone="purple" type="button" @click="openCustomerModal">
+                            <Button variant="secondary" tone="purple" type="button" class="h-9 cursor-pointer" aria-label="Add a new customer" @click="openCustomerModal">
                                 <Plus class="h-3.5 w-3.5" /> New
                             </Button>
                         </div>
                         <p v-if="form.errors.customer_id" class="mt-1 text-sm text-danger">{{ form.errors.customer_id }}</p>
-                    </Card>
+                    </div>
 
-                    <Card variant="panel" title="Cart" class="max-h-[360px] overflow-y-auto">
-                        <p v-if="form.lines.length === 0" class="text-sm text-text-faint">Tap an item to add it, or scan a barcode.</p>
-                        <div v-for="(line, index) in form.lines" :key="index" class="mb-2 flex flex-col gap-1.5 border-b border-border pb-2 last:mb-0 last:border-0">
+                    <Card
+                        variant="panel"
+                        class="shrink !border-b-0 lg:min-h-[240px] lg:flex-1 lg:overflow-y-auto lg:overflow-x-hidden"
+                    >
+                        <div class="mb-2 flex items-center justify-between">
+                            <p class="text-[10px] font-bold tracking-[.8px] text-text-muted uppercase">Cart</p>
+                            <button
+                                v-if="form.lines.length > 0"
+                                type="button"
+                                class="h-7 cursor-pointer px-2 text-xs font-semibold text-text-muted hover:text-danger focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
+                                @click="clearCart"
+                            >
+                                Clear cart
+                            </button>
+                        </div>
+                        <div v-if="form.lines.length === 0" class="flex flex-col items-center gap-1 py-6 text-center">
+                            <ScanBarcode class="h-8 w-8 text-text-faint" />
+                            <p class="text-sm font-semibold text-text-base">Scan or search an item to start a sale</p>
+                            <p class="text-xs text-text-faint">Tap an item tile, press <kbd class="font-mono">F2</kbd> to search or <kbd class="font-mono">F7</kbd> to scan a barcode.</p>
+                        </div>
+                        <div v-for="(line, index) in form.lines" :key="index" class="mb-1.5 flex flex-col gap-1.5 border-[1.5px] border-border bg-white p-2 last:mb-0">
                             <div class="flex items-center gap-2">
                                 <p class="min-w-0 flex-1 truncate text-sm font-semibold text-text-strong">
                                     {{ itemsById[line.item_id]?.name ?? 'Item' }}
                                 </p>
                                 <Badge :variant="itemsById[line.item_id]?.is_vatable ? 'tax' : 'free'">
-                                    {{ itemsById[line.item_id]?.is_vatable ? 'TAX' : 'FREE' }}
+                                    {{ itemsById[line.item_id]?.is_vatable ? 'TAX' : 'VAT-FREE' }}
                                 </Badge>
-                                <Tooltip label="Split into a new cart">
+                                <span class="shrink-0 text-sm font-bold tabular-nums" :class="lineTotal(index) === null ? 'text-text-faint' : 'text-text-strong'">
+                                    {{ lineTotal(index) === null ? '—' : formatMoney(lineTotal(index)) }}
+                                </span>
+                                <Tooltip label="More: MRP, free units, split">
                                     <button
                                         type="button"
-                                        class="flex h-6 w-6 items-center justify-center text-text-muted hover:text-primary"
-                                        @click="openSplitModal(index)"
+                                        class="flex h-8 w-8 shrink-0 cursor-pointer items-center justify-center text-text-muted hover:text-primary focus-visible:outline-2 focus-visible:outline-primary"
+                                        aria-label="Show more options for this line"
+                                        :aria-expanded="!!line.showMore"
+                                        @click="toggleLineMore(line)"
                                     >
-                                        <SplitSquareHorizontal class="h-3.5 w-3.5" />
+                                        <ChevronDown class="h-4 w-4 transition-transform" :class="line.showMore ? 'rotate-180' : ''" />
                                     </button>
                                 </Tooltip>
-                                <button
-                                    type="button"
-                                    class="flex h-6 w-6 items-center justify-center text-text-muted hover:text-danger"
-                                    aria-label="Remove line"
-                                    @click="removeLine(index)"
-                                >
-                                    <X class="h-3.5 w-3.5" />
-                                </button>
+                                <Tooltip label="Remove this item">
+                                    <button
+                                        type="button"
+                                        class="flex h-8 w-8 shrink-0 cursor-pointer items-center justify-center text-text-muted hover:text-danger focus-visible:outline-2 focus-visible:outline-primary"
+                                        aria-label="Remove this item from the cart"
+                                        @click="removeLine(index)"
+                                    >
+                                        <X class="h-4 w-4" />
+                                    </button>
+                                </Tooltip>
                             </div>
                             <p v-if="form.errors[`lines.${index}.item_id`]" class="text-xs text-danger">
                                 {{ form.errors[`lines.${index}.item_id`] }}
                             </p>
-                            <div class="flex items-center gap-1.5">
-                                <button
-                                    type="button"
-                                    class="flex h-6 w-6 shrink-0 items-center justify-center bg-bg-subtle text-text-muted hover:text-primary"
-                                    @click="decrementQty(index)"
-                                >
-                                    <Minus class="h-3 w-3" />
-                                </button>
-                                <Input
-                                    v-model="line.quantity"
-                                    type="number"
-                                    min="0"
-                                    step="0.0001"
-                                    placeholder="Qty"
-                                    class="w-14 text-center"
-                                    @focusin="focusTarget('quantity', index)"
-                                    @blur="warnIfOverstock(line.item_id)"
-                                />
-                                <button
-                                    type="button"
-                                    class="flex h-6 w-6 shrink-0 items-center justify-center bg-bg-subtle text-text-muted hover:text-primary"
-                                    @click="incrementQty(index)"
-                                >
-                                    <Plus class="h-3 w-3" />
-                                </button>
-                                <Input
-                                    v-model="line.rate"
-                                    type="number"
-                                    min="0"
-                                    step="0.01"
-                                    placeholder="Rate"
-                                    class="w-16 text-center"
-                                    @focusin="focusTarget('rate', index)"
-                                />
-                                <Input
-                                    v-model="line.discount"
-                                    type="number"
-                                    min="0"
-                                    :max="line.discountType === 'percent' ? 100 : undefined"
-                                    :placeholder="line.discountType === 'percent' ? '%' : 'Rs'"
-                                    class="w-14 text-center"
-                                />
-                                <button
-                                    type="button"
-                                    class="flex h-6 w-8 shrink-0 items-center justify-center border-[1.5px] border-border bg-bg-subtle text-[10px] font-bold text-text-muted hover:border-primary hover:text-primary"
-                                    title="Click to switch between % and Rs discount"
-                                    @click="toggleLineDiscountType(index)"
-                                >
-                                    {{ line.discountType === 'percent' ? '%' : 'Rs' }}
-                                </button>
-                                <span class="ml-auto shrink-0 text-xs font-bold text-text-strong">
-                                    {{ lineTotal(index) === null ? '—' : formatMoney(lineTotal(index)) }}
-                                </span>
+                            <div class="flex flex-wrap items-center gap-1.5">
+                                <div class="flex w-32 shrink-0 items-stretch border-[1.5px] border-border bg-white focus-within:border-primary">
+                                    <button
+                                        type="button"
+                                        class="flex h-8 w-8 shrink-0 cursor-pointer items-center justify-center bg-bg-subtle text-text-muted hover:text-primary focus-visible:outline-2 focus-visible:outline-primary"
+                                        aria-label="Decrease quantity"
+                                        title="Decrease quantity"
+                                        @click="decrementQty(index)"
+                                    >
+                                        <Minus class="h-4 w-4" />
+                                    </button>
+                                    <Input
+                                        v-model="line.quantity"
+                                        type="number"
+                                        min="0"
+                                        step="0.0001"
+                                        placeholder="Qty"
+                                        aria-label="Quantity"
+                                        class="!h-8 min-w-0 flex-1 !border-0 !bg-white text-center !shadow-none !outline-none"
+                                        @blur="warnIfOverstock(line.item_id)"
+                                    />
+                                    <button
+                                        type="button"
+                                        class="flex h-8 w-8 shrink-0 cursor-pointer items-center justify-center bg-bg-subtle text-text-muted hover:text-primary focus-visible:outline-2 focus-visible:outline-primary"
+                                        aria-label="Increase quantity"
+                                        title="Increase quantity"
+                                        @click="incrementQty(index)"
+                                    >
+                                        <Plus class="h-4 w-4" />
+                                    </button>
+                                </div>
+                                <div class="w-20 shrink-0" :data-rate-index="index">
+                                    <Input
+                                        v-model="line.rate"
+                                        type="number"
+                                        min="0"
+                                        step="0.01"
+                                        placeholder="Rate"
+                                        aria-label="Rate"
+                                        :class="isRateMissing(line) ? '!h-8 !border-danger text-center' : '!h-8 text-center'"
+                                    />
+                                </div>
+                                <div class="flex w-28 shrink-0 items-stretch border-[1.5px] border-border bg-white focus-within:border-primary">
+                                    <Input
+                                        v-model="line.discount"
+                                        type="number"
+                                        min="0"
+                                        :max="line.discountType === 'percent' ? 100 : undefined"
+                                        :placeholder="line.discountType === 'percent' ? '%' : 'Disc.'"
+                                        aria-label="Line discount"
+                                        class="!h-8 min-w-0 flex-1 !border-0 !bg-white text-center !shadow-none !outline-none"
+                                    />
+                                    <button
+                                        type="button"
+                                        class="flex h-8 w-8 shrink-0 cursor-pointer items-center justify-center bg-bg-subtle text-xs font-bold text-text-muted hover:text-primary focus-visible:outline-2 focus-visible:outline-primary"
+                                        title="Click to switch between % and Rs discount"
+                                        :aria-label="`Discount type: ${line.discountType === 'percent' ? 'percent' : 'rupees'}. Click to switch`"
+                                        @click="toggleLineDiscountType(index)"
+                                    >
+                                        {{ line.discountType === 'percent' ? '%' : 'Rs' }}
+                                    </button>
+                                </div>
                             </div>
-                            <!-- MRP and free units, kept off the main row so
-                                 the quantity/rate/discount cluster the numpad
-                                 targets is unchanged.
-
-                                 MRP is VAT-inclusive entry (audit section 3
+                            <!-- MRP is VAT-inclusive entry (audit section 3
                                  "Sales"): typing it fills Rate above with
                                  MRP / 1.13 for a vatable item. Browser-only,
                                  never submitted. Bonus units move stock and
                                  are never billed, so the line total above and
-                                 the bill total below ignore them. -->
-                            <div class="flex items-center gap-1.5">
-                                <Input
-                                    :model-value="line.mrp"
-                                    type="number"
-                                    min="0"
-                                    step="0.0001"
-                                    placeholder="MRP"
-                                    title="VAT-inclusive price: fills Rate with MRP / (1 + VAT%)"
-                                    class="w-20 text-center"
-                                    @update:model-value="(v) => applyLineMrp(line, v)"
-                                />
-                                <Input
-                                    v-model="line.bonus_quantity"
-                                    type="number"
-                                    min="0"
-                                    step="0.0001"
-                                    placeholder="Free"
-                                    title="Free units given with this line - moves stock, never billed"
-                                    class="w-16 text-center"
-                                    @focusin="focusTarget('bonus_quantity', index)"
-                                    @blur="warnIfOverstock(line.item_id)"
-                                />
+                                 the bill total below ignore them. Collapsed by
+                                 default - edited far less often than
+                                 qty/rate/discount. -->
+                            <div v-if="line.showMore" class="flex items-center gap-1.5">
+                                <div class="w-20 shrink-0">
+                                    <Input
+                                        :model-value="line.mrp"
+                                        type="number"
+                                        min="0"
+                                        step="0.0001"
+                                        placeholder="MRP"
+                                        title="VAT-inclusive price: fills Rate with MRP / (1 + VAT%)"
+                                        class="!h-8 text-center"
+                                        @update:model-value="(v) => applyLineMrp(line, v)"
+                                    />
+                                </div>
+                                <div class="w-20 shrink-0">
+                                    <Input
+                                        v-model="line.bonus_quantity"
+                                        type="number"
+                                        min="0"
+                                        step="0.0001"
+                                        placeholder="Free"
+                                        title="Free units given with this line - moves stock, never billed"
+                                        class="!h-8 text-center"
+                                        @blur="warnIfOverstock(line.item_id)"
+                                    />
+                                </div>
+                                <button
+                                    type="button"
+                                    class="ml-auto flex h-8 cursor-pointer items-center gap-1.5 px-2 text-xs font-semibold text-text-muted hover:text-primary focus-visible:outline-2 focus-visible:outline-primary"
+                                    @click="openSplitModal(index)"
+                                >
+                                    <SplitSquareHorizontal class="h-4 w-4" /> Split to new cart
+                                </button>
                                 <span v-if="form.errors[`lines.${index}.bonus_quantity`]" class="text-xs text-danger">
                                     {{ form.errors[`lines.${index}.bonus_quantity`] }}
                                 </span>
@@ -1526,109 +1613,61 @@ onUnmounted(() => {
                         </div>
                     </Card>
 
-                    <!-- Numpad -->
-                    <Card variant="panel">
-                        <p class="mb-2 text-xs font-semibold text-text-muted">{{ activeTargetLabel }}</p>
-                        <div class="grid grid-cols-3 gap-1.5">
-                            <button
-                                v-for="digit in ['7', '8', '9', '4', '5', '6', '1', '2', '3', '.', '0']"
-                                :key="digit"
-                                type="button"
-                                class="border-[1.5px] border-border bg-bg-subtle py-2 text-sm font-bold text-text-base hover:bg-primary-tint hover:text-primary"
-                                @click="pressDigit(digit)"
-                            >
-                                {{ digit }}
-                            </button>
-                            <button
-                                type="button"
-                                class="flex items-center justify-center border-[1.5px] border-border bg-bg-subtle py-2 text-text-base hover:bg-danger-bg hover:text-danger"
-                                aria-label="Backspace"
-                                @click="pressBackspace"
-                            >
-                                <Delete class="h-4 w-4" />
-                            </button>
-                        </div>
-                        <Button variant="secondary" tone="purple" type="button" class="mt-1.5 w-full justify-center" @click="pressClear">
-                            Clear
-                        </Button>
-                    </Card>
-
                     <!-- Payment -->
-                    <Card variant="panel">
-                        <div class="mb-2 flex items-center justify-between">
-                            <p class="text-[10px] font-bold tracking-[.8px] text-text-muted uppercase">Payment</p>
-                            <div class="flex gap-1.5">
-                                <Button variant="secondary" tone="blue" type="button" class="!px-2.5 !py-1 !text-[11px]" @click="quickPayFullCash">
+                    <Card variant="panel" class="-mt-3 shrink-0">
+                        <div class="mb-2 flex flex-wrap items-center justify-between gap-1.5">
+                            <p class="text-xs font-bold tracking-[.8px] text-text-muted uppercase">Payment</p>
+                            <div class="flex flex-wrap gap-1.5" role="group" aria-label="Quick payment">
+                                <Button variant="secondary" tone="blue" type="button" class="h-6 cursor-pointer !px-2 !text-[11px]" @click="quickPayFullCash">
                                     Full Cash
                                 </Button>
-                                <Button variant="secondary" tone="purple" type="button" class="!px-2.5 !py-1 !text-[11px]" @click="quickPayFullBank">
+                                <Button variant="secondary" tone="purple" type="button" class="h-6 cursor-pointer !px-2 !text-[11px]" @click="quickPayFullBank">
                                     Full Bank
                                 </Button>
-                                <Button variant="secondary" tone="danger" type="button" class="!px-2.5 !py-1 !text-[11px]" @click="quickPayReset">
+                                <Button variant="secondary" tone="danger" type="button" class="h-6 cursor-pointer !px-2 !text-[11px]" @click="quickPayReset">
                                     Reset
                                 </Button>
                             </div>
                         </div>
 
-                        <div class="grid grid-cols-2 gap-3">
+                        <!-- Legacy's fixed 2x2 layout: Cash | Bank / Note | Bank account -->
+                        <div class="pos-pay-fields grid gap-2.5">
                             <div>
-                                <label class="mb-1 block text-sm font-semibold text-text-base">Cash paid</label>
-                                <Input
-                                    v-model="form.cash_amount"
-                                    type="number"
-                                    min="0"
-                                    step="0.01"
-                                    placeholder="0.00"
-                                    @focusin="activeTarget = { type: 'cash' }"
+                                <label class="mb-1 block text-xs font-semibold text-text-muted">Cash Paid</label>
+                                <Input v-model="form.cash_amount" type="number" min="0" step="0.01" placeholder="0.00" class="!h-8" />
+                            </div>
+                            <div>
+                                <label class="mb-1 block text-xs font-semibold text-text-muted">Bank / QR Paid</label>
+                                <Input v-model="form.bank_amount" type="number" min="0" step="0.01" placeholder="0.00" class="!h-8" />
+                            </div>
+                            <div v-if="showBankAccountField" class="col-span-2">
+                                <label class="mb-1 block text-sm font-semibold text-text-base">Bank account</label>
+                                <Combobox
+                                    :model-value="form.bank_account_id"
+                                    :options="bankAccountOptions"
+                                    placeholder="Select bank account"
+                                    @update:model-value="(v) => (form.bank_account_id = v)"
                                 />
                             </div>
-                            <div>
-                                <label class="mb-1 block text-sm font-semibold text-text-base">Bank / QR paid</label>
-                                <Input v-model="form.bank_amount" type="number" min="0" step="0.01" placeholder="0.00" />
-                            </div>
                         </div>
+                        <p v-if="form.errors.bank_account_id" class="mt-1 text-sm text-danger">{{ form.errors.bank_account_id }}</p>
 
-                        <div v-if="showBankAccountField" class="mt-3">
-                            <label class="mb-1 block text-sm font-semibold text-text-base">Bank account</label>
-                            <Combobox
-                                :model-value="form.bank_account_id"
-                                :options="bankAccountOptions"
-                                placeholder="Select bank account"
-                                @update:model-value="(v) => (form.bank_account_id = v)"
-                            />
-                            <p v-if="form.errors.bank_account_id" class="mt-1 text-sm text-danger">{{ form.errors.bank_account_id }}</p>
-                        </div>
-
-                        <div v-if="hasDue" class="mt-3 flex items-center justify-between bg-warning-bg px-3 py-2 text-xs font-bold text-warning-text">
-                            <span>Due</span>
-                            <span>{{ formatMoney(dueAmount) }}</span>
-                        </div>
-                        <div v-else-if="hasChange" class="mt-3 flex items-center justify-between bg-success-bg px-3 py-2 text-xs font-bold text-success">
-                            <span>Change to return</span>
-                            <span>{{ formatMoney(changeAmount) }}</span>
-                        </div>
                         <p v-if="resolvedPaymentMode === 'partial' && !paymentBalanced" class="mt-1 text-xs font-semibold text-danger">
-                            Cash + bank must add up to exactly {{ settlementDue ? formatMoney(settlementDue) : '—' }} for a split payment.
+                            Cash + bank must add up to exactly {{ settlementDue ? formatMoney(settlementDue) : '-' }} for a split payment.
                         </p>
 
-                        <button type="button" class="mt-3 text-xs font-semibold text-primary" @click="showAdvanced = !showAdvanced">
+                        <button type="button" class="mt-3 h-9 cursor-pointer text-sm font-semibold text-primary focus-visible:outline-2 focus-visible:outline-primary" @click="showAdvanced = !showAdvanced">
                             {{ showAdvanced ? 'Hide' : 'Show' }} more options
                         </button>
 
+                        <!-- Fields legacy never had at all (store, header discount,
+                             TDS, chalani number) stay tucked away here - Date moved
+                             to the always-visible top bar since legacy shows it
+                             there and it's required to submit. -->
                         <div v-if="showAdvanced" class="mt-3 flex flex-col gap-3 border-t border-border pt-3">
                             <div class="grid grid-cols-2 gap-3">
                                 <div>
-                                    <label class="mb-1 block text-sm font-semibold text-text-base">Invoice type</label>
-                                    <Select v-model="form.invoice_type" :options="invoiceTypeOptions" />
-                                </div>
-                                <div>
-                                    <label class="mb-1 block text-sm font-semibold text-text-base">Date</label>
-                                    <NepaliDateInput v-model="form.date" required />
-                                </div>
-                            </div>
-                            <div class="grid grid-cols-2 gap-3">
-                                <div>
-                                    <label class="mb-1 block text-sm font-semibold text-text-base">Store</label>
+                                    <label class="mb-1 block text-xs font-semibold text-text-muted">Store</label>
                                     <Combobox
                                         :model-value="form.store_id"
                                         :options="storeOptions"
@@ -1637,7 +1676,13 @@ onUnmounted(() => {
                                     />
                                 </div>
                                 <div>
-                                    <label class="mb-1 block text-sm font-semibold text-text-base">Header discount</label>
+                                    <label class="mb-1 block text-xs font-semibold text-text-muted">TDS amount</label>
+                                    <Input v-model="form.tds_amount" type="number" min="0" step="0.01" placeholder="0.00" />
+                                </div>
+                            </div>
+                            <div class="grid grid-cols-2 gap-3">
+                                <div>
+                                    <label class="mb-1 block text-xs font-semibold text-text-muted">Header discount</label>
                                     <div class="flex gap-1.5">
                                         <Input
                                             v-model="form.discount"
@@ -1648,34 +1693,17 @@ onUnmounted(() => {
                                         />
                                         <button
                                             type="button"
-                                            class="flex h-9 w-9 shrink-0 items-center justify-center border-[1.5px] border-border bg-bg-subtle text-[10px] font-bold text-text-muted hover:border-primary hover:text-primary"
+                                            class="flex h-9 w-9 shrink-0 cursor-pointer items-center justify-center border-[1.5px] border-border bg-bg-subtle text-xs font-bold text-text-muted hover:border-primary hover:text-primary focus-visible:outline-2 focus-visible:outline-primary"
                                             title="Click to switch between % and Rs discount"
+                                            :aria-label="`Discount type: ${form.discount_type === 'percent' ? 'percent' : 'rupees'}. Click to switch`"
                                             @click="toggleHeaderDiscountType"
                                         >
                                             {{ form.discount_type === 'percent' ? '%' : 'Rs' }}
                                         </button>
                                     </div>
                                 </div>
-                            </div>
-                            <div class="grid grid-cols-2 gap-3">
                                 <div>
-                                    <label class="mb-1 block text-sm font-semibold text-text-base">VAT rate (%)</label>
-                                    <!-- Read-only: the server always uses the
-                                         tenant's configured rate, and a PAN
-                                         invoice carries no VAT at all. -->
-                                    <p class="flex h-9 items-center border-[1.5px] border-border bg-bg-subtle px-3 text-[13px] font-semibold text-text-muted">
-                                        {{ formatRate(effectiveVatRate) }}
-                                        <span v-if="isPanInvoice" class="ml-2 text-xs font-normal">(no VAT)</span>
-                                    </p>
-                                </div>
-                                <div>
-                                    <label class="mb-1 block text-sm font-semibold text-text-base">TDS amount</label>
-                                    <Input v-model="form.tds_amount" type="number" min="0" step="0.01" placeholder="0.00" />
-                                </div>
-                            </div>
-                            <div class="grid grid-cols-2 gap-3">
-                                <div>
-                                    <label class="mb-1 block text-sm font-semibold text-text-base">TDS account</label>
+                                    <label class="mb-1 block text-xs font-semibold text-text-muted">TDS account</label>
                                     <Combobox
                                         :model-value="form.tds_account_id"
                                         :options="tdsAccountOptions"
@@ -1683,38 +1711,80 @@ onUnmounted(() => {
                                         @update:model-value="(v) => (form.tds_account_id = v)"
                                     />
                                 </div>
+                            </div>
+                            <div class="grid grid-cols-2 gap-3">
                                 <div>
-                                    <label class="mb-1 block text-sm font-semibold text-text-base">Chalani number</label>
+                                    <label class="mb-1 block text-xs font-semibold text-text-muted">Chalani number</label>
                                     <Input v-model="form.chalani_number" type="text" placeholder="Optional" />
                                 </div>
-                            </div>
-                            <div>
-                                <label class="mb-1 block text-sm font-semibold text-text-base">Narration</label>
-                                <Input v-model="form.narration" type="text" placeholder="Optional" />
+                                <div>
+                                    <label class="mb-1 block text-xs font-semibold text-text-muted">Note</label>
+                                    <Input v-model="form.narration" type="text" placeholder="Optional" />
+                                </div>
                             </div>
                         </div>
                     </Card>
 
-                    <!-- Totals + submit -->
-                    <Card variant="panel">
-                        <div v-if="totals" class="grid grid-cols-2 gap-2 text-sm">
-                            <p class="text-text-muted">Taxable</p>
-                            <p class="text-right font-semibold text-text-strong">{{ formatMoney(totals.taxable_amount) }}</p>
-                            <p class="text-text-muted">Non-taxable</p>
-                            <p class="text-right font-semibold text-text-strong">{{ formatMoney(totals.nontaxable_amount) }}</p>
-                            <p class="text-text-muted">VAT</p>
-                            <p class="text-right font-semibold text-text-strong">{{ formatMoney(totals.vat_amount) }}</p>
-                            <p class="text-base font-bold text-text-strong">Grand total</p>
-                            <p class="text-right text-base font-bold text-primary">{{ formatMoney(totals.total) }}</p>
-                        </div>
-                        <p v-if="previewError" class="text-sm text-danger">{{ previewError }}</p>
+                    <!-- Totals -->
+                    <Card v-if="totals || form.errors.lines || form.errors.expected_total" variant="panel" class="shrink-0">
+                        <dl v-if="totals" class="grid grid-cols-[1fr_auto] gap-x-3 gap-y-1 text-[13px]" aria-live="polite">
+                            <dt class="text-text-muted">Subtotal</dt>
+                            <dd class="text-right font-medium text-text-strong tabular-nums">{{ formatMoney(addMoney(totals.vatable_subtotal, totals.non_vatable_subtotal)) }}</dd>
+                            <template v-if="totals.header_discount && totals.header_discount !== '0.00'">
+                                <dt class="text-text-muted">Discount</dt>
+                                <dd class="text-right font-medium text-text-strong tabular-nums">− {{ formatMoney(totals.header_discount) }}</dd>
+                            </template>
+                            <dt class="text-text-muted">Taxable amount</dt>
+                            <dd class="text-right font-medium text-text-strong tabular-nums">{{ formatMoney(totals.taxable_amount) }}</dd>
+                            <dt class="text-text-muted">Non-taxable amount</dt>
+                            <dd class="text-right font-medium text-text-strong tabular-nums">{{ formatMoney(totals.nontaxable_amount) }}</dd>
+                            <dt class="text-text-muted">VAT ({{ Number(totals.vat_rate) }}%)</dt>
+                            <dd class="text-right font-medium text-text-strong tabular-nums">{{ formatMoney(totals.vat_amount) }}</dd>
+                            <dt class="pos-grand mt-1 border-t border-border pt-2">Grand total</dt>
+                            <dd class="pos-grand-amt mt-1 border-t border-border pt-2 text-right tabular-nums">{{ formatMoney(totals.total) }}</dd>
+                        </dl>
+                        <p v-else-if="!previewError" class="text-sm text-text-faint">Totals appear once the cart has items.</p>
                         <p v-if="form.errors.lines" class="mt-2 text-sm text-danger">{{ form.errors.lines }}</p>
                         <p v-if="form.errors.expected_total" class="mt-2 text-sm text-danger">{{ form.errors.expected_total }}</p>
-                        <Button variant="primary" tone="purple" type="button" class="mt-3 w-full justify-center" :disabled="!canSubmit" @click="completeSale">
-                            Complete sale (F8)
-                        </Button>
                     </Card>
-                </div>
+
+                    <!-- Actions: legacy's Hold / Save / Save & Print row -->
+                    <div class="pos-footer sticky bottom-0 z-10 -mx-3 -mb-3 mt-3 flex shrink-0 flex-col gap-2 border-t border-border bg-white px-3 pt-3 pb-2 shadow-[0_-6px_10px_-6px_rgba(0,0,0,0.12)]">
+                    <div v-if="hasDue || hasChange" class="flex shrink-0 items-center justify-between px-3 py-1.5 text-sm font-bold" :class="hasDue ? 'bg-warning-bg text-warning-text' : 'bg-success-bg text-success'">
+                        <span>{{ hasDue ? 'Balance due' : 'Change to return' }}</span>
+                        <span>{{ formatMoney(hasDue ? dueAmount : changeAmount) }}</span>
+                    </div>
+                    <p v-if="submitBlockedReason" id="pos-submit-reason" class="sr-only" role="status">{{ submitBlockedReason }}</p>
+                    <div class="pos-actions grid shrink-0 gap-1.5">
+                        <Button variant="secondary" tone="purple" type="button" class="h-11 cursor-pointer justify-center" @click="holdCarts">
+                            <CirclePause class="h-4 w-4" /> Hold <kbd class="ml-1 font-mono text-[10px] opacity-70">F9</kbd>
+                        </Button>
+                        <Button
+                            variant="secondary"
+                            tone="blue"
+                            type="button"
+                            class="h-11 cursor-pointer justify-center"
+                            :disabled="!canSubmit"
+                            :loading="form.processing"
+                            @click="completeSale('save')"
+                        >
+                            Save
+                        </Button>
+                        <Button
+                            variant="primary"
+                            tone="purple"
+                            type="button"
+                            class="h-11 cursor-pointer justify-center"
+                            :disabled="!canSubmit"
+                            :loading="form.processing"
+                            :aria-describedby="submitBlockedReason ? 'pos-submit-reason' : undefined"
+                            @click="completeSale('print')"
+                        >
+                            Save & Print <kbd class="ml-1 font-mono text-[10px] font-normal opacity-80">F8</kbd>
+                        </Button>
+                    </div>
+                    <p v-if="form.processing" class="shrink-0 text-center text-xs text-text-faint" role="status">Completing sale…</p>
+                    </div>
             </div>
         </div>
 
@@ -1744,7 +1814,7 @@ onUnmounted(() => {
         <Modal :open="splitModalOpen" title="Split into a new cart" size="compact" @update:open="(v) => (v ? null : closeSplitModal())">
             <div v-if="splitLineIndex !== null" class="flex flex-col gap-3 text-sm">
                 <p class="text-text-muted">
-                    {{ itemsById[form.lines[splitLineIndex]?.item_id]?.name ?? 'Item' }} — current quantity
+                    {{ itemsById[form.lines[splitLineIndex]?.item_id]?.name ?? 'Item' }} - current quantity
                     {{ form.lines[splitLineIndex]?.quantity }}
                 </p>
                 <div>
@@ -1850,3 +1920,234 @@ onUnmounted(() => {
         </Modal>
     </div>
 </template>
+
+<style scoped>
+/*
+ * Legacy's dedicated pos-modules CSS (styles-layout.blade.php,
+ * styles-components.blade.php) is fully separate from the rest of its app -
+ * mirrored here as scoped, POS-only CSS rather than new shared UI-kit
+ * variants, for the same reason: this screen's density/sizing needs
+ * (52px top bar, 60/40 split, 34px qty-stepper buttons) don't belong on
+ * Button/Input/Card everywhere else in the app. Colors reuse the app's
+ * existing --color-* tokens (already close to legacy's palette); all
+ * border-radius stays 0 to match the app-wide square design.
+ */
+
+.pos-root {
+    height: 100%;
+}
+
+.pos-bar {
+    background: var(--color-primary);
+    color: white;
+}
+
+/* The accent rule is drawn per section (not on the bar) so the active cart tab can sit on top of it and merge into the panel below. */
+.pos-bar-section {
+    position: relative;
+}
+
+.pos-bar-section::after {
+    content: '';
+    position: absolute;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    height: 2px;
+    background: var(--color-accent);
+}
+
+.pos-cart-tab {
+    position: relative;
+    z-index: 1;
+}
+
+.pos-cart-tab--active {
+    height: 46px;
+    padding-bottom: 2px;
+    background: var(--color-bg-subtle);
+    color: var(--color-primary);
+}
+
+.pos-cart-tab--idle {
+    height: 32px;
+    margin-bottom: 10px;
+    background: rgba(255, 255, 255, 0.12);
+    border: 1.5px solid rgba(255, 255, 255, 0.25);
+    color: white;
+}
+
+.pos-cart-tab--idle:hover {
+    background: rgba(255, 255, 255, 0.22);
+}
+
+.pos-bar-section {
+    min-height: 52px;
+    min-width: 0;
+    padding: 0 14px;
+}
+
+.pos-bar-section--carts {
+    border-top: 1px solid rgba(255, 255, 255, 0.25);
+}
+
+/* Same 60/40 split as the body below, so the tabs sit right over the cart column. */
+@media (min-width: 1024px) {
+    .pos-bar-section--products {
+        width: 60%;
+    }
+
+    .pos-bar-section--carts {
+        width: 40%;
+        border-top: 0;
+        border-left: 1px solid rgba(255, 255, 255, 0.25);
+    }
+}
+
+.pos-bar-divider {
+    width: 1px;
+    height: 22px;
+    background: rgba(255, 255, 255, 0.25);
+    flex-shrink: 0;
+}
+
+.pos-bar-btn {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    height: 32px;
+    padding: 0 10px;
+    flex-shrink: 0;
+    font-size: 12px;
+    font-weight: 700;
+    color: white;
+    background: rgba(255, 255, 255, 0.12);
+    border: 1.5px solid rgba(255, 255, 255, 0.25);
+    cursor: pointer;
+    white-space: nowrap;
+}
+
+.pos-bar-btn:hover {
+    background: rgba(255, 255, 255, 0.22);
+}
+
+.pos-bar-btn--icon {
+    width: 32px;
+    padding: 0;
+    justify-content: center;
+}
+
+.pos-bar-kbd {
+    font-family: ui-monospace, monospace;
+    font-size: 10px;
+    opacity: 0.8;
+}
+
+.pos-fy-badge,
+.pos-bill-badge {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    height: 32px;
+    padding: 0 10px;
+    flex-shrink: 0;
+    font-size: 11.5px;
+    font-weight: 700;
+    color: white;
+    background: rgba(255, 255, 255, 0.12);
+    white-space: nowrap;
+}
+
+.pos-date-box {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    flex-shrink: 0;
+}
+
+.pos-date-box label {
+    font-size: 9px;
+    font-weight: 700;
+    color: rgba(255, 255, 255, 0.75);
+    letter-spacing: 0.5px;
+}
+
+.pos-date-input {
+    width: 96px;
+}
+
+.pos-draft-btn {
+    display: flex;
+    margin-bottom: 12px;
+    height: 28px;
+    width: 28px;
+    flex-shrink: 0;
+    align-items: center;
+    justify-content: center;
+    border: 1.5px dashed var(--color-border);
+    background: var(--color-primary-tint);
+    color: var(--color-primary);
+    cursor: pointer;
+}
+
+.pos-draft-btn--merge {
+    background: var(--color-success-bg-soft, var(--color-bg-subtle));
+    color: var(--color-success);
+    border-style: solid;
+}
+
+.pos-body {
+    overflow: hidden;
+}
+
+.pos-left {
+    background: var(--color-bg-surface);
+    border-right: 1px solid var(--color-border);
+}
+
+.pos-right {
+    background: var(--color-bg-subtle);
+}
+
+@media (min-width: 1024px) {
+    .pos-left {
+        width: 60%;
+    }
+
+    .pos-right {
+        width: 40%;
+    }
+}
+
+.pos-grid {
+    grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+    /* Room for the hover shadow, which the scroll container would otherwise crop. */
+    padding: 14px 16px 20px;
+}
+
+@media (max-width: 600px) {
+    .pos-grid {
+        grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
+    }
+}
+
+.pos-pay-fields {
+    grid-template-columns: 1fr 1fr;
+}
+
+.pos-grand {
+    font-size: 13px;
+    font-weight: 800;
+    color: var(--color-text-strong);
+}
+
+.pos-grand-amt {
+    font-size: 16px;
+    font-weight: 800;
+    color: var(--color-primary);
+}
+
+.pos-actions {
+    grid-template-columns: 1fr 1fr 1.3fr;
+}
+</style>

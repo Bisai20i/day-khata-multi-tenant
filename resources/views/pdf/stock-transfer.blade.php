@@ -21,11 +21,11 @@
         <tr>
             <td>
                 <div class="party-label">From Store</div>
-                <div class="party-name">{{ $stockTransfer->fromStore->name ?? '—' }}</div>
+                <div class="party-name">{{ $stockTransfer->fromStore->name ?? '-' }}</div>
             </td>
             <td>
                 <div class="party-label">To Store</div>
-                <div class="party-name">{{ $stockTransfer->toStore->name ?? '—' }}</div>
+                <div class="party-name">{{ $stockTransfer->toStore->name ?? '-' }}</div>
             </td>
         </tr>
     </table>
@@ -56,9 +56,9 @@
                         @endif
                     </td>
                     <td class="text-right">{{ $qty($line->quantity) }}</td>
-                    <td class="text-right">{{ $line->unit_cost_rate !== null ? $rate($line->unit_cost_rate) : '—' }}</td>
+                    <td class="text-right">{{ $line->unit_cost_rate !== null ? $rate($line->unit_cost_rate) : '-' }}</td>
                     <td class="text-right">{{ $money($line->line_value) }}</td>
-                    <td>{{ $line->remarks ?? '—' }}</td>
+                    <td>{{ $line->remarks ?? '-' }}</td>
                 </tr>
             @endforeach
         </tbody>

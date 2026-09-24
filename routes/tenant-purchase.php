@@ -3,6 +3,7 @@
 declare(strict_types=1);
 
 use App\Http\Controllers\Tenant\Purchases\CapitalPurchaseController;
+use App\Http\Controllers\Tenant\Purchases\CapitalPurchaseSettlementController;
 use App\Http\Controllers\Tenant\Purchases\PurchaseController;
 use Illuminate\Support\Facades\Route;
 
@@ -39,5 +40,10 @@ Route::name('tenant.')->group(function () {
         Route::post('/{capitalPurchase}/cancel', [CapitalPurchaseController::class, 'cancel'])
             ->middleware('role:admin')
             ->name('cancel');
+        Route::post('/{capitalPurchase}/settlements', [CapitalPurchaseSettlementController::class, 'store'])
+            ->name('settlements.store');
+        Route::post('/settlements/{settlement}/cancel', [CapitalPurchaseSettlementController::class, 'cancel'])
+            ->middleware('role:admin')
+            ->name('settlements.cancel');
     });
 });

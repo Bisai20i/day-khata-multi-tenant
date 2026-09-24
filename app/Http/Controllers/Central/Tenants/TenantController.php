@@ -93,7 +93,7 @@ class TenantController extends Controller
      * created) asynchronously via the queued TenantCreated job pipeline
      * (see App\Jobs\CreateTenantFirstAdmin and TenancyServiceProvider). The
      * tenant starts out `Provisioning` and only flips to `Active` once that
-     * pipeline finishes — see AbortIfTenantSuspended for how requests into a
+     * pipeline finishes - see AbortIfTenantSuspended for how requests into a
      * still-provisioning tenant are handled in the meantime.
      */
     public function store(Request $request): RedirectResponse
@@ -132,13 +132,13 @@ class TenantController extends Controller
                 'trial_ends_at' => now()->addDays(PlatformSetting::current()->default_trial_days),
             ]);
 
-            // Not a real column (see Tenant::getCustomColumns()) — swept into
+            // Not a real column (see Tenant::getCustomColumns()) - swept into
             // the `data` JSON column and read back by App\Jobs\CreateTenantFirstAdmin
             // once the tenant database exists. Hashed here, never stored in
             // plaintext even transiently. `domain` is stashed here (rather
             // than CreateTenantFirstAdmin querying $tenant->domains()->first())
             // because $tenant->save() below fires the TenantCreated pipeline
-            // synchronously on the `sync` queue connection (tests) — that
+            // synchronously on the `sync` queue connection (tests) - that
             // pipeline, including CreateTenantFirstAdmin, runs and completes
             // BEFORE the domains()->create() call further down even executes,
             // so a domains() lookup from inside the job would always find
@@ -178,7 +178,7 @@ class TenantController extends Controller
 
         return redirect()
             ->route('central.tenants.show', $tenant)
-            ->with('status', 'Tenant provisioning started — it will be ready shortly.');
+            ->with('status', 'Tenant provisioning started - it will be ready shortly.');
     }
 
     /**

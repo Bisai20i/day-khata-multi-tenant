@@ -6,6 +6,7 @@ import { useLayoutChrome } from '@/composables/useLayoutChrome';
 import Card from '@/components/ui/Card.vue';
 import Select from '@/components/ui/Select.vue';
 import Button from '@/components/ui/Button.vue';
+import PageHeader from '@/components/ui/PageHeader.vue';
 import NepaliDateInput from '@/components/ui/NepaliDateInput.vue';
 import { formatMoney, isZeroMoney } from '@/lib/money.js';
 import { formatBsDate } from '@/lib/format.js';
@@ -68,28 +69,30 @@ function exportUrl() {
 
 <template>
     <div>
-        <div class="mb-4 flex flex-wrap items-center justify-between gap-3">
-            <h2 class="text-base font-bold text-text-strong">Balance Sheet</h2>
-            <div v-if="fiscalYearId !== null" class="flex items-center gap-2">
+        <PageHeader
+            title="Balance Sheet"
+            description="What the business owns (assets) against what it owes and the owners' capital, on one date."
+        >
+            <template v-if="fiscalYearId !== null">
                 <a :href="printUrl()" target="_blank" rel="noopener"><Button variant="secondary" tone="purple">Print</Button></a>
                 <a :href="exportUrl()"><Button variant="secondary" tone="purple">Export</Button></a>
-            </div>
-        </div>
+            </template>
+        </PageHeader>
 
         <Card v-if="fiscalYearId !== null" variant="panel" class="mb-4">
             <div class="flex flex-wrap items-end gap-3">
                 <div class="w-56">
-                    <label class="mb-1 block text-xs font-semibold text-text-muted">Fiscal Year</label>
+                    <label class="mb-1 block text-xs font-semibold text-text-muted">Fiscal year</label>
                     <Select v-model="fiscalYear" :options="fiscalYearOptions" />
                 </div>
                 <div>
-                    <label class="mb-1 block text-xs font-semibold text-text-muted">As at</label>
+                    <label class="mb-1 block text-xs font-semibold text-text-muted">As at date (BS)</label>
                     <NepaliDateInput v-model="to" />
                 </div>
-                <Button variant="primary" tone="purple" @click="apply">Apply</Button>
+                <Button variant="primary" tone="purple" @click="apply">Generate report</Button>
             </div>
             <p v-if="to" class="mt-2 text-[12px] text-text-muted">
-                As at {{ formatBsDate(to) }} BS <span class="text-text-muted">({{ to }})</span>
+                Showing report as at {{ formatBsDate(to) }} BS <span class="text-text-muted">({{ to }})</span>
             </p>
         </Card>
 
@@ -107,7 +110,7 @@ function exportUrl() {
 
             <div class="grid gap-4 md:grid-cols-2">
                 <Card variant="panel" title="Assets">
-                    <div v-if="assetHeads.length === 0" class="px-1 py-6 text-center text-[13px] text-text-muted">No asset balances.</div>
+                    <div v-if="assetHeads.length === 0" class="px-1 py-6 text-center text-[13px] text-text-muted">No asset balances as at this date. Try a later date.</div>
                     <div v-else class="divide-y divide-border">
                         <template v-for="head in assetHeads" :key="head.name">
                             <template v-for="group in head.groups" :key="group.name">
@@ -146,7 +149,7 @@ function exportUrl() {
 
                 <Card variant="panel" title="Liabilities &amp; Capital">
                     <div v-if="otherHeads.length === 0 && !hasEarnings" class="px-1 py-6 text-center text-[13px] text-text-muted">
-                        No liability/capital balances.
+                        No liability or capital balances as at this date. Try a later date.
                     </div>
                     <div v-else class="divide-y divide-border">
                         <template v-for="head in otherHeads" :key="head.name">

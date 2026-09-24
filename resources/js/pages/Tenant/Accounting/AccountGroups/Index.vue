@@ -4,6 +4,7 @@ import { router, useForm, usePage } from '@inertiajs/vue3';
 import { Plus } from '@lucide/vue';
 import AppLayout from '@/layouts/AppLayout.vue';
 import { useLayoutChrome } from '@/composables/useLayoutChrome';
+import PageHeader from '@/components/ui/PageHeader.vue';
 import Card from '@/components/ui/Card.vue';
 import Button from '@/components/ui/Button.vue';
 import Input from '@/components/ui/Input.vue';
@@ -99,7 +100,7 @@ function submit() {
 }
 
 async function destroy(group) {
-    if (!(await confirm({ message: 'Delete this account group?', tone: 'danger', confirmLabel: 'Delete' }))) return;
+    if (!(await confirm({ message: `Delete account group "${group.name}"? This cannot be undone, and it will be refused if subgroups or accounts still use it.`, tone: 'danger', confirmLabel: 'Delete' }))) return;
     router.delete(`/account-groups/${group.id}`, {
         onSuccess: () => toast({ message: 'Account group deleted', variant: 'success' }),
     });
@@ -111,7 +112,7 @@ const columns = [
         id: 'head',
         header: 'Account Head',
         numeric: false,
-        cell: ({ row }) => row.original.account_head?.name ?? '—',
+        cell: ({ row }) => row.original.account_head?.name ?? '-',
     },
     {
         id: 'actions',
@@ -132,16 +133,15 @@ const columns = [
 
 <template>
     <div>
-        <div class="mb-4 flex items-center justify-between">
-            <h2 class="text-base font-bold text-text-strong">Account Groups</h2>
+        <PageHeader title="Account Groups" description="Top-level categories that organise your chart of accounts. Each group sits under an account head and can be split into subgroups.">
             <Button v-if="isAdmin" variant="primary" tone="purple" @click="openCreate">
                 <Plus class="size-4" />
                 New group
             </Button>
-        </div>
+        </PageHeader>
 
         <Card variant="panel">
-            <DataTable :columns="columns" :data="groups" :page-size="10" empty-message="No account groups found" />
+            <DataTable :columns="columns" :data="groups" :page-size="10" empty-message="No account groups yet. Use New group to create your first one." />
         </Card>
 
         <Modal :open="showModal" :title="editing ? 'Edit Account Group' : 'New Account Group'" @update:open="onModalOpenChange">
@@ -154,12 +154,14 @@ const columns = [
                         :options="headOptions"
                         placeholder="Select account head"
                     />
+                    <p class="mt-1 text-xs text-text-muted">The main statement section (Assets, Liabilities, Income, Expense, Equity) this group belongs to.</p>
                     <p v-if="form.errors.account_head_id" class="mt-1 text-sm text-danger">{{ form.errors.account_head_id }}</p>
                 </div>
 
                 <div>
                     <label for="name" class="mb-1 block text-sm font-semibold text-text-base">Name <span class="text-danger">*</span></label>
                     <Input id="name" v-model="form.name" type="text" placeholder="e.g. Current Assets" required />
+                    <p class="mt-1 text-xs text-text-muted">Account group is the broadest level; subgroups and individual accounts go beneath it.</p>
                     <p v-if="form.errors.name" class="mt-1 text-sm text-danger">{{ form.errors.name }}</p>
                 </div>
             </form>

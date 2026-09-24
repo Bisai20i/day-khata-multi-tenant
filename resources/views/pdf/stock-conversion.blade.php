@@ -47,8 +47,8 @@
                         @endif
                     </td>
                     <td class="text-right">{{ $qty($line->quantity) }}</td>
-                    <td class="text-right">{{ $line->unit_cost_rate !== null ? $rate($line->unit_cost_rate) : '—' }}</td>
-                    <td>{{ $line->remarks ?? '—' }}</td>
+                    <td class="text-right">{{ $line->unit_cost_rate !== null ? $rate($line->unit_cost_rate) : '-' }}</td>
+                    <td>{{ $line->remarks ?? '-' }}</td>
                 </tr>
             @endforeach
         </tbody>
@@ -76,8 +76,8 @@
                         @endif
                     </td>
                     <td class="text-right">{{ $qty($line->quantity) }}</td>
-                    <td class="text-right">{{ $line->unit_cost_rate !== null ? $rate($line->unit_cost_rate) : '—' }}</td>
-                    <td>{{ $line->remarks ?? '—' }}</td>
+                    <td class="text-right">{{ $line->unit_cost_rate !== null ? $rate($line->unit_cost_rate) : '-' }}</td>
+                    <td>{{ $line->remarks ?? '-' }}</td>
                 </tr>
             @endforeach
         </tbody>

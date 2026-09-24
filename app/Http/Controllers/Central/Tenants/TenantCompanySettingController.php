@@ -120,13 +120,27 @@ class TenantCompanySettingController extends Controller
             // with a field error instead of letting it reach the model.
             'default_vat_rate' => ['required', 'numeric', 'decimal:0,2', 'min:0', 'max:100'],
             'allow_negative_stock' => ['boolean'],
-            'default_store_id' => ['nullable', 'exists:stores,id'],
+            // Plain 'exists:stores,id' would run against the central
+            // connection, which has no stores table at all - stores only
+            // exist per-tenant. Check existence inside the tenant's own
+            // database instead.
+            'default_store_id' => [
+                'nullable',
+                'integer',
+                function (string $attribute, mixed $value, \Closure $fail) use ($tenant): void {
+                    if ($tenant->run(fn () => ! Store::whereKey($value)->exists())) {
+                        $fail('The selected store does not exist for this tenant.');
+                    }
+                },
+            ],
             'sale_full_prefix' => ['required', 'string', 'max:20'],
-            'sale_full_enabled' => ['boolean'],
             'sale_abbreviated_prefix' => ['required', 'string', 'max:20'],
-            'sale_abbreviated_enabled' => ['boolean'],
             'sale_pan_prefix' => ['required', 'string', 'max:20'],
-            'sale_pan_enabled' => ['boolean'],
+            // The invoice type a business issues is fixed by how it's
+            // registered with IRD, never a per-sale cashier choice - one
+            // active type only, set here by the platform admin (see
+            // App\Models\Sale::post()).
+            'active_invoice_type' => ['required', 'in:full,abbreviated,pan'],
             'purchase_prefix' => ['required', 'string', 'max:20'],
             'sale_return_prefix' => ['required', 'string', 'max:20'],
             'purchase_return_prefix' => ['required', 'string', 'max:20'],

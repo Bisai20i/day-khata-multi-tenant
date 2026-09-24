@@ -3,6 +3,7 @@ import { computed, ref } from 'vue';
 import { Link, router } from '@inertiajs/vue3';
 import AppLayout from '@/layouts/AppLayout.vue';
 import { useLayoutChrome } from '@/composables/useLayoutChrome';
+import PageHeader from '@/components/ui/PageHeader.vue';
 import Card from '@/components/ui/Card.vue';
 import Button from '@/components/ui/Button.vue';
 import Select from '@/components/ui/Select.vue';
@@ -59,37 +60,47 @@ const actionVariants = {
 function subjectLabel(subjectType) {
     return subjectType?.split('\\').pop() ?? subjectType;
 }
+
+function humanizeAction(action) {
+    if (!action) return '-';
+    const text = String(action).replace(/[_.-]+/g, ' ').trim();
+    return text.charAt(0).toUpperCase() + text.slice(1);
+}
+
+const hasActiveFilters = computed(() => !!(props.filters.subject_type || props.filters.from || props.filters.to));
 </script>
 
 <template>
     <div>
-        <div class="mb-4 flex items-center justify-between">
-            <h2 class="text-base font-bold text-text-strong">Activity Log</h2>
-        </div>
+        <PageHeader title="Activity Log" description="A record of who created, changed or deleted data in your company, and when." />
 
         <Card variant="panel" class="mb-4">
             <div class="flex flex-wrap items-end gap-3">
                 <div class="min-w-[180px]">
-                    <label class="mb-1 block text-xs font-semibold text-text-muted">Subject type</label>
-                    <Select v-model="subjectType" :options="subjectTypeOptions" placeholder="All types" />
+                    <label for="log-subject-type" class="mb-1 block text-xs font-semibold text-text-muted">Record type</label>
+                    <Select id="log-subject-type" v-model="subjectType" :options="subjectTypeOptions" placeholder="All types" />
                 </div>
                 <div>
-                    <label class="mb-1 block text-xs font-semibold text-text-muted">From</label>
-                    <NepaliDateInput v-model="from" />
+                    <label for="log-from" class="mb-1 block text-xs font-semibold text-text-muted">From date</label>
+                    <NepaliDateInput id="log-from" v-model="from" />
                 </div>
                 <div>
-                    <label class="mb-1 block text-xs font-semibold text-text-muted">To</label>
-                    <NepaliDateInput v-model="to" />
+                    <label for="log-to" class="mb-1 block text-xs font-semibold text-text-muted">To date</label>
+                    <NepaliDateInput id="log-to" v-model="to" />
                 </div>
-                <Button variant="primary" tone="purple" @click="applyFilter">Apply</Button>
-                <Button variant="secondary" tone="purple" @click="clearFilter">Clear</Button>
+                <Button variant="primary" tone="purple" @click="applyFilter">Apply filters</Button>
+                <Button variant="secondary" tone="purple" @click="clearFilter">Clear filters</Button>
             </div>
         </Card>
 
         <Card variant="panel">
-            <p v-if="logs.data.length === 0" class="px-1 py-6 text-center text-[13px] text-text-muted">
-                No activity recorded.
-            </p>
+            <div v-if="logs.data.length === 0" class="px-1 py-6 text-center text-[13px] text-text-muted">
+                <template v-if="hasActiveFilters">
+                    <p>No activity matches these filters.</p>
+                    <Button class="mt-3" variant="secondary" tone="purple" @click="clearFilter">Clear filters</Button>
+                </template>
+                <p v-else>No activity has been recorded yet. Changes made by your team will appear here.</p>
+            </div>
 
             <div v-else class="w-full overflow-x-auto">
                 <table class="w-full border-separate [border-spacing:0_4px] text-[12.5px] text-text-base">
@@ -111,20 +122,20 @@ function subjectLabel(subjectType) {
                                 {{ log.user?.name ?? 'System' }}
                             </td>
                             <td class="border-y-[1.5px] border-border bg-white px-[9px] py-2 align-middle">
-                                <Badge :variant="actionVariants[log.action] ?? 'neutral'" pill>{{ log.action }}</Badge>
+                                <Badge :variant="actionVariants[log.action] ?? 'neutral'" pill>{{ humanizeAction(log.action) }}</Badge>
                             </td>
                             <td class="border-y-[1.5px] border-border bg-white px-[9px] py-2 align-middle">
                                 {{ subjectLabel(log.subject_type) }} #{{ log.subject_id }}
                             </td>
                             <td class="border-y-[1.5px] border-border bg-white px-[9px] py-2 align-middle last:border-r-[1.5px]">
-                                {{ log.description ?? '—' }}
+                                {{ log.description ?? '-' }}
                             </td>
                         </tr>
                     </tbody>
                 </table>
             </div>
 
-            <div v-if="logs.data.length > 0" class="mt-3 flex flex-wrap items-center justify-between gap-3">
+            <nav v-if="logs.data.length > 0" aria-label="Activity log pages" class="mt-3 flex flex-wrap items-center justify-between gap-3">
                 <p class="text-xs text-text-muted">
                     Showing {{ logs.from }}–{{ logs.to }} of {{ logs.total }}
                 </p>
@@ -132,6 +143,7 @@ function subjectLabel(subjectType) {
                     <Link
                         v-if="logs.prev_page_url"
                         :href="logs.prev_page_url"
+                        aria-label="Previous page"
                         preserve-state
                         preserve-scroll
                         class="inline-flex items-center border-[1.5px] border-border bg-white px-3 py-1.5 text-xs font-semibold text-text-muted transition-colors duration-150 ease-out hover:border-primary hover:text-primary"
@@ -148,6 +160,7 @@ function subjectLabel(subjectType) {
                     <Link
                         v-if="logs.next_page_url"
                         :href="logs.next_page_url"
+                        aria-label="Next page"
                         preserve-state
                         preserve-scroll
                         class="inline-flex items-center border-[1.5px] border-border bg-white px-3 py-1.5 text-xs font-semibold text-text-muted transition-colors duration-150 ease-out hover:border-primary hover:text-primary"
@@ -161,7 +174,7 @@ function subjectLabel(subjectType) {
                         Next
                     </span>
                 </div>
-            </div>
+            </nav>
         </Card>
     </div>
 </template>

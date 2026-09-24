@@ -16,7 +16,7 @@ test('enrollment: generating a secret then confirming with a valid code enables 
     expect($admin->two_factor_secret)->not->toBeNull();
     expect($admin->hasTwoFactorEnabled())->toBeFalse();
 
-    $code = (new Google2FA())->getCurrentOtp($admin->two_factor_secret);
+    $code = (new Google2FA)->getCurrentOtp($admin->two_factor_secret);
 
     $response = $this->actingAs($admin, 'platform')->post('/two-factor/confirm', ['code' => $code]);
 
@@ -85,7 +85,7 @@ test('the challenge rejects a wrong code and accepts a correct one', function ()
     $this->post('/two-factor-challenge', ['code' => '000000'])->assertSessionHasErrors('code');
     expect(Auth::guard('platform')->check())->toBeFalse();
 
-    $code = (new Google2FA())->getCurrentOtp($admin->two_factor_secret);
+    $code = (new Google2FA)->getCurrentOtp($admin->two_factor_secret);
     $response = $this->post('/two-factor-challenge', ['code' => $code]);
 
     expect(Auth::guard('platform')->check())->toBeTrue();
@@ -121,7 +121,7 @@ test('visiting the challenge page without a pending login redirects to the login
 /**
  * Enrolls and confirms 2FA for the given admin via the real HTTP flow (not a
  * direct model write), so every test exercises the same code path the UI
- * does. Logs the admin back out afterward — actingAs() leaves the platform
+ * does. Logs the admin back out afterward - actingAs() leaves the platform
  * guard authenticated for the rest of the test, which would make a
  * subsequent plain (non-actingAs) /login POST hit guest:platform's redirect
  * instead of actually exercising the login flow callers expect to test.
@@ -131,7 +131,7 @@ function twoFactorTestEnable(PlatformAdmin $admin): PlatformAdmin
     test()->actingAs($admin, 'platform')->post('/two-factor');
     $admin->refresh();
 
-    $code = (new Google2FA())->getCurrentOtp($admin->two_factor_secret);
+    $code = (new Google2FA)->getCurrentOtp($admin->two_factor_secret);
     test()->actingAs($admin, 'platform')->post('/two-factor/confirm', ['code' => $code]);
 
     $admin->refresh();

@@ -8,7 +8,7 @@ import Card from '@/components/ui/Card.vue';
 import Button from '@/components/ui/Button.vue';
 import Badge from '@/components/ui/Badge.vue';
 import DataTable from '@/components/ui/DataTable.vue';
-import Tooltip from '@/components/ui/Tooltip.vue';
+import PageHeader from '@/components/ui/PageHeader.vue';
 
 defineOptions({ layout: AppLayout });
 
@@ -26,6 +26,10 @@ useLayoutChrome('Platform Admins');
 
 const roleBadgeVariant = { owner: 'success', support: 'neutral' };
 
+function roleLabel(role) {
+    return role ? role.charAt(0).toUpperCase() + role.slice(1) : '';
+}
+
 const columns = computed(() => {
     const base = [
         { accessorKey: 'name', header: 'Name' },
@@ -34,7 +38,7 @@ const columns = computed(() => {
             accessorKey: 'role',
             header: 'Role',
             numeric: false,
-            cell: ({ row }) => h(Badge, { variant: roleBadgeVariant[row.original.role] ?? 'neutral', pill: true }, () => row.original.role),
+            cell: ({ row }) => h(Badge, { variant: roleBadgeVariant[row.original.role] ?? 'neutral', pill: true }, () => roleLabel(row.original.role)),
         },
         {
             id: 'status',
@@ -55,19 +59,17 @@ const columns = computed(() => {
         ...base,
         {
             id: 'actions',
-            header: '',
+            header: 'Actions',
             numeric: false,
             cell: ({ row }) =>
-                h(Tooltip, { label: 'Edit platform admin' }, () =>
-                    h(
-                        Link,
-                        {
-                            href: `/platform-admins/${row.original.id}/edit`,
-                            class: 'flex h-8 w-8 items-center justify-center bg-bg-subtle text-text-muted transition-colors duration-150 ease-out hover:bg-primary-tint hover:text-primary',
-                            'aria-label': 'Edit platform admin',
-                        },
-                        () => h(Pencil, { class: 'size-[13px]' }),
-                    ),
+                h(
+                    Link,
+                    {
+                        href: `/platform-admins/${row.original.id}/edit`,
+                        class: 'inline-flex items-center gap-1 bg-bg-subtle px-2.5 py-1.5 text-xs font-semibold text-text-muted transition-colors duration-150 ease-out hover:bg-primary-tint hover:text-primary',
+                        'aria-label': `Edit ${row.original.name}`,
+                    },
+                    () => [h(Pencil, { class: 'size-[13px]', 'aria-hidden': 'true' }), 'Edit'],
                 ),
         },
     ];
@@ -76,16 +78,18 @@ const columns = computed(() => {
 
 <template>
     <div>
-        <div class="mb-4 flex items-center justify-between">
-            <h2 class="text-base font-bold text-text-strong">Platform Admins</h2>
+        <PageHeader
+            title="Platform admins"
+            description="People who can sign in to this platform panel. Admins are never deleted - set an admin to Inactive to block their access."
+        >
             <Button v-if="isOwner" :as="Link" href="/platform-admins/create" variant="primary" tone="purple">
                 <UserPlus class="size-4" />
-                New platform admin
+                Add platform admin
             </Button>
-        </div>
+        </PageHeader>
 
         <Card variant="panel">
-            <DataTable :columns="columns" :data="admins" :page-size="10" />
+            <DataTable :columns="columns" :data="admins" :page-size="10" empty-message="No platform admins yet." />
         </Card>
     </div>
 </template>

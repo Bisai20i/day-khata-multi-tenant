@@ -3,6 +3,7 @@ import { computed, ref, watch } from 'vue';
 import { router, useForm } from '@inertiajs/vue3';
 import { Plus, Search, X } from '@lucide/vue';
 import Card from '@/components/ui/Card.vue';
+import PageHeader from '@/components/ui/PageHeader.vue';
 import Button from '@/components/ui/Button.vue';
 import Input from '@/components/ui/Input.vue';
 import Combobox from '@/components/ui/Combobox.vue';
@@ -356,10 +357,9 @@ function submit() {
 
 <template>
     <Card variant="panel">
-        <div class="mb-4 flex items-center justify-between">
-            <h3 class="text-base font-bold text-text-strong">New purchase return</h3>
+        <PageHeader title="New purchase return" description="Send goods back to a supplier and issue a debit note. Stock reduces when you create the return. Fields marked * are required.">
             <Button variant="secondary" tone="purple" type="button" @click="emit('cancel')">Cancel</Button>
-        </div>
+        </PageHeader>
 
         <div class="mb-4 flex flex-wrap items-center gap-2">
             <Button :variant="mode === 'linked' ? 'primary' : 'secondary'" tone="purple" type="button" @click="mode = 'linked'">
@@ -411,9 +411,10 @@ function submit() {
                 </div>
             </div>
 
-            <div class="grid grid-cols-5 gap-4">
+            <h4 class="border-b-[1.5px] border-border pb-1 text-sm font-bold text-text-strong">Purchase &amp; date</h4>
+            <div class="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-5">
                 <div>
-                    <label class="mb-1 block text-sm font-semibold text-text-base">Purchase <span class="text-danger">*</span></label>
+                    <label class="mb-1 block text-sm font-semibold text-text-base">Original purchase <span class="text-danger">*</span></label>
                     <Combobox
                         :model-value="form.purchase_id"
                         :options="purchaseOptions"
@@ -423,13 +424,13 @@ function submit() {
                     <p v-if="form.errors.purchase_id" class="mt-1 text-sm text-danger">{{ form.errors.purchase_id }}</p>
                 </div>
                 <div>
-                    <label class="mb-1 block text-sm font-semibold text-text-base">Date <span class="text-danger">*</span></label>
+                    <label class="mb-1 block text-sm font-semibold text-text-base">Return date (BS) <span class="text-danger">*</span></label>
                     <NepaliDateInput v-model="form.date" required />
                     <p v-if="form.errors.date" class="mt-1 text-sm text-danger">{{ form.errors.date }}</p>
                 </div>
                 <div>
-                    <label class="mb-1 block text-sm font-semibold text-text-base">Reason</label>
-                    <Input v-model="form.reason" type="text" maxlength="255" placeholder="Optional" />
+                    <label class="mb-1 block text-sm font-semibold text-text-base">Reason for return</label>
+                    <Input v-model="form.reason" type="text" maxlength="255" placeholder="e.g. Damaged goods (optional)" />
                     <p v-if="form.errors.reason" class="mt-1 text-sm text-danger">{{ form.errors.reason }}</p>
                 </div>
                 <div>
@@ -440,6 +441,7 @@ function submit() {
                         placeholder="No refund (debit note only)"
                         @update:model-value="(v) => (form.refund_account_id = v)"
                     />
+                    <p class="mt-1 text-xs text-text-faint">Leave empty to only reduce what you owe the supplier.</p>
                     <p v-if="form.errors.refund_account_id" class="mt-1 text-sm text-danger">{{ form.errors.refund_account_id }}</p>
                 </div>
                 <div>
@@ -455,14 +457,15 @@ function submit() {
             </div>
 
             <div v-if="selectedPurchase">
+                <h4 class="mb-2 border-b-[1.5px] border-border pb-1 text-sm font-bold text-text-strong">Items to return</h4>
                 <div class="mb-2 grid grid-cols-[1fr_90px_110px_110px_90px_110px_140px] gap-2 text-[10px] font-bold tracking-[.8px] text-text-muted uppercase">
                     <span>Item</span>
                     <span>Unit</span>
-                    <span>Rate</span>
-                    <span>Purchased</span>
-                    <span>Free</span>
-                    <span>Returnable</span>
-                    <span>Return Qty</span>
+                    <span>Rate (Rs.)</span>
+                    <span>Purchased qty</span>
+                    <span>Free qty</span>
+                    <span>Still returnable</span>
+                    <span>Quantity to return</span>
                 </div>
 
                 <div
@@ -484,6 +487,7 @@ function submit() {
                             step="0.0001"
                             :max="line.quantity_remaining"
                             placeholder="0"
+                            :aria-label="`Quantity to return for ${line.item_name}`"
                         />
                         <p v-if="form.errors[`lines.${index}.quantity`]" class="mt-1 text-xs text-danger">
                             {{ form.errors[`lines.${index}.quantity`] }}
@@ -504,9 +508,10 @@ function submit() {
                     variant="primary"
                     tone="purple"
                     type="submit"
+                    :loading="form.processing"
                     :disabled="form.processing || !selectedPurchase || !hasReturnableLine"
                 >
-                    Create Purchase Return
+                    Create purchase return
                 </Button>
             </div>
         </form>
@@ -521,9 +526,10 @@ function submit() {
                 {{ unlinkedForm.errors.lines }}
             </p>
 
-            <div class="grid grid-cols-5 gap-4">
+            <h4 class="border-b-[1.5px] border-border pb-1 text-sm font-bold text-text-strong">Supplier &amp; date</h4>
+            <div class="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-5">
                 <div>
-                    <label class="mb-1 block text-sm font-semibold text-text-base">Date <span class="text-danger">*</span></label>
+                    <label class="mb-1 block text-sm font-semibold text-text-base">Return date (BS) <span class="text-danger">*</span></label>
                     <NepaliDateInput v-model="unlinkedForm.date" required />
                     <p v-if="unlinkedForm.errors.date" class="mt-1 text-sm text-danger">{{ unlinkedForm.errors.date }}</p>
                 </div>
@@ -548,25 +554,26 @@ function submit() {
                     <p v-if="unlinkedForm.errors.store_id" class="mt-1 text-sm text-danger">{{ unlinkedForm.errors.store_id }}</p>
                 </div>
                 <div>
-                    <label class="mb-1 block text-sm font-semibold text-text-base">VAT rate %</label>
+                    <label class="mb-1 block text-sm font-semibold text-text-base">VAT rate (%)</label>
                     <Input v-model="unlinkedForm.vat_rate" type="number" min="0" max="100" step="0.01" />
                     <p v-if="unlinkedForm.errors.vat_rate" class="mt-1 text-sm text-danger">{{ unlinkedForm.errors.vat_rate }}</p>
                 </div>
                 <div>
-                    <label class="mb-1 block text-sm font-semibold text-text-base">Reason</label>
-                    <Input v-model="unlinkedForm.reason" type="text" maxlength="255" placeholder="Optional" />
+                    <label class="mb-1 block text-sm font-semibold text-text-base">Reason for return</label>
+                    <Input v-model="unlinkedForm.reason" type="text" maxlength="255" placeholder="e.g. Damaged goods (optional)" />
                     <p v-if="unlinkedForm.errors.reason" class="mt-1 text-sm text-danger">{{ unlinkedForm.errors.reason }}</p>
                 </div>
             </div>
 
             <div>
+                <h4 class="mb-2 border-b-[1.5px] border-border pb-1 text-sm font-bold text-text-strong">Items to return <span class="text-danger">*</span></h4>
                 <div class="mb-2 grid grid-cols-[1fr_180px_120px_140px_120px_40px] gap-2 text-[10px] font-bold tracking-[.8px] text-text-muted uppercase">
                     <span>Item</span>
                     <span>Unit</span>
                     <span>Quantity</span>
-                    <span>Rate</span>
-                    <span>Value</span>
-                    <span></span>
+                    <span>Rate (Rs.)</span>
+                    <span>Line value</span>
+                    <span class="sr-only">Remove</span>
                 </div>
 
                 <div
@@ -609,15 +616,17 @@ function submit() {
                     <button
                         type="button"
                         class="mt-1 border-[1.5px] border-border bg-white p-2 text-text-muted hover:border-danger hover:text-danger"
+                        :aria-label="`Remove item row ${index + 1}`"
+                        :title="`Remove item row ${index + 1}`"
                         @click="removeUnlinkedLine(index)"
                     >
-                        <X class="size-4" />
+                        <X class="size-4" aria-hidden="true" />
                     </button>
                 </div>
 
                 <Button variant="secondary" tone="purple" type="button" @click="addUnlinkedLine">
-                    <Plus class="size-4" />
-                    Add line
+                    <Plus class="size-4" aria-hidden="true" />
+                    Add another item
                 </Button>
 
                 <p class="mt-2 text-xs text-text-muted">
@@ -626,9 +635,10 @@ function submit() {
                 </p>
             </div>
 
-            <div class="grid grid-cols-4 gap-4">
+            <h4 class="border-b-[1.5px] border-border pb-1 text-sm font-bold text-text-strong">Refund</h4>
+            <div class="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
                 <div>
-                    <label class="mb-1 block text-sm font-semibold text-text-base">Refund <span class="text-danger">*</span></label>
+                    <label class="mb-1 block text-sm font-semibold text-text-base">Refund received as <span class="text-danger">*</span></label>
                     <Select
                         :model-value="unlinkedForm.payment_mode"
                         :options="paymentModeOptions"
@@ -650,12 +660,12 @@ function submit() {
                 </div>
                 <template v-if="unlinkedForm.payment_mode === 'partial'">
                     <div>
-                        <label class="mb-1 block text-sm font-semibold text-text-base">Cash part</label>
+                        <label class="mb-1 block text-sm font-semibold text-text-base">Refunded in cash (Rs.)</label>
                         <Input v-model="unlinkedForm.cash_amount" type="number" min="0" step="0.01" placeholder="0.00" />
                         <p v-if="unlinkedForm.errors.cash_amount" class="mt-1 text-sm text-danger">{{ unlinkedForm.errors.cash_amount }}</p>
                     </div>
                     <div>
-                        <label class="mb-1 block text-sm font-semibold text-text-base">Bank part</label>
+                        <label class="mb-1 block text-sm font-semibold text-text-base">Refunded to bank (Rs.)</label>
                         <Input v-model="unlinkedForm.bank_amount" type="number" min="0" step="0.01" placeholder="0.00" />
                         <p v-if="unlinkedForm.errors.bank_amount" class="mt-1 text-sm text-danger">{{ unlinkedForm.errors.bank_amount }}</p>
                     </div>
@@ -683,9 +693,10 @@ function submit() {
                         variant="primary"
                         tone="purple"
                         type="submit"
+                        :loading="unlinkedForm.processing"
                         :disabled="unlinkedForm.processing || !hasUnlinkedLine || !!unlinkedSplitError"
                     >
-                        Create Purchase Return
+                        Create purchase return
                     </Button>
                 </div>
             </div>

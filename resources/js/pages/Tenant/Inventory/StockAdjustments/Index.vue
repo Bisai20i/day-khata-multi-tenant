@@ -4,6 +4,7 @@ import { router, useForm, usePage } from '@inertiajs/vue3';
 import { Ban, Plus, Printer } from '@lucide/vue';
 import AppLayout from '@/layouts/AppLayout.vue';
 import { useLayoutChrome } from '@/composables/useLayoutChrome';
+import PageHeader from '@/components/ui/PageHeader.vue';
 import Card from '@/components/ui/Card.vue';
 import Button from '@/components/ui/Button.vue';
 import Input from '@/components/ui/Input.vue';
@@ -132,7 +133,7 @@ const reasonLabels = {
 };
 
 function linesSummary(adjustment) {
-    if (!adjustment.lines?.length) return '—';
+    if (!adjustment.lines?.length) return '-';
     return adjustment.lines
         .map((line) => {
             const sign = line.direction === 'in' ? '+' : '-';
@@ -141,7 +142,7 @@ function linesSummary(adjustment) {
             // unit when one was picked, otherwise the item's own base unit -
             // so "2" never reads ambiguously against a base-unit quantity.
             const unit = line.item_unit?.name ?? line.item?.unit ?? '';
-            return `${line.item?.name ?? '—'} (${sign}${formatQuantity(line.quantity)} ${unit} ${reason})`;
+            return `${line.item?.name ?? '-'} (${sign}${formatQuantity(line.quantity)} ${unit} ${reason})`;
         })
         .join(', ');
 }
@@ -186,7 +187,7 @@ const columns = [
         id: 'note',
         header: 'Note',
         numeric: false,
-        cell: ({ row }) => row.original.note ?? '—',
+        cell: ({ row }) => row.original.note ?? '-',
     },
     {
         id: 'lines',
@@ -222,7 +223,7 @@ const columns = [
         numeric: false,
         cell: ({ row }) =>
             h('div', { class: 'flex items-center gap-1' }, [
-                h(Tooltip, { label: 'Print' }, () =>
+                h(Tooltip, { label: 'Print adjustment' }, () =>
                     h(
                         'a',
                         {
@@ -267,34 +268,31 @@ const columns = [
         </template>
 
         <template v-else>
-            <div class="mb-4 flex items-center justify-between">
-                <h2 class="text-base font-bold text-text-strong">Stock Adjustments</h2>
-                <div class="flex items-center gap-2">
-                    <Button variant="secondary" tone="purple" @click="openImport">Import opening stock</Button>
+            <PageHeader title="Stock Adjustments" description="Stock adjustments: correct stock after a count, damage or loss.">
+                    <Button variant="secondary" tone="purple" @click="openImport">Import opening stock (CSV)</Button>
                     <Button variant="primary" tone="purple" @click="showCreateForm = true">
                         <Plus class="size-4" />
                         New adjustment
                     </Button>
-                </div>
-            </div>
+                </PageHeader>
 
             <Card variant="panel">
                 <div class="mb-4 flex flex-wrap items-end gap-3 border-b-[1.5px] border-border pb-4">
                     <div>
-                        <label class="mb-1 block text-sm font-semibold text-text-base">From</label>
+                        <label class="mb-1 block text-sm font-semibold text-text-base">From date</label>
                         <NepaliDateInput v-model="dateFilter.from" @update:model-value="applyDateFilter" />
                     </div>
                     <div>
-                        <label class="mb-1 block text-sm font-semibold text-text-base">To</label>
+                        <label class="mb-1 block text-sm font-semibold text-text-base">To date</label>
                         <NepaliDateInput v-model="dateFilter.to" @update:model-value="applyDateFilter" />
                     </div>
-                    <Button variant="secondary" tone="purple" type="button" @click="clearDateFilter">Show all</Button>
+                    <Button variant="secondary" tone="purple" type="button" @click="clearDateFilter">Clear filters</Button>
                     <p class="ml-auto self-center text-[12px] text-text-faint">
                         Showing {{ stockAdjustments.length }} adjustment(s) in this date range.
                     </p>
                 </div>
 
-                <DataTable :columns="columns" :data="stockAdjustments" :page-size="10" empty-message="No stock adjustments in this date range" />
+                <DataTable :columns="columns" :data="stockAdjustments" :page-size="10" empty-message="No stock adjustments in this date range. Use 'New adjustment' above, or clear the date filters." />
             </Card>
         </template>
 
@@ -356,6 +354,7 @@ const columns = [
                             placeholder="Default store"
                             @update:model-value="(v) => (importForm.store_id = v)"
                         />
+                        <p class="mt-1 text-xs text-text-faint">Opening stock is the quantity you already had when you started using the system.</p>
                         <p v-if="importForm.errors.store_id" class="mt-1 text-sm text-danger">{{ importForm.errors.store_id }}</p>
                     </div>
                 </div>
@@ -396,7 +395,7 @@ const columns = [
                         <tbody>
                             <tr v-for="item in importResult.skipped" :key="item.row" class="border-t border-border">
                                 <td class="px-2 py-1.5">{{ item.row }}</td>
-                                <td class="px-2 py-1.5">{{ item.name || '—' }}</td>
+                                <td class="px-2 py-1.5">{{ item.name || '-' }}</td>
                                 <td class="px-2 py-1.5">{{ item.reason }}</td>
                             </tr>
                         </tbody>
@@ -415,7 +414,7 @@ const columns = [
                         :disabled="importForm.processing || !importForm.file || !importForm.date"
                         @click="submitImport"
                     >
-                        Import
+                        Import opening stock
                     </Button>
                 </template>
                 <template v-else>

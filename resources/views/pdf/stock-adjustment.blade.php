@@ -54,9 +54,9 @@
                     <td class="text-center">{{ ucfirst($line->direction) }}</td>
                     <td>{{ ucfirst($line->reason_type->value) }}</td>
                     <td class="text-right">{{ $qty($line->quantity) }}</td>
-                    <td class="text-right">{{ $line->unit_cost_rate !== null ? $rate($line->unit_cost_rate) : '—' }}</td>
+                    <td class="text-right">{{ $line->unit_cost_rate !== null ? $rate($line->unit_cost_rate) : '-' }}</td>
                     <td class="text-right">{{ $money($line->line_value) }}</td>
-                    <td>{{ $line->remarks ?? '—' }}</td>
+                    <td>{{ $line->remarks ?? '-' }}</td>
                 </tr>
             @endforeach
         </tbody>

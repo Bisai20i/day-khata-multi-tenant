@@ -38,6 +38,7 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Validator;
 use Illuminate\Validation\Rule;
+use Illuminate\Validation\ValidationException;
 use Inertia\Inertia;
 use Inertia\Response;
 use InvalidArgumentException;
@@ -136,14 +137,24 @@ class AccountController extends Controller
 
     public function update(Request $request, Account $account): RedirectResponse
     {
-        $account->update($this->validated($request, $account));
+        $data = $this->validated($request, $account);
+
+        try {
+            $account->update($data);
+        } catch (InvalidArgumentException $e) {
+            throw ValidationException::withMessages(['account' => $e->getMessage()]);
+        }
 
         return redirect()->route('tenant.accounts.index')->with('status', 'Account updated.');
     }
 
     public function destroy(Account $account): RedirectResponse
     {
-        $account->delete();
+        try {
+            $account->delete();
+        } catch (InvalidArgumentException $e) {
+            throw ValidationException::withMessages(['account' => $e->getMessage()]);
+        }
 
         return redirect()->route('tenant.accounts.index')->with('status', 'Account deleted.');
     }

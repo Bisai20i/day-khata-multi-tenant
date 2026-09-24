@@ -4,6 +4,7 @@ import { useForm, usePage } from '@inertiajs/vue3';
 import { Ban, Plus, Printer } from '@lucide/vue';
 import AppLayout from '@/layouts/AppLayout.vue';
 import { useLayoutChrome } from '@/composables/useLayoutChrome';
+import PageHeader from '@/components/ui/PageHeader.vue';
 import Card from '@/components/ui/Card.vue';
 import Button from '@/components/ui/Button.vue';
 import Input from '@/components/ui/Input.vue';
@@ -41,9 +42,9 @@ watch(
 const showCreateForm = ref(false);
 
 function linesSummary(transfer) {
-    if (!transfer.lines?.length) return '—';
+    if (!transfer.lines?.length) return '-';
     return transfer.lines
-        .map((line) => `${line.item?.name ?? '—'} (${formatQuantity(line.quantity)})`)
+        .map((line) => `${line.item?.name ?? '-'} (${formatQuantity(line.quantity)})`)
         .join(', ');
 }
 
@@ -85,21 +86,21 @@ const columns = [
     },
     {
         id: 'from_store',
-        header: 'From',
+        header: 'From store',
         numeric: false,
-        cell: ({ row }) => row.original.from_store?.name ?? '—',
+        cell: ({ row }) => row.original.from_store?.name ?? '-',
     },
     {
         id: 'to_store',
-        header: 'To',
+        header: 'To store',
         numeric: false,
-        cell: ({ row }) => row.original.to_store?.name ?? '—',
+        cell: ({ row }) => row.original.to_store?.name ?? '-',
     },
     {
         id: 'note',
         header: 'Note',
         numeric: false,
-        cell: ({ row }) => row.original.note ?? '—',
+        cell: ({ row }) => row.original.note ?? '-',
     },
     {
         id: 'lines',
@@ -135,7 +136,7 @@ const columns = [
         numeric: false,
         cell: ({ row }) =>
             h('div', { class: 'flex items-center gap-1' }, [
-                h(Tooltip, { label: 'Print' }, () =>
+                h(Tooltip, { label: 'Print transfer' }, () =>
                     h(
                         'a',
                         {
@@ -179,16 +180,15 @@ const columns = [
         </template>
 
         <template v-else>
-            <div class="mb-4 flex items-center justify-between">
-                <h2 class="text-base font-bold text-text-strong">Stock Transfers</h2>
+            <PageHeader title="Stock Transfers" description="Stock transfers: move stock from one store to another.">
                 <Button variant="primary" tone="purple" @click="showCreateForm = true">
                     <Plus class="size-4" />
                     New transfer
                 </Button>
-            </div>
+            </PageHeader>
 
             <Card variant="panel">
-                <DataTable :columns="columns" :data="stockTransfers" :page-size="10" empty-message="No stock transfers yet" />
+                <DataTable :columns="columns" :data="stockTransfers" :page-size="10" empty-message="No stock transfers yet. Use 'New transfer' above to move stock between stores." />
             </Card>
         </template>
 

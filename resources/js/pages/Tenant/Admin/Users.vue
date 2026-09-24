@@ -12,7 +12,9 @@ import Modal from '@/components/ui/Modal.vue';
 import DataTable from '@/components/ui/DataTable.vue';
 import Badge from '@/components/ui/Badge.vue';
 import Tooltip from '@/components/ui/Tooltip.vue';
+import PageHeader from '@/components/ui/PageHeader.vue';
 import { useToast } from '@/composables/useToast';
+import { useConfirm } from '@/composables/useConfirm';
 
 defineOptions({ layout: AppLayout });
 
@@ -29,6 +31,7 @@ const props = defineProps({
 
 const page = usePage();
 const { toast } = useToast();
+const { confirm } = useConfirm();
 useLayoutChrome('Manage Users');
 
 // Flash status is watched (not just read on mount) because create/edit both
@@ -106,7 +109,25 @@ function onModalOpenChange(value) {
     }
 }
 
-function submit() {
+async function submit() {
+    if (editing.value && editing.value.is_active && !form.is_active) {
+        const ok = await confirm({
+            title: 'Deactivate employee?',
+            message: `${editing.value.name} will no longer be able to sign in. Their past records are kept. You can reactivate them later.`,
+            tone: 'danger',
+            confirmLabel: 'Deactivate employee',
+        });
+        if (!ok) return;
+    }
+    if (editing.value && form.password) {
+        const ok = await confirm({
+            title: 'Reset password?',
+            message: `${editing.value.name}'s current password will stop working. Share the new password with them.`,
+            tone: 'purple',
+            confirmLabel: 'Save new password',
+        });
+        if (!ok) return;
+    }
     if (editing.value) {
         form.put(`/admin/users/${editing.value.id}`, { onSuccess: closeModal });
     } else {
@@ -121,7 +142,10 @@ const columns = [
         id: 'role',
         header: 'Role',
         numeric: false,
-        cell: ({ row }) => row.original.role?.name ?? '—',
+        cell: ({ row }) =>
+            row.original.role?.name
+                ? h(Badge, { variant: 'info', pill: true }, { default: () => row.original.role.name })
+                : '-',
     },
     {
         id: 'status',
@@ -139,13 +163,13 @@ const columns = [
         header: 'Actions',
         numeric: false,
         cell: ({ row }) =>
-            h(Tooltip, { label: 'Edit' }, () =>
+            h(Tooltip, { label: `Edit ${row.original.name}` }, () =>
                 h(
                     'button',
                     {
                         type: 'button',
                         class: 'flex h-[26px] w-[26px] items-center justify-center bg-primary-tint text-primary transition-[filter] duration-150 ease-out hover:brightness-95',
-                        'aria-label': 'Edit',
+                        'aria-label': `Edit ${row.original.name}`,
                         onClick: () => openEdit(row.original),
                     },
                     [h(Pencil, { class: 'h-[13px] w-[13px]', 'aria-hidden': 'true' })],
@@ -157,10 +181,9 @@ const columns = [
 
 <template>
     <div>
-        <div class="mb-4 flex items-center justify-between">
-            <h2 class="text-base font-bold text-text-strong">Employees</h2>
+        <PageHeader title="Employees" description="People who can sign in to your company. Each employee's role controls what they can see and do.">
             <Button variant="primary" tone="purple" @click="openCreate">New employee</Button>
-        </div>
+        </PageHeader>
 
         <Card variant="panel">
             <DataTable :columns="columns" :data="users" :page-size="10" />
@@ -183,12 +206,14 @@ const columns = [
                 <div>
                     <label for="role_id" class="mb-1 block text-sm font-semibold text-text-base">Role <span class="text-danger">*</span></label>
                     <Select id="role_id" v-model="form.role_id" :options="roleOptions" placeholder="Select role" />
+                    <p class="mt-1 text-xs text-text-faint">The role decides which screens and actions this employee can use.</p>
                     <p v-if="form.errors.role_id" class="mt-1 text-sm text-danger">{{ form.errors.role_id }}</p>
                 </div>
 
                 <div v-if="editing">
                     <label for="is_active" class="mb-1 block text-sm font-semibold text-text-base">Status <span class="text-danger">*</span></label>
                     <Select id="is_active" v-model="isActiveOption" :options="statusOptions" />
+                    <p class="mt-1 text-xs text-text-faint">Inactive employees cannot sign in.</p>
                     <p v-if="form.errors.is_active" class="mt-1 text-sm text-danger">{{ form.errors.is_active }}</p>
                 </div>
 
@@ -204,6 +229,7 @@ const columns = [
                         :placeholder="editing ? 'Leave blank to keep current' : 'Enter a password'"
                         :required="!editing"
                     />
+                    <p class="mt-1 text-xs text-text-faint">At least 8 characters.</p>
                     <p v-if="form.errors.password" class="mt-1 text-sm text-danger">{{ form.errors.password }}</p>
                 </div>
 
@@ -225,7 +251,7 @@ const columns = [
             <template #footer>
                 <Button variant="secondary" tone="purple" type="button" @click="closeModal">Cancel</Button>
                 <Button variant="primary" tone="purple" type="button" :disabled="form.processing" @click="submit">
-                    {{ editing ? 'Save changes' : 'Create employee' }}
+                    {{ form.processing ? 'Saving...' : editing ? 'Save employee' : 'Create employee' }}
                 </Button>
             </template>
         </Modal>

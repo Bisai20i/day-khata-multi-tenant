@@ -18,11 +18,15 @@ import {
     HandCoins,
     ReceiptText,
     Percent,
+    ShoppingCart,
+    ArrowDownLeft,
+    ArrowUpRight,
 } from '@lucide/vue';
 import AppLayout from '@/layouts/AppLayout.vue';
 import { useLayoutChrome } from '@/composables/useLayoutChrome';
 import Card from '@/components/ui/Card.vue';
 import Button from '@/components/ui/Button.vue';
+import PageHeader from '@/components/ui/PageHeader.vue';
 import { formatMoney, formatQuantity, compareMoney, parseMoney } from '@/lib/money.js';
 
 defineOptions({ layout: AppLayout });
@@ -104,19 +108,19 @@ function dismissNotice(id) {
 useLayoutChrome('Dashboard');
 
 const kpiCards = computed(() => [
-    { key: 'customers', label: 'Customers', icon: Users, total: props.kpis.customers.total, thisWeek: props.kpis.customers.thisWeek },
-    { key: 'suppliers', label: 'Suppliers', icon: Truck, total: props.kpis.suppliers.total, thisWeek: props.kpis.suppliers.thisWeek },
-    { key: 'items', label: 'Items', icon: Package, total: props.kpis.items.total, thisWeek: props.kpis.items.thisWeek },
-    { key: 'accounts', label: 'Ledger Accounts', icon: BookOpen, total: props.kpis.accounts.total, thisWeek: null },
+    { key: 'customers', label: 'Customers', hint: 'People you sell to', href: '/customers', icon: Users, total: props.kpis.customers.total, thisWeek: props.kpis.customers.thisWeek },
+    { key: 'suppliers', label: 'Suppliers', hint: 'People you buy from', href: '/suppliers', icon: Truck, total: props.kpis.suppliers.total, thisWeek: props.kpis.suppliers.thisWeek },
+    { key: 'items', label: 'Items', hint: 'Products in your catalogue', href: '/items', icon: Package, total: props.kpis.items.total, thisWeek: props.kpis.items.thisWeek },
+    { key: 'accounts', label: 'Ledger Accounts', hint: 'Accounts used for bookkeeping', href: '/accounts', icon: BookOpen, total: props.kpis.accounts.total, thisWeek: null },
 ]);
 
 // Point-in-time balance sheet snapshot - cash, stock, and the two ledger
 // balances a shopkeeper checks daily (who owes us, who do we owe).
 const financialCards = computed(() => [
-    { key: 'cashInHand', label: 'Cash in Hand', icon: Wallet, amount: props.kpis.cashInHand },
-    { key: 'stockValue', label: 'Stock Value', icon: Boxes, amount: props.kpis.stockValue },
-    { key: 'debtors', label: 'Debtors (Sundry Debtors)', icon: HandCoins, amount: props.kpis.debtors },
-    { key: 'creditors', label: 'Creditors (Sundry Creditors)', icon: Landmark, amount: props.kpis.creditors },
+    { key: 'cashInHand', label: 'Cash in Hand', hint: 'Cash you hold right now', href: '/accounts', icon: Wallet, amount: props.kpis.cashInHand },
+    { key: 'stockValue', label: 'Stock Value', hint: 'Worth of goods in stock', href: '/reports/stock-valuation', icon: Boxes, amount: props.kpis.stockValue },
+    { key: 'debtors', label: 'Customers Owe You', hint: 'Sundry Debtors - money to collect', href: '/receipts', icon: HandCoins, amount: props.kpis.debtors },
+    { key: 'creditors', label: 'You Owe Suppliers', hint: 'Sundry Creditors - money to pay', href: '/payments', icon: Landmark, amount: props.kpis.creditors },
 ]);
 
 const taxSummary = computed(() => props.kpis.tax?.thisWeek ?? { taxable: '0.00', nontaxable: '0.00', vat: '0.00' });
@@ -154,6 +158,14 @@ function trendDayLabel(dateString) {
     return new Date(`${dateString}T00:00:00`).toLocaleDateString(undefined, { weekday: 'short', day: 'numeric' });
 }
 
+const quickActions = [
+    { label: 'New sale', href: '/sales', icon: Receipt },
+    { label: 'Quick POS sale', href: '/pos', icon: ScanBarcode },
+    { label: 'New purchase', href: '/purchases', icon: ShoppingCart },
+    { label: 'Receive payment', href: '/receipts', icon: ArrowDownLeft },
+    { label: 'Make payment', href: '/payments', icon: ArrowUpRight },
+];
+
 const dotPalette = ['#6600FF', '#0EA5E9', '#F59E0B', '#10B981', '#EC4899'];
 
 const paymentModeLabels = {
@@ -179,6 +191,18 @@ function formatAmount(amount) {
 
 <template>
     <div>
+        <PageHeader
+            title="Dashboard"
+            :description="fiscalYear ? `Your business at a glance - fiscal year ${fiscalYear.name}.` : 'Your business at a glance.'"
+        />
+
+        <section aria-label="Quick actions" class="mb-5 flex flex-wrap gap-2">
+            <Button v-for="action in quickActions" :key="action.href" :as="Link" :href="action.href" variant="primary" tone="purple">
+                <component :is="action.icon" class="size-4" aria-hidden="true" />
+                {{ action.label }}
+            </Button>
+        </section>
+
         <div v-if="visibleNotices.length" class="mb-5 flex flex-col gap-2">
             <div
                 v-for="notice in visibleNotices"
@@ -201,8 +225,10 @@ function formatAmount(amount) {
             </div>
         </div>
 
-        <div class="mb-5 grid grid-cols-4 gap-4">
-            <Card v-for="card in kpiCards" :key="card.key" variant="panel">
+        <h3 class="mb-2 text-sm font-bold text-text-strong">Your business</h3>
+        <div class="mb-5 grid grid-cols-2 gap-4 lg:grid-cols-4">
+            <Link v-for="card in kpiCards" :key="card.key" :href="card.href" class="block">
+            <Card variant="panel" class="h-full transition-colors hover:border-primary">
                 <div class="flex items-start justify-between">
                     <div class="flex size-9 items-center justify-center bg-primary-tint">
                         <component :is="card.icon" class="size-5 text-primary" />
@@ -215,22 +241,28 @@ function formatAmount(amount) {
                     </span>
                 </div>
                 <p class="mt-3 text-2xl font-bold text-text-strong">{{ card.total }}</p>
-                <p class="text-sm text-text-muted">{{ card.label }}</p>
+                <p class="text-sm font-semibold text-text-base">{{ card.label }}</p>
+                <p class="text-xs text-text-muted">{{ card.hint }}</p>
             </Card>
+            </Link>
         </div>
 
+        <h3 class="mb-2 text-sm font-bold text-text-strong">Money position</h3>
         <p v-if="fiscalYear" class="mb-2 text-xs text-text-muted">
             Ledger balances below are for fiscal year {{ fiscalYear.name }} only.
         </p>
 
-        <div class="mb-5 grid grid-cols-4 gap-4">
-            <Card v-for="card in financialCards" :key="card.key" variant="panel">
+        <div class="mb-5 grid grid-cols-2 gap-4 lg:grid-cols-4">
+            <Link v-for="card in financialCards" :key="card.key" :href="card.href" class="block">
+            <Card variant="panel" class="h-full transition-colors hover:border-primary">
                 <div class="flex size-9 items-center justify-center bg-primary-tint">
                     <component :is="card.icon" class="size-5 text-primary" />
                 </div>
                 <p class="mt-3 text-2xl font-bold text-text-strong">{{ formatAmount(card.amount) }}</p>
-                <p class="text-sm text-text-muted">{{ card.label }}</p>
+                <p class="text-sm font-semibold text-text-base">{{ card.label }}</p>
+                <p class="text-xs text-text-muted">{{ card.hint }}</p>
             </Card>
+            </Link>
         </div>
 
         <Card v-if="expiringItemsCount > 0" variant="panel" class="mb-5">
@@ -239,7 +271,7 @@ function formatAmount(amount) {
                     <AlertTriangle class="size-5 text-warning-text" aria-hidden="true" />
                 </div>
                 <div>
-                    <p class="text-sm font-bold text-text-strong">{{ expiringItemsCount }} item(s) expiring soon</p>
+                    <p class="text-sm font-bold text-text-strong">{{ expiringItemsCount }} {{ expiringItemsCount === 1 ? 'item is' : 'items are' }} expiring soon</p>
                     <p class="text-xs text-text-muted">Expiring within the next 30 days</p>
                 </div>
             </div>
@@ -263,10 +295,11 @@ function formatAmount(amount) {
             <p class="mt-2 text-xs text-text-muted">Items at or below their reorder level.</p>
         </Card>
 
-        <div class="mb-5 grid grid-cols-[2fr_1fr] gap-5">
+        <div class="mb-5 grid grid-cols-1 gap-5 lg:grid-cols-[2fr_1fr]">
             <Card variant="panel" title="Recent Sales">
                 <div v-if="recentSales.length === 0" class="py-6 text-center text-sm text-text-muted">
-                    No sales yet
+                    No sales yet.
+                    <Link href="/sales" class="font-semibold text-primary hover:underline">Record your first sale</Link>
                 </div>
                 <table v-else class="w-full text-sm">
                     <thead>
@@ -284,7 +317,7 @@ function formatAmount(amount) {
                                     <span class="flex size-6 items-center justify-center rounded-full bg-primary-tint text-[11px] font-bold text-primary">
                                         {{ initial(sale.customer) }}
                                     </span>
-                                    <span class="text-text-base">{{ sale.customer ?? '—' }}</span>
+                                    <span class="text-text-base">{{ sale.customer ?? '-' }}</span>
                                 </div>
                             </td>
                             <td class="py-2 text-text-muted">{{ sale.date }}</td>
@@ -319,7 +352,7 @@ function formatAmount(amount) {
                         </span>
                     </div>
                     <p class="mt-3 text-2xl font-bold text-text-strong">{{ formatAmount(kpis.sales.today.total) }}</p>
-                    <p class="text-sm text-text-muted">Today's Sales ({{ kpis.sales.today.count }})</p>
+                    <p class="text-sm text-text-muted">Today's Sales - {{ kpis.sales.today.count }} bills</p>
                 </Card>
 
                 <Card variant="panel">
@@ -335,7 +368,7 @@ function formatAmount(amount) {
                         </span>
                     </div>
                     <p class="mt-3 text-2xl font-bold text-text-strong">{{ formatAmount(kpis.purchases.today.total) }}</p>
-                    <p class="text-sm text-text-muted">Today's Purchases ({{ kpis.purchases.today.count }})</p>
+                    <p class="text-sm text-text-muted">Today's Purchases - {{ kpis.purchases.today.count }} bills</p>
                 </Card>
 
                 <Card variant="panel">
@@ -375,10 +408,11 @@ function formatAmount(amount) {
             </div>
         </div>
 
-        <div class="mb-5 grid grid-cols-[2fr_1fr] gap-5">
+        <div class="mb-5 grid grid-cols-1 gap-5 lg:grid-cols-[2fr_1fr]">
             <Card variant="panel" title="Recent Customers">
                 <div v-if="recentCustomers.length === 0" class="py-6 text-center text-sm text-text-muted">
-                    No customers yet
+                    No customers yet.
+                    <Link href="/customers" class="font-semibold text-primary hover:underline">Add a customer</Link>
                 </div>
                 <table v-else class="w-full text-sm">
                     <thead>
@@ -399,10 +433,10 @@ function formatAmount(amount) {
                                     <span class="text-text-base">{{ customer.name }}</span>
                                 </div>
                             </td>
-                            <td class="py-2 text-text-muted">{{ customer.mobile ?? '—' }}</td>
+                            <td class="py-2 text-text-muted">{{ customer.mobile ?? '-' }}</td>
                             <td class="py-2">
                                 <span class="border border-border px-1.5 py-0.5 text-xs text-text-muted">
-                                    {{ customer.code ?? '—' }}
+                                    {{ customer.code ?? '-' }}
                                 </span>
                             </td>
                             <td class="py-2 text-text-muted">{{ customer.added }}</td>
@@ -411,7 +445,7 @@ function formatAmount(amount) {
                 </table>
             </Card>
 
-            <Card variant="panel" title="Chart of Accounts">
+            <Card variant="panel" title="Account Groups">
                 <div v-if="accountHeadBreakdown.length === 0" class="py-6 text-center text-sm text-text-muted">
                     No account heads found
                 </div>
@@ -434,10 +468,11 @@ function formatAmount(amount) {
             </Card>
         </div>
 
-        <div class="mb-5 grid grid-cols-2 gap-5">
+        <div class="mb-5 grid grid-cols-1 gap-5 md:grid-cols-2">
             <Card variant="panel" title="Sales Trend (Last 7 Days)">
                 <div v-if="salesTrend.length === 0" class="py-6 text-center text-sm text-text-muted">
-                    No sales activity yet
+                    No sales in the last 7 days.
+                    <Link href="/sales" class="font-semibold text-primary hover:underline">Record a sale</Link>
                 </div>
                 <ul v-else class="flex flex-col gap-2">
                     <li v-for="day in salesTrend" :key="day.date" class="flex items-center gap-3 text-sm">
@@ -452,7 +487,8 @@ function formatAmount(amount) {
 
             <Card variant="panel" title="Purchase Trend (Last 7 Days)">
                 <div v-if="purchaseTrend.length === 0" class="py-6 text-center text-sm text-text-muted">
-                    No purchase activity yet
+                    No purchases in the last 7 days.
+                    <Link href="/purchases" class="font-semibold text-primary hover:underline">Record a purchase</Link>
                 </div>
                 <ul v-else class="flex flex-col gap-2">
                     <li v-for="day in purchaseTrend" :key="day.date" class="flex items-center gap-3 text-sm">
@@ -466,10 +502,11 @@ function formatAmount(amount) {
             </Card>
         </div>
 
-        <div class="grid grid-cols-2 gap-5">
+        <div class="grid grid-cols-1 gap-5 md:grid-cols-2">
             <Card variant="panel" title="Top 5 Items This Month">
                 <div v-if="topItemsThisMonth.length === 0" class="py-6 text-center text-sm text-text-muted">
-                    No sales this month yet
+                    No sales this month yet.
+                    <Link href="/sales" class="font-semibold text-primary hover:underline">Record a sale</Link>
                 </div>
                 <ol v-else class="flex flex-col gap-3">
                     <li v-for="(item, index) in topItemsThisMonth" :key="item.name" class="flex items-center justify-between text-sm">
@@ -486,7 +523,8 @@ function formatAmount(amount) {
 
             <Card variant="panel" title="Top 5 Customers This Month">
                 <div v-if="topCustomersThisMonth.length === 0" class="py-6 text-center text-sm text-text-muted">
-                    No sales this month yet
+                    No sales this month yet.
+                    <Link href="/sales" class="font-semibold text-primary hover:underline">Record a sale</Link>
                 </div>
                 <ol v-else class="flex flex-col gap-3">
                     <li v-for="(customer, index) in topCustomersThisMonth" :key="customer.name" class="flex items-center justify-between text-sm">

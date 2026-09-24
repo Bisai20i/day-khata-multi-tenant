@@ -8,6 +8,8 @@ import Card from '@/components/ui/Card.vue';
 import Button from '@/components/ui/Button.vue';
 import Input from '@/components/ui/Input.vue';
 import Modal from '@/components/ui/Modal.vue';
+import Badge from '@/components/ui/Badge.vue';
+import PageHeader from '@/components/ui/PageHeader.vue';
 import DataTable from '@/components/ui/DataTable.vue';
 import Tooltip from '@/components/ui/Tooltip.vue';
 import { useToast } from '@/composables/useToast';
@@ -99,19 +101,19 @@ const columns = [
         id: 'invoice_number',
         header: 'Invoice #',
         numeric: false,
-        cell: ({ row }) => row.original.invoice_number ?? '—',
+        cell: ({ row }) => row.original.invoice_number ?? '-',
     },
     {
         id: 'customer',
         header: 'Customer',
         numeric: false,
-        cell: ({ row }) => row.original.customer?.name ?? '—',
+        cell: ({ row }) => row.original.customer?.name ?? '-',
     },
     {
         id: 'accounts',
-        header: 'Accounts',
+        header: 'Assets sold',
         numeric: false,
-        cell: ({ row }) => lineSummary(row.original) || '—',
+        cell: ({ row }) => lineSummary(row.original) || '-',
     },
     {
         id: 'payment_mode',
@@ -130,7 +132,10 @@ const columns = [
         id: 'status',
         header: 'Status',
         numeric: false,
-        cell: ({ row }) => (row.original.status === 'cancelled' ? 'Cancelled' : 'Posted'),
+        cell: ({ row }) =>
+            h(Badge, { variant: row.original.status === 'cancelled' ? 'neutral' : 'success', pill: true }, () =>
+                row.original.status === 'cancelled' ? 'Cancelled' : 'Posted',
+            ),
     },
     {
         id: 'actions',
@@ -163,8 +168,10 @@ const columns = [
                     variant: 'secondary',
                     tone: 'purple',
                     type: 'button',
+                    title: 'Cancel this capital sale (posts a reversing voucher)',
+                    'aria-label': `Cancel capital sale ${capitalSale.invoice_number ?? capitalSale.id}`,
                     onClick: () => openCancel(capitalSale),
-                }, () => 'Cancel'),
+                }, () => 'Cancel sale'),
             ]);
         },
     },
@@ -185,16 +192,29 @@ const columns = [
         </template>
 
         <template v-else>
-            <div class="mb-4 flex items-center justify-between">
-                <h2 class="text-base font-bold text-text-strong">Capital Sales</h2>
+            <PageHeader
+                title="Capital sales"
+                description="Sales of business assets such as equipment or vehicles, not of your regular stock. The gain or loss is posted to your accounts."
+            >
                 <Button variant="primary" tone="purple" @click="showCreateForm = true">
-                    <Plus class="size-4" />
+                    <Plus class="size-4" aria-hidden="true" />
                     New capital sale
                 </Button>
-            </div>
+            </PageHeader>
 
             <Card variant="panel">
-                <DataTable :columns="columns" :data="capitalSales" :page-size="10" empty-message="No capital sales yet" />
+                <div v-if="capitalSales.length === 0" class="flex flex-col items-center gap-3 py-10 text-center">
+                    <p class="text-sm font-semibold text-text-strong">No capital sales yet</p>
+                    <p class="text-xs text-text-muted">Record the sale of an asset and it will be listed here.</p>
+                    <Button variant="primary" tone="purple" @click="showCreateForm = true">
+                        <Plus class="size-4" aria-hidden="true" />
+                        New capital sale
+                    </Button>
+                </div>
+                <template v-else>
+                    <DataTable :columns="columns" :data="capitalSales" :page-size="10" empty-message="No capital sales" />
+                    <p class="mt-3 text-xs text-text-muted" aria-live="polite">{{ capitalSales.length }} {{ capitalSales.length === 1 ? 'capital sale' : 'capital sales' }} in total</p>
+                </template>
             </Card>
         </template>
 
@@ -206,19 +226,19 @@ const columns = [
         >
             <div v-if="cancelling" class="flex flex-col gap-4">
                 <p class="text-sm text-text-muted">
-                    This posts a reversing voucher for the capital sale of {{ formatMoney(cancelling.total) }}. This cannot be undone.
+                    This posts a reversing voucher for the capital sale of {{ formatMoney(cancelling.total) }}: the asset sale, customer balance and any gain or loss are reversed. This cannot be undone.
                 </p>
                 <div>
-                    <label class="mb-1 block text-sm font-semibold text-text-base">Reason <span class="text-danger">*</span></label>
-                    <Input v-model="reasonForm.reason" type="text" maxlength="500" placeholder="Reason for cancellation" required />
-                    <p v-if="reasonForm.errors.reason" class="mt-1 text-sm text-danger">{{ reasonForm.errors.reason }}</p>
+                    <label for="capital-cancel-reason" class="mb-1 block text-sm font-semibold text-text-base">Reason <span class="text-danger">*</span></label>
+                    <Input id="capital-cancel-reason" v-model="reasonForm.reason" type="text" maxlength="500" placeholder="Reason for cancellation" required />
+                    <p v-if="reasonForm.errors.reason" class="mt-1 text-sm text-danger" role="alert">{{ reasonForm.errors.reason }}</p>
                 </div>
             </div>
 
             <template #footer>
-                <Button variant="secondary" tone="purple" type="button" @click="cancelling = null">Back</Button>
-                <Button variant="primary" tone="purple" type="button" :disabled="reasonForm.processing" @click="submitCancel">
-                    Confirm cancellation
+                <Button variant="secondary" tone="purple" type="button" @click="cancelling = null">Keep capital sale</Button>
+                <Button variant="primary" tone="purple" type="button" :disabled="reasonForm.processing" :loading="reasonForm.processing" @click="submitCancel">
+                    Cancel capital sale
                 </Button>
             </template>
         </Modal>

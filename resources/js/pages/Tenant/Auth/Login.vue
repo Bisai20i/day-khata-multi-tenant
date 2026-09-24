@@ -19,9 +19,9 @@ function submit() {
 </script>
 
 <template>
-    <AuthLayout title="Login" tagline="Sales, stock, and khata - all in one place.">
-        <h1 class="mb-1 text-xl font-bold text-text-strong">Log in</h1>
-        <p class="mb-6 text-sm text-text-muted">Enter your shop's account details to continue.</p>
+    <AuthLayout title="Sign in" tagline="Sales, stock, and khata - all in one place.">
+        <h1 class="mb-1 text-xl font-bold text-text-strong">Sign in to your account</h1>
+        <p class="mb-6 text-sm text-text-muted">Enter your email and password to open your shop's books.</p>
 
         <form class="flex flex-col gap-4" @submit.prevent="submit">
             <div>
@@ -33,6 +33,7 @@ function submit() {
                     placeholder="you@example.com"
                     :icon="Mail"
                     autofocus
+                    autocomplete="username"
                     required
                 />
                 <p v-if="form.errors.email" class="mt-1 text-sm text-danger">{{ form.errors.email }}</p>
@@ -40,17 +41,17 @@ function submit() {
 
             <div>
                 <label for="password" class="mb-1 block text-sm font-semibold text-text-base">Password <span class="text-danger">*</span></label>
-                <Input id="password" v-model="form.password" type="password" :icon="Lock" required />
+                <Input id="password" v-model="form.password" type="password" :icon="Lock" autocomplete="current-password" placeholder="Your password" required />
                 <p v-if="form.errors.password" class="mt-1 text-sm text-danger">{{ form.errors.password }}</p>
             </div>
 
             <label class="inline-flex items-center gap-2 text-sm text-text-muted">
                 <input v-model="form.remember" type="checkbox" name="remember" />
-                Remember me
+                Keep me signed in on this device
             </label>
 
             <Button type="submit" variant="primary" tone="purple" :loading="form.processing" class="w-full">
-                Log in
+                {{ form.processing ? 'Signing in...' : 'Sign in' }}
             </Button>
         </form>
     </AuthLayout>

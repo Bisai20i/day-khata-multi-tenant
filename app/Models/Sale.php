@@ -276,7 +276,7 @@ class Sale extends Model
      * what closes P0-10: PAN bills used to charge a hidden 13% that the PDF
      * then hid from the customer while it still posted to LIA20.
      *
-     * @param  array{customer_id: int, invoice_type: string, chalani_number?: string|null, date: string, payment_mode: string, bank_account_id?: int|null, discount?: string|float, discount_type?: string, cash_amount?: string|float|null, bank_amount?: string|float|null, tds_account_id?: int|null, tds_amount?: string|float, agent_id?: int|null, commission_amount?: string|float, narration?: string|null, store_id?: int|null, expected_total?: string|null}  $data
+     * @param  array{customer_id: int, chalani_number?: string|null, date: string, payment_mode: string, bank_account_id?: int|null, discount?: string|float, discount_type?: string, cash_amount?: string|float|null, bank_amount?: string|float|null, tds_account_id?: int|null, tds_amount?: string|float, agent_id?: int|null, commission_amount?: string|float, narration?: string|null, store_id?: int|null, expected_total?: string|null}  $data
      * @param  array<int, array{item_id: int, item_unit_id?: int|null, quantity: string|float, rate: string|float, discount?: string|float, discount_type?: string}>  $lines
      */
     public static function post(array $data, array $lines, User $actor): self
@@ -284,7 +284,11 @@ class Sale extends Model
         return DB::transaction(function () use ($data, $lines, $actor) {
             $settings = CompanySetting::current();
             $customer = Customer::findOrFail($data['customer_id']);
-            $invoiceType = static::validatedInvoiceType($data['invoice_type'] ?? 'full', $settings);
+            // The invoice type is never a cashier/request choice: IRD
+            // requires a business to issue exactly the type it is
+            // registered under, set only by the platform admin from the
+            // central panel (TenantCompanySettingController::update()).
+            $invoiceType = $settings->active_invoice_type ?? 'full';
             $storeId = static::resolveStoreId($data, $settings);
 
             $items = Item::with('units')->whereIn('id', collect($lines)->pluck('item_id'))->get()->keyBy('id');
@@ -480,27 +484,6 @@ class Sale extends Model
                 );
             }
         }
-    }
-
-    /**
-     * Rejects an invoice type the tenant has switched off in Settings. The
-     * enabled flags were saved but never enforced until now (audit P1
-     * "Invoice and IRD compliance").
-     */
-    private static function validatedInvoiceType(string $invoiceType, CompanySetting $settings): string
-    {
-        $enabled = match ($invoiceType) {
-            'full' => (bool) $settings->sale_full_enabled,
-            'abbreviated' => (bool) $settings->sale_abbreviated_enabled,
-            'pan' => (bool) $settings->sale_pan_enabled,
-            default => throw new InvalidArgumentException("Invalid invoice type [{$invoiceType}]."),
-        };
-
-        if (! $enabled) {
-            throw new InvalidArgumentException('This invoice type is turned off in Settings.');
-        }
-
-        return $invoiceType;
     }
 
     /**

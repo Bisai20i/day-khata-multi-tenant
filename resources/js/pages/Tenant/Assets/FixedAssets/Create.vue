@@ -19,7 +19,7 @@ const emit = defineEmits(['cancel', 'posted']);
 const accountOptions = computed(() =>
     props.accounts.map((account) => ({
         value: account.id,
-        label: account.code ? `${account.code} — ${account.name}` : account.name,
+        label: account.code ? `${account.code} - ${account.name}` : account.name,
     })),
 );
 const supplierOptions = computed(() => props.suppliers.map((s) => ({ value: s.id, label: s.name })));
@@ -136,7 +136,7 @@ function submit() {
         </label>
 
         <form class="flex flex-col gap-4" @submit.prevent="submit">
-            <div class="grid grid-cols-3 gap-4">
+            <div class="grid grid-cols-1 gap-4 md:grid-cols-3">
                 <div>
                     <label class="mb-1 block text-sm font-semibold text-text-base">Asset Name <span class="text-danger">*</span></label>
                     <Input v-model="form.asset_name" type="text" placeholder="e.g. Office Laptop" required />
@@ -144,6 +144,7 @@ function submit() {
                 </div>
                 <div>
                     <label class="mb-1 block text-sm font-semibold text-text-base">Depreciation Pool <span class="text-danger">*</span></label>
+                    <p class="mb-1 text-xs text-text-faint">The tax group that sets the standard rate.</p>
                     <Select
                         :model-value="form.category"
                         :options="poolOptions"
@@ -160,21 +161,26 @@ function submit() {
                 <div>
                     <label class="mb-1 block text-sm font-semibold text-text-base">Cost <span class="text-danger">*</span></label>
                     <Input v-model="form.cost" type="number" min="0.01" step="0.01" placeholder="e.g. 50000" required />
+                    <p class="mt-1 text-xs text-text-faint">Purchase cost before VAT, in rupees.</p>
                     <p v-if="form.errors.cost" class="mt-1 text-sm text-danger">{{ form.errors.cost }}</p>
                 </div>
                 <div v-if="registeringExisting">
                     <label class="mb-1 block text-sm font-semibold text-text-base">Accumulated Depreciation So Far</label>
                     <Input v-model="form.accumulated_depreciation" type="number" min="0" step="0.01" placeholder="0.00" />
+                    <p class="mt-1 text-xs text-text-faint">Total depreciation already written off before this system.</p>
                     <p v-if="form.errors.accumulated_depreciation" class="mt-1 text-sm text-danger">{{ form.errors.accumulated_depreciation }}</p>
                 </div>
                 <div v-else>
                     <label class="mb-1 block text-sm font-semibold text-text-base">VAT Rate (%)</label>
                     <Input v-model="form.vat_rate" type="number" min="0" max="100" step="0.01" placeholder="0.00" />
+                    <p class="mt-1 text-xs text-text-faint">Leave blank if no VAT was charged.</p>
                     <p v-if="form.errors.vat_rate" class="mt-1 text-sm text-danger">{{ form.errors.vat_rate }}</p>
                 </div>
                 <div>
                     <label class="mb-1 block text-sm font-semibold text-text-base">Salvage Value</label>
                     <Input v-model="form.salvage_value" type="number" min="0" step="0.01" placeholder="0.00" />
+                    <p class="mt-1 text-xs text-text-faint">Expected value at the end of its life. Leave blank for 0.</p>
+                    <p v-if="form.errors.salvage_value" class="mt-1 text-sm text-danger">{{ form.errors.salvage_value }}</p>
                 </div>
                 <div>
                     <label class="mb-1 block text-sm font-semibold text-text-base">Depreciation Method <span class="text-danger">*</span></label>
@@ -183,10 +189,13 @@ function submit() {
                         :options="methodOptions"
                         @update:model-value="(v) => (form.depreciation_method = v)"
                     />
+                    <p class="mt-1 text-xs text-text-faint">Straight-Line writes off the same amount every year; Written-Down Value applies the rate to the remaining balance.</p>
+                    <p v-if="form.errors.depreciation_method" class="mt-1 text-sm text-danger">{{ form.errors.depreciation_method }}</p>
                 </div>
                 <div>
                     <label class="mb-1 block text-sm font-semibold text-text-base">Depreciation Rate (%) <span class="text-danger">*</span></label>
                     <Input v-model="form.depreciation_rate" type="number" min="0" max="100" step="0.01" placeholder="e.g. 15" required />
+                    <p class="mt-1 text-xs text-text-faint">Yearly percentage. Pre-filled from the chosen pool; you can change it.</p>
                     <p v-if="form.errors.depreciation_rate" class="mt-1 text-sm text-danger">{{ form.errors.depreciation_rate }}</p>
                 </div>
                 <template v-if="!registeringExisting">
@@ -219,7 +228,7 @@ function submit() {
                         <p v-if="form.errors.supplier_id" class="mt-1 text-sm text-danger">{{ form.errors.supplier_id }}</p>
                     </div>
                 </template>
-                <div class="col-span-3">
+                <div class="md:col-span-3">
                     <label class="mb-1 block text-sm font-semibold text-text-base">Narration</label>
                     <Input v-model="form.narration" type="text" placeholder="Optional" />
                 </div>
@@ -228,7 +237,7 @@ function submit() {
             <div class="flex items-center justify-end gap-2">
                 <Button variant="secondary" tone="purple" type="button" @click="emit('cancel')">Cancel</Button>
                 <Button variant="primary" tone="purple" type="submit" :disabled="form.processing">
-                    {{ registeringExisting ? 'Register asset' : 'Add asset' }}
+                    {{ form.processing ? 'Saving...' : registeringExisting ? 'Register existing asset' : 'Add fixed asset' }}
                 </Button>
             </div>
         </form>

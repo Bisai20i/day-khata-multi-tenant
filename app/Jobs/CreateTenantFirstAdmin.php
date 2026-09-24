@@ -27,7 +27,7 @@ use Throwable;
  * pending_admin is only ever set by TenantController::store(). Tenants created any other way
  * (Tenant::create() directly, e.g. throughout the test suite and in tinker) still run this
  * same pipeline once TenantCreated fires, so admin creation is skipped rather than assumed
- * when there's no payload to act on — the tenant still gets flipped to Active either way.
+ * when there's no payload to act on - the tenant still gets flipped to Active either way.
  */
 class CreateTenantFirstAdmin implements ShouldQueue
 {
@@ -44,7 +44,7 @@ class CreateTenantFirstAdmin implements ShouldQueue
     public function handle(): void
     {
         // Re-fetch rather than trust the (de)serialized instance passed down
-        // the job pipeline — this also guarantees `data` (and therefore
+        // the job pipeline - this also guarantees `data` (and therefore
         // pending_admin) is freshly decoded from the DB rather than relying
         // on whatever decode state the instance happened to carry through
         // serialization.

@@ -300,7 +300,7 @@ function pickYear(year) {
                     placeholder="YYYY-MM-DD"
                     :disabled="disabled"
                     :required="required"
-                    class="w-full border-[1.5px] border-border bg-bg-subtle py-2 pr-9 pl-3 text-[13px] text-text-base outline-none transition-colors duration-150 placeholder:text-text-faint focus:border-primary focus:bg-white focus:[box-shadow:0_0_0_3px_var(--color-primary-focus-ring)] disabled:cursor-not-allowed disabled:opacity-50"
+                    class="h-9 w-full border-[1.5px] border-border bg-bg-subtle pr-9 pl-3 text-[13px] text-text-base outline-none transition-colors duration-150 placeholder:text-text-faint focus:border-primary focus:bg-white focus:[box-shadow:0_0_0_3px_var(--color-primary-focus-ring)] disabled:cursor-not-allowed disabled:opacity-50"
                     @input="onInput"
                     @focus="onFocus"
                     @blur="onBlur"

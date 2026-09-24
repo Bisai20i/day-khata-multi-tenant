@@ -17,7 +17,7 @@ This file defines the operating modes, constraints, and execution boundaries for
   1. Break down features into atomic, independent tasks in `workflow/todo.md`.
   2. Ensure parallel tasks have 100% disjoint file boundaries (no two workers touch the same file).
   3. After workers finish, wire up routes and imports in shared files.
-  4. Never write heavy business logic—delegate to `@BUILDER` or `@BUILDER-HIGH`.
+  4. Never write heavy business logic-delegate to `@BUILDER` or `@BUILDER-HIGH`.
 
 ---
 

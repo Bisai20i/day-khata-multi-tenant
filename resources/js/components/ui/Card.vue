@@ -14,7 +14,7 @@ const rootClasses = computed(() =>
         props.variant === 'product'
             ? cn(
                   'bg-white transition-[transform,box-shadow,border-color] duration-200 [transition-timing-function:ease]',
-                  'motion-safe:hover:-translate-y-0.5 hover:border-[#C4B5FD] hover:shadow-[0_4px_16px_rgba(102,0,255,.15)]',
+                  'hover:border-[#C4B5FD] hover:shadow-[0_4px_16px_rgba(102,0,255,.15)]',
                   'motion-safe:active:scale-[.97]',
               )
             : 'bg-bg-subtle shadow-xs',

@@ -2,10 +2,12 @@
 
 namespace App\Http\Controllers\Tenant\Sales;
 
+use App\Enums\FiscalYearStatus;
 use App\Http\Controllers\Controller;
 use App\Models\Account;
 use App\Models\CompanySetting;
 use App\Models\Customer;
+use App\Models\FiscalYear;
 use App\Models\Item;
 use App\Models\ItemCategory;
 use App\Models\Store;
@@ -66,12 +68,17 @@ class PosController extends Controller
             // section 3 "Sales") - a quick counter sale usually has nobody
             // to name.
             'walkInCustomerId' => Customer::walkIn()?->id,
+            // Legacy's top bar always shows "FY: <label>" (new-pos.blade.php)
+            // - mirrored here as a plain display badge, never posted anywhere.
+            // Deliberately not FiscalYear::current(), which firstOrFail()s
+            // (appropriate for a posting path, not for this purely cosmetic
+            // badge) - a tenant with no open fiscal year would 404 the whole
+            // POS screen instead of just showing no badge.
+            'currentFiscalYear' => FiscalYear::where('status', FiscalYearStatus::Open)->first()?->name,
             'invoiceSettings' => [
                 'default_vat_rate' => $settings->default_vat_rate,
                 'default_store_id' => $settings->default_store_id,
-                'sale_full_enabled' => (bool) $settings->sale_full_enabled,
-                'sale_abbreviated_enabled' => (bool) $settings->sale_abbreviated_enabled,
-                'sale_pan_enabled' => (bool) $settings->sale_pan_enabled,
+                'active_invoice_type' => $settings->active_invoice_type ?? 'full',
             ],
         ]);
     }

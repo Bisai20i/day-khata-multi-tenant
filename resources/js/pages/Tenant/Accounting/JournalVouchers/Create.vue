@@ -8,7 +8,7 @@ import Input from '@/components/ui/Input.vue';
 import Combobox from '@/components/ui/Combobox.vue';
 import Select from '@/components/ui/Select.vue';
 import NepaliDateInput from '@/components/ui/NepaliDateInput.vue';
-import { formatMoney, isZeroMoney, moneyEquals, parseMoney, sumMoney } from '@/lib/money';
+import { formatMoney, isZeroMoney, moneyEquals, parseMoney, subtractMoney, sumMoney } from '@/lib/money';
 import { todayInKathmandu } from '@/lib/format';
 
 const props = defineProps({
@@ -35,11 +35,11 @@ const isAdmin = computed(() => page.props.auth?.user?.role?.slug === 'admin');
 const accountOptions = computed(() =>
     props.accounts.map((account) => ({
         value: account.id,
-        label: account.code ? `${account.code} — ${account.name}` : account.name,
+        label: account.code ? `${account.code} - ${account.name}` : account.name,
     })),
 );
 
-// Only admins see this picker at all (see isAdmin above) — for everyone
+// Only admins see this picker at all (see isAdmin above) - for everyone
 // else the voucher always posts into whichever fiscal year is currently
 // open, which the backend defaults to when fiscal_year_id is omitted. The
 // single option offered is the reopened-for-correction year itself -
@@ -106,6 +106,7 @@ const totalCredit = computed(() => sumMoney(form.lines.map((line) => amountOf(li
 
 // Exact equality, no tolerance: a 0.005 window is precisely how an unbalanced
 // voucher used to reach the database (audit P0-2).
+const difference = computed(() => subtractMoney(totalDebit.value, totalCredit.value));
 const isBalanced = computed(() => !isZeroMoney(totalDebit.value) && moneyEquals(totalDebit.value, totalCredit.value));
 const hasUnreadableAmount = computed(() =>
     form.lines.some((line) => amountOf(line.debit) === null || amountOf(line.credit) === null),
@@ -135,7 +136,10 @@ function submit() {
 <template>
     <Card variant="panel">
         <div class="mb-4 flex items-center justify-between">
-            <h3 class="text-base font-bold text-text-strong">New journal voucher</h3>
+            <div>
+                <h3 class="text-base font-bold text-text-strong">New journal voucher</h3>
+                <p class="text-sm text-text-muted">Record a manual accounting entry. Total debits must equal total credits before you can post.</p>
+            </div>
             <Button variant="secondary" tone="purple" type="button" @click="emit('cancel')">Cancel</Button>
         </div>
 
@@ -152,6 +156,7 @@ function submit() {
                     :options="fiscalYearOptions"
                     placeholder="Currently open fiscal year"
                 />
+                <p class="mt-1 text-xs text-text-muted">Leave blank to post into the currently open fiscal year.</p>
                 <p v-if="form.errors.fiscal_year_id" class="mt-1 text-sm text-danger">{{ form.errors.fiscal_year_id }}</p>
             </div>
 
@@ -189,10 +194,10 @@ function submit() {
 
             <div>
                 <div class="mb-2 grid grid-cols-[1fr_140px_140px_1fr_28px] gap-2 text-[10px] font-bold tracking-[.8px] text-text-muted uppercase">
-                    <span>Account</span>
-                    <span>Debit</span>
-                    <span>Credit</span>
-                    <span>Narration</span>
+                    <span>Account <span class="text-danger">*</span></span>
+                    <span>Debit (Dr)</span>
+                    <span>Credit (Cr)</span>
+                    <span>Line narration</span>
                     <span></span>
                 </div>
 
@@ -242,22 +247,28 @@ function submit() {
                     <Plus class="h-3.5 w-3.5" /> Add line
                 </Button>
 
+                <p class="mt-2 text-xs text-text-muted">Each line takes either a debit or a credit, not both. Debit increases assets and expenses; credit increases liabilities, income and equity.</p>
+
                 <div class="mt-4 grid grid-cols-[1fr_140px_140px_1fr_28px] items-center gap-2 border-t-[1.5px] border-border pt-3">
-                    <span class="text-sm font-bold text-text-strong">Total</span>
+                    <span class="text-sm font-bold text-text-strong">Debit total / Credit total</span>
                     <span class="text-sm font-bold text-text-strong">{{ formatMoney(totalDebit) }}</span>
                     <span class="text-sm font-bold text-text-strong">{{ formatMoney(totalCredit) }}</span>
                     <span class="text-xs font-semibold" :class="isBalanced && !hasUnreadableAmount ? 'text-success' : 'text-danger'">
                         <template v-if="hasUnreadableAmount">Every amount must be a number with at most 2 decimals</template>
-                        <template v-else>{{ isBalanced ? 'Balanced' : 'Debit and credit totals must match' }}</template>
+                        <template v-else>{{ isBalanced ? 'Balanced' : 'Unbalanced: debit and credit totals must match' }}</template>
                     </span>
                     <span></span>
+                </div>
+                <div class="mt-1 flex items-center justify-end gap-2 text-sm">
+                    <span class="font-semibold text-text-base">Difference</span>
+                    <span class="font-bold" :class="isBalanced ? 'text-success' : 'text-danger'">{{ formatMoney(difference) }}</span>
                 </div>
             </div>
 
             <div class="flex items-center justify-end gap-2">
                 <Button variant="secondary" tone="purple" type="button" @click="emit('cancel')">Cancel</Button>
                 <Button variant="primary" tone="purple" type="submit" :disabled="form.processing || !canSubmit">
-                    Create Journal Voucher
+                    {{ form.processing ? 'Posting...' : 'Post journal voucher' }}
                 </Button>
             </div>
         </form>

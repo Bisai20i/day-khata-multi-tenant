@@ -3,6 +3,7 @@ import { computed, h, ref, watch } from 'vue';
 import { router, useForm, usePage } from '@inertiajs/vue3';
 import AppLayout from '@/layouts/AppLayout.vue';
 import { useLayoutChrome } from '@/composables/useLayoutChrome';
+import PageHeader from '@/components/ui/PageHeader.vue';
 import Card from '@/components/ui/Card.vue';
 import Button from '@/components/ui/Button.vue';
 import Badge from '@/components/ui/Badge.vue';
@@ -254,7 +255,7 @@ function submit() {
 }
 
 async function destroy(item) {
-    if (!(await confirm({ message: 'Delete this item?', tone: 'danger', confirmLabel: 'Delete' }))) return;
+    if (!(await confirm({ message: `Delete item "${item.name}"? Items already used in invoices or stock cannot be deleted; deactivate them instead. This cannot be undone.`, tone: 'danger', confirmLabel: 'Delete item' }))) return;
     router.delete(`/items/${item.id}`, {
         // The server refuses to delete an item any document references and
         // returns a field error instead of a raw SQL page - surface it here,
@@ -340,7 +341,7 @@ function submitUnit() {
 
 async function destroyUnit(unit) {
     if (!unitsItem.value) return;
-    if (!(await confirm({ message: `Delete the "${unit.name}" unit?`, tone: 'danger', confirmLabel: 'Delete' }))) return;
+    if (!(await confirm({ message: `Delete the "${unit.name}" unit?`, tone: 'danger', confirmLabel: 'Delete unit' }))) return;
     router.delete(`/items/${unitsItem.value.id}/units/${unit.id}`, {
         onSuccess: () => {
             if (editingUnit.value?.id === unit.id) resetUnitForm();
@@ -487,14 +488,14 @@ const columns = [
         id: 'subcategory',
         header: 'Subcategory',
         numeric: false,
-        cell: ({ row }) => row.original.subcategory?.name ?? '—',
+        cell: ({ row }) => row.original.subcategory?.name ?? '-',
     },
     { accessorKey: 'unit', header: 'Unit', numeric: false },
     {
         id: 'brand',
         header: 'Brand',
         numeric: false,
-        cell: ({ row }) => row.original.brand?.name ?? '—',
+        cell: ({ row }) => row.original.brand?.name ?? '-',
     },
     {
         id: 'stock',
@@ -502,7 +503,21 @@ const columns = [
         numeric: true,
         // 4-decimal quantities shown as quantities, trailing zeros trimmed -
         // audit P3 found this column rendering a 4dp value at 2dp.
-        cell: ({ row }) => (row.original.is_stockable ? formatQuantity(stockOnHand(row.original)) : '—'),
+        cell: ({ row }) => {
+            if (!row.original.is_stockable) return '-';
+            const onHand = Number(stockOnHand(row.original));
+            const minimum = Number(row.original.min_stock ?? 0);
+            const badge =
+                onHand <= 0
+                    ? h(Badge, { variant: 'danger', pill: true }, () => 'Out of stock')
+                    : minimum > 0 && onHand <= minimum
+                      ? h(Badge, { variant: 'warning', pill: true }, () => 'Low stock')
+                      : null;
+            return h('div', { class: 'flex flex-col items-end gap-1' }, [
+                h('span', formatQuantity(stockOnHand(row.original))),
+                badge,
+            ]);
+        },
     },
     {
         id: 'purchase_rate',
@@ -510,13 +525,13 @@ const columns = [
         numeric: true,
         // formatRate, not toFixed(2): a rate legitimately carries 4 decimals
         // and 12.3456 must not print as 12.35 (audit P0-1/P3).
-        cell: ({ row }) => (row.original.purchase_rate != null ? formatRate(row.original.purchase_rate) : '—'),
+        cell: ({ row }) => (row.original.purchase_rate != null ? formatRate(row.original.purchase_rate) : '-'),
     },
     {
         id: 'sale_rate',
         header: 'Sale rate',
         numeric: true,
-        cell: ({ row }) => (row.original.sale_rate != null ? formatRate(row.original.sale_rate) : '—'),
+        cell: ({ row }) => (row.original.sale_rate != null ? formatRate(row.original.sale_rate) : '-'),
     },
     {
         id: 'expiry',
@@ -526,7 +541,7 @@ const columns = [
             const status = expiryStatus(row.original);
             if (status === 'expired') return h(Badge, { variant: 'danger', pill: true }, () => 'Expired');
             if (status === 'soon') return h(Badge, { variant: 'warning', pill: true }, () => 'Expiring soon');
-            return '—';
+            return '-';
         },
     },
     {
@@ -569,7 +584,7 @@ const columns = [
                         class: 'h-[26px] shrink-0 border-[1.5px] border-border px-2 text-[11px] font-bold text-text-muted transition-colors duration-150 hover:border-primary hover:text-primary',
                         onClick: () => openBarcodeModal(row.original),
                     },
-                    'Print Barcode',
+                    'Print barcode',
                 ),
                 h(RowActions, {
                     onEdit: () => openEdit(row.original),
@@ -582,9 +597,7 @@ const columns = [
 
 <template>
     <div>
-        <div class="mb-4 flex items-center justify-between">
-            <h2 class="text-base font-bold text-text-strong">Items</h2>
-            <div class="flex items-center gap-2">
+        <PageHeader title="Items" description="Items: the products you buy and sell, with their unit, rates and stock level.">
                 <Button
                     v-if="selectedItemIds.length > 0"
                     variant="secondary"
@@ -594,13 +607,12 @@ const columns = [
                 >
                     Mark {{ selectedItemIds.length }} vatable
                 </Button>
-                <Button variant="secondary" tone="purple" @click="openImport">Bulk import</Button>
+                <Button variant="secondary" tone="purple" @click="openImport">Bulk import (CSV)</Button>
                 <Button variant="primary" tone="purple" @click="openCreate">New item</Button>
-            </div>
-        </div>
+        </PageHeader>
 
         <Card variant="panel">
-            <DataTable :columns="columns" :data="items" :page-size="10" />
+            <DataTable :columns="columns" :data="items" :page-size="10" empty-message="No items yet. Use 'New item' above to add one, or Bulk import (CSV)." />
         </Card>
 
         <Modal :open="showModal" :title="editing ? 'Edit item' : 'New item'" @update:open="onModalOpenChange">
@@ -652,6 +664,7 @@ const columns = [
                     <div>
                         <label for="unit" class="mb-1 block text-sm font-semibold text-text-base">Unit <span class="text-danger">*</span></label>
                         <Input id="unit" v-model="form.unit" type="text" placeholder="pcs" required />
+                        <p class="mt-1 text-xs text-text-faint">Base unit stock is counted in, e.g. pcs, kg, litre. Add bigger units (box, carton) later with "Units".</p>
                         <p v-if="form.errors.unit" class="mt-1 text-sm text-danger">{{ form.errors.unit }}</p>
                     </div>
 
@@ -700,8 +713,9 @@ const columns = [
 
                 <div class="grid grid-cols-2 gap-4">
                     <div>
-                        <label for="min_stock" class="mb-1 block text-sm font-semibold text-text-base">Minimum stock</label>
+                        <label for="min_stock" class="mb-1 block text-sm font-semibold text-text-base">Reorder level (minimum stock)</label>
                         <Input id="min_stock" v-model="form.min_stock" type="number" step="0.01" placeholder="e.g. 10" class="max-w-[160px]" />
+                        <p class="mt-1 text-xs text-text-faint">Reorder level: the item is flagged "Low stock" when quantity falls to this or below.</p>
                         <p v-if="form.errors.min_stock" class="mt-1 text-sm text-danger">{{ form.errors.min_stock }}</p>
                     </div>
 
@@ -781,7 +795,7 @@ const columns = [
             <template #footer>
                 <Button variant="secondary" tone="purple" type="button" @click="closeModal">Cancel</Button>
                 <Button variant="primary" tone="purple" type="submit" form="item-form" :disabled="form.processing">
-                    {{ editing ? 'Save changes' : 'Create item' }}
+                    {{ form.processing ? 'Saving...' : editing ? 'Save item' : 'Create item' }}
                 </Button>
             </template>
         </Modal>
@@ -832,7 +846,7 @@ const columns = [
                         <tbody>
                             <tr v-for="item in importResult.skipped" :key="item.row" class="border-t border-border">
                                 <td class="px-2 py-1.5">{{ item.row }}</td>
-                                <td class="px-2 py-1.5">{{ item.name || '—' }}</td>
+                                <td class="px-2 py-1.5">{{ item.name || '-' }}</td>
                                 <td class="px-2 py-1.5">{{ item.reason }}</td>
                             </tr>
                         </tbody>
@@ -862,7 +876,7 @@ const columns = [
 
         <Modal
             :open="unitsModalOpen"
-            :title="unitsItem ? `Units — ${unitsItem.name}` : 'Units'"
+            :title="unitsItem ? `Units - ${unitsItem.name}` : 'Units'"
             @update:open="onUnitsModalOpenChange"
         >
             <div v-if="unitsItem" class="flex flex-col gap-4">
@@ -892,10 +906,10 @@ const columns = [
                             <tr v-for="unit in unitsItem.units" :key="unit.id" class="border-t border-border">
                                 <td class="px-2 py-1.5 font-semibold text-text-strong">{{ unit.name }}</td>
                                 <td class="px-2 py-1.5">{{ formatQuantity(unit.conversion_factor) }} {{ unitsItem.unit }}</td>
-                                <td class="px-2 py-1.5">{{ unit.purchase_rate != null ? formatRate(unit.purchase_rate) : '—' }}</td>
-                                <td class="px-2 py-1.5">{{ unit.sale_rate != null ? formatRate(unit.sale_rate) : '—' }}</td>
-                                <td class="px-2 py-1.5">{{ unit.mrp != null ? formatRate(unit.mrp) : '—' }}</td>
-                                <td class="px-2 py-1.5">{{ unit.barcode ?? '—' }}</td>
+                                <td class="px-2 py-1.5">{{ unit.purchase_rate != null ? formatRate(unit.purchase_rate) : '-' }}</td>
+                                <td class="px-2 py-1.5">{{ unit.sale_rate != null ? formatRate(unit.sale_rate) : '-' }}</td>
+                                <td class="px-2 py-1.5">{{ unit.mrp != null ? formatRate(unit.mrp) : '-' }}</td>
+                                <td class="px-2 py-1.5">{{ unit.barcode ?? '-' }}</td>
                                 <td class="px-2 py-1.5">
                                     <Badge :variant="unit.is_active ? 'success' : 'neutral'" pill>
                                         {{ unit.is_active ? 'Active' : 'Inactive' }}
@@ -954,14 +968,14 @@ const columns = [
                 <Button v-if="editingUnit" variant="secondary" tone="purple" type="button" @click="resetUnitForm">Cancel edit</Button>
                 <Button variant="secondary" tone="purple" type="button" @click="closeUnitsModal">Close</Button>
                 <Button variant="primary" tone="purple" type="submit" form="item-unit-form" :disabled="unitForm.processing">
-                    {{ editingUnit ? 'Save changes' : 'Add unit' }}
+                    {{ editingUnit ? 'Save unit' : 'Add unit' }}
                 </Button>
             </template>
         </Modal>
 
         <Modal
             :open="barcodeModalOpen"
-            :title="barcodeItem ? `Print Barcode — ${barcodeItem.name}` : 'Print Barcode'"
+            :title="barcodeItem ? `Print Barcode - ${barcodeItem.name}` : 'Print Barcode'"
             size="compact"
             @update:open="onBarcodeModalOpenChange"
         >

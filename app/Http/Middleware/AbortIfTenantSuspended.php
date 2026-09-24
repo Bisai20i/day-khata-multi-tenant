@@ -13,7 +13,7 @@ use Stancl\Tenancy\Resolvers\DomainTenantResolver;
  * Blocks a real inbound request with a 403 if the tenant that owns this
  * domain has been suspended by a platform admin, or isn't ready yet (its
  * database is created/migrated/seeded asynchronously via the queued
- * TenantCreated job pipeline — see App\Jobs\CreateTenantFirstAdmin and
+ * TenantCreated job pipeline - see App\Jobs\CreateTenantFirstAdmin and
  * TenancyServiceProvider).
  *
  * Runs BEFORE InitializeTenancyByDomain (see TenancyServiceProvider's
@@ -32,7 +32,7 @@ use Stancl\Tenancy\Resolvers\DomainTenantResolver;
  * second, independent reason: that event also fires for every *internal*
  * tenancy()->initialize()/$tenant->run() call the provisioning pipeline
  * itself makes while status is still Provisioning (MigrateDatabase,
- * SeedDatabase, CreateTenantFirstAdmin) — an event listener aborts the
+ * SeedDatabase, CreateTenantFirstAdmin) - an event listener aborts the
  * pipeline on its own first step, every time. Route middleware only ever
  * sees genuine end-user requests into a tenant's domain.
  */
@@ -46,7 +46,7 @@ class AbortIfTenantSuspended
             /** @var Tenant $tenant */
             $tenant = $this->resolver->resolve($request->getHost());
         } catch (TenantCouldNotBeIdentifiedException) {
-            // Not a recognized tenant domain — let InitializeTenancyByDomain
+            // Not a recognized tenant domain - let InitializeTenancyByDomain
             // (which runs right after this middleware) handle that failure
             // the normal way.
             return $next($request);

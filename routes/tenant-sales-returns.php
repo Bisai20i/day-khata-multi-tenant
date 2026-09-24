@@ -25,15 +25,21 @@ Route::name('tenant.')->group(function () {
         // section 3 "Sales", "returns without a bill") - see SalesReturn::
         // postUnlinked(). Always posts directly, so it has no request/
         // approve counterpart.
-        Route::post('/unlinked', [SalesReturnController::class, 'storeUnlinked'])->name('store-unlinked');
+        Route::post('/unlinked', [SalesReturnController::class, 'storeUnlinked'])
+            ->middleware('role:admin')
+            ->name('store-unlinked');
         // Request/approve/reject: the two-step "request first, post only on
         // approval" workflow (see SalesReturn::request()'s docblock) -
         // request() never posts anything, approve() posts exactly what a
         // direct store() would have, reject() records a reason and posts
         // nothing.
         Route::post('/request', [SalesReturnController::class, 'requestReturn'])->name('request');
-        Route::post('/{salesReturn}/approve', [SalesReturnController::class, 'approve'])->name('approve');
-        Route::post('/{salesReturn}/reject', [SalesReturnController::class, 'reject'])->name('reject');
+        Route::post('/{salesReturn}/approve', [SalesReturnController::class, 'approve'])
+            ->middleware('role:admin')
+            ->name('approve');
+        Route::post('/{salesReturn}/reject', [SalesReturnController::class, 'reject'])
+            ->middleware('role:admin')
+            ->name('reject');
         // Cancelling a posted credit note reverses real money, so it is
         // admin-only (CONTRACTS C5) - unlike request/approve/reject, which
         // every tenant user may drive.

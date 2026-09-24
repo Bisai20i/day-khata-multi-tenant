@@ -66,11 +66,9 @@ function baseCentralSettingsUpdatePayload(): array
         'allow_negative_stock' => false,
         'default_store_id' => null,
         'sale_full_prefix' => 'SL',
-        'sale_full_enabled' => true,
         'sale_abbreviated_prefix' => 'SLA',
-        'sale_abbreviated_enabled' => true,
         'sale_pan_prefix' => 'SLP',
-        'sale_pan_enabled' => true,
+        'active_invoice_type' => 'full',
         'purchase_prefix' => 'PU',
         'sale_return_prefix' => 'SR',
         'purchase_return_prefix' => 'PR',
@@ -174,7 +172,7 @@ test('a platform admin can update the invoicing and stock policy fields', functi
         'allow_negative_stock' => true,
         'default_store_id' => $storeId,
         'sale_full_prefix' => 'INV',
-        'sale_full_enabled' => false,
+        'active_invoice_type' => 'abbreviated',
         'sale_abbreviated_prefix' => 'ABR',
         'sale_pan_prefix' => 'PAN',
         'purchase_prefix' => 'PRC',
@@ -194,7 +192,7 @@ test('a platform admin can update the invoicing and stock policy fields', functi
         expect($settings->allow_negative_stock)->toBeTrue();
         expect($settings->default_store_id)->toBe($storeId);
         expect($settings->sale_full_prefix)->toBe('INV');
-        expect($settings->sale_full_enabled)->toBeFalse();
+        expect($settings->active_invoice_type)->toBe('abbreviated');
     });
 });
 
@@ -229,6 +227,17 @@ test('a non-existent default store id is rejected', function () {
     $this->actingAs($admin, 'platform')
         ->put(route('central.tenants.settings.update', $tenant), $payload)
         ->assertSessionHasErrors('default_store_id');
+});
+
+test('an invalid active invoice type is rejected', function () {
+    $admin = PlatformAdmin::factory()->create();
+    $tenant = provisionTenantSettingsTestTenant($this, $admin, 'settingsinvoicetype');
+
+    $payload = array_merge(baseCentralSettingsUpdatePayload(), ['active_invoice_type' => 'not-a-real-type']);
+
+    $this->actingAs($admin, 'platform')
+        ->put(route('central.tenants.settings.update', $tenant), $payload)
+        ->assertSessionHasErrors('active_invoice_type');
 });
 
 test('two document series cannot share a prefix', function () {

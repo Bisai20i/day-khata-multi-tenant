@@ -7,10 +7,12 @@ use App\Models\Account;
 use App\Models\Customer;
 use App\Models\Receipt;
 use App\Models\Sale;
+use App\Models\SalesReturn;
 use App\Support\Money\Money;
 use Illuminate\Auth\Access\AuthorizationException;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
+use Illuminate\Validation\Rule;
 use Inertia\Inertia;
 use Inertia\Response;
 use InvalidArgumentException;
@@ -74,7 +76,7 @@ class ReceiptController extends Controller
             'date' => ['required', 'date'],
             'amount' => ['required', 'numeric', 'decimal:0,2', 'min:0.01'],
             'payment_mode' => ['required', 'in:cash,bank'],
-            'bank_account_id' => ['nullable', 'integer', 'exists:accounts,id'],
+            'bank_account_id' => ['nullable', 'integer', Rule::in(SalesReturn::refundAccountQuery()->pluck('id')->all())],
             'reference_number' => ['nullable', 'string', 'max:255'],
             'narration' => ['nullable', 'string', 'max:255'],
             'allocations' => ['nullable', 'array'],

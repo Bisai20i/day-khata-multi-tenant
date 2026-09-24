@@ -194,10 +194,15 @@ test('a PAN invoice charges no VAT and is numbered in its own SalePan series', f
         $customer = Customer::factory()->create();
         $item = Item::factory()->create(['is_vatable' => true, 'is_stockable' => false]);
 
+        // The invoice type is never a request field - it's whatever the
+        // tenant's CompanySetting::active_invoice_type says (set only by the
+        // platform admin from the central panel).
+        CompanySetting::current()->update(['active_invoice_type' => 'pan']);
+
         // Audit P0-10: a PAN bill used to charge a hidden 13% that the PDF then
         // hid from the customer while it still posted to LIA20.
         $pan = Sale::post(
-            ['customer_id' => $customer->id, 'invoice_type' => 'pan', 'date' => '2026-06-01', 'payment_mode' => 'credit'],
+            ['customer_id' => $customer->id, 'date' => '2026-06-01', 'payment_mode' => 'credit'],
             [['item_id' => $item->id, 'quantity' => '1', 'rate' => '1000.00']],
             $admin,
         );
@@ -215,8 +220,10 @@ test('a PAN invoice charges no VAT and is numbered in its own SalePan series', f
             ->and($pan->lines()->first()->vatable)->toBeFalse();
 
         // The full-invoice series is untouched by the PAN bill: both start at 1.
+        CompanySetting::current()->update(['active_invoice_type' => 'full']);
+
         $full = Sale::post(
-            ['customer_id' => $customer->id, 'invoice_type' => 'full', 'date' => '2026-06-02', 'payment_mode' => 'credit'],
+            ['customer_id' => $customer->id, 'date' => '2026-06-02', 'payment_mode' => 'credit'],
             [['item_id' => $item->id, 'quantity' => '1', 'rate' => '1000.00']],
             $admin,
         );
@@ -227,21 +234,30 @@ test('a PAN invoice charges no VAT and is numbered in its own SalePan series', f
     $tenant->delete();
 });
 
-test('an invoice type switched off in settings is rejected', function () {
-    $tenant = provisionSaleBillingTenant('sale-type-disabled.tenant-test');
+test('Sale::post() ignores a client-submitted invoice_type and always uses the settings-configured one', function () {
+    $tenant = provisionSaleBillingTenant('sale-type-not-client-chosen.tenant-test');
 
     $tenant->run(function () {
         saleBillingOpenYear();
-        CompanySetting::current()->update(['sale_pan_enabled' => false]);
+        // IRD requires a business to issue exactly the invoice type it is
+        // registered under - the platform admin fixes this centrally
+        // (TenantCompanySettingController), never a per-sale cashier choice.
+        CompanySetting::current()->update(['default_vat_rate' => '13.00', 'active_invoice_type' => 'full']);
         $admin = saleBillingAdmin();
         $customer = Customer::factory()->create();
-        $item = Item::factory()->create(['is_vatable' => false, 'is_stockable' => false]);
+        $item = Item::factory()->create(['is_vatable' => true, 'is_stockable' => false]);
 
-        expect(fn () => Sale::post(
+        // A request trying to smuggle a different type through (here 'pan',
+        // which would force zero VAT) must be silently ignored - the stored
+        // sale still comes out 'full', VAT and all.
+        $sale = Sale::post(
             ['customer_id' => $customer->id, 'invoice_type' => 'pan', 'date' => '2026-06-01', 'payment_mode' => 'credit'],
             [['item_id' => $item->id, 'quantity' => '1', 'rate' => '100.00']],
             $admin,
-        ))->toThrow(InvalidArgumentException::class, 'This invoice type is turned off in Settings.');
+        );
+
+        expect($sale->invoice_type)->toBe('full')
+            ->and($sale->vat_amount)->toBe('13.00');
     });
 
     $tenant->delete();
@@ -252,12 +268,13 @@ test('an abbreviated invoice above Rs 10,000 is rejected but exactly Rs 10,000 i
 
     $tenant->run(function () {
         saleBillingOpenYear();
+        CompanySetting::current()->update(['active_invoice_type' => 'abbreviated']);
         $admin = saleBillingAdmin();
         $customer = Customer::factory()->create();
         $exempt = Item::factory()->create(['is_vatable' => false, 'is_stockable' => false]);
 
         $atTheCap = Sale::post(
-            ['customer_id' => $customer->id, 'invoice_type' => 'abbreviated', 'date' => '2026-06-01', 'payment_mode' => 'credit'],
+            ['customer_id' => $customer->id, 'date' => '2026-06-01', 'payment_mode' => 'credit'],
             [['item_id' => $exempt->id, 'quantity' => '1', 'rate' => '10000.00']],
             $admin,
         );
@@ -265,7 +282,7 @@ test('an abbreviated invoice above Rs 10,000 is rejected but exactly Rs 10,000 i
         expect($atTheCap->total)->toBe('10000.00');
 
         expect(fn () => Sale::post(
-            ['customer_id' => $customer->id, 'invoice_type' => 'abbreviated', 'date' => '2026-06-02', 'payment_mode' => 'credit'],
+            ['customer_id' => $customer->id, 'date' => '2026-06-02', 'payment_mode' => 'credit'],
             [['item_id' => $exempt->id, 'quantity' => '1', 'rate' => '10000.01']],
             $admin,
         ))->toThrow(InvalidArgumentException::class, 'Use a full tax invoice above Rs 10,000.');

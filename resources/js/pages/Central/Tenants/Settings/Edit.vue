@@ -1,7 +1,7 @@
 <script setup>
 import { computed, ref, watch } from 'vue';
-import { Link, useForm, usePage } from '@inertiajs/vue3';
-import { ArrowLeft } from '@lucide/vue';
+import { useForm, usePage } from '@inertiajs/vue3';
+import { Check } from '@lucide/vue';
 import AppLayout from '@/layouts/AppLayout.vue';
 import { useLayoutChrome } from '@/composables/useLayoutChrome';
 import Card from '@/components/ui/Card.vue';
@@ -9,6 +9,7 @@ import Button from '@/components/ui/Button.vue';
 import Input from '@/components/ui/Input.vue';
 import Select from '@/components/ui/Select.vue';
 import Tabs from '@/components/ui/Tabs.vue';
+import PageHeader from '@/components/ui/PageHeader.vue';
 import { useToast } from '@/composables/useToast';
 
 defineOptions({ layout: AppLayout });
@@ -38,12 +39,13 @@ const props = defineProps({
 
 const page = usePage();
 const { toast } = useToast();
-useLayoutChrome(() => `${props.tenant.company_name} — Settings`);
+useLayoutChrome(() => `${props.tenant.company_name} - Settings`);
 
 const settingsTabs = [
-    { value: 'company', label: 'Company Setup' },
-    { value: 'invoice', label: 'Invoice Setup' },
-    { value: 'stock', label: 'Stock & Discount Policy' },
+    { value: 'company', label: 'Company info' },
+    { value: 'invoice', label: 'Invoicing' },
+    { value: 'numbering', label: 'Invoice numbering' },
+    { value: 'stock', label: 'Stock & discount policy' },
 ];
 const activeTab = ref('company');
 
@@ -52,6 +54,16 @@ const paperSizeOptions = [
     { value: 'a5', label: 'A5' },
     { value: '58mm', label: 'Thermal 58mm' },
     { value: '80mm', label: 'Thermal 80mm' },
+];
+
+// A tenant issues exactly one invoice type - the one it's registered under
+// with IRD - never a per-sale cashier choice (see Sale::post()). This is a
+// single fixed choice, not independent toggles, so the sales screen never
+// needs to show a picker at all.
+const invoiceTypeOptions = [
+    { value: 'full', label: 'Full tax invoice', prefixKey: 'sale_full_prefix', prefixPlaceholder: 'SL' },
+    { value: 'abbreviated', label: 'Abbreviated tax invoice', prefixKey: 'sale_abbreviated_prefix', prefixPlaceholder: 'SLA' },
+    { value: 'pan', label: 'PAN invoice', prefixKey: 'sale_pan_prefix', prefixPlaceholder: 'SLP' },
 ];
 
 const storeOptions = computed(() => [
@@ -85,11 +97,9 @@ const form = useForm({
     allow_negative_stock: props.settings.allow_negative_stock ?? false,
     default_store_id: props.settings.default_store_id ?? null,
     sale_full_prefix: props.settings.sale_full_prefix ?? 'SL',
-    sale_full_enabled: props.settings.sale_full_enabled ?? true,
     sale_abbreviated_prefix: props.settings.sale_abbreviated_prefix ?? 'SLA',
-    sale_abbreviated_enabled: props.settings.sale_abbreviated_enabled ?? true,
     sale_pan_prefix: props.settings.sale_pan_prefix ?? 'SLP',
-    sale_pan_enabled: props.settings.sale_pan_enabled ?? true,
+    active_invoice_type: props.settings.active_invoice_type ?? 'full',
     purchase_prefix: props.settings.purchase_prefix ?? 'PU',
     sale_return_prefix: props.settings.sale_return_prefix ?? 'SR',
     purchase_return_prefix: props.settings.purchase_return_prefix ?? 'PR',
@@ -97,6 +107,11 @@ const form = useForm({
 
 function submit() {
     form.put(settingsUrl.value);
+}
+
+function discard() {
+    form.reset();
+    form.clearErrors();
 }
 
 // One form reused across rows: only one starting number is ever being edited
@@ -152,29 +167,27 @@ function submitLogo() {
 
 <template>
     <div>
-        <Link :href="`/tenants/${tenant.id}`" class="mb-2 inline-flex items-center gap-1 text-sm font-semibold text-primary">
-            <ArrowLeft class="size-4" />
-            Back to {{ tenant.company_name }}
-        </Link>
-
-        <div class="mb-4 flex items-center justify-between">
-            <h2 class="text-base font-bold text-text-strong">{{ tenant.company_name }} — Settings</h2>
-        </div>
+        <PageHeader
+            :title="`${tenant.company_name} - Settings`"
+            description="Company details, invoice rules and stock policy for this tenant. Changes apply to this tenant only."
+            :back-href="`/tenants/${tenant.id}`"
+            :back-label="`Back to ${tenant.company_name}`"
+        />
 
         <Tabs v-model="activeTab" :tabs="settingsTabs">
             <template #company>
                 <div class="flex flex-col gap-4">
-                    <Card variant="panel" title="Company Info">
-                        <form class="flex flex-col gap-4" @submit.prevent="submit">
+                    <Card variant="panel" title="Company info">
+                        <div class="flex flex-col gap-4">
                             <div class="grid grid-cols-2 gap-4">
                                 <div>
-                                    <label for="company_name" class="mb-1 block text-sm font-semibold text-text-base">Company Name <span class="text-danger">*</span></label>
+                                    <label for="company_name" class="mb-1 block text-sm font-semibold text-text-base">Company name <span class="text-danger">*</span></label>
                                     <Input id="company_name" v-model="form.company_name" type="text" placeholder="e.g. Sharma Traders Pvt. Ltd." required />
                                     <p v-if="form.errors.company_name" class="mt-1 text-sm text-danger">{{ form.errors.company_name }}</p>
                                 </div>
 
                                 <div>
-                                    <label for="pan_vat_number" class="mb-1 block text-sm font-semibold text-text-base">PAN/VAT Number</label>
+                                    <label for="pan_vat_number" class="mb-1 block text-sm font-semibold text-text-base">PAN/VAT number</label>
                                     <Input id="pan_vat_number" v-model="form.pan_vat_number" type="text" placeholder="e.g. 123456789" />
                                     <p v-if="form.errors.pan_vat_number" class="mt-1 text-sm text-danger">{{ form.errors.pan_vat_number }}</p>
                                 </div>
@@ -197,14 +210,11 @@ function submitLogo() {
                                     <p v-if="form.errors.email" class="mt-1 text-sm text-danger">{{ form.errors.email }}</p>
                                 </div>
                             </div>
-
-                            <div class="flex items-center justify-end gap-2">
-                                <Button variant="primary" tone="purple" type="submit" :disabled="form.processing">Save changes</Button>
-                            </div>
-                        </form>
+                        </div>
 
                         <div class="mt-4 border-t border-border pt-4">
-                            <label for="logo" class="mb-1 block text-sm font-semibold text-text-base">Company Logo</label>
+                            <label for="logo" class="mb-1 block text-sm font-semibold text-text-base">Company logo</label>
+                            <p class="mb-2 text-xs text-text-muted">Shown on printed invoices. Uploading saves the logo immediately.</p>
                             <div class="flex items-end gap-4">
                                 <img
                                     v-if="logoPreviewUrl"
@@ -240,77 +250,77 @@ function submitLogo() {
             <template #invoice>
                 <div class="flex flex-col gap-4">
                     <Card variant="panel" title="Invoicing">
-                        <form class="flex flex-col gap-4" @submit.prevent="submit">
+                        <div class="flex flex-col gap-4">
                             <div class="grid grid-cols-2 gap-4">
                                 <div>
-                                    <label class="mb-1 block text-sm font-semibold text-text-base">Print Paper Size</label>
+                                    <label class="mb-1 block text-sm font-semibold text-text-base">Print paper size</label>
+                                    <p class="mb-1 text-xs text-text-muted">Paper format used when printing invoices.</p>
                                     <Select v-model="form.print_paper_size" :options="paperSizeOptions" />
                                     <p v-if="form.errors.print_paper_size" class="mt-1 text-sm text-danger">{{ form.errors.print_paper_size }}</p>
                                 </div>
 
                                 <div>
-                                    <label for="default_vat_rate" class="mb-1 block text-sm font-semibold text-text-base">Default VAT Rate (%)</label>
+                                    <label for="default_vat_rate" class="mb-1 block text-sm font-semibold text-text-base">Default VAT rate (%)</label>
+                                    <p class="mb-1 text-xs text-text-muted">Pre-filled on new sale lines; can still be changed per item.</p>
                                     <Input id="default_vat_rate" v-model="form.default_vat_rate" type="number" min="0" max="100" step="0.01" placeholder="13.00" />
                                     <p v-if="form.errors.default_vat_rate" class="mt-1 text-sm text-danger">{{ form.errors.default_vat_rate }}</p>
                                 </div>
                             </div>
 
                             <div class="border-t border-border pt-4">
-                                <p class="mb-3 text-[10px] font-bold tracking-[.8px] text-text-muted uppercase">Sale Invoice Types</p>
+                                <p class="mb-1 text-[10px] font-bold tracking-[.8px] text-text-muted uppercase">Invoice type (fixed per tenant)</p>
+                                <p class="mb-3 text-sm text-text-muted">
+                                    Set this to whichever invoice type this tenant is registered to issue under IRD - it is
+                                    never a choice the cashier makes per sale. An abbreviated or PAN invoice may not be
+                                    issued once a bill's taxable value exceeds NPR 10,000; use Full tax invoice for a
+                                    business that regularly bills above that.
+                                </p>
+                                <p v-if="form.errors.active_invoice_type" class="mb-3 text-sm text-danger">{{ form.errors.active_invoice_type }}</p>
                                 <div class="grid grid-cols-3 gap-4">
-                                    <div>
-                                        <label for="sale_full_prefix" class="mb-1 block text-sm font-semibold text-text-base">Full Invoice Prefix</label>
-                                        <Input id="sale_full_prefix" v-model="form.sale_full_prefix" type="text" placeholder="SL" />
-                                        <p v-if="form.errors.sale_full_prefix" class="mt-1 text-sm text-danger">{{ form.errors.sale_full_prefix }}</p>
-                                        <div class="mt-2 flex items-center gap-2">
-                                            <input id="sale_full_enabled" v-model="form.sale_full_enabled" type="checkbox" class="size-4 border-[1.5px] border-border" />
-                                            <label for="sale_full_enabled" class="text-sm text-text-base">Enabled</label>
-                                        </div>
-                                    </div>
-
-                                    <div>
-                                        <label for="sale_abbreviated_prefix" class="mb-1 block text-sm font-semibold text-text-base">Abbreviated Invoice Prefix</label>
-                                        <Input id="sale_abbreviated_prefix" v-model="form.sale_abbreviated_prefix" type="text" placeholder="SLA" />
-                                        <p v-if="form.errors.sale_abbreviated_prefix" class="mt-1 text-sm text-danger">{{ form.errors.sale_abbreviated_prefix }}</p>
-                                        <div class="mt-2 flex items-center gap-2">
-                                            <input id="sale_abbreviated_enabled" v-model="form.sale_abbreviated_enabled" type="checkbox" class="size-4 border-[1.5px] border-border" />
-                                            <label for="sale_abbreviated_enabled" class="text-sm text-text-base">Enabled</label>
-                                        </div>
-                                    </div>
-
-                                    <div>
-                                        <label for="sale_pan_prefix" class="mb-1 block text-sm font-semibold text-text-base">PAN Invoice Prefix</label>
-                                        <Input id="sale_pan_prefix" v-model="form.sale_pan_prefix" type="text" placeholder="SLP" />
-                                        <p v-if="form.errors.sale_pan_prefix" class="mt-1 text-sm text-danger">{{ form.errors.sale_pan_prefix }}</p>
-                                        <div class="mt-2 flex items-center gap-2">
-                                            <input id="sale_pan_enabled" v-model="form.sale_pan_enabled" type="checkbox" class="size-4 border-[1.5px] border-border" />
-                                            <label for="sale_pan_enabled" class="text-sm text-text-base">Enabled</label>
-                                        </div>
-                                    </div>
+                                    <label
+                                        v-for="option in invoiceTypeOptions"
+                                        :key="option.value"
+                                        class="flex cursor-pointer flex-col gap-2 border-[1.5px] p-3"
+                                        :class="form.active_invoice_type === option.value ? 'border-primary bg-[#FAF5FF]' : 'border-border'"
+                                    >
+                                        <span class="flex items-center gap-2">
+                                            <input v-model="form.active_invoice_type" type="radio" :value="option.value" class="size-4" />
+                                            <span class="text-sm font-semibold text-text-base">{{ option.label }}</span>
+                                        </span>
+                                        <span class="text-xs text-text-muted">Number prefix (e.g. {{ option.prefixPlaceholder }}-1)</span>
+                                        <Input
+                                            v-model="form[option.prefixKey]"
+                                            type="text"
+                                            :placeholder="option.prefixPlaceholder"
+                                            :aria-label="`${option.label} prefix`"
+                                            @click.stop
+                                        />
+                                        <p v-if="form.errors[option.prefixKey]" class="text-sm text-danger">{{ form.errors[option.prefixKey] }}</p>
+                                    </label>
                                 </div>
                             </div>
 
                             <div class="border-t border-border pt-4">
-                                <p class="mb-3 text-[10px] font-bold tracking-[.8px] text-text-muted uppercase">Purchase and Returns</p>
+                                <p class="mb-3 text-[10px] font-bold tracking-[.8px] text-text-muted uppercase">Purchase and return numbering</p>
                                 <p class="mb-3 text-sm text-text-muted">
                                     Every series needs its own prefix. Two series sharing one print the same number on two
                                     different documents.
                                 </p>
                                 <div class="grid grid-cols-3 gap-4">
                                     <div>
-                                        <label for="purchase_prefix" class="mb-1 block text-sm font-semibold text-text-base">Purchase Prefix</label>
+                                        <label for="purchase_prefix" class="mb-1 block text-sm font-semibold text-text-base">Purchase prefix</label>
                                         <Input id="purchase_prefix" v-model="form.purchase_prefix" type="text" placeholder="PU" />
                                         <p v-if="form.errors.purchase_prefix" class="mt-1 text-sm text-danger">{{ form.errors.purchase_prefix }}</p>
                                     </div>
 
                                     <div>
-                                        <label for="sale_return_prefix" class="mb-1 block text-sm font-semibold text-text-base">Credit Note Prefix</label>
+                                        <label for="sale_return_prefix" class="mb-1 block text-sm font-semibold text-text-base">Credit note prefix (sales returns)</label>
                                         <Input id="sale_return_prefix" v-model="form.sale_return_prefix" type="text" placeholder="SR" />
                                         <p v-if="form.errors.sale_return_prefix" class="mt-1 text-sm text-danger">{{ form.errors.sale_return_prefix }}</p>
                                     </div>
 
                                     <div>
-                                        <label for="purchase_return_prefix" class="mb-1 block text-sm font-semibold text-text-base">Debit Note Prefix</label>
+                                        <label for="purchase_return_prefix" class="mb-1 block text-sm font-semibold text-text-base">Debit note prefix (purchase returns)</label>
                                         <Input id="purchase_return_prefix" v-model="form.purchase_return_prefix" type="text" placeholder="PR" />
                                         <p v-if="form.errors.purchase_return_prefix" class="mt-1 text-sm text-danger">{{ form.errors.purchase_return_prefix }}</p>
                                     </div>
@@ -319,8 +329,9 @@ function submitLogo() {
 
                             <div class="border-t border-border pt-4">
                                 <label for="invoice_footer_note" class="mb-1 block text-sm font-semibold text-text-base">
-                                    Invoice Footer Note
+                                    Invoice footer note
                                 </label>
+                                <p class="mb-1 text-xs text-text-muted">Printed at the bottom of every invoice.</p>
                                 <textarea
                                     id="invoice_footer_note"
                                     v-model="form.invoice_footer_note"
@@ -332,14 +343,14 @@ function submitLogo() {
                                     {{ form.errors.invoice_footer_note }}
                                 </p>
                             </div>
-
-                            <div class="flex items-center justify-end gap-2">
-                                <Button variant="primary" tone="purple" type="submit" :disabled="form.processing">Save changes</Button>
-                            </div>
-                        </form>
+                        </div>
                     </Card>
+                </div>
+            </template>
 
-                    <Card variant="panel" title="Invoice Numbering">
+            <template #numbering>
+                <div class="flex flex-col gap-4">
+                    <Card variant="panel" title="Invoice numbering">
                         <p class="mb-3 text-sm text-text-muted">
                             The number the next document of each series will be issued under in
                             <template v-if="invoiceNumbering[0]?.fiscal_year">{{ invoiceNumbering[0].fiscal_year }}</template>
@@ -403,8 +414,8 @@ function submitLogo() {
 
             <template #stock>
                 <div class="flex flex-col gap-4">
-                    <Card variant="panel" title="Stock & Discount Policy">
-                        <form class="flex flex-col gap-4" @submit.prevent="submit">
+                    <Card variant="panel" title="Stock & discount policy">
+                        <div class="flex flex-col gap-4">
                             <div class="grid grid-cols-2 gap-4">
                                 <div>
                                     <div class="flex items-center gap-2">
@@ -418,19 +429,29 @@ function submitLogo() {
                                 </div>
 
                                 <div>
-                                    <label class="mb-1 block text-sm font-semibold text-text-base">Default Store</label>
+                                    <label class="mb-1 block text-sm font-semibold text-text-base">Default store</label>
+                                    <p class="mb-1 text-xs text-text-muted">Store that sales and purchases use unless another is picked.</p>
                                     <Select v-model="form.default_store_id" :options="storeOptions" />
                                     <p v-if="form.errors.default_store_id" class="mt-1 text-sm text-danger">{{ form.errors.default_store_id }}</p>
                                 </div>
                             </div>
-
-                            <div class="flex items-center justify-end gap-2">
-                                <Button variant="primary" tone="purple" type="submit" :disabled="form.processing">Save changes</Button>
-                            </div>
-                        </form>
+                        </div>
                     </Card>
                 </div>
             </template>
         </Tabs>
+
+        <div class="sticky bottom-0 z-10 mt-4 flex items-center justify-between gap-3 border-t border-border bg-white px-4 py-3">
+            <span class="text-sm" :class="form.isDirty ? 'font-semibold text-text-strong' : 'text-text-muted'">
+                {{ form.isDirty ? 'Unsaved changes' : 'All changes saved' }}
+            </span>
+            <div class="flex items-center gap-2">
+                <Button variant="secondary" tone="purple" type="button" :disabled="!form.isDirty || form.processing" @click="discard">Discard</Button>
+                <Button variant="primary" tone="purple" type="button" :loading="form.processing" :disabled="!form.isDirty" @click="submit">
+                    <Check class="size-4" />
+                    Save changes
+                </Button>
+            </div>
+        </div>
     </div>
 </template>

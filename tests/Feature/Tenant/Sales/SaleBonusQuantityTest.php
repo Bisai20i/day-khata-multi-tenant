@@ -228,11 +228,11 @@ test('the printed bill shows the free units in their own column, and omits the c
 
         // The customer sees the free pieces, and the money columns still only
         // know about the ten that were charged for.
-        $itemsBlock = substr($html, (int) strpos($html, 'items-table'), (int) strpos($html, 'totals-table') - (int) strpos($html, 'items-table'));
+        $itemsBlock = substr($html, (int) strpos($html, '<table class="items">'), (int) strpos($html, '<table class="totals">') - (int) strpos($html, '<table class="items">'));
 
         expect($itemsBlock)->toContain('Free')
             ->and($itemsBlock)->toContain('>2<')
-            ->and($itemsBlock)->toContain('>10<');
+            ->and($itemsBlock)->toContain('>10 ');
 
         expect($html)->toContain('1,130.00')->not->toContain('1,356.00');
 
@@ -252,8 +252,8 @@ test('the printed bill shows the free units in their own column, and omits the c
 
         $plainItemsBlock = substr(
             $plainHtml,
-            (int) strpos($plainHtml, 'items-table'),
-            (int) strpos($plainHtml, 'totals-table') - (int) strpos($plainHtml, 'items-table'),
+            (int) strpos($plainHtml, '<table class="items">'),
+            (int) strpos($plainHtml, '<table class="totals">') - (int) strpos($plainHtml, '<table class="items">'),
         );
 
         expect($plainItemsBlock)->not->toContain('Free');

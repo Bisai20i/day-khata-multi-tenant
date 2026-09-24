@@ -39,6 +39,6 @@
     @endif
 
     <div class="narration">
-        <strong>Posted by:</strong> {{ $voucher->creator?->name ?? '—' }}
+        <strong>Posted by:</strong> {{ $voucher->creator?->name ?? '-' }}
     </div>
 @endsection

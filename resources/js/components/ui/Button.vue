@@ -16,14 +16,17 @@ const props = defineProps({
 const isButtonTag = computed(() => props.as === 'button');
 const isInteractionBlocked = computed(() => props.disabled || props.loading);
 
+// h-9 matches Input/Select/Combobox/NepaliDateInput's own computed height
+// (1.5px border + py-2 padding + 13px/1.5 line-height) exactly, so a button
+// sitting beside a form control lines up instead of standing taller than it.
 const buttonVariants = cva(
-    'inline-flex items-center justify-center gap-1.5 font-bold transition-all duration-150 ease-out whitespace-nowrap cursor-pointer',
+    'inline-flex h-9 items-center justify-center gap-1.5 font-bold transition-all duration-150 ease-out whitespace-nowrap cursor-pointer',
     {
         variants: {
             variant: {
-                primary: 'px-4 py-2.5 text-[13px]',
-                secondary: 'border-[1.5px] px-4 py-2.5 text-[13px]',
-                icon: 'h-8 w-8',
+                primary: 'px-4 text-[13px]',
+                secondary: 'border-[1.5px] px-4 text-[13px]',
+                icon: 'w-9',
             },
         },
         defaultVariants: {
@@ -43,6 +46,10 @@ const toneStyles = {
         primary: 'bg-primary text-white hover:bg-primary-dark',
         secondary: 'border-[#D8B4FE] bg-[#FAF5FF] text-primary hover:bg-[#F3E8FF]',
         icon: 'bg-primary-tint text-primary hover:bg-primary hover:text-white',
+    },
+    neutral: {
+        secondary: 'border-border bg-white text-text-base hover:bg-bg-muted',
+        icon: 'bg-bg-subtle text-text-muted hover:bg-bg-muted hover:text-text-strong',
     },
     blue: {
         secondary: 'border-[#BAE6FD] bg-[#F0F9FF] text-accent hover:bg-[#E0F2FE]',

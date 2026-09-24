@@ -226,7 +226,10 @@ function submit() {
 <template>
     <Card variant="panel">
         <div class="mb-4 flex items-center justify-between">
-            <h3 class="text-base font-bold text-text-strong">New stock adjustment</h3>
+            <div>
+                <h3 class="text-base font-bold text-text-strong">New stock adjustment</h3>
+                <p class="text-sm text-text-muted">Correct stock after a count, damage or loss. Each line adds or removes quantity of one item.</p>
+            </div>
             <Button variant="secondary" tone="purple" type="button" @click="emit('cancel')">Cancel</Button>
         </div>
 
@@ -274,6 +277,7 @@ function submit() {
                 <div>
                     <label class="mb-1 block text-sm font-semibold text-text-base">Note</label>
                     <Input v-model="form.note" type="text" placeholder="Optional" />
+                    <p v-if="form.errors.note" class="mt-1 text-sm text-danger">{{ form.errors.note }}</p>
                 </div>
                 <div>
                     <label class="mb-1 block text-sm font-semibold text-text-base">Store</label>
@@ -283,17 +287,18 @@ function submit() {
                         placeholder="Default store"
                         @update:model-value="(v) => (form.store_id = v)"
                     />
+                    <p class="mt-1 text-xs text-text-faint">The store whose stock is adjusted. Blank uses your default store.</p>
                     <p v-if="form.errors.store_id" class="mt-1 text-sm text-danger">{{ form.errors.store_id }}</p>
                 </div>
             </div>
 
             <div>
                 <div class="mb-2 grid grid-cols-[1fr_100px_130px_140px_100px_110px_1fr_28px] gap-2 text-[10px] font-bold tracking-[.8px] text-text-muted uppercase">
-                    <span>Item</span>
+                    <span>Item <span class="text-danger">*</span></span>
                     <span>Unit</span>
                     <span>Direction</span>
-                    <span>Reason</span>
-                    <span>Quantity</span>
+                    <span>Reason <span class="text-danger">*</span></span>
+                    <span>Quantity <span class="text-danger">*</span></span>
                     <span>Unit cost</span>
                     <span>Remarks</span>
                     <span></span>
@@ -322,7 +327,7 @@ function submit() {
                             :options="unitOptionsFor(itemsById.get(line.item_id))"
                             @update:model-value="(v) => selectLineUnit(line, v)"
                         />
-                        <span v-else class="block pt-2 text-xs text-text-muted">{{ itemsById.get(line.item_id)?.unit ?? '—' }}</span>
+                        <span v-else class="block pt-2 text-xs text-text-muted">{{ itemsById.get(line.item_id)?.unit ?? '-' }}</span>
                         <p v-if="form.errors[`lines.${index}.item_unit_id`]" class="mt-1 text-xs text-danger">
                             {{ form.errors[`lines.${index}.item_unit_id`] }}
                         </p>
@@ -360,6 +365,10 @@ function submit() {
                     </button>
                 </div>
 
+                <p class="mb-2 text-xs text-text-faint">
+                    Reason explains why stock changed. Damage and Lost lines carry no value; Opening stock is always added.
+                    Unit cost is the cost per unit, used to value added stock (optional).
+                </p>
                 <Button variant="secondary" tone="purple" type="button" class="mt-1" @click="addLine">
                     <Plus class="h-3.5 w-3.5" /> Add line
                 </Button>
@@ -375,7 +384,7 @@ function submit() {
             <div class="flex items-center justify-end gap-2">
                 <Button variant="secondary" tone="purple" type="button" @click="emit('cancel')">Cancel</Button>
                 <Button variant="primary" tone="purple" type="submit" :disabled="form.processing || !form.date || !canSubmit">
-                    Create Stock Adjustment
+                    {{ form.processing ? 'Posting...' : 'Post stock adjustment' }}
                 </Button>
             </div>
         </form>

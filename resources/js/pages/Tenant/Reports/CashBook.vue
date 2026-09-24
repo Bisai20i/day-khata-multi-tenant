@@ -7,6 +7,7 @@ import Card from '@/components/ui/Card.vue';
 import NepaliDateInput from '@/components/ui/NepaliDateInput.vue';
 import Select from '@/components/ui/Select.vue';
 import Button from '@/components/ui/Button.vue';
+import PageHeader from '@/components/ui/PageHeader.vue';
 import DataTable from '@/components/ui/DataTable.vue';
 import { formatMoney, isZeroMoney } from '@/lib/money.js';
 import { formatBsDate } from '@/lib/format.js';
@@ -100,41 +101,42 @@ function exportUrl() {
 const columns = [
     { accessorKey: 'date', header: 'Date', numeric: false, cell: ({ row }) => formatBsDate(row.original.date) },
     { id: 'voucher', header: 'Voucher', numeric: false, cell: ({ row }) => voucherLabel(row.original) },
-    { accessorKey: 'narration', header: 'Narration', numeric: false, cell: ({ row }) => row.original.narration ?? '—' },
-    { accessorKey: 'debit', header: 'Debit', cell: ({ row }) => (isZeroMoney(row.original.debit) ? '—' : formatMoney(row.original.debit)) },
-    { accessorKey: 'credit', header: 'Credit', cell: ({ row }) => (isZeroMoney(row.original.credit) ? '—' : formatMoney(row.original.credit)) },
+    { accessorKey: 'narration', header: 'Narration', numeric: false, cell: ({ row }) => row.original.narration ?? '-' },
+    { accessorKey: 'debit', header: 'Debit (Dr)', cell: ({ row }) => (isZeroMoney(row.original.debit) ? '-' : formatMoney(row.original.debit)) },
+    { accessorKey: 'credit', header: 'Credit (Cr)', cell: ({ row }) => (isZeroMoney(row.original.credit) ? '-' : formatMoney(row.original.credit)) },
     { accessorKey: 'balance', header: 'Balance', cell: ({ row }) => formatMoney(row.original.balance) },
 ];
 </script>
 
 <template>
     <div>
-        <div class="mb-4 flex items-center justify-between">
-            <h2 class="text-base font-bold text-text-strong">
-                Cash Book <span class="font-normal text-text-muted">· {{ account.name }} ({{ account.code ?? '—' }})</span>
-            </h2>
-            <div class="flex items-center gap-2">
-                <a :href="printUrl()" target="_blank" rel="noopener"><Button variant="secondary" tone="purple">Print</Button></a>
-                <a :href="exportUrl()"><Button variant="secondary" tone="purple">Export</Button></a>
-            </div>
-        </div>
+        <PageHeader
+            :title="`Cash Book - ${account.name} (${account.code ?? '-'})`"
+            description="Every cash receipt and payment in the period, with the running cash balance."
+        >
+            <a :href="printUrl()" target="_blank" rel="noopener"><Button variant="secondary" tone="purple">Print</Button></a>
+            <a :href="exportUrl()"><Button variant="secondary" tone="purple">Export</Button></a>
+        </PageHeader>
 
         <Card variant="panel" class="mb-4">
             <div class="flex flex-wrap items-end gap-3">
                 <div class="w-56">
-                    <label class="mb-1 block text-xs font-semibold text-text-muted">Fiscal Year</label>
+                    <label class="mb-1 block text-xs font-semibold text-text-muted">Fiscal year</label>
                     <Select v-model="fiscalYear" :options="fiscalYearOptions" />
                 </div>
                 <div>
-                    <label class="mb-1 block text-xs font-semibold text-text-muted">From</label>
+                    <label class="mb-1 block text-xs font-semibold text-text-muted">From date (BS)</label>
                     <NepaliDateInput v-model="from" />
                 </div>
                 <div>
-                    <label class="mb-1 block text-xs font-semibold text-text-muted">To</label>
+                    <label class="mb-1 block text-xs font-semibold text-text-muted">To date (BS)</label>
                     <NepaliDateInput v-model="to" />
                 </div>
-                <Button variant="primary" tone="purple" @click="applyFilter">Apply</Button>
+                <Button variant="primary" tone="purple" @click="applyFilter">Generate report</Button>
             </div>
+            <p v-if="from && to" class="mt-2 text-[12px] text-text-muted">
+                Showing report for {{ formatBsDate(from) }} to {{ formatBsDate(to) }} BS
+            </p>
         </Card>
 
         <Card variant="panel">
@@ -148,7 +150,7 @@ const columns = [
                     <div><span class="text-text-muted">Closing Balance:</span> <span class="font-semibold">{{ formatMoney(closingBalance) }}</span></div>
                 </div>
 
-                <DataTable :columns="columns" :data="entries" :page-size="25" empty-message="No cash activity in this range" />
+                <DataTable :columns="columns" :data="entries" :page-size="25" empty-message="No transactions in this period. Try widening the date range." />
             </template>
         </Card>
     </div>

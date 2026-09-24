@@ -43,7 +43,7 @@ use InvalidArgumentException;
  * (CONTRACTS C3, C10; audit P0-1, P0-4, P0-17).
  */
 #[Fillable([
-    'supplier_id', 'store_id', 'journal_voucher_id', 'bill_number', 'bill_number_key', 'pan_number',
+    'supplier_id', 'store_id', 'journal_voucher_id', 'fiscal_year_id', 'bill_number', 'bill_number_key', 'pan_number',
     'chalani_number', 'date', 'payment_mode', 'bank_account_id', 'discount', 'discount_type', 'taxable_amount',
     'nontaxable_amount', 'vat_rate', 'force_non_taxable', 'vat_amount', 'total', 'cash_amount',
     'bank_amount', 'tds_account_id', 'tds_rate', 'tds_amount', 'narration', 'status',
@@ -281,7 +281,7 @@ class Purchase extends Model
             // serialise here instead of racing past the duplicate check below.
             $supplier = Supplier::whereKey($data['supplier_id'])->lockForUpdate()->firstOrFail();
             $billNumber = static::normalisedBillNumber($data['bill_number'] ?? null);
-            static::assertBillNumberUnused($supplier, $billNumber);
+            static::assertBillNumberUnused($supplier, $billNumber, $targetFiscalYear->id);
 
             $company = CompanySetting::current();
             $storeId = static::resolveStoreId($data['store_id'] ?? null, $company);
@@ -410,12 +410,14 @@ class Purchase extends Model
                 ],
                 $voucherLines,
                 $actor,
+                logCorrection: false,
             );
 
             $purchase = static::create([
                 'supplier_id' => $supplier->id,
                 'store_id' => $storeId,
                 'journal_voucher_id' => $voucher->id,
+                'fiscal_year_id' => $targetFiscalYear->id,
                 'bill_number' => $billNumber,
                 'bill_number_key' => $billNumber,
                 'pan_number' => $data['pan_number'] ?? null,
@@ -618,18 +620,19 @@ class Purchase extends Model
     }
 
     /**
-     * At most one LIVE purchase may carry a given (supplier, bill number).
+     * At most one LIVE purchase may carry a given (supplier, fiscal year, bill number).
      * Checked here, inside the transaction and behind the supplier row lock, so
      * the user gets this sentence rather than a unique-constraint stack trace;
      * the index on purchases.bill_number_key is the backstop.
      */
-    private static function assertBillNumberUnused(Supplier $supplier, ?string $billNumber): void
+    private static function assertBillNumberUnused(Supplier $supplier, ?string $billNumber, int $fiscalYearId): void
     {
         if ($billNumber === null) {
             return;
         }
 
         $existing = static::where('supplier_id', $supplier->id)
+            ->where('fiscal_year_id', $fiscalYearId)
             ->where('bill_number_key', $billNumber)
             ->value('id');
 

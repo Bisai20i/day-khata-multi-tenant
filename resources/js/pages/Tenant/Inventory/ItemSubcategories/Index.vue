@@ -3,6 +3,7 @@ import { computed, h, ref, watch } from 'vue';
 import { router, useForm, usePage } from '@inertiajs/vue3';
 import AppLayout from '@/layouts/AppLayout.vue';
 import { useLayoutChrome } from '@/composables/useLayoutChrome';
+import PageHeader from '@/components/ui/PageHeader.vue';
 import Card from '@/components/ui/Card.vue';
 import Button from '@/components/ui/Button.vue';
 import Badge from '@/components/ui/Badge.vue';
@@ -92,7 +93,7 @@ function submit() {
 }
 
 async function destroy(subcategory) {
-    if (!(await confirm({ message: 'Delete this subcategory?', tone: 'danger', confirmLabel: 'Delete' }))) return;
+    if (!(await confirm({ message: `Delete subcategory "${subcategory.name}"? Items in it will become uncategorised. This cannot be undone.`, tone: 'danger', confirmLabel: 'Delete subcategory' }))) return;
     router.delete(`/item-subcategories/${subcategory.id}`);
 }
 
@@ -128,10 +129,9 @@ const columns = [
 
 <template>
     <div>
-        <div class="mb-4 flex items-center justify-between">
-            <h2 class="text-base font-bold text-text-strong">Item Subcategories</h2>
+        <PageHeader title="Item Subcategories" description="Item subcategories: finer groups inside a category, such as Soft drinks under Beverages.">
             <Button variant="primary" tone="purple" @click="openCreate">New subcategory</Button>
-        </div>
+        </PageHeader>
 
         <Card variant="panel">
             <DataTable :columns="columns" :data="subcategories" :page-size="10" />
@@ -164,6 +164,7 @@ const columns = [
                 <div class="flex items-center gap-2">
                     <input id="is_active" v-model="form.is_active" type="checkbox" class="size-4 border-[1.5px] border-border" />
                     <label for="is_active" class="text-sm font-semibold text-text-base">Active</label>
+                    <span class="text-xs text-text-faint">(inactive entries are hidden from selection lists)</span>
                 </div>
             </form>
 
@@ -176,7 +177,7 @@ const columns = [
                     form="item-subcategory-form"
                     :disabled="form.processing"
                 >
-                    {{ editing ? 'Save changes' : 'Create subcategory' }}
+                    {{ form.processing ? 'Saving...' : editing ? 'Save subcategory' : 'Create subcategory' }}
                 </Button>
             </template>
         </Modal>

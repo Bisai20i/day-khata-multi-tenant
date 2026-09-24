@@ -8,7 +8,7 @@ use Illuminate\Database\Seeder;
 
 /**
  * Standalone seeder for the central "platform_admins" table. Not wired into
- * DatabaseSeeder — run manually:
+ * DatabaseSeeder - run manually:
  *   php artisan db:seed --class=PlatformAdminSeeder
  */
 class PlatformAdminSeeder extends Seeder

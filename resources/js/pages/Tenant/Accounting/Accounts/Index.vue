@@ -4,6 +4,7 @@ import { Link, router, useForm, usePage } from '@inertiajs/vue3';
 import { Plus } from '@lucide/vue';
 import AppLayout from '@/layouts/AppLayout.vue';
 import { useLayoutChrome } from '@/composables/useLayoutChrome';
+import PageHeader from '@/components/ui/PageHeader.vue';
 import Card from '@/components/ui/Card.vue';
 import Button from '@/components/ui/Button.vue';
 import Input from '@/components/ui/Input.vue';
@@ -202,7 +203,7 @@ async function clearOpeningBalanceImport(entry) {
 }
 
 async function destroy(account) {
-    if (!(await confirm({ message: 'Delete this account?', tone: 'danger', confirmLabel: 'Delete' }))) return;
+    if (!(await confirm({ message: `Delete account "${account.name}"? This cannot be undone, and it will be refused if the account already has ledger entries.`, tone: 'danger', confirmLabel: 'Delete account' }))) return;
     router.delete(`/accounts/${account.id}`, {
         onSuccess: () => toast({ message: 'Account deleted', variant: 'success' }),
     });
@@ -212,12 +213,12 @@ async function destroy(account) {
 // the row actions are hidden rather than left to fail with a 403.
 const columns = [
     { accessorKey: 'code', header: 'Code' },
-    { accessorKey: 'name', header: 'Name' },
+    { accessorKey: 'name', header: 'Account name' },
     {
         id: 'parent',
-        header: 'Parent',
+        header: 'Group / subgroup',
         numeric: false,
-        cell: ({ row }) => row.original.group?.name ?? row.original.subgroup?.name ?? '—',
+        cell: ({ row }) => row.original.group?.name ?? row.original.subgroup?.name ?? '-',
     },
     { accessorKey: 'phone', header: 'Phone' },
     { accessorKey: 'address', header: 'Address' },
@@ -245,19 +246,16 @@ const columns = [
 
 <template>
     <div>
-        <div class="mb-4 flex items-center justify-between">
-            <h2 class="text-base font-bold text-text-strong">Accounts</h2>
-            <div class="flex items-center gap-2">
-                <Button v-if="isAdmin" variant="secondary" tone="purple" @click="openImport">Import opening balances</Button>
-                <Button v-if="isAdmin" variant="primary" tone="purple" @click="openCreate">
-                    <Plus class="size-4" />
-                    New account
-                </Button>
-            </div>
-        </div>
+        <PageHeader title="Accounts" description="Your chart of accounts: every ledger that money is recorded against. Open an account's Ledger to see its full history and running balance.">
+            <Button v-if="isAdmin" variant="secondary" tone="purple" @click="openImport">Import opening balances</Button>
+            <Button v-if="isAdmin" variant="primary" tone="purple" @click="openCreate">
+                <Plus class="size-4" />
+                New account
+            </Button>
+        </PageHeader>
 
         <Card variant="panel">
-            <DataTable :columns="columns" :data="accounts" :page-size="10" empty-message="No accounts found" />
+            <DataTable :columns="columns" :data="accounts" :page-size="10" empty-message="No accounts yet. Use New account to add your first one." />
         </Card>
 
         <Card v-if="openingBalanceImports.length" variant="panel" title="Opening balance imports" class="mt-4">
@@ -270,19 +268,19 @@ const columns = [
                         <th class="px-2 py-1.5">Date (BS)</th>
                         <th class="px-2 py-1.5">Date (AD)</th>
                         <th class="px-2 py-1.5">Fiscal year</th>
-                        <th class="px-2 py-1.5">Accounts</th>
-                        <th class="px-2 py-1.5">Total</th>
+                        <th class="px-2 py-1.5 text-right">Accounts</th>
+                        <th class="px-2 py-1.5 text-right">Total</th>
                         <th class="px-2 py-1.5">Status</th>
                         <th class="px-2 py-1.5"></th>
                     </tr>
                 </thead>
                 <tbody>
                     <tr v-for="entry in openingBalanceImports" :key="entry.id" class="border-t border-border">
-                        <td class="px-2 py-1.5">{{ formatBsDate(entry.date) || '—' }}</td>
+                        <td class="px-2 py-1.5">{{ formatBsDate(entry.date) || '-' }}</td>
                         <td class="px-2 py-1.5">{{ entry.date }}</td>
-                        <td class="px-2 py-1.5">{{ entry.fiscal_year ?? '—' }}</td>
-                        <td class="px-2 py-1.5">{{ entry.line_count }}</td>
-                        <td class="px-2 py-1.5">{{ formatMoney(entry.total) }}</td>
+                        <td class="px-2 py-1.5">{{ entry.fiscal_year ?? '-' }}</td>
+                        <td class="px-2 py-1.5 text-right">{{ entry.line_count }}</td>
+                        <td class="px-2 py-1.5 text-right">{{ formatMoney(entry.total) }}</td>
                         <td class="px-2 py-1.5">{{ entry.status === 'cancelled' ? 'Cleared' : 'In effect' }}</td>
                         <td class="px-2 py-1.5 text-right">
                             <button
@@ -291,7 +289,7 @@ const columns = [
                                 class="text-[12px] font-bold text-danger hover:underline"
                                 @click="clearOpeningBalanceImport(entry)"
                             >
-                                Clear
+                                Clear import
                             </button>
                         </td>
                     </tr>
@@ -304,6 +302,7 @@ const columns = [
                 <div>
                     <label for="parent_type" class="mb-1 block text-sm font-semibold text-text-base">File under</label>
                     <Select id="parent_type" v-model="parentType" :options="parentTypeOptions" />
+                    <p class="mt-1 text-xs text-text-muted">Choose whether this account sits directly under an account group or under a subgroup.</p>
                 </div>
 
                 <div v-if="parentType === 'group'">
@@ -331,6 +330,7 @@ const columns = [
                 <div>
                     <label for="code" class="mb-1 block text-sm font-semibold text-text-base">Code</label>
                     <Input id="code" v-model="form.code" type="text" placeholder="e.g. 1001" />
+                    <p class="mt-1 text-xs text-text-muted">Optional short reference number. Leave blank to auto-assign.</p>
                     <p v-if="form.errors.code" class="mt-1 text-sm text-danger">{{ form.errors.code }}</p>
                 </div>
 
@@ -356,7 +356,7 @@ const columns = [
             <template #footer>
                 <Button variant="secondary" tone="purple" @click="closeModal">Cancel</Button>
                 <Button variant="primary" tone="purple" :disabled="form.processing" @click="submit">
-                    {{ editing ? 'Save changes' : 'Create account' }}
+                    {{ form.processing ? 'Saving...' : editing ? 'Save changes' : 'Save account' }}
                 </Button>
             </template>
         </Modal>
@@ -417,7 +417,7 @@ const columns = [
                         <tbody>
                             <tr v-for="item in importResult.skipped" :key="item.row" class="border-t border-border">
                                 <td class="px-2 py-1.5">{{ item.row }}</td>
-                                <td class="px-2 py-1.5">{{ item.name || '—' }}</td>
+                                <td class="px-2 py-1.5">{{ item.name || '-' }}</td>
                                 <td class="px-2 py-1.5">{{ item.reason }}</td>
                             </tr>
                         </tbody>

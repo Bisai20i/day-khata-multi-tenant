@@ -1,7 +1,7 @@
 <script setup>
-import { h, onMounted, reactive, ref } from 'vue';
+import { computed, h, onMounted, reactive, ref, watch } from 'vue';
 import { Link, router, usePage } from '@inertiajs/vue3';
-import { CirclePause, CirclePlay, Eye, LogIn, Plus, Search, X } from '@lucide/vue';
+import { ChevronLeft, ChevronRight, CirclePause, CirclePlay, Eye, LogIn, Plus, Search, X } from '@lucide/vue';
 import AppLayout from '@/layouts/AppLayout.vue';
 import { useLayoutChrome } from '@/composables/useLayoutChrome';
 import Card from '@/components/ui/Card.vue';
@@ -11,6 +11,8 @@ import Input from '@/components/ui/Input.vue';
 import Select from '@/components/ui/Select.vue';
 import Tooltip from '@/components/ui/Tooltip.vue';
 import DataTable from '@/components/ui/DataTable.vue';
+import PageHeader from '@/components/ui/PageHeader.vue';
+import { useConfirm } from '@/composables/useConfirm';
 import { useToast } from '@/composables/useToast';
 
 defineOptions({ layout: AppLayout });
@@ -29,6 +31,7 @@ const props = defineProps({
 
 const page = usePage();
 const { toast } = useToast();
+const { confirm } = useConfirm();
 useLayoutChrome('Tenants');
 
 onMounted(() => {
@@ -41,6 +44,8 @@ const search = ref(props.filters.search ?? '');
 const status = ref(props.filters.status ?? null);
 const searching = ref(false);
 
+const hasFilters = computed(() => Boolean(props.filters.search || props.filters.status));
+
 function applyFilters() {
     router.get(
         window.location.pathname,
@@ -48,6 +53,12 @@ function applyFilters() {
         { preserveState: true, preserveScroll: true, onStart: () => (searching.value = true), onFinish: () => (searching.value = false) },
     );
 }
+
+watch(status, (value) => {
+    if ((value || null) !== (props.filters.status || null)) {
+        applyFilters();
+    }
+});
 
 function clearFilters() {
     search.value = '';
@@ -73,16 +84,31 @@ function runRowAction(tenant, action, url) {
     router.post(url, {}, { preserveScroll: true, onFinish: () => (rowAction[tenant.id] = null) });
 }
 
-function suspendRow(tenant) {
-    runRowAction(tenant, 'suspend', `/tenants/${tenant.id}/suspend`);
+async function suspendRow(tenant) {
+    const confirmed = await confirm({
+        message: `Suspend ${tenant.company_name}? Its users will be blocked from signing in until you resume the tenant. No data is deleted.`,
+        tone: 'danger',
+        confirmLabel: 'Suspend',
+    });
+
+    if (confirmed) {
+        runRowAction(tenant, 'suspend', `/tenants/${tenant.id}/suspend`);
+    }
 }
 
 function resumeRow(tenant) {
     runRowAction(tenant, 'resume', `/tenants/${tenant.id}/resume`);
 }
 
-function impersonateRow(tenant) {
-    runRowAction(tenant, 'impersonate', `/tenants/${tenant.id}/impersonate`);
+async function impersonateRow(tenant) {
+    const confirmed = await confirm({
+        message: `Sign in to ${tenant.company_name} as its admin? You will act inside their account, and the session is recorded in the activity log.`,
+        confirmLabel: 'Impersonate',
+    });
+
+    if (confirmed) {
+        runRowAction(tenant, 'impersonate', `/tenants/${tenant.id}/impersonate`);
+    }
 }
 
 const statusBadgeVariant = {
@@ -90,6 +116,14 @@ const statusBadgeVariant = {
     provisioning: 'warning',
     suspended: 'danger',
 };
+
+const statusLabel = {
+    active: 'Active',
+    provisioning: 'Provisioning',
+    suspended: 'Suspended',
+};
+
+const secondaryActionClass = 'inline-flex items-center gap-1.5 px-2.5 py-1.5 text-xs';
 
 const columns = [
     { accessorKey: 'company_name', header: 'Company' },
@@ -99,8 +133,8 @@ const columns = [
         header: 'Status',
         numeric: false,
         cell: ({ row }) =>
-            h('div', { class: 'flex items-center gap-1.5' }, [
-                h(Badge, { variant: statusBadgeVariant[row.original.status] ?? 'neutral', pill: true }, () => row.original.status),
+            h('div', { class: 'flex flex-wrap items-center gap-1.5' }, [
+                h(Badge, { variant: statusBadgeVariant[row.original.status] ?? 'neutral', pill: true }, () => statusLabel[row.original.status] ?? row.original.status),
                 row.original.past_grace_period
                     ? h(Badge, { variant: 'danger', pill: true }, () => 'Past grace period')
                     : null,
@@ -112,74 +146,75 @@ const columns = [
     { accessorKey: 'created_at', header: 'Created' },
     {
         id: 'actions',
-        header: '',
+        header: 'Actions',
         numeric: false,
         cell: ({ row }) => {
             const tenant = row.original;
 
             const buttons = [
-                h(
-                    Tooltip,
-                    { label: 'View tenant' },
-                    () =>
-                        h(
-                            Link,
-                            {
-                                href: `/tenants/${tenant.id}`,
-                                class: 'flex h-8 w-8 items-center justify-center bg-bg-subtle text-text-muted transition-colors duration-150 ease-out hover:bg-primary-tint hover:text-primary',
-                                'aria-label': 'View tenant',
-                            },
-                            () => h(Eye, { class: 'size-[13px]' }),
-                        ),
+                h(Tooltip, { label: 'Open tenant details' }, () =>
+                    h(
+                        Link,
+                        {
+                            href: `/tenants/${tenant.id}`,
+                            class: 'inline-flex items-center gap-1.5 bg-bg-subtle px-2.5 py-1.5 text-xs font-semibold text-text-base transition-colors duration-150 ease-out hover:bg-primary-tint hover:text-primary',
+                            'aria-label': `View ${tenant.company_name}`,
+                        },
+                        () => [h(Eye, { class: 'size-[13px]', 'aria-hidden': 'true' }), 'View'],
+                    ),
                 ),
             ];
 
             if (tenant.status === 'active') {
                 buttons.push(
-                    h(Tooltip, { label: 'Impersonate admin' }, () =>
+                    h(Tooltip, { label: 'Sign in as this tenant admin' }, () =>
                         h(
                             Button,
                             {
-                                variant: 'icon',
+                                variant: 'secondary',
+                                class: secondaryActionClass,
                                 loading: isRowActionLoading(tenant.id, 'impersonate'),
-                                'aria-label': 'Impersonate admin',
+                                'aria-label': `Impersonate admin of ${tenant.company_name}`,
                                 onClick: () => impersonateRow(tenant),
                             },
-                            () => h(LogIn, { class: 'size-[13px]' }),
+                            () => [h(LogIn, { class: 'size-[13px]', 'aria-hidden': 'true' }), 'Impersonate'],
                         ),
                     ),
-                    h(Tooltip, { label: 'Suspend tenant' }, () =>
+                    h(Tooltip, { label: 'Block this tenant from signing in' }, () =>
                         h(
                             Button,
                             {
-                                variant: 'icon',
+                                variant: 'secondary',
+                                tone: 'danger',
+                                class: secondaryActionClass,
                                 loading: isRowActionLoading(tenant.id, 'suspend'),
-                                'aria-label': 'Suspend tenant',
+                                'aria-label': `Suspend ${tenant.company_name}`,
                                 onClick: () => suspendRow(tenant),
                             },
-                            () => h(CirclePause, { class: 'size-[13px]' }),
+                            () => [h(CirclePause, { class: 'size-[13px]', 'aria-hidden': 'true' }), 'Suspend'],
                         ),
                     ),
                 );
             } else if (tenant.status === 'suspended') {
                 buttons.push(
-                    h(Tooltip, { label: 'Resume tenant' }, () =>
+                    h(Tooltip, { label: 'Restore access for this tenant' }, () =>
                         h(
                             Button,
                             {
-                                variant: 'icon',
+                                variant: 'secondary',
                                 tone: 'success',
+                                class: secondaryActionClass,
                                 loading: isRowActionLoading(tenant.id, 'resume'),
-                                'aria-label': 'Resume tenant',
+                                'aria-label': `Resume ${tenant.company_name}`,
                                 onClick: () => resumeRow(tenant),
                             },
-                            () => h(CirclePlay, { class: 'size-[13px]' }),
+                            () => [h(CirclePlay, { class: 'size-[13px]', 'aria-hidden': 'true' }), 'Resume'],
                         ),
                     ),
                 );
             }
 
-            return h('div', { class: 'flex items-center gap-1.5' }, buttons);
+            return h('div', { class: 'flex flex-wrap items-center gap-1.5' }, buttons);
         },
     },
 ];
@@ -187,19 +222,19 @@ const columns = [
 
 <template>
     <div>
-        <div class="mb-4 flex items-center justify-between">
-            <h2 class="text-base font-bold text-text-strong">Tenants</h2>
+        <PageHeader title="Tenants" description="Manage every company on the platform: open details, sign in as its admin, or suspend and resume access.">
             <Button :as="Link" href="/tenants/create" variant="primary" tone="purple">
                 <Plus class="size-4" />
                 New tenant
             </Button>
-        </div>
+        </PageHeader>
 
         <Card variant="panel" class="mb-4">
             <div class="flex flex-wrap items-end gap-3">
                 <div class="min-w-[240px]">
-                    <label class="mb-1 block text-xs font-semibold text-text-muted">Search</label>
+                    <label for="tenant-search" class="mb-1 block text-xs font-semibold text-text-muted">Search</label>
                     <Input
+                        id="tenant-search"
                         v-model="search"
                         :icon="Search"
                         placeholder="Company name, domain, or email"
@@ -214,57 +249,75 @@ const columns = [
                     <Search class="size-4" />
                     Search
                 </Button>
-                <Button v-if="filters.search || filters.status" variant="secondary" tone="purple" @click="clearFilters">
+                <Button v-if="hasFilters" variant="secondary" tone="purple" @click="clearFilters">
                     <X class="size-4" />
-                    Clear
+                    Clear filters
                 </Button>
             </div>
         </Card>
 
         <Card variant="panel">
-            <DataTable
-                :columns="columns"
-                :data="tenants.data"
-                :page-size="Math.max(tenants.data.length, 1)"
-                empty-message="No tenants found."
-            />
-
-            <div v-if="tenants.data.length > 0" class="mt-3 flex flex-wrap items-center justify-between gap-3">
-                <p class="text-xs text-text-muted">Showing {{ tenants.from }}–{{ tenants.to }} of {{ tenants.total }}</p>
-                <div class="flex items-center gap-2">
-                    <Link
-                        v-if="tenants.prev_page_url"
-                        :href="tenants.prev_page_url"
-                        preserve-state
-                        preserve-scroll
-                        class="inline-flex items-center border-[1.5px] border-border bg-white px-3 py-1.5 text-xs font-semibold text-text-muted transition-colors duration-150 ease-out hover:border-primary hover:text-primary"
-                    >
-                        Previous
-                    </Link>
-                    <span
-                        v-else
-                        class="inline-flex cursor-not-allowed items-center border-[1.5px] border-border bg-white px-3 py-1.5 text-xs font-semibold text-text-faint opacity-40"
-                    >
-                        Previous
-                    </span>
-                    <span class="text-xs text-text-muted">Page {{ tenants.current_page }} of {{ tenants.last_page }}</span>
-                    <Link
-                        v-if="tenants.next_page_url"
-                        :href="tenants.next_page_url"
-                        preserve-state
-                        preserve-scroll
-                        class="inline-flex items-center border-[1.5px] border-border bg-white px-3 py-1.5 text-xs font-semibold text-text-muted transition-colors duration-150 ease-out hover:border-primary hover:text-primary"
-                    >
-                        Next
-                    </Link>
-                    <span
-                        v-else
-                        class="inline-flex cursor-not-allowed items-center border-[1.5px] border-border bg-white px-3 py-1.5 text-xs font-semibold text-text-faint opacity-40"
-                    >
-                        Next
-                    </span>
-                </div>
+            <div v-if="tenants.data.length === 0" class="flex flex-col items-center gap-3 py-10 text-center">
+                <p class="text-sm font-bold text-text-strong">
+                    {{ hasFilters ? 'No tenants match your filters' : 'No tenants yet' }}
+                </p>
+                <p class="text-sm text-text-muted">
+                    {{ hasFilters ? 'Try a different search or status.' : 'Create your first tenant to get started.' }}
+                </p>
+                <Button v-if="hasFilters" variant="secondary" tone="purple" @click="clearFilters">
+                    <X class="size-4" />
+                    Clear filters
+                </Button>
+                <Button v-else :as="Link" href="/tenants/create" variant="primary" tone="purple">
+                    <Plus class="size-4" />
+                    New tenant
+                </Button>
             </div>
+
+            <template v-else>
+                <DataTable :columns="columns" :data="tenants.data" :page-size="Math.max(tenants.data.length, 1)" />
+
+                <nav class="mt-3 flex flex-wrap items-center justify-between gap-3" aria-label="Tenants pagination">
+                    <p class="text-xs text-text-muted">Showing {{ tenants.from }}–{{ tenants.to }} of {{ tenants.total }}</p>
+                    <div class="flex items-center gap-2">
+                        <Button
+                            v-if="tenants.prev_page_url"
+                            :as="Link"
+                            :href="tenants.prev_page_url"
+                            preserve-state
+                            preserve-scroll
+                            variant="secondary"
+                            tone="purple"
+                            aria-label="Previous page"
+                        >
+                            <ChevronLeft class="size-4" aria-hidden="true" />
+                            Previous
+                        </Button>
+                        <Button v-else variant="secondary" tone="purple" disabled aria-label="Previous page">
+                            <ChevronLeft class="size-4" aria-hidden="true" />
+                            Previous
+                        </Button>
+                        <span class="text-xs text-text-muted">Page {{ tenants.current_page }} of {{ tenants.last_page }}</span>
+                        <Button
+                            v-if="tenants.next_page_url"
+                            :as="Link"
+                            :href="tenants.next_page_url"
+                            preserve-state
+                            preserve-scroll
+                            variant="secondary"
+                            tone="purple"
+                            aria-label="Next page"
+                        >
+                            Next
+                            <ChevronRight class="size-4" aria-hidden="true" />
+                        </Button>
+                        <Button v-else variant="secondary" tone="purple" disabled aria-label="Next page">
+                            Next
+                            <ChevronRight class="size-4" aria-hidden="true" />
+                        </Button>
+                    </div>
+                </nav>
+            </template>
         </Card>
     </div>
 </template>

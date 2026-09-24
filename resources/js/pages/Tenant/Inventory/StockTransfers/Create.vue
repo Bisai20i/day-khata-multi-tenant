@@ -98,7 +98,10 @@ function submit() {
 <template>
     <Card variant="panel">
         <div class="mb-4 flex items-center justify-between">
-            <h3 class="text-base font-bold text-text-strong">New stock transfer</h3>
+            <div>
+                <h3 class="text-base font-bold text-text-strong">New stock transfer</h3>
+                <p class="text-sm text-text-muted">Move stock from one store to another. Stock leaves the source store and is added to the destination.</p>
+            </div>
             <Button variant="secondary" tone="purple" type="button" @click="emit('cancel')">Cancel</Button>
         </div>
 
@@ -114,7 +117,7 @@ function submit() {
                     <p v-if="form.errors.date" class="mt-1 text-sm text-danger">{{ form.errors.date }}</p>
                 </div>
                 <div>
-                    <label class="mb-1 block text-sm font-semibold text-text-base">From store <span class="text-danger">*</span></label>
+                    <label class="mb-1 block text-sm font-semibold text-text-base">Transfer from (source store) <span class="text-danger">*</span></label>
                     <Combobox
                         :model-value="form.from_store_id"
                         :options="storeOptions"
@@ -124,7 +127,7 @@ function submit() {
                     <p v-if="form.errors.from_store_id" class="mt-1 text-sm text-danger">{{ form.errors.from_store_id }}</p>
                 </div>
                 <div>
-                    <label class="mb-1 block text-sm font-semibold text-text-base">To store <span class="text-danger">*</span></label>
+                    <label class="mb-1 block text-sm font-semibold text-text-base">Transfer to (destination store) <span class="text-danger">*</span></label>
                     <Combobox
                         :model-value="form.to_store_id"
                         :options="storeOptions"
@@ -137,14 +140,15 @@ function submit() {
                 <div>
                     <label class="mb-1 block text-sm font-semibold text-text-base">Note</label>
                     <Input v-model="form.note" type="text" placeholder="Optional" />
+                    <p v-if="form.errors.note" class="mt-1 text-sm text-danger">{{ form.errors.note }}</p>
                 </div>
             </div>
 
             <div>
                 <div class="mb-2 grid grid-cols-[1fr_120px_140px_1fr_28px] gap-2 text-[10px] font-bold tracking-[.8px] text-text-muted uppercase">
-                    <span>Item</span>
-                    <span>Quantity</span>
-                    <span>Unit cost</span>
+                    <span>Item <span class="text-danger">*</span></span>
+                    <span>Quantity <span class="text-danger">*</span></span>
+                    <span>Unit cost (optional)</span>
                     <span>Remarks</span>
                     <span></span>
                 </div>
@@ -184,6 +188,7 @@ function submit() {
                     </button>
                 </div>
 
+                <p class="mb-2 text-xs text-text-faint">Unit cost is the cost per unit of the item; leave blank to use the item's current cost.</p>
                 <Button variant="secondary" tone="purple" type="button" class="mt-1" @click="addLine">
                     <Plus class="h-3.5 w-3.5" /> Add line
                 </Button>
@@ -199,7 +204,7 @@ function submit() {
             <div class="flex items-center justify-end gap-2">
                 <Button variant="secondary" tone="purple" type="button" @click="emit('cancel')">Cancel</Button>
                 <Button variant="primary" tone="purple" type="submit" :disabled="form.processing || !canSubmit">
-                    Create Stock Transfer
+                    {{ form.processing ? 'Posting...' : 'Post stock transfer' }}
                 </Button>
             </div>
         </form>

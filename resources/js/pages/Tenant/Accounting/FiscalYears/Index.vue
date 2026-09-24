@@ -1,9 +1,10 @@
 <script setup>
 import { computed, h, ref, watch } from 'vue';
 import { Link, router, useForm, usePage } from '@inertiajs/vue3';
-import { Archive, Lock, Unlock } from '@lucide/vue';
+import { Archive, Lock, Plus, Unlock } from '@lucide/vue';
 import AppLayout from '@/layouts/AppLayout.vue';
 import { useLayoutChrome } from '@/composables/useLayoutChrome';
+import PageHeader from '@/components/ui/PageHeader.vue';
 import Card from '@/components/ui/Card.vue';
 import Button from '@/components/ui/Button.vue';
 import Input from '@/components/ui/Input.vue';
@@ -134,8 +135,8 @@ function submitClose() {
 async function archiveFiscalYear(fiscalYear) {
     const confirmed = await confirm({
         title: 'Archive fiscal year',
-        message: `Archive "${fiscalYear.name}"? This copies its ledger to a read-only snapshot and can only be done once.`,
-        confirmLabel: 'Archive',
+        message: `Archive "${fiscalYear.name}"? This copies its ledger to a read-only snapshot. Nothing is deleted, and it can only be done once.`,
+        confirmLabel: 'Archive year',
     });
     if (!confirmed) {
         return;
@@ -190,7 +191,7 @@ async function relockFiscalYear(fiscalYear) {
     const confirmed = await confirm({
         title: 'Relock fiscal year',
         message: `Relock "${fiscalYear.name}"? Purchase, Journal Voucher, and Stock Adjustment postings will no longer be able to target it, and a supplementary closing entry will sweep whatever the corrections left unswept so the year's Balance Sheet balances again.`,
-        confirmLabel: 'Relock',
+        confirmLabel: 'Relock year',
     });
     if (!confirmed) {
         return;
@@ -200,9 +201,9 @@ async function relockFiscalYear(fiscalYear) {
 }
 
 const columns = [
-    { accessorKey: 'name', header: 'Name' },
-    { accessorKey: 'start_date', header: 'Start Date', numeric: false, cell: ({ row }) => formatBsDate(row.original.start_date) },
-    { accessorKey: 'end_date', header: 'End Date', numeric: false, cell: ({ row }) => formatBsDate(row.original.end_date) },
+    { accessorKey: 'name', header: 'Fiscal year' },
+    { accessorKey: 'start_date', header: 'Start date (BS)', numeric: false, cell: ({ row }) => formatBsDate(row.original.start_date) },
+    { accessorKey: 'end_date', header: 'End date (BS)', numeric: false, cell: ({ row }) => formatBsDate(row.original.end_date) },
     {
         accessorKey: 'status',
         header: 'Status',
@@ -226,7 +227,7 @@ const columns = [
                     { label: fiscalYear.reopen_reason || 'Reopened for correction' },
                     {
                         default: () =>
-                            h(Badge, { variant: 'warning' }, { default: () => `Reopened for correction — ${fiscalYear.reopen_reason ?? ''}` }),
+                            h(Badge, { variant: 'warning' }, { default: () => `Reopened for correction - ${fiscalYear.reopen_reason ?? ''}` }),
                     },
                 ),
             ]);
@@ -239,27 +240,23 @@ const columns = [
         cell: ({ row }) => {
             const buttons = [];
             const fiscalYear = row.original;
+            const actionClass =
+                'inline-flex h-[26px] items-center gap-1 whitespace-nowrap bg-primary-tint px-2 text-[12px] font-semibold text-primary transition-[filter] duration-150 ease-out hover:brightness-95';
+            const actionButton = (tip, text, icon, onClick) =>
+                h(
+                    Tooltip,
+                    { label: tip },
+                    {
+                        default: () =>
+                            h('button', { type: 'button', class: actionClass, 'aria-label': tip, onClick }, [
+                                h(icon, { class: 'h-[13px] w-[13px]', 'aria-hidden': 'true' }),
+                                text,
+                            ]),
+                    },
+                );
 
             if (fiscalYear.status === 'open') {
-                buttons.push(
-                    h(
-                        Tooltip,
-                        { label: 'Close fiscal year' },
-                        {
-                            default: () =>
-                                h(
-                                    'button',
-                                    {
-                                        type: 'button',
-                                        class: 'flex h-[26px] w-[26px] items-center justify-center bg-primary-tint text-primary transition-[filter] duration-150 ease-out hover:brightness-95',
-                                        'aria-label': 'Close fiscal year',
-                                        onClick: () => openClose(fiscalYear),
-                                    },
-                                    [h(Lock, { class: 'h-[13px] w-[13px]', 'aria-hidden': 'true' })],
-                                ),
-                        },
-                    ),
-                );
+                buttons.push(actionButton('Close fiscal year', 'Close', Lock, () => openClose(fiscalYear)));
             }
 
             if (isAdmin.value && fiscalYear.status === 'closed') {
@@ -274,30 +271,14 @@ const columns = [
                                           Link,
                                           {
                                               href: `/fiscal-year-archives/${fiscalYear.archive.id}`,
-                                              class: 'flex h-[26px] w-[26px] items-center justify-center bg-primary-tint text-primary transition-[filter] duration-150 ease-out hover:brightness-95',
+                                              class: actionClass,
                                               'aria-label': 'View archived year',
                                           },
-                                          [h(Archive, { class: 'h-[13px] w-[13px]', 'aria-hidden': 'true' })],
+                                          () => [h(Archive, { class: 'h-[13px] w-[13px]', 'aria-hidden': 'true' }), 'View archive'],
                                       ),
                               },
                           )
-                        : h(
-                              Tooltip,
-                              { label: 'Archive fiscal year' },
-                              {
-                                  default: () =>
-                                      h(
-                                          'button',
-                                          {
-                                              type: 'button',
-                                              class: 'flex h-[26px] w-[26px] items-center justify-center bg-primary-tint text-primary transition-[filter] duration-150 ease-out hover:brightness-95',
-                                              'aria-label': 'Archive fiscal year',
-                                              onClick: () => archiveFiscalYear(fiscalYear),
-                                          },
-                                          [h(Archive, { class: 'h-[13px] w-[13px]', 'aria-hidden': 'true' })],
-                                      ),
-                              },
-                          ),
+                        : actionButton('Archive fiscal year', 'Archive', Archive, () => archiveFiscalYear(fiscalYear)),
                 );
             }
 
@@ -306,47 +287,11 @@ const columns = [
             // the UI same as archive above; the actual authorization is
             // enforced server-side regardless.
             if (isAdmin.value && fiscalYear.status === 'closed' && !fiscalYear.archive && !isOpenForCorrection(fiscalYear)) {
-                buttons.push(
-                    h(
-                        Tooltip,
-                        { label: 'Reopen for correction' },
-                        {
-                            default: () =>
-                                h(
-                                    'button',
-                                    {
-                                        type: 'button',
-                                        class: 'flex h-[26px] w-[26px] items-center justify-center bg-primary-tint text-primary transition-[filter] duration-150 ease-out hover:brightness-95',
-                                        'aria-label': 'Reopen for correction',
-                                        onClick: () => openReopen(fiscalYear),
-                                    },
-                                    [h(Unlock, { class: 'h-[13px] w-[13px]', 'aria-hidden': 'true' })],
-                                ),
-                        },
-                    ),
-                );
+                buttons.push(actionButton('Reopen for correction', 'Reopen', Unlock, () => openReopen(fiscalYear)));
             }
 
             if (isAdmin.value && isOpenForCorrection(fiscalYear)) {
-                buttons.push(
-                    h(
-                        Tooltip,
-                        { label: 'Relock fiscal year' },
-                        {
-                            default: () =>
-                                h(
-                                    'button',
-                                    {
-                                        type: 'button',
-                                        class: 'flex h-[26px] w-[26px] items-center justify-center bg-primary-tint text-primary transition-[filter] duration-150 ease-out hover:brightness-95',
-                                        'aria-label': 'Relock fiscal year',
-                                        onClick: () => relockFiscalYear(fiscalYear),
-                                    },
-                                    [h(Lock, { class: 'h-[13px] w-[13px]', 'aria-hidden': 'true' })],
-                                ),
-                        },
-                    ),
-                );
+                buttons.push(actionButton('Relock fiscal year', 'Relock', Lock, () => relockFiscalYear(fiscalYear)));
             }
 
             return buttons.length ? h('div', { class: 'flex items-center gap-1.5' }, buttons) : null;
@@ -357,13 +302,15 @@ const columns = [
 
 <template>
     <div>
-        <div class="mb-4 flex items-center justify-between">
-            <h2 class="text-base font-bold text-text-strong">Fiscal Years</h2>
-            <Button variant="primary" tone="purple" @click="openCreate">New fiscal year</Button>
-        </div>
+        <PageHeader title="Fiscal Years" description="Your accounting periods. Close a year when it ends to lock its books and carry balances forward; archive a closed year to keep a read-only copy of its ledger.">
+            <Button variant="primary" tone="purple" @click="openCreate">
+                <Plus class="size-4" />
+                New fiscal year
+            </Button>
+        </PageHeader>
 
         <Card variant="panel">
-            <DataTable :columns="columns" :data="fiscalYears" :page-size="10" empty-message="No fiscal years yet" />
+            <DataTable :columns="columns" :data="fiscalYears" :page-size="10" empty-message="No fiscal years yet. Use New fiscal year to create your first accounting period." />
         </Card>
 
         <Modal :open="createModalOpen" title="New fiscal year" @update:open="onCreateModalOpenChange">
@@ -371,17 +318,18 @@ const columns = [
                 <div>
                     <label for="name" class="mb-1 block text-sm font-semibold text-text-base">Name <span class="text-danger">*</span></label>
                     <Input id="name" v-model="form.name" type="text" placeholder="e.g. FY 2082/83" required />
+                    <p class="mt-1 text-xs text-text-muted">A label for this accounting period, shown on reports and ledgers.</p>
                     <p v-if="form.errors.name" class="mt-1 text-sm text-danger">{{ form.errors.name }}</p>
                 </div>
 
                 <div>
-                    <label for="start_date" class="mb-1 block text-sm font-semibold text-text-base">Start Date <span class="text-danger">*</span></label>
+                    <label for="start_date" class="mb-1 block text-sm font-semibold text-text-base">Start date (BS) <span class="text-danger">*</span></label>
                     <NepaliDateInput id="start_date" v-model="form.start_date" required />
                     <p v-if="form.errors.start_date" class="mt-1 text-sm text-danger">{{ form.errors.start_date }}</p>
                 </div>
 
                 <div>
-                    <label for="end_date" class="mb-1 block text-sm font-semibold text-text-base">End Date <span class="text-danger">*</span></label>
+                    <label for="end_date" class="mb-1 block text-sm font-semibold text-text-base">End date (BS) <span class="text-danger">*</span></label>
                     <NepaliDateInput id="end_date" v-model="form.end_date" required />
                     <p v-if="form.errors.end_date" class="mt-1 text-sm text-danger">{{ form.errors.end_date }}</p>
                 </div>
@@ -394,9 +342,10 @@ const columns = [
                     tone="purple"
                     type="button"
                     :disabled="form.processing"
+                    :loading="form.processing"
                     @click="submitCreate"
                 >
-                    Create fiscal year
+                    Save fiscal year
                 </Button>
             </template>
         </Modal>
@@ -406,6 +355,7 @@ const columns = [
                 <p class="text-sm text-text-muted">
                     This posts depreciation, the opening and closing stock entries, the year-end closing entries,
                     and carries balances forward into the selected year. A database backup is taken first.
+                    Closing locks this year's books, so it cannot be undone casually (an admin can later reopen it for corrections).
                 </p>
 
                 <div>
@@ -449,6 +399,7 @@ const columns = [
                     variant="primary"
                     tone="purple"
                     type="button"
+                    :loading="closeForm.processing"
                     :disabled="closeForm.processing || !closeForm.next_fiscal_year_id || (closingEarly && !closeForm.reason.trim())"
                     @click="submitClose"
                 >
@@ -487,6 +438,7 @@ const columns = [
                     variant="primary"
                     tone="purple"
                     type="button"
+                    :loading="reopenForm.processing"
                     :disabled="reopenForm.processing || !reopenForm.reason.trim()"
                     @click="submitReopen"
                 >

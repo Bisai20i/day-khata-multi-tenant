@@ -25,7 +25,7 @@ const storeOptions = computed(() => props.stores.map((s) => ({ value: s.id, labe
 const accountOptions = computed(() =>
     props.accounts.map((account) => ({
         value: account.id,
-        label: account.code ? `${account.code} — ${account.name}` : account.name,
+        label: account.code ? `${account.code} - ${account.name}` : account.name,
     })),
 );
 
@@ -140,7 +140,10 @@ function submit() {
 <template>
     <Card variant="panel">
         <div class="mb-4 flex items-center justify-between">
-            <h3 class="text-base font-bold text-text-strong">New capital sale</h3>
+            <div>
+                <h3 class="text-base font-bold text-text-strong">New capital sale</h3>
+                <p class="mt-0.5 text-sm text-text-muted">Selling a business asset (not regular stock). Pick the asset account being sold on each line; any gain or loss is posted for you.</p>
+            </div>
             <Button variant="secondary" tone="purple" type="button" @click="emit('cancel')">Cancel</Button>
         </div>
 
@@ -181,7 +184,7 @@ function submit() {
                     <p v-if="form.errors.store_id" class="mt-1 text-sm text-danger">{{ form.errors.store_id }}</p>
                 </div>
                 <div>
-                    <label class="mb-1 block text-sm font-semibold text-text-base">Payment Mode <span class="text-danger">*</span></label>
+                    <label class="mb-1 block text-sm font-semibold text-text-base">Payment mode <span class="text-danger">*</span></label>
                     <Select
                         :model-value="form.payment_mode"
                         :options="paymentModeOptions"
@@ -189,7 +192,7 @@ function submit() {
                     />
                 </div>
                 <div v-if="showBankAccount">
-                    <label class="mb-1 block text-sm font-semibold text-text-base">Bank Account <span class="text-danger">*</span></label>
+                    <label class="mb-1 block text-sm font-semibold text-text-base">Bank account <span class="text-danger">*</span></label>
                     <Combobox
                         :model-value="form.bank_account_id"
                         :options="accountOptions"
@@ -202,11 +205,11 @@ function submit() {
 
             <div v-if="showPartialSplit" class="grid grid-cols-2 gap-4">
                 <div>
-                    <label class="mb-1 block text-sm font-semibold text-text-base">Cash Amount</label>
+                    <label class="mb-1 block text-sm font-semibold text-text-base">Cash amount</label>
                     <Input v-model="form.cash_amount" type="number" min="0" step="0.01" inputmode="decimal" placeholder="0.00" />
                 </div>
                 <div>
-                    <label class="mb-1 block text-sm font-semibold text-text-base">Bank Amount</label>
+                    <label class="mb-1 block text-sm font-semibold text-text-base">Bank amount</label>
                     <Input v-model="form.bank_amount" type="number" min="0" step="0.01" inputmode="decimal" placeholder="0.00" />
                 </div>
                 <p v-if="!splitIsExact" class="col-span-2 text-sm text-danger">
@@ -216,8 +219,8 @@ function submit() {
 
             <div>
                 <div class="mb-2 grid grid-cols-[1fr_130px_70px_1fr_28px] gap-2 text-[10px] font-bold tracking-[.8px] text-text-muted uppercase">
-                    <span>Account</span>
-                    <span>Amount</span>
+                    <span>Asset account sold *</span>
+                    <span>Sale amount *</span>
                     <span>VAT</span>
                     <span>Narration</span>
                     <span></span>
@@ -259,9 +262,10 @@ function submit() {
 
             <div class="grid grid-cols-3 gap-4 border-t-[1.5px] border-border pt-4">
                 <div>
-                    <label class="mb-1 block text-sm font-semibold text-text-base">VAT Rate (%)</label>
+                    <label class="mb-1 block text-sm font-semibold text-text-base">VAT rate (%) <span class="text-danger">*</span></label>
                     <Input v-model="form.vat_rate" type="number" min="0" max="100" step="0.01" inputmode="decimal" required />
-                    <p v-if="form.errors.vat_rate" class="mt-1 text-sm text-danger">{{ form.errors.vat_rate }}</p>
+                    <p v-if="form.errors.vat_rate" class="mt-1 text-sm text-danger" role="alert">{{ form.errors.vat_rate }}</p>
+                    <p v-else class="mt-1 text-xs text-text-muted">Applied to lines marked Taxable.</p>
                 </div>
                 <div class="col-span-2">
                     <label class="mb-1 block text-sm font-semibold text-text-base">Narration</label>
@@ -290,8 +294,8 @@ function submit() {
 
             <div class="flex items-center justify-end gap-2">
                 <Button variant="secondary" tone="purple" type="button" @click="emit('cancel')">Cancel</Button>
-                <Button variant="primary" tone="purple" type="submit" :disabled="!canSubmit">
-                    Create Capital Sale
+                <Button variant="primary" tone="purple" type="submit" :disabled="!canSubmit || form.processing" :loading="form.processing">
+                    Post capital sale
                 </Button>
             </div>
         </form>

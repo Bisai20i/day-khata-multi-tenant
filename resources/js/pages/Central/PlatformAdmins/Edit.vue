@@ -1,13 +1,14 @@
 <script setup>
 import { computed } from 'vue';
 import { useForm, Link } from '@inertiajs/vue3';
-import { ArrowLeft, Check } from '@lucide/vue';
+import { Check } from '@lucide/vue';
 import AppLayout from '@/layouts/AppLayout.vue';
 import { useLayoutChrome } from '@/composables/useLayoutChrome';
 import Card from '@/components/ui/Card.vue';
 import Input from '@/components/ui/Input.vue';
 import Select from '@/components/ui/Select.vue';
 import Button from '@/components/ui/Button.vue';
+import PageHeader from '@/components/ui/PageHeader.vue';
 
 defineOptions({ layout: AppLayout });
 
@@ -57,10 +58,12 @@ function submit() {
 
 <template>
     <div>
-        <Link href="/platform-admins" class="mb-2 inline-flex items-center gap-1 text-sm font-semibold text-primary">
-            <ArrowLeft class="size-4" />
-            All platform admins
-        </Link>
+        <PageHeader
+            title="Edit platform admin"
+            :description="`Update details, role and access for ${admin.name}. Set status to Inactive to block sign-in.`"
+            back-href="/platform-admins"
+            back-label="All platform admins"
+        />
 
         <Card variant="panel" class="max-w-lg">
             <form class="flex flex-col gap-4" @submit.prevent="submit">
@@ -90,7 +93,7 @@ function submit() {
 
                 <div>
                     <label for="password" class="mb-1 block text-sm font-semibold text-text-base">
-                        New password (leave blank to keep current)
+                        New password (optional)
                     </label>
                     <Input id="password" v-model="form.password" type="password" placeholder="Leave blank to keep current" />
                     <p v-if="form.errors.password" class="mt-1 text-sm text-danger">{{ form.errors.password }}</p>
@@ -104,7 +107,7 @@ function submit() {
                 <div class="flex gap-2">
                     <Button type="submit" variant="primary" tone="purple" :loading="form.processing" class="flex-1">
                         <Check class="size-4" />
-                        Save
+                        Save changes
                     </Button>
                     <Button :as="Link" href="/platform-admins" variant="secondary" tone="purple" class="flex-1 justify-center">
                         Cancel

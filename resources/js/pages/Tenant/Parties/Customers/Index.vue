@@ -3,6 +3,8 @@ import { h, ref, watch } from 'vue';
 import { router, useForm, usePage } from '@inertiajs/vue3';
 import AppLayout from '@/layouts/AppLayout.vue';
 import { useLayoutChrome } from '@/composables/useLayoutChrome';
+import { Plus } from '@lucide/vue';
+import PageHeader from '@/components/ui/PageHeader.vue';
 import Card from '@/components/ui/Card.vue';
 import Button from '@/components/ui/Button.vue';
 import Input from '@/components/ui/Input.vue';
@@ -135,35 +137,35 @@ function submit() {
 }
 
 async function destroyCustomer(customer) {
-    if (!(await confirm({ message: `Delete ${customer.name}?`, tone: 'danger', confirmLabel: 'Delete' }))) return;
+    if (!(await confirm({ message: `Delete customer "${customer.name}"? This cannot be undone, and it will be refused if the customer already has sales or ledger entries.`, tone: 'danger', confirmLabel: 'Delete customer' }))) return;
     router.delete(`/customers/${customer.id}`);
 }
 
 const columns = [
-    { accessorKey: 'name', header: 'Name' },
+    { accessorKey: 'name', header: 'Customer name' },
     {
         accessorKey: 'mobile_no',
-        header: 'Mobile No',
+        header: 'Mobile no.',
         numeric: false,
-        cell: ({ row }) => row.original.mobile_no ?? '—',
+        cell: ({ row }) => row.original.mobile_no ?? '-',
     },
     {
         accessorKey: 'email',
         header: 'Email',
         numeric: false,
-        cell: ({ row }) => row.original.email ?? '—',
+        cell: ({ row }) => row.original.email ?? '-',
     },
     {
         accessorKey: 'tpin',
         header: 'TPIN',
         numeric: false,
-        cell: ({ row }) => row.original.tpin ?? '—',
+        cell: ({ row }) => row.original.tpin ?? '-',
     },
     {
         id: 'ledger_code',
-        header: 'Ledger Code',
+        header: 'Ledger code',
         numeric: false,
-        cell: ({ row }) => row.original.account?.code ?? '—',
+        cell: ({ row }) => row.original.account?.code ?? '-',
     },
     {
         id: 'actions',
@@ -183,16 +185,16 @@ const columns = [
 
 <template>
     <div>
-        <div class="mb-4 flex items-center justify-between">
-            <h2 class="text-base font-bold text-text-strong">Customers</h2>
-            <div class="flex items-center gap-2">
-                <Button variant="secondary" tone="purple" @click="openImport">Bulk import</Button>
-                <Button variant="primary" tone="purple" @click="openCreate">New customer</Button>
-            </div>
-        </div>
+        <PageHeader title="Customers" description="People and businesses you sell to. Each customer gets its own ledger account, so you can track what they owe you.">
+            <Button variant="secondary" tone="purple" @click="openImport">Bulk import</Button>
+            <Button variant="primary" tone="purple" @click="openCreate">
+                <Plus class="size-4" />
+                New customer
+            </Button>
+        </PageHeader>
 
         <Card variant="panel">
-            <DataTable :columns="columns" :data="customers" :page-size="10" />
+            <DataTable :columns="columns" :data="customers" :page-size="10" empty-message="No customers yet. Use New customer to add one, or Bulk import to upload a CSV." />
         </Card>
 
         <Modal :open="modalOpen" :title="editing ? 'Edit customer' : 'New customer'" @update:open="onModalOpenChange">
@@ -224,6 +226,7 @@ const columns = [
                 <div>
                     <label for="tpin" class="mb-1 block text-sm font-semibold text-text-base">TPIN</label>
                     <Input id="tpin" v-model="form.tpin" type="text" placeholder="e.g. 123456789" />
+                    <p class="mt-1 text-xs text-text-muted">Taxpayer PIN (PAN/VAT number). Needed only if the customer wants a tax invoice.</p>
                     <p v-if="form.errors.tpin" class="mt-1 text-sm text-danger">{{ form.errors.tpin }}</p>
                 </div>
 
@@ -237,7 +240,7 @@ const columns = [
             <template #footer>
                 <Button variant="secondary" tone="purple" type="button" @click="closeModal">Cancel</Button>
                 <Button variant="primary" tone="purple" type="button" :disabled="form.processing" @click="submit">
-                    {{ editing ? 'Save changes' : 'Create customer' }}
+                    {{ form.processing ? 'Saving...' : editing ? 'Save changes' : 'Save customer' }}
                 </Button>
             </template>
         </Modal>
@@ -286,7 +289,7 @@ const columns = [
                         <tbody>
                             <tr v-for="item in importResult.skipped" :key="item.row" class="border-t border-border">
                                 <td class="px-2 py-1.5">{{ item.row }}</td>
-                                <td class="px-2 py-1.5">{{ item.name || '—' }}</td>
+                                <td class="px-2 py-1.5">{{ item.name || '-' }}</td>
                                 <td class="px-2 py-1.5">{{ item.reason }}</td>
                             </tr>
                         </tbody>

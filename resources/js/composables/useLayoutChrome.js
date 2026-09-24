@@ -13,6 +13,11 @@ import { reactive, watchEffect } from 'vue';
 const chrome = reactive({
     title: '',
     fullscreen: false,
+    // Whether <main> keeps its normal page padding while fullscreen. POS
+    // sets this false for a true edge-to-edge terminal layout (legacy's
+    // #npos is height:100vh with zero padding) - every other fullscreen
+    // page keeps the default (true).
+    padded: true,
 });
 
 /**

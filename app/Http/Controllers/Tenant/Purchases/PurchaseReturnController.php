@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Tenant\Purchases;
 
 use App\Exports\PurchaseReturnListExport;
 use App\Http\Controllers\Controller;
+use App\Http\Requests\Tenant\Purchases\StoreUnlinkedPurchaseReturnRequest;
 use App\Models\Account;
 use App\Models\CompanySetting;
 use App\Models\Item;
@@ -14,6 +15,7 @@ use App\Models\PurchaseReturn;
 use App\Models\PurchaseReturnLine;
 use App\Models\Store;
 use App\Models\Supplier;
+use App\Rules\AccountUnderHead;
 use App\Support\AmountInWords;
 use App\Support\Money\Money;
 use App\Support\Money\Quantity;
@@ -101,7 +103,7 @@ class PurchaseReturnController extends Controller
             'purchase_id' => ['required', 'exists:purchases,id'],
             'date' => ['required', 'date'],
             'reason' => ['nullable', 'string', 'max:255'],
-            'refund_account_id' => ['nullable', 'exists:accounts,id'],
+            'refund_account_id' => ['nullable', 'exists:accounts,id', new AccountUnderHead('Assets')],
             'store_id' => ['nullable', 'integer', 'exists:stores,id'],
             'lines' => ['required', 'array', 'min:1'],
             // `distinct` plus the model's own per-line aggregation: naming the
@@ -132,27 +134,9 @@ class PurchaseReturnController extends Controller
      * from a purchase made before this system went live, with no Purchase
      * row to point at. See PurchaseReturn::postUnlinked().
      */
-    public function storeUnlinked(Request $request): RedirectResponse
+    public function storeUnlinked(StoreUnlinkedPurchaseReturnRequest $request): RedirectResponse
     {
-        $data = $request->validate([
-            'date' => ['required', 'date'],
-            'supplier_id' => ['nullable', 'exists:suppliers,id'],
-            'vat_rate' => ['nullable', 'numeric', 'min:0', 'max:100', 'decimal:0,2'],
-            'payment_mode' => ['required', 'in:cash,bank,partial'],
-            'bank_account_id' => ['nullable', 'exists:accounts,id'],
-            'cash_amount' => ['nullable', 'numeric', 'min:0', 'decimal:0,2'],
-            'bank_amount' => ['nullable', 'numeric', 'min:0', 'decimal:0,2'],
-            'store_id' => ['nullable', 'integer', 'exists:stores,id'],
-            'reason' => ['nullable', 'string', 'max:255'],
-            'expected_total' => ['nullable', 'numeric', 'decimal:0,2'],
-            'lines' => ['required', 'array', 'min:1'],
-            'lines.*.item_id' => ['required', 'exists:items,id'],
-            'lines.*.item_unit_id' => ['nullable', 'integer', 'exists:item_units,id'],
-            'lines.*.quantity' => ['required', 'numeric', 'min:0.0001', 'decimal:0,4'],
-            // Blank means "value at average cost" - see PurchaseReturn::
-            // postUnlinked()'s docblock.
-            'lines.*.rate' => ['nullable', 'numeric', 'min:0', 'decimal:0,4'],
-        ]);
+        $data = $request->validated();
 
         try {
             $purchaseReturn = PurchaseReturn::postUnlinked($data, $data['lines'], $request->user());

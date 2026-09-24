@@ -6,6 +6,7 @@ import { useLayoutChrome } from '@/composables/useLayoutChrome';
 import Card from '@/components/ui/Card.vue';
 import Select from '@/components/ui/Select.vue';
 import Button from '@/components/ui/Button.vue';
+import PageHeader from '@/components/ui/PageHeader.vue';
 import NepaliDateInput from '@/components/ui/NepaliDateInput.vue';
 import { formatMoney, compareMoney } from '@/lib/money.js';
 import { formatBsDate } from '@/lib/format.js';
@@ -73,32 +74,34 @@ function exportUrl() {
 
 <template>
     <div>
-        <div class="mb-4 flex flex-wrap items-center justify-between gap-3">
-            <h2 class="text-base font-bold text-text-strong">Income Statement</h2>
-            <div v-if="fiscalYearId !== null" class="flex items-center gap-2">
+        <PageHeader
+            title="Income Statement"
+            description="Profit and loss: income earned minus expenses incurred in the period. Also called Profit &amp; Loss."
+        >
+            <template v-if="fiscalYearId !== null">
                 <a :href="printUrl()" target="_blank" rel="noopener"><Button variant="secondary" tone="purple">Print</Button></a>
                 <a :href="exportUrl()"><Button variant="secondary" tone="purple">Export</Button></a>
-            </div>
-        </div>
+            </template>
+        </PageHeader>
 
         <Card v-if="fiscalYearId !== null" variant="panel" class="mb-4">
             <div class="flex flex-wrap items-end gap-3">
                 <div class="w-56">
-                    <label class="mb-1 block text-xs font-semibold text-text-muted">Fiscal Year</label>
+                    <label class="mb-1 block text-xs font-semibold text-text-muted">Fiscal year</label>
                     <Select v-model="fiscalYear" :options="fiscalYearOptions" />
                 </div>
                 <div>
-                    <label class="mb-1 block text-xs font-semibold text-text-muted">From</label>
+                    <label class="mb-1 block text-xs font-semibold text-text-muted">From date (BS)</label>
                     <NepaliDateInput v-model="from" />
                 </div>
                 <div>
-                    <label class="mb-1 block text-xs font-semibold text-text-muted">To</label>
+                    <label class="mb-1 block text-xs font-semibold text-text-muted">To date (BS)</label>
                     <NepaliDateInput v-model="to" />
                 </div>
-                <Button variant="primary" tone="purple" @click="apply">Apply</Button>
+                <Button variant="primary" tone="purple" @click="apply">Generate report</Button>
             </div>
             <p v-if="from && to" class="mt-2 text-[12px] text-text-muted">
-                {{ formatBsDate(from) }} to {{ formatBsDate(to) }} BS
+                Showing report for {{ formatBsDate(from) }} to {{ formatBsDate(to) }} BS
                 <span class="text-text-muted">({{ from }} to {{ to }})</span>
             </p>
         </Card>
@@ -133,7 +136,7 @@ function exportUrl() {
             </Card>
 
             <Card variant="panel" title="Income" class="mb-4">
-                <div v-if="income.length === 0" class="px-1 py-6 text-center text-[13px] text-text-muted">No income recorded.</div>
+                <div v-if="income.length === 0" class="px-1 py-6 text-center text-[13px] text-text-muted">No transactions in this period. Try widening the date range.</div>
                 <div v-else class="divide-y divide-border">
                     <div
                         v-for="account in income"
@@ -141,7 +144,7 @@ function exportUrl() {
                         class="flex items-center px-1 py-1.5 text-[13px] text-text-base"
                     >
                         <div class="flex-1">
-                            {{ account.name }} <span class="text-text-muted">· {{ account.code ?? '—' }}</span>
+                            {{ account.name }} <span class="text-text-muted">· {{ account.code ?? '-' }}</span>
                             <span v-if="account.computed" class="text-text-muted">· computed</span>
                         </div>
                         <div class="w-32 text-right">{{ formatMoney(account.amount) }}</div>
@@ -154,7 +157,7 @@ function exportUrl() {
             </Card>
 
             <Card variant="panel" title="Expenses" class="mb-4">
-                <div v-if="expenses.length === 0" class="px-1 py-6 text-center text-[13px] text-text-muted">No expenses recorded.</div>
+                <div v-if="expenses.length === 0" class="px-1 py-6 text-center text-[13px] text-text-muted">No transactions in this period. Try widening the date range.</div>
                 <div v-else class="divide-y divide-border">
                     <div
                         v-for="account in expenses"
@@ -162,7 +165,7 @@ function exportUrl() {
                         class="flex items-center px-1 py-1.5 text-[13px] text-text-base"
                     >
                         <div class="flex-1">
-                            {{ account.name }} <span class="text-text-muted">· {{ account.code ?? '—' }}</span>
+                            {{ account.name }} <span class="text-text-muted">· {{ account.code ?? '-' }}</span>
                             <span v-if="account.computed" class="text-text-muted">· computed</span>
                         </div>
                         <div class="w-32 text-right">{{ formatMoney(account.amount) }}</div>

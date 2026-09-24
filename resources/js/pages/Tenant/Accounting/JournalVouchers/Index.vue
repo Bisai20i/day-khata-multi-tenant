@@ -4,6 +4,7 @@ import { useForm, usePage } from '@inertiajs/vue3';
 import { Eye, Plus, Printer } from '@lucide/vue';
 import AppLayout from '@/layouts/AppLayout.vue';
 import { useLayoutChrome } from '@/composables/useLayoutChrome';
+import PageHeader from '@/components/ui/PageHeader.vue';
 import Card from '@/components/ui/Card.vue';
 import Button from '@/components/ui/Button.vue';
 import Badge from '@/components/ui/Badge.vue';
@@ -173,7 +174,7 @@ const columns = [
         id: 'dateBs',
         header: 'Date (BS)',
         numeric: false,
-        cell: ({ row }) => formatBsDate(row.original.date) || '—',
+        cell: ({ row }) => formatBsDate(row.original.date) || '-',
     },
     {
         id: 'dateAd',
@@ -196,21 +197,21 @@ const columns = [
     { accessorKey: 'narration', header: 'Narration' },
     {
         id: 'fiscal_year',
-        header: 'Fiscal Year',
+        header: 'Fiscal year',
         numeric: false,
-        cell: ({ row }) => row.original.fiscal_year?.name ?? '—',
+        cell: ({ row }) => row.original.fiscal_year?.name ?? '-',
     },
     {
         id: 'amount',
-        header: 'Amount',
+        header: 'Total amount',
         numeric: true,
         cell: ({ row }) => formatMoney(voucherAmount(row.original)),
     },
     {
         id: 'created_by',
-        header: 'Created By',
+        header: 'Created by',
         numeric: false,
-        cell: ({ row }) => row.original.creator?.name ?? '—',
+        cell: ({ row }) => row.original.creator?.name ?? '-',
     },
     {
         id: 'status',
@@ -230,11 +231,11 @@ const columns = [
                         'button',
                         {
                             type: 'button',
-                            class: 'flex h-[26px] w-[26px] items-center justify-center bg-primary-tint text-primary transition-[filter] duration-150 ease-out hover:brightness-95',
+                            class: 'inline-flex h-[26px] items-center gap-1 bg-primary-tint px-2 text-[12px] font-semibold text-primary transition-[filter] duration-150 ease-out hover:brightness-95',
                             'aria-label': 'View lines',
                             onClick: () => viewVoucher(row.original),
                         },
-                        [h(Eye, { class: 'h-[13px] w-[13px]' })],
+                        [h(Eye, { class: 'h-[13px] w-[13px]' }), 'View'],
                     ),
                 ),
                 h(Tooltip, { label: 'Print' }, () =>
@@ -244,10 +245,10 @@ const columns = [
                             href: `/journal-vouchers/${row.original.id}/print`,
                             target: '_blank',
                             rel: 'noopener',
-                            class: 'flex h-[26px] w-[26px] items-center justify-center bg-primary-tint text-primary transition-[filter] duration-150 ease-out hover:brightness-95',
+                            class: 'inline-flex h-[26px] items-center gap-1 bg-primary-tint px-2 text-[12px] font-semibold text-primary transition-[filter] duration-150 ease-out hover:brightness-95',
                             'aria-label': 'Print',
                         },
-                        [h(Printer, { class: 'h-[13px] w-[13px]' })],
+                        [h(Printer, { class: 'h-[13px] w-[13px]' }), 'Print'],
                     ),
                 ),
                 isAdmin.value && row.original.status === 'posted' && MANUALLY_CANCELLABLE_TYPES.includes(row.original.voucher_type)
@@ -259,7 +260,7 @@ const columns = [
                               type: 'button',
                               onClick: () => openCancel(row.original),
                           },
-                          () => 'Cancel',
+                          () => 'Cancel voucher',
                       )
                     : null,
             ]),
@@ -287,9 +288,8 @@ const columns = [
         </template>
 
         <template v-else>
-            <div class="mb-4 flex items-center justify-between">
-                <h2 class="text-base font-bold text-text-strong">Journal Vouchers</h2>
-                <div v-if="isAdmin" class="flex items-center gap-2">
+            <PageHeader title="Journal Vouchers" description="The record of every accounting entry. Post a journal voucher for general adjustments, or a cash/bank voucher for simple money in and out. Entries from sales and purchases also appear here.">
+                <template v-if="isAdmin">
                     <Button variant="secondary" tone="purple" @click="showCashBankForm = true">
                         <Plus class="size-4" />
                         New cash/bank voucher
@@ -298,11 +298,16 @@ const columns = [
                         <Plus class="size-4" />
                         New journal voucher
                     </Button>
-                </div>
-            </div>
+                </template>
+            </PageHeader>
 
             <Card variant="panel">
-                <DataTable :columns="columns" :data="journalVouchers" :page-size="10" empty-message="No journal vouchers yet" />
+                <DataTable
+                    :columns="columns"
+                    :data="journalVouchers"
+                    :page-size="10"
+                    :empty-message="isAdmin ? 'No vouchers yet. Use New journal voucher or New cash/bank voucher to post your first entry.' : 'No vouchers have been posted yet.'"
+                />
             </Card>
         </template>
 
@@ -315,11 +320,11 @@ const columns = [
                 <div class="grid grid-cols-2 gap-3 text-sm">
                     <div>
                         <p class="text-[10px] font-bold tracking-[.8px] text-text-muted uppercase">Date</p>
-                        <p class="text-text-base">{{ formatBsDate(selectedVoucher.date) || '—' }} (BS) · {{ adDate(selectedVoucher.date) }}</p>
+                        <p class="text-text-base">{{ formatBsDate(selectedVoucher.date) || '-' }} (BS) · {{ adDate(selectedVoucher.date) }}</p>
                     </div>
                     <div>
                         <p class="text-[10px] font-bold tracking-[.8px] text-text-muted uppercase">Fiscal Year</p>
-                        <p class="text-text-base">{{ selectedVoucher.fiscal_year?.name ?? '—' }}</p>
+                        <p class="text-text-base">{{ selectedVoucher.fiscal_year?.name ?? '-' }}</p>
                     </div>
                     <div class="col-span-2">
                         <p class="text-[10px] font-bold tracking-[.8px] text-text-muted uppercase">Narration</p>
@@ -331,7 +336,7 @@ const columns = [
                     </div>
                     <div>
                         <p class="text-[10px] font-bold tracking-[.8px] text-text-muted uppercase">Created By</p>
-                        <p class="text-text-base">{{ selectedVoucher.creator?.name ?? '—' }}</p>
+                        <p class="text-text-base">{{ selectedVoucher.creator?.name ?? '-' }}</p>
                     </div>
                 </div>
 
@@ -347,11 +352,11 @@ const columns = [
                     <tbody>
                         <tr v-for="line in selectedVoucher.lines" :key="line.id" class="border-b border-border-soft last:border-0">
                             <td class="py-2 text-text-base">
-                                {{ line.account?.code ? `${line.account.code} — ${line.account.name}` : line.account?.name }}
+                                {{ line.account?.code ? `${line.account.code} - ${line.account.name}` : line.account?.name }}
                             </td>
                             <td class="py-2 text-right [font-variant-numeric:tabular-nums]">{{ formatMoney(line.debit) }}</td>
                             <td class="py-2 text-right [font-variant-numeric:tabular-nums]">{{ formatMoney(line.credit) }}</td>
-                            <td class="py-2 text-text-muted">{{ line.narration ?? '—' }}</td>
+                            <td class="py-2 text-text-muted">{{ line.narration ?? '-' }}</td>
                         </tr>
                     </tbody>
                 </table>
@@ -361,7 +366,7 @@ const columns = [
         <Modal :open="!!cancelling" title="Cancel journal voucher" size="compact" @update:open="onCancelOpenChange">
             <form class="flex flex-col gap-4" @submit.prevent="submitCancel">
                 <p class="text-sm text-text-muted">
-                    This posts a reversing entry for this journal voucher. This cannot be undone.
+                    Cancelling {{ cancelling ? voucherLabel(cancelling) : 'this voucher' }} posts a reversing entry that cancels out its effect on the ledger. The original stays on record and this cannot be undone.
                 </p>
                 <div>
                     <label class="mb-1 block text-sm font-semibold text-text-base">Reason <span class="text-danger">*</span></label>
@@ -371,8 +376,8 @@ const columns = [
             </form>
 
             <template #footer>
-                <Button variant="secondary" tone="purple" type="button" @click="cancelling = null">Back</Button>
-                <Button variant="primary" tone="purple" type="button" :disabled="cancelForm.processing" @click="submitCancel">
+                <Button variant="secondary" tone="purple" type="button" @click="cancelling = null">Keep voucher</Button>
+                <Button variant="primary" tone="purple" type="button" :loading="cancelForm.processing" :disabled="cancelForm.processing" @click="submitCancel">
                     Confirm cancellation
                 </Button>
             </template>

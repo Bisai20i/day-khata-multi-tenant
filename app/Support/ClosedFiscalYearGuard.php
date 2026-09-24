@@ -101,7 +101,7 @@ class ClosedFiscalYearGuard
      */
     public static function logCorrection(FiscalYear $fiscalYear, string $reason, string $voucherDescription): void
     {
-        $description = "Correction posted into reopened fiscal year \"{$fiscalYear->name}\": {$voucherDescription} — reason: {$reason}";
+        $description = "Correction posted into reopened fiscal year \"{$fiscalYear->name}\": {$voucherDescription} - reason: {$reason}";
 
         ActivityLog::create([
             // Explicit 'web' guard, matching ActivityLogObserver::write()'s

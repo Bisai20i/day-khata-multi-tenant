@@ -1,7 +1,7 @@
 <script setup>
-import { computed, onMounted, ref } from 'vue';
+import { computed, nextTick, onMounted, ref } from 'vue';
 import { router, useForm, usePage } from '@inertiajs/vue3';
-import { Plus, X } from '@lucide/vue';
+import { ChevronDown, ChevronUp, Plus, X } from '@lucide/vue';
 import Card from '@/components/ui/Card.vue';
 import Button from '@/components/ui/Button.vue';
 import Input from '@/components/ui/Input.vue';
@@ -9,14 +9,17 @@ import Select from '@/components/ui/Select.vue';
 import Combobox from '@/components/ui/Combobox.vue';
 import Modal from '@/components/ui/Modal.vue';
 import NepaliDateInput from '@/components/ui/NepaliDateInput.vue';
+import DropdownMenu from '@/components/ui/DropdownMenu.vue';
+import DropdownMenuItem from '@/components/ui/DropdownMenuItem.vue';
 import { useToast } from '@/composables/useToast';
+import { useConfirm } from '@/composables/useConfirm';
 import {
     calculateDocument,
     formatMoney,
     formatQuantity,
-    formatRate,
     moneyEquals,
     parseMoney,
+    parseQuantity,
     percentOf,
     addMoney,
     rateExcludingVat,
@@ -54,9 +57,7 @@ const props = defineProps({
         default: () => ({
             default_vat_rate: '13.00',
             default_store_id: null,
-            sale_full_enabled: true,
-            sale_abbreviated_enabled: true,
-            sale_pan_enabled: true,
+            active_invoice_type: 'full',
         }),
     },
     // Set by the parent Index page when it bounces back here after the
@@ -68,23 +69,46 @@ const props = defineProps({
 
 const emit = defineEmits(['cancel', 'posted']);
 const { toast } = useToast();
+const { confirm } = useConfirm();
 const page = usePage();
+
+/** Cancel straight away when nothing was entered, otherwise ask before discarding. */
+async function requestCancel() {
+    const hasEntries = form.isDirty || form.lines.length > 0;
+    if (hasEntries) {
+        const discard = await confirm({
+            title: 'Discard this sale?',
+            message: 'The items and details you entered have not been saved and will be lost.',
+            tone: 'danger',
+            confirmLabel: 'Discard sale',
+            cancelLabel: 'Keep editing',
+        });
+        if (!discard) return;
+    }
+    emit('cancel');
+}
 
 const customerOptions = computed(() => props.customers.map((c) => ({ value: c.id, label: c.name })));
 const storeOptions = computed(() => props.stores.map((s) => ({ value: s.id, label: s.name })));
 const bankAccountOptions = computed(() =>
-    props.bankAccounts.map((a) => ({ value: a.id, label: a.code ? `${a.code} — ${a.name}` : a.name })),
+    props.bankAccounts.map((a) => ({ value: a.id, label: a.code ? `${a.code} - ${a.name}` : a.name })),
 );
 const tdsAccountOptions = computed(() =>
-    props.tdsAccounts.map((a) => ({ value: a.id, label: a.code ? `${a.code} — ${a.name}` : a.name })),
+    props.tdsAccounts.map((a) => ({ value: a.id, label: a.code ? `${a.code} - ${a.name}` : a.name })),
 );
 // searchValue lets a barcode match the item even though it isn't shown in
-// the option's label - see Combobox.vue's searchText().
+// the option's label - see Combobox.vue's searchText(). A scanner types the
+// barcode then Enter, reka-ui's own filter narrows to that one item and
+// highlights it, so Enter selects it exactly like picking from the list.
 const itemOptions = computed(() =>
     props.items.map((i) => ({
         value: i.id,
         label: `${i.name} (${i.unit})`,
         searchValue: i.barcode ? `${i.name} ${i.barcode}` : i.name,
+        // Stock shown right in the option row so a cashier can see availability
+        // while picking, without a separate badge appearing after selection.
+        meta: i.current_stock != null ? `${formatQuantity(i.current_stock)} ${i.unit}` : null,
+        metaClass: stockStatus(i) === 'out' ? 'text-danger' : stockStatus(i) === 'low' ? 'text-[#92400E]' : 'text-text-muted',
     })),
 );
 const itemsById = computed(() => Object.fromEntries(props.items.map((i) => [i.id, i])));
@@ -113,17 +137,6 @@ function saveNoteTemplate() {
         preserveState: true,
     });
 }
-
-// Only the invoice types the tenant has switched on in Settings. The flags
-// were saved and never enforced anywhere until this pass; the server rejects
-// a disabled type too, this just stops the cashier picking one.
-const invoiceTypeOptions = computed(() =>
-    [
-        { value: 'full', label: 'Full tax invoice', enabled: props.invoiceSettings.sale_full_enabled },
-        { value: 'abbreviated', label: 'Abbreviated tax invoice', enabled: props.invoiceSettings.sale_abbreviated_enabled },
-        { value: 'pan', label: 'PAN invoice', enabled: props.invoiceSettings.sale_pan_enabled },
-    ].filter((option) => option.enabled),
-);
 
 const paymentModeOptions = [
     { value: 'cash', label: 'Cash' },
@@ -170,7 +183,8 @@ function unitOptionsFor(item) {
 // sale_rate override; switching back to the base unit ('') restores the
 // item's own sale_rate, so a mis-click no longer leaves a Box rate sitting on
 // a Piece line. Still freely editable afterwards - Sale::post() only ever
-// uses the entered rate, never the unit's.
+// uses the entered rate, never the unit's. Shared by the staging line and
+// every already-added row - see selectStagingItem()/the lines grid below.
 function selectLineUnit(line, unitId) {
     line.item_unit_id = unitId;
     // An MRP is a price for ONE of whatever unit was selected, so the number
@@ -245,7 +259,6 @@ function defaultFormData() {
         // common case of a counter sale nobody bothers to name.
         customer_id: props.walkInCustomerId ?? null,
         store_id: props.invoiceSettings.default_store_id ?? null,
-        invoice_type: invoiceTypeOptions.value[0]?.value ?? 'full',
         chalani_number: '',
         // Asia/Kathmandu, not UTC: between midnight and 05:45 local time a
         // toISOString() default dated the bill to the previous day.
@@ -261,23 +274,117 @@ function defaultFormData() {
         agent_id: null,
         commission_amount: '',
         narration: '',
-        lines: [emptyLine()],
+        // Items only ever enter the bill through the "Add item" staging
+        // panel below (addStagingLine()) - no starter blank row here.
+        lines: [],
     };
 }
 
 const form = useForm(props.initialDraft ?? defaultFormData());
 
-function addLine() {
-    form.lines.push(emptyLine());
-}
+// Progressive disclosure for the remaining rare fields (Store, header
+// discount, TDS, agent) - Narration stays directly visible per the redesign,
+// it's common enough not to hide.
+const showMoreOptions = ref(false);
+const showLineExtras = ref(false);
+const lineGridColumns = computed(() =>
+    showLineExtras.value
+        ? '1fr 80px 90px 80px 90px 90px 120px 96px 28px'
+        : '1fr 80px 90px 90px 120px 96px 28px',
+);
 
 function removeLine(index) {
     form.lines.splice(index, 1);
 }
 
+// --- Add item: staging panel -----------------------------------------------
+// One row of entry fields, separate from the lines already committed to the
+// bill below (the redesign's step 2/step 3 split). selectLineItem/
+// selectLineUnit/applyLineMrp above are written generically against
+// whatever `line` object is passed in, so the staging line reuses them
+// exactly as the committed rows do.
+const stagingLine = ref(emptyLine());
+const stagingItemEl = ref(null);
+const stagingQuantityEl = ref(null);
+
+function focusStagingField(el) {
+    nextTick(() => el.value?.querySelector('input')?.focus());
+}
+
+function selectStagingItem(itemId) {
+    selectLineItem(stagingLine.value, itemId);
+    focusStagingField(stagingQuantityEl);
+}
+
+function selectStagingUnit(unitId) {
+    selectLineUnit(stagingLine.value, unitId);
+}
+
+function applyStagingMrp(mrp) {
+    applyLineMrp(stagingLine.value, mrp);
+}
+
+function toggleStagingDiscountType() {
+    toggleLineDiscountTypeOn(stagingLine.value);
+}
+
+const stagingItem = computed(() => itemsById.value[stagingLine.value.item_id] ?? null);
+
+// -1/0/1 on two quantity strings, exact (scaled BigInt, never Number()) -
+// only used here to compare current_stock against min_stock for the badge
+// below, never to compute anything billed. A canonical decimal STRING can't
+// be compared with `<`/`>` directly ("6.0000" sorts after "10.0000"
+// lexicographically), so this scales both sides to an integer first -
+// mirrors Pos.vue's own toScaledQuantity()/compareQuantity(), which money.js
+// doesn't expose yet.
+function compareQuantity(a, b) {
+    const left = parseQuantity(a === '' || a === null || a === undefined ? '0' : a);
+    const right = parseQuantity(b === '' || b === null || b === undefined ? '0' : b);
+    if (!left.ok || !right.ok) return null;
+
+    const toScaled = (value) => {
+        const negative = value.startsWith('-');
+        const scaled = BigInt((negative ? value.slice(1) : value).replace('.', ''));
+
+        return negative ? -scaled : scaled;
+    };
+
+    const leftScaled = toScaled(left.value);
+    const rightScaled = toScaled(right.value);
+
+    return leftScaled === rightScaled ? 0 : leftScaled < rightScaled ? -1 : 1;
+}
+
+/** 'out' | 'low' | null - drives the stock badge next to Qty and per-line in the bill. */
+function stockStatus(item) {
+    if (!item?.is_stockable || item.current_stock == null) return null;
+    if (compareQuantity(item.current_stock, '0') <= 0) return 'out';
+    if (item.min_stock != null && compareQuantity(item.current_stock, item.min_stock) <= 0) return 'low';
+
+    return null;
+}
+
+
+/** Item + quantity is enough to commit a line; everything else can stay blank. */
+const canAddStagingLine = computed(() => !!stagingLine.value.item_id && stagingLine.value.quantity !== '');
+
+function addStagingLine() {
+    if (!canAddStagingLine.value) {
+        focusStagingField(stagingLine.value.item_id ? stagingQuantityEl : stagingItemEl);
+        return;
+    }
+
+    form.lines.push({ ...stagingLine.value });
+    stagingLine.value = emptyLine();
+    focusStagingField(stagingItemEl);
+}
+
 // --- Totals: the single preview, mirroring the server step for step --------
 
-const isPanInvoice = computed(() => form.invoice_type === 'pan');
+// The invoice type is never a form field - it's fixed per tenant by the
+// platform admin (TenantCompanySettingController), so this just reads the
+// value the server already applies to every sale (see Sale::post()).
+const isPanInvoice = computed(() => props.invoiceSettings.active_invoice_type === 'pan');
 
 // A PAN invoice carries no VAT at all; every other type uses the tenant's
 // configured rate. The rate is never editable here - the server ignores any
@@ -317,7 +424,21 @@ const totals = computed(() => (preview.value.ok ? preview.value.totals : null));
 const hasEnteredLines = computed(() =>
     form.lines.some((line) => line.item_id && line.quantity !== '' && line.rate !== ''),
 );
-const previewError = computed(() => (preview.value.ok || !hasEnteredLines.value ? null : preview.value.message));
+const previewError = computed(() => {
+    if (preview.value.ok) return null;
+
+    // Items with no sale price are added with a blank rate, which the
+    // calculator rejects for the whole bill - say so instead of silently
+    // hiding the summary.
+    const unpriced = form.lines.filter((line) => line.item_id && (line.rate === '' || line.rate === null));
+    if (unpriced.length > 0) {
+        const names = unpriced.map((line) => itemsById.value[line.item_id]?.name ?? 'an item');
+
+        return `Enter a rate for ${names.join(', ')} to see the total.`;
+    }
+
+    return hasEnteredLines.value ? preview.value.message : null;
+});
 
 /** A line's own total, or null while the line is still incomplete. */
 function lineTotal(index) {
@@ -329,7 +450,8 @@ function lineDiscountAmount(index) {
 }
 
 /**
- * Switching a discount between % and Rs.
+ * Switching a discount between % and Rs, for any line object (staging or
+ * already committed).
  *
  * Percentage to flat is exact: the calculator already knows the rupee amount
  * that percentage came to. The other direction is not - recovering a
@@ -338,11 +460,9 @@ function lineDiscountAmount(index) {
  * the percentage they mean, instead of a silently wrong number being carried
  * across.
  */
-function toggleLineDiscountType(index) {
-    const line = form.lines[index];
-
+function toggleLineDiscountTypeOn(line, index = null) {
     if (line.discount_type === 'percentage') {
-        const amount = lineDiscountAmount(index);
+        const amount = index !== null ? lineDiscountAmount(index) : null;
         line.discount = amount && amount !== '0.00' ? amount : '';
         line.discount_type = 'flat';
 
@@ -351,6 +471,10 @@ function toggleLineDiscountType(index) {
 
     line.discount = '';
     line.discount_type = 'percentage';
+}
+
+function toggleLineDiscountType(index) {
+    toggleLineDiscountTypeOn(form.lines[index], index);
 }
 
 function toggleHeaderDiscountType() {
@@ -409,11 +533,18 @@ const canSubmit = computed(
         !form.processing &&
         !!form.customer_id &&
         !!form.date &&
+        form.lines.length > 0 &&
         !!totals.value &&
         (!showPartialFields.value || partialBalanced.value),
 );
 
-function submit(print = false) {
+// "Save & Print" copy count (audit section 4 polish, "Save & Print N
+// copies"): the backend already supports ?copies=N up to
+// SaleController::MAX_PRINT_COPIES (5), this just wires a picker to it.
+const PRINT_COPY_OPTIONS = [1, 2, 3, 4, 5];
+const printCopies = ref(1);
+
+function submit(print = false, copies = 1) {
     if (!totals.value) return;
 
     const expectedTotal = totals.value.total;
@@ -446,21 +577,27 @@ function submit(print = false) {
             // newest id out of the list it was redirected to.
             const created = page.props.flash?.created;
             if (print && created?.print_url) {
-                window.open(created.print_url, '_blank');
+                window.open(`${created.print_url}?copies=${copies}`, '_blank');
             }
             emit('posted');
         },
     });
 }
 
+/** Save & Print with a specific copy count, chosen from the dropdown. */
+function submitAndPrint(copies) {
+    printCopies.value = copies;
+    submit(true, copies);
+}
+
 // --- Enter key: advance, never submit --------------------------------------
 // Legacy adds the next line on Enter; here Enter submitted the whole bill from
-// the Qty field (audit P1 "Workflow"). Enter now walks the line's fields left
-// to right and, past the last one, starts a new line.
-//
-// Bonus and MRP are deliberately not on this path: almost no line uses them,
-// and putting them in the Enter chain would cost every other line two extra
-// keystrokes. Both are still reachable by Tab or by clicking.
+// the Qty field (audit P1 "Workflow"). On the staging panel, Enter walks
+// Qty -> Rate -> Discount and then commits the line (addStagingLine()) -
+// mirrors legacy's "Enter adds to basket" and the barcode-scan flow in
+// Pos.vue. On an already-added row, Enter just walks the same three fields;
+// there's no line left to auto-create at the end since new items only ever
+// enter through the staging panel now.
 const LINE_FIELDS = ['quantity', 'rate', 'discount'];
 const linesEl = ref(null);
 
@@ -472,18 +609,23 @@ function focusLineField(index, field) {
 
 function onLineEnter(index, field) {
     const position = LINE_FIELDS.indexOf(field);
-
     if (position < LINE_FIELDS.length - 1) {
         focusLineField(index, LINE_FIELDS[position + 1]);
+    }
+}
+
+function onStagingEnter(field) {
+    const position = LINE_FIELDS.indexOf(field);
+
+    if (position < LINE_FIELDS.length - 1) {
+        stagingLineEl.value?.querySelector(`[data-staging-field="${LINE_FIELDS[position + 1]}"] input`)?.focus();
         return;
     }
 
-    if (index === form.lines.length - 1) {
-        addLine();
-    }
-
-    setTimeout(() => focusLineField(index + 1, LINE_FIELDS[0]), 0);
+    addStagingLine();
 }
+
+const stagingLineEl = ref(null);
 
 // --- Inline "+ New customer" ------------------------------------------
 // Ports Pos.vue's openCustomerModal()/submitCustomer() pattern: POST
@@ -559,395 +701,628 @@ onMounted(() => applyPendingCustomer());
 
 <template>
     <div>
-    <Card variant="panel">
-        <div class="mb-4 flex items-center justify-between">
+    <div class="mb-4 flex items-center justify-between">
+        <div>
             <h3 class="text-base font-bold text-text-strong">New sale</h3>
-            <Button variant="secondary" tone="purple" type="button" @click="emit('cancel')">Cancel</Button>
+            <p class="text-xs text-text-muted">Fields marked * are required. Totals update as you add items.</p>
         </div>
+        <Button variant="secondary" tone="purple" type="button" @click="requestCancel">Cancel</Button>
+    </div>
 
-        <p v-if="form.errors.lines" class="mb-4 border-[1.5px] border-danger bg-danger-bg px-3 py-2 text-sm text-danger">
-            {{ form.errors.lines }}
-        </p>
-        <p v-if="form.errors.expected_total" class="mb-4 border-[1.5px] border-danger bg-danger-bg px-3 py-2 text-sm text-danger">
-            {{ form.errors.expected_total }}
-        </p>
+    <p v-if="form.errors.lines" class="mb-4 border-[1.5px] border-danger bg-danger-bg px-3 py-2 text-sm text-danger">
+        {{ form.errors.lines }}
+    </p>
+    <p v-if="form.errors.expected_total" class="mb-4 border-[1.5px] border-danger bg-danger-bg px-3 py-2 text-sm text-danger">
+        {{ form.errors.expected_total }}
+    </p>
 
-        <form class="flex flex-col gap-4" @submit.prevent="submit(false)">
-            <div class="grid grid-cols-4 gap-4">
-                <div>
-                    <label class="mb-1 block text-sm font-semibold text-text-base">Customer <span class="text-danger">*</span></label>
-                    <div class="flex gap-2">
+    <form class="flex flex-col gap-4 pb-4" @submit.prevent="submit(false)">
+            <!-- Bill info -------------------------------------------------- -->
+            <Card variant="panel" title="Customer & date" class="!p-4">
+                <div class="grid grid-cols-1 gap-4 sm:grid-cols-3">
+                    <div>
+                        <label class="mb-1 block text-sm font-semibold text-text-base">Customer <span class="text-danger" aria-hidden="true">*</span></label>
                         <Combobox
                             :model-value="form.customer_id"
                             :options="customerOptions"
                             placeholder="Select customer"
-                            class="flex-1"
+                            aria-describedby="sale-customer-help sale-customer-error"
                             @update:model-value="(v) => (form.customer_id = v)"
-                        />
-                        <Button variant="secondary" tone="purple" type="button" class="!px-2.5" @click="openCustomerModal">
-                            <Plus class="h-3.5 w-3.5" />
-                        </Button>
+                        >
+                            <template #addon>
+                                <button
+                                    type="button"
+                                    class="flex items-center justify-center text-text-muted hover:text-primary"
+                                    aria-label="Add new customer"
+                                    title="Add new customer"
+                                    @click="openCustomerModal"
+                                >
+                                    <Plus class="h-3.5 w-3.5" />
+                                </button>
+                            </template>
+                        </Combobox>
+                        <p id="sale-customer-help" class="mt-1 text-xs text-text-muted">Pick Walk-in customer for a counter sale.</p>
+                        <p v-if="form.errors.customer_id" id="sale-customer-error" class="mt-1 text-sm text-danger" role="alert">{{ form.errors.customer_id }}</p>
                     </div>
-                    <p v-if="form.errors.customer_id" class="mt-1 text-sm text-danger">{{ form.errors.customer_id }}</p>
-                </div>
-                <div>
-                    <label class="mb-1 block text-sm font-semibold text-text-base">Invoice type <span class="text-danger">*</span></label>
-                    <Select v-model="form.invoice_type" :options="invoiceTypeOptions" />
-                    <p v-if="form.errors.invoice_type" class="mt-1 text-sm text-danger">{{ form.errors.invoice_type }}</p>
-                </div>
-                <div>
-                    <label class="mb-1 block text-sm font-semibold text-text-base">Date <span class="text-danger">*</span></label>
-                    <NepaliDateInput v-model="form.date" required />
-                    <p v-if="form.errors.date" class="mt-1 text-sm text-danger">{{ form.errors.date }}</p>
-                </div>
-                <div>
-                    <label class="mb-1 block text-sm font-semibold text-text-base">Store</label>
-                    <Combobox
-                        :model-value="form.store_id"
-                        :options="storeOptions"
-                        placeholder="Default store"
-                        @update:model-value="(v) => (form.store_id = v)"
-                    />
-                    <p v-if="form.errors.store_id" class="mt-1 text-sm text-danger">{{ form.errors.store_id }}</p>
-                </div>
-            </div>
-
-            <div>
-                <label class="mb-1 block text-sm font-semibold text-text-base">Chalani number</label>
-                <Input v-model="form.chalani_number" type="text" placeholder="Optional" class="max-w-[220px]" />
-                <p v-if="form.errors.chalani_number" class="mt-1 text-sm text-danger">{{ form.errors.chalani_number }}</p>
-            </div>
-
-            <div ref="linesEl">
-                <div class="mb-2 grid grid-cols-[1fr_80px_90px_80px_90px_90px_80px_40px_96px_28px] gap-2 text-[10px] font-bold tracking-[.8px] text-text-muted uppercase">
-                    <span>Item</span>
-                    <span>Unit</span>
-                    <span>Quantity</span>
-                    <span>Bonus</span>
-                    <span>MRP</span>
-                    <span>Rate</span>
-                    <span>Discount</span>
-                    <span></span>
-                    <span class="text-right">Total</span>
-                    <span></span>
-                </div>
-
-                <div v-for="(line, index) in form.lines" :key="index" class="mb-2 grid grid-cols-[1fr_80px_90px_80px_90px_90px_80px_40px_96px_28px] items-start gap-2">
                     <div>
+                        <label for="sale-date" class="mb-1 block text-sm font-semibold text-text-base">Sale date (BS) <span class="text-danger" aria-hidden="true">*</span></label>
+                        <NepaliDateInput v-model="form.date" required aria-describedby="sale-date-help sale-date-error" />
+                        <p id="sale-date-help" class="mt-1 text-xs text-text-muted">Bikram Sambat (Nepali) date of the bill.</p>
+                        <p v-if="form.errors.date" id="sale-date-error" class="mt-1 text-sm text-danger" role="alert">{{ form.errors.date }}</p>
+                    </div>
+                    <div>
+                        <label for="sale-chalani" class="mb-1 block text-sm font-semibold text-text-base">Chalani (delivery challan) number</label>
+                        <Input id="sale-chalani" v-model="form.chalani_number" type="text" placeholder="Optional" aria-describedby="sale-chalani-help sale-chalani-error" />
+                        <p id="sale-chalani-help" class="mt-1 text-xs text-text-muted">Only needed if this bill travels with a delivery challan.</p>
+                        <p v-if="form.errors.chalani_number" id="sale-chalani-error" class="mt-1 text-sm text-danger" role="alert">{{ form.errors.chalani_number }}</p>
+                    </div>
+                </div>
+            </Card>
+
+            <!-- Items: staging row + the bill's committed lines, merged into
+                 one section instead of two separate cards. -->
+            <Card variant="panel" class="!p-4">
+                <div class="mb-3 flex items-center justify-between">
+                    <div class="text-[10px] font-bold tracking-[.8px] text-text-muted uppercase">Items</div>
+                    <button type="button" class="text-xs font-semibold text-primary" @click="showLineExtras = !showLineExtras">
+                        {{ showLineExtras ? 'Hide' : 'Show' }} bonus &amp; MRP columns
+                    </button>
+                </div>
+
+                <div ref="stagingLineEl" class="grid grid-cols-[2.2fr_1fr_0.8fr_1fr_1.2fr] items-end gap-3">
+                    <div ref="stagingItemEl">
+                        <label class="mb-1 block text-sm font-semibold text-text-base">Item or scan barcode</label>
                         <Combobox
-                            :model-value="line.item_id"
+                            :model-value="stagingLine.item_id"
                             :options="itemOptions"
-                            placeholder="Select item"
-                            @update:model-value="(v) => selectLineItem(line, v)"
+                            placeholder="Search or scan barcode"
+                            @update:model-value="selectStagingItem"
                         />
-                        <!-- Stock is always quoted in the item's own base unit
-                             with that unit named, plus the conversion factor
-                             when the line is entered in an alternate unit -
-                             the cashier can see both numbers instead of a
-                             base-unit figure silently labelled as Boxes. -->
-                        <p v-if="itemsById[line.item_id]?.current_stock != null" class="mt-1 text-xs text-text-muted">
-                            Stock: {{ formatQuantity(itemsById[line.item_id].current_stock) }} {{ itemsById[line.item_id].unit }}
-                            <span v-if="line.item_unit_id">
-                                (1 {{ itemsById[line.item_id].units.find((u) => u.id === line.item_unit_id)?.name }} =
-                                {{ formatQuantity(itemsById[line.item_id].units.find((u) => u.id === line.item_unit_id)?.conversion_factor ?? 1) }}
-                                {{ itemsById[line.item_id].unit }})
-                            </span>
-                        </p>
-                        <p v-if="form.errors[`lines.${index}.item_id`]" class="mt-1 text-xs text-danger">
-                            {{ form.errors[`lines.${index}.item_id`] }}
-                        </p>
                     </div>
                     <div>
+                        <label class="mb-1 block text-sm font-semibold text-text-base">Unit</label>
                         <Select
-                            v-if="itemsById[line.item_id]?.units?.length"
-                            :model-value="line.item_unit_id"
-                            :options="unitOptionsFor(itemsById[line.item_id])"
-                            @update:model-value="(v) => selectLineUnit(line, v)"
+                            v-if="stagingItem?.units?.length"
+                            :model-value="stagingLine.item_unit_id"
+                            :options="unitOptionsFor(stagingItem)"
+                            @update:model-value="selectStagingUnit"
                         />
-                        <span v-else class="block pt-2 text-xs text-text-muted">{{ itemsById[line.item_id]?.unit ?? '—' }}</span>
+                        <span v-else class="block h-9 pt-2 text-xs text-text-muted">{{ stagingItem?.unit ?? '-' }}</span>
                     </div>
-                    <!-- No min="0": a negative quantity is a valid in-bill
-                         return/adjustment line (see SaleController::store()'s
-                         validation comment). -->
-                    <div :data-line-field="`quantity-${index}`">
+                    <div ref="stagingQuantityEl" data-staging-field="quantity">
+                        <label class="mb-1 block text-sm font-semibold text-text-base">Quantity</label>
                         <Input
-                            v-model="line.quantity"
+                            v-model="stagingLine.quantity"
                             type="number"
                             step="0.0001"
                             placeholder="0"
-                            required
-                            @keydown.enter.prevent="onLineEnter(index, 'quantity')"
-                        />
-                        <p v-if="form.errors[`lines.${index}.quantity`]" class="mt-1 text-xs text-danger">
-                            {{ form.errors[`lines.${index}.quantity`] }}
-                        </p>
-                    </div>
-                    <!-- Free / bonus units handed over with the line: they
-                         move stock but are never priced, so the preview and
-                         the bill total below ignore them entirely (audit
-                         section 3 "Sales"). -->
-                    <div>
-                        <Input
-                            v-model="line.bonus_quantity"
-                            type="number"
-                            min="0"
-                            step="0.0001"
-                            placeholder="0"
-                            title="Free units given with this line - moves stock, never billed"
-                        />
-                        <p v-if="form.errors[`lines.${index}.bonus_quantity`]" class="mt-1 text-xs text-danger">
-                            {{ form.errors[`lines.${index}.bonus_quantity`] }}
-                        </p>
-                    </div>
-                    <!-- MRP / VAT-inclusive entry: typing the sticker price
-                         fills Rate to the right with MRP / 1.13 for a vatable
-                         line (applyLineMrp()). Browser-only - the server is
-                         sent the rate, never the MRP. -->
-                    <div>
-                        <!-- Explicit :model-value + @update:model-value rather
-                             than v-model: the rate has to be recalculated from
-                             the value the cashier just typed, and a plain
-                             @input listener would fire before v-model had
-                             written it back. -->
-                        <Input
-                            :model-value="line.mrp"
-                            type="number"
-                            min="0"
-                            step="0.0001"
-                            placeholder="Incl. VAT"
-                            title="VAT-inclusive price: fills Rate with MRP / (1 + VAT%)"
-                            @update:model-value="(v) => applyLineMrp(line, v)"
+                            @keydown.enter.prevent="onStagingEnter('quantity')"
                         />
                     </div>
-                    <div :data-line-field="`rate-${index}`">
+                    <div data-staging-field="rate">
+                        <label class="mb-1 block text-sm font-semibold text-text-base">Rate</label>
                         <Input
-                            v-model="line.rate"
+                            v-model="stagingLine.rate"
                             type="number"
                             min="0"
                             step="0.0001"
                             placeholder="0.00"
-                            required
-                            @keydown.enter.prevent="onLineEnter(index, 'rate')"
-                        />
-                        <p v-if="form.errors[`lines.${index}.rate`]" class="mt-1 text-xs text-danger">
-                            {{ form.errors[`lines.${index}.rate`] }}
-                        </p>
-                    </div>
-                    <div :data-line-field="`discount-${index}`">
-                        <Input
-                            v-model="line.discount"
-                            type="number"
-                            min="0"
-                            step="0.01"
-                            :max="line.discount_type === 'percentage' ? 100 : undefined"
-                            :placeholder="line.discount_type === 'percentage' ? '%' : 'Rs'"
-                            @keydown.enter.prevent="onLineEnter(index, 'discount')"
+                            @keydown.enter.prevent="onStagingEnter('rate')"
                         />
                     </div>
-                    <button
-                        type="button"
-                        class="flex h-9 w-full items-center justify-center border-[1.5px] border-border bg-bg-subtle text-[10px] font-bold text-text-muted hover:border-primary hover:text-primary"
-                        title="Click to switch between % and Rs discount"
-                        @click="toggleLineDiscountType(index)"
-                    >
-                        {{ line.discount_type === 'percentage' ? '%' : 'Rs' }}
-                    </button>
-                    <span class="block pt-2 text-right text-[13px] font-semibold text-text-strong">
-                        {{ lineTotal(index) === null ? '—' : formatMoney(lineTotal(index)) }}
-                    </span>
-                    <button
-                        v-if="form.lines.length > 1"
-                        type="button"
-                        class="mt-2 flex h-7 w-7 items-center justify-center text-text-muted transition-colors duration-150 hover:text-danger"
-                        aria-label="Remove line"
-                        @click="removeLine(index)"
-                    >
-                        <X class="h-3.5 w-3.5" />
-                    </button>
+                    <div class="flex items-end gap-2">
+                        <div data-staging-field="discount" class="flex-1">
+                            <label class="mb-1 block text-sm font-semibold text-text-base">Discount</label>
+                            <Input
+                                v-model="stagingLine.discount"
+                                type="number"
+                                min="0"
+                                step="0.01"
+                                :max="stagingLine.discount_type === 'percentage' ? 100 : undefined"
+                                :placeholder="stagingLine.discount_type === 'percentage' ? '%' : 'Rs'"
+                                @keydown.enter.prevent="onStagingEnter('discount')"
+                            >
+                                <template #addon>
+                                    <button
+                                        type="button"
+                                        class="flex h-9 w-9 shrink-0 items-center justify-center text-[10px] font-bold text-text-muted hover:text-primary"
+                                        title="Click to switch between % and Rs discount"
+                                        aria-label="Discount type: switch between percent and rupees"
+                                        @click="toggleStagingDiscountType"
+                                    >
+                                        {{ stagingLine.discount_type === 'percentage' ? '%' : 'Rs' }}
+                                    </button>
+                                </template>
+                            </Input>
+                        </div>
+                        <Button variant="primary" tone="purple" type="button" :disabled="!canAddStagingLine" @click="addStagingLine">
+                            <Plus class="h-3.5 w-3.5" /> Add item
+                        </Button>
+                    </div>
                 </div>
 
-                <Button variant="secondary" tone="purple" type="button" class="mt-1" @click="addLine">
-                    <Plus class="h-3.5 w-3.5" /> Add line
-                </Button>
-            </div>
+                <Transition name="extras">
+                    <div v-if="showLineExtras" class="mt-3 grid grid-cols-2 gap-3 sm:[grid-template-columns:2.2fr_1fr_0.8fr_1fr_1.2fr]">
+                        <div class="sm:col-start-3">
+                            <label class="mb-1 block text-sm font-semibold text-text-base">Bonus</label>
+                            <Input
+                                v-model="stagingLine.bonus_quantity"
+                                type="number"
+                                min="0"
+                                step="0.0001"
+                                placeholder="0"
+                                title="Free units given with this line - moves stock, never billed"
+                            />
+                        </div>
+                        <div class="sm:col-start-4">
+                            <label class="mb-1 block text-sm font-semibold text-text-base">MRP</label>
+                            <Input
+                                :model-value="stagingLine.mrp"
+                                type="number"
+                                min="0"
+                                step="0.0001"
+                                placeholder="Incl. VAT"
+                                title="VAT-inclusive price: fills Rate with MRP / (1 + VAT%)"
+                                @update:model-value="applyStagingMrp"
+                            />
+                        </div>
+                    </div>
+                </Transition>
 
-            <div class="grid grid-cols-3 gap-4 border-t-[1.5px] border-border pt-4">
-                <div>
-                    <label class="mb-1 block text-sm font-semibold text-text-base">Header discount</label>
-                    <div class="flex gap-2">
-                        <Input
-                            v-model="form.discount"
-                            type="number"
-                            min="0"
-                            step="0.01"
-                            :max="form.discount_type === 'percentage' ? 100 : undefined"
-                            :placeholder="form.discount_type === 'percentage' ? '%' : '0.00'"
-                        />
+                <!-- Stock now shows directly beside the item name in the search
+                     dropdown (see itemOptions' `meta`), so this only needs to
+                     surface the unit conversion once a non-base unit is picked. -->
+                <div v-if="stagingLine.item_unit_id" class="mt-3 flex items-center gap-2">
+                    <span class="text-xs text-text-muted">
+                        (1 {{ stagingItem.units.find((u) => u.id === stagingLine.item_unit_id)?.name }} =
+                        {{ formatQuantity(stagingItem.units.find((u) => u.id === stagingLine.item_unit_id)?.conversion_factor ?? 1) }}
+                        {{ stagingItem.unit }})
+                    </span>
+                </div>
+
+                <div class="my-4 border-t border-border" />
+
+                <div class="mb-3 flex items-center gap-1.5">
+                    <span class="text-[10px] font-bold tracking-[.8px] text-text-muted uppercase">On this bill</span>
+                    <span class="bg-primary-tint px-2 py-0.5 text-[11px] font-bold text-primary">{{ form.lines.length }}</span>
+                </div>
+
+                <p v-if="form.lines.length === 0" class="py-6 text-center text-sm text-text-faint">
+                    No items yet. Search or scan an item above, enter quantity and rate, then press "Add item" (or Enter) to put it on the bill.
+                </p>
+
+                <div v-else ref="linesEl">
+                    <div
+                        class="mb-2 grid gap-2 text-[10px] font-bold tracking-[.8px] text-text-muted uppercase transition-[grid-template-columns] duration-150"
+                        :style="{ gridTemplateColumns: lineGridColumns }"
+                    >
+                        <span>Item</span>
+                        <span>Unit</span>
+                        <span class="text-right">Qty</span>
+                        <template v-if="showLineExtras">
+                            <span>Bonus (free)</span>
+                            <span>MRP (incl. VAT)</span>
+                        </template>
+                        <span class="text-right">Rate</span>
+                        <span class="text-right">Discount</span>
+                        <span class="text-right">Amount</span>
+                        <span class="sr-only">Remove</span>
+                    </div>
+
+                    <div
+                        v-for="(line, index) in form.lines"
+                        :key="index"
+                        class="mb-2 grid items-start gap-2 transition-[grid-template-columns] duration-150"
+                        :style="{ gridTemplateColumns: lineGridColumns }"
+                    >
+                        <div>
+                            <Combobox
+                                :model-value="line.item_id"
+                                :options="itemOptions"
+                                placeholder="Select item"
+                                @update:model-value="(v) => selectLineItem(line, v)"
+                            />
+                            <!-- Stock is always quoted in the item's own base unit
+                                 with that unit named, plus the conversion factor
+                                 when the line is entered in an alternate unit -
+                                 the cashier can see both numbers instead of a
+                                 base-unit figure silently labelled as Boxes. A
+                                 coloured badge (not just text) flags low/out of
+                                 stock, alongside the line's own VAT status. -->
+                            <p v-if="itemsById[line.item_id]?.current_stock != null" class="mt-1 flex flex-wrap items-center gap-1">
+                                <span
+                                    v-if="stockStatus(itemsById[line.item_id])"
+                                    class="inline-flex px-1.5 py-0.5 text-[10px] font-bold"
+                                    :class="stockStatus(itemsById[line.item_id]) === 'out' ? 'bg-danger-bg text-danger' : 'bg-[#FEF9C3] text-[#92400E]'"
+                                >
+                                    {{ stockStatus(itemsById[line.item_id]) === 'out' ? 'Out of stock' : 'Low stock' }}
+                                </span>
+                                <span
+                                    class="inline-flex px-1.5 py-0.5 text-[10px] font-bold"
+                                    :class="itemsById[line.item_id]?.is_vatable ? 'bg-[#D9EDF7] text-[#245269]' : 'bg-[#EEEEEE] text-[#555555]'"
+                                >
+                                    {{ itemsById[line.item_id]?.is_vatable ? `VAT ${effectiveVatRate}%` : 'Non taxable' }}
+                                </span>
+                                <span class="text-xs text-text-muted">
+                                    Stock: {{ formatQuantity(itemsById[line.item_id].current_stock) }} {{ itemsById[line.item_id].unit }}
+                                    <template v-if="line.item_unit_id">
+                                        (1 {{ itemsById[line.item_id].units.find((u) => u.id === line.item_unit_id)?.name }} =
+                                        {{ formatQuantity(itemsById[line.item_id].units.find((u) => u.id === line.item_unit_id)?.conversion_factor ?? 1) }}
+                                        {{ itemsById[line.item_id].unit }})
+                                    </template>
+                                </span>
+                            </p>
+                            <p v-if="form.errors[`lines.${index}.item_id`]" class="mt-1 text-xs text-danger">
+                                {{ form.errors[`lines.${index}.item_id`] }}
+                            </p>
+                        </div>
+                        <div>
+                            <Select
+                                v-if="itemsById[line.item_id]?.units?.length"
+                                :model-value="line.item_unit_id"
+                                :options="unitOptionsFor(itemsById[line.item_id])"
+                                @update:model-value="(v) => selectLineUnit(line, v)"
+                            />
+                            <span v-else class="block pt-2 text-xs text-text-muted">{{ itemsById[line.item_id]?.unit ?? '-' }}</span>
+                        </div>
+                        <!-- No min="0": a negative quantity is a valid in-bill
+                             return/adjustment line (see SaleController::store()'s
+                             validation comment). -->
+                        <div :data-line-field="`quantity-${index}`">
+                            <Input
+                                v-model="line.quantity"
+                                class="text-right"
+                                type="number"
+                                step="0.0001"
+                                placeholder="0"
+                                required
+                                @keydown.enter.prevent="onLineEnter(index, 'quantity')"
+                            />
+                            <p v-if="form.errors[`lines.${index}.quantity`]" class="mt-1 text-xs text-danger">
+                                {{ form.errors[`lines.${index}.quantity`] }}
+                            </p>
+                        </div>
+                        <!-- Free / bonus units handed over with the line: they
+                             move stock but are never priced, so the preview and
+                             the bill total below ignore them entirely (audit
+                             section 3 "Sales"). -->
+                        <div v-if="showLineExtras">
+                            <Input
+                                v-model="line.bonus_quantity"
+                                type="number"
+                                min="0"
+                                step="0.0001"
+                                placeholder="0"
+                                title="Free units given with this line - moves stock, never billed"
+                            />
+                            <p v-if="form.errors[`lines.${index}.bonus_quantity`]" class="mt-1 text-xs text-danger">
+                                {{ form.errors[`lines.${index}.bonus_quantity`] }}
+                            </p>
+                        </div>
+                        <!-- MRP / VAT-inclusive entry: typing the sticker price
+                             fills Rate to the right with MRP / 1.13 for a vatable
+                             line (applyLineMrp()). Browser-only - the server is
+                             sent the rate, never the MRP. -->
+                        <div v-if="showLineExtras">
+                            <!-- Explicit :model-value + @update:model-value rather
+                                 than v-model: the rate has to be recalculated from
+                                 the value the cashier just typed, and a plain
+                                 @input listener would fire before v-model had
+                                 written it back. -->
+                            <Input
+                                :model-value="line.mrp"
+                                type="number"
+                                min="0"
+                                step="0.0001"
+                                placeholder="Incl. VAT"
+                                title="VAT-inclusive price: fills Rate with MRP / (1 + VAT%)"
+                                @update:model-value="(v) => applyLineMrp(line, v)"
+                            />
+                        </div>
+                        <div :data-line-field="`rate-${index}`">
+                            <Input
+                                v-model="line.rate"
+                                class="text-right"
+                                type="number"
+                                min="0"
+                                step="0.0001"
+                                placeholder="0.00"
+                                required
+                                @keydown.enter.prevent="onLineEnter(index, 'rate')"
+                            />
+                            <p v-if="form.errors[`lines.${index}.rate`]" class="mt-1 text-xs text-danger">
+                                {{ form.errors[`lines.${index}.rate`] }}
+                            </p>
+                        </div>
+                        <div :data-line-field="`discount-${index}`">
+                            <Input
+                                v-model="line.discount"
+                                class="text-right"
+                                type="number"
+                                min="0"
+                                step="0.01"
+                                :max="line.discount_type === 'percentage' ? 100 : undefined"
+                                :placeholder="line.discount_type === 'percentage' ? '%' : 'Rs'"
+                                @keydown.enter.prevent="onLineEnter(index, 'discount')"
+                            >
+                                <template #addon>
+                                    <button
+                                        type="button"
+                                        class="flex h-9 w-9 shrink-0 items-center justify-center text-[10px] font-bold text-text-muted hover:text-primary"
+                                        title="Click to switch between % and Rs discount"
+                                        :aria-label="`Discount type for line ${index + 1}: switch between percent and rupees`"
+                                        @click="toggleLineDiscountType(index)"
+                                    >
+                                        {{ line.discount_type === 'percentage' ? '%' : 'Rs' }}
+                                    </button>
+                                </template>
+                            </Input>
+                        </div>
+                        <span class="block pt-2 text-right text-[13px] font-semibold text-text-strong">
+                            {{ lineTotal(index) === null ? '-' : formatMoney(lineTotal(index)) }}
+                        </span>
                         <button
                             type="button"
-                            class="flex h-9 w-10 shrink-0 items-center justify-center border-[1.5px] border-border bg-bg-subtle text-[10px] font-bold text-text-muted hover:border-primary hover:text-primary"
-                            title="Click to switch between % and Rs discount"
-                            @click="toggleHeaderDiscountType"
+                            class="mt-2 flex h-7 w-7 items-center justify-center text-text-muted transition-colors duration-150 hover:text-danger"
+                            :aria-label="`Remove ${itemsById[line.item_id]?.name ?? 'item'} (line ${index + 1}) from bill`"
+                            :title="`Remove line ${index + 1}`"
+                            @click="removeLine(index)"
                         >
-                            {{ form.discount_type === 'percentage' ? '%' : 'Rs' }}
+                            <X class="h-3.5 w-3.5" />
                         </button>
                     </div>
                 </div>
-                <div>
-                    <label class="mb-1 block text-sm font-semibold text-text-base">VAT rate (%)</label>
-                    <!-- Read-only: the server always uses the tenant's
-                         configured rate and ignores anything sent here. -->
-                    <p class="flex h-9 items-center border-[1.5px] border-border bg-bg-subtle px-3 text-[13px] font-semibold text-text-muted">
-                        {{ formatRate(effectiveVatRate) }}
-                        <span v-if="isPanInvoice" class="ml-2 text-xs font-normal">(PAN invoice: no VAT)</span>
-                    </p>
-                </div>
-                <div>
-                    <label class="mb-1 block text-sm font-semibold text-text-base">Payment mode <span class="text-danger">*</span></label>
-                    <Select v-model="form.payment_mode" :options="paymentModeOptions" />
-                </div>
+
+                <p v-if="previewError" class="mt-2 border-[1.5px] border-danger bg-danger-bg px-3 py-2 text-sm text-danger">
+                    {{ previewError }}
+                </p>
+            </Card>
+
+            <!-- Payment and Notes side by side - both are quick, secondary
+                 fields that don't need a full-width row each. -->
+            <div class="grid grid-cols-1 items-start gap-4 lg:grid-cols-2">
+                <!-- Payment: its own clearly-labelled section - burying this
+                     inside a generic "Notes" card made it too easy to miss that
+                     the payment type/details live down here now. -->
+                <Card variant="panel" class="!p-4">
+                    <template #title>
+                        <div class="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-0.5">
+                            <span>Payment</span>
+                            <span id="sale-payment-help" class="text-[11px] font-normal normal-case tracking-normal text-text-muted">
+                                Credit = customer pays later and the amount goes on their account.
+                            </span>
+                        </div>
+                    </template>
+                    <div class="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                        <div>
+                            <label for="sale-payment-mode" class="mb-1 block text-sm font-semibold text-text-base">Payment type <span class="text-danger" aria-hidden="true">*</span></label>
+                            <Select id="sale-payment-mode" v-model="form.payment_mode" :options="paymentModeOptions" aria-describedby="sale-payment-help" />
+                        </div>
+                        <div v-if="showBankField">
+                            <label class="mb-1 block text-sm font-semibold text-text-base">Bank account <span class="text-danger">*</span></label>
+                            <Combobox
+                                :model-value="form.bank_account_id"
+                                :options="bankAccountOptions"
+                                placeholder="Select bank account"
+                                @update:model-value="(v) => (form.bank_account_id = v)"
+                            />
+                            <p v-if="form.errors.bank_account_id" class="mt-1 text-sm text-danger">{{ form.errors.bank_account_id }}</p>
+                        </div>
+                    </div>
+
+                    <div v-if="showPartialFields" class="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2">
+                        <div>
+                            <label for="sale-cash-amount" class="mb-1 block text-sm font-semibold text-text-base">Cash received (Rs) <span class="text-danger" aria-hidden="true">*</span></label>
+                            <Input id="sale-cash-amount" v-model="form.cash_amount" type="number" min="0" step="0.01" placeholder="0.00" required aria-describedby="sale-cash-error" />
+                            <p v-if="form.errors.cash_amount" id="sale-cash-error" class="mt-1 text-sm text-danger" role="alert">{{ form.errors.cash_amount }}</p>
+                        </div>
+                        <div>
+                            <label for="sale-bank-amount" class="mb-1 block text-sm font-semibold text-text-base">Bank received (Rs) <span class="text-danger" aria-hidden="true">*</span></label>
+                            <Input id="sale-bank-amount" v-model="form.bank_amount" type="number" min="0" step="0.01" placeholder="0.00" required aria-describedby="sale-bank-error" />
+                            <p v-if="form.errors.bank_amount" id="sale-bank-error" class="mt-1 text-sm text-danger" role="alert">{{ form.errors.bank_amount }}</p>
+                        </div>
+                    </div>
+                </Card>
+
+                <!-- Notes: narration only - kept as its own, visually lighter
+                     section now that Payment has its own card. -->
+                <Card variant="panel" title="Notes" class="!p-4">
+                    <label for="sale-narration" class="mb-1 block text-sm font-semibold text-text-base">Narration (printed on the bill)</label>
+                    <div class="flex gap-2">
+                        <Input id="sale-narration" v-model="form.narration" type="text" placeholder="Optional" class="flex-1">
+                            <template #addon>
+                                <button
+                                    type="button"
+                                    class="flex h-9 w-9 shrink-0 items-center justify-center text-text-muted hover:text-primary disabled:cursor-not-allowed disabled:opacity-50"
+                                    title="Save this narration as a reusable note"
+                                    :disabled="!form.narration.trim() || noteTemplateForm.processing"
+                                    @click="saveNoteTemplate"
+                                >
+                                    <Plus class="h-3.5 w-3.5" />
+                                </button>
+                            </template>
+                        </Input>
+                        <!-- Saved-note picker (audit section 4 polish, "note
+                             templates"): fills Narration above, still freely
+                             editable afterwards. -->
+                        <Select
+                            v-if="noteTemplateOptions.length"
+                            :model-value="null"
+                            :options="noteTemplateOptions"
+                            placeholder="Saved notes"
+                            class="w-48"
+                            @update:model-value="applyNoteTemplate"
+                        />
+                    </div>
+                </Card>
             </div>
 
-            <div v-if="showBankField" class="grid grid-cols-2 gap-4">
-                <div>
-                    <label class="mb-1 block text-sm font-semibold text-text-base">Bank account <span class="text-danger">*</span></label>
-                    <Combobox
-                        :model-value="form.bank_account_id"
-                        :options="bankAccountOptions"
-                        placeholder="Select bank account"
-                        @update:model-value="(v) => (form.bank_account_id = v)"
-                    />
-                    <p v-if="form.errors.bank_account_id" class="mt-1 text-sm text-danger">{{ form.errors.bank_account_id }}</p>
-                </div>
-            </div>
+            <!-- Toggled from the sticky bar below (left side, chevron
+                 indicator) - the panel itself still renders here, directly
+                 above the totals, so it never fights the floating bar for
+                 space. -->
+            <Transition name="extras">
+                <div v-if="showMoreOptions" class="flex flex-col gap-4 border-[1.5px] border-border bg-bg-subtle p-4">
+                    <div class="grid grid-cols-2 gap-4">
+                        <div v-if="storeOptions.length > 1">
+                            <label class="mb-1 block text-sm font-semibold text-text-base">Store (stock is taken from here)</label>
+                            <Combobox
+                                :model-value="form.store_id"
+                                :options="storeOptions"
+                                placeholder="Default store"
+                                @update:model-value="(v) => (form.store_id = v)"
+                            />
+                            <p v-if="form.errors.store_id" class="mt-1 text-sm text-danger">{{ form.errors.store_id }}</p>
+                        </div>
+                        <div>
+                            <label class="mb-1 block text-sm font-semibold text-text-base">Discount on whole bill</label>
+                            <p class="mb-1 text-xs text-text-muted">Applied to the subtotal. Use % or Rs with the button.</p>
+                            <Input
+                                v-model="form.discount"
+                                type="number"
+                                min="0"
+                                step="0.01"
+                                :max="form.discount_type === 'percentage' ? 100 : undefined"
+                                :placeholder="form.discount_type === 'percentage' ? '%' : '0.00'"
+                            >
+                                <template #addon>
+                                    <button
+                                        type="button"
+                                        class="flex h-9 w-9 shrink-0 items-center justify-center text-[10px] font-bold text-text-muted hover:text-primary"
+                                        title="Click to switch between % and Rs discount"
+                                        aria-label="Bill discount type: switch between percent and rupees"
+                                        @click="toggleHeaderDiscountType"
+                                    >
+                                        {{ form.discount_type === 'percentage' ? '%' : 'Rs' }}
+                                    </button>
+                                </template>
+                            </Input>
+                        </div>
+                    </div>
 
-            <div v-if="showPartialFields" class="grid grid-cols-2 gap-4">
-                <div>
-                    <label class="mb-1 block text-sm font-semibold text-text-base">Cash amount <span class="text-danger">*</span></label>
-                    <Input v-model="form.cash_amount" type="number" min="0" step="0.01" placeholder="0.00" required />
-                    <p v-if="form.errors.cash_amount" class="mt-1 text-sm text-danger">{{ form.errors.cash_amount }}</p>
-                </div>
-                <div>
-                    <label class="mb-1 block text-sm font-semibold text-text-base">Bank amount <span class="text-danger">*</span></label>
-                    <Input v-model="form.bank_amount" type="number" min="0" step="0.01" placeholder="0.00" required />
-                    <p v-if="form.errors.bank_amount" class="mt-1 text-sm text-danger">{{ form.errors.bank_amount }}</p>
-                </div>
-            </div>
+                    <div class="grid grid-cols-2 gap-4">
+                        <div>
+                            <label class="mb-1 block text-sm font-semibold text-text-base">TDS account (optional)</label>
+                            <p class="mb-1 text-xs text-text-muted">TDS = tax the customer deducts at source and pays to the government.</p>
+                            <Combobox
+                                :model-value="form.tds_account_id"
+                                :options="tdsAccountOptions"
+                                placeholder="Select TDS account"
+                                @update:model-value="(v) => (form.tds_account_id = v)"
+                            />
+                            <p v-if="form.errors.tds_account_id" class="mt-1 text-sm text-danger">{{ form.errors.tds_account_id }}</p>
+                        </div>
+                        <div>
+                            <label class="mb-1 block text-sm font-semibold text-text-base">TDS amount</label>
+                            <Input v-model="form.tds_amount" type="number" min="0" step="0.01" placeholder="0.00" />
+                            <p v-if="form.errors.tds_amount" class="mt-1 text-sm text-danger">{{ form.errors.tds_amount }}</p>
+                        </div>
+                    </div>
 
-            <div class="grid grid-cols-2 gap-4 border-t-[1.5px] border-border pt-4">
-                <div>
-                    <label class="mb-1 block text-sm font-semibold text-text-base">TDS account (optional)</label>
-                    <Combobox
-                        :model-value="form.tds_account_id"
-                        :options="tdsAccountOptions"
-                        placeholder="Select TDS account"
-                        @update:model-value="(v) => (form.tds_account_id = v)"
-                    />
-                    <p v-if="form.errors.tds_account_id" class="mt-1 text-sm text-danger">{{ form.errors.tds_account_id }}</p>
+                    <div class="grid grid-cols-2 gap-4">
+                        <div>
+                            <label class="mb-1 block text-sm font-semibold text-text-base">Sales agent (optional)</label>
+                            <p class="mb-1 text-xs text-text-muted">Agent who brought this sale; earns the commission below.</p>
+                            <Combobox
+                                :model-value="form.agent_id"
+                                :options="agentOptions"
+                                placeholder="Select agent"
+                                @update:model-value="selectAgent"
+                            />
+                            <p v-if="form.errors.agent_id" class="mt-1 text-sm text-danger">{{ form.errors.agent_id }}</p>
+                        </div>
+                        <div>
+                            <label class="mb-1 block text-sm font-semibold text-text-base">Commission amount</label>
+                            <Input v-model="form.commission_amount" type="number" min="0" step="0.01" placeholder="0.00" :disabled="!form.agent_id" />
+                            <p v-if="form.errors.commission_amount" class="mt-1 text-sm text-danger">{{ form.errors.commission_amount }}</p>
+                        </div>
+                    </div>
                 </div>
-                <div>
-                    <label class="mb-1 block text-sm font-semibold text-text-base">TDS amount</label>
-                    <Input v-model="form.tds_amount" type="number" min="0" step="0.01" placeholder="0.00" />
-                    <p v-if="form.errors.tds_amount" class="mt-1 text-sm text-danger">{{ form.errors.tds_amount }}</p>
-                </div>
-            </div>
+            </Transition>
 
-            <div class="grid grid-cols-2 gap-4 border-t-[1.5px] border-border pt-4">
-                <div>
-                    <label class="mb-1 block text-sm font-semibold text-text-base">Sales agent (optional)</label>
-                    <Combobox
-                        :model-value="form.agent_id"
-                        :options="agentOptions"
-                        placeholder="Select agent"
-                        @update:model-value="selectAgent"
-                    />
-                    <p v-if="form.errors.agent_id" class="mt-1 text-sm text-danger">{{ form.errors.agent_id }}</p>
+            <!-- Totals + actions: pinned to the bottom of the scroll area so a
+                 long bill's grand total and Save buttons never scroll out of
+                 view (audit UX pass). -->
+            <div class="sticky bottom-0 z-10 flex flex-col gap-3 border-[1.5px] border-border bg-white px-4 py-3 shadow-[0_-4px_16px_rgba(0,0,0,.08)]">
+                <!-- Subtotal, Discount, Taxable, Non-taxable, VAT, Total: the same
+                     order and the same six figures the printed bill shows, so the
+                     cashier can reconcile the screen against the paper line by
+                     line instead of having to trust that Taxable + VAT reaches the
+                     Total on a mixed bill. -->
+                <div v-if="totals" class="border-[1.5px] border-border">
+                    <table class="w-full table-auto border-collapse text-sm">
+                        <thead>
+                            <tr class="divide-x divide-border border-b-[1.5px] border-border bg-bg-subtle">
+                                <th class="px-3 py-1.5 text-left text-[10px] font-bold tracking-[.8px] text-text-muted uppercase">Subtotal</th>
+                                <th class="px-3 py-1.5 text-left text-[10px] font-bold tracking-[.8px] text-text-muted uppercase">Discount</th>
+                                <th class="px-3 py-1.5 text-left text-[10px] font-bold tracking-[.8px] text-text-muted uppercase" title="Amount on which VAT is charged">Taxable amount</th>
+                                <th class="px-3 py-1.5 text-left text-[10px] font-bold tracking-[.8px] text-text-muted uppercase" title="Amount with no VAT">Non-taxable amount</th>
+                                <th class="px-3 py-1.5 text-left text-[10px] font-bold tracking-[.8px] text-text-muted uppercase" title="Value Added Tax">VAT</th>
+                                <th class="bg-primary-tint px-3 py-1.5 text-left text-[10px] font-bold tracking-[.8px] text-primary uppercase">Total to pay</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <tr class="divide-x divide-border">
+                                <td class="px-3 py-1.5 font-bold text-text-strong">{{ formatMoney(addMoney(totals.vatable_subtotal, totals.non_vatable_subtotal)) }}</td>
+                                <td class="px-3 py-1.5 font-bold text-text-strong">{{ formatMoney(totals.header_discount) }}</td>
+                                <td class="px-3 py-1.5 font-bold text-text-strong">{{ formatMoney(totals.taxable_amount) }}</td>
+                                <td class="px-3 py-1.5 font-bold text-text-strong">{{ formatMoney(totals.nontaxable_amount) }}</td>
+                                <td class="px-3 py-1.5 font-bold text-text-strong">{{ formatMoney(totals.vat_amount) }}</td>
+                                <td class="bg-primary-tint px-3 py-1.5 text-base font-extrabold text-primary">{{ formatMoney(totals.total) }}</td>
+                            </tr>
+                        </tbody>
+                    </table>
                 </div>
-                <div>
-                    <label class="mb-1 block text-sm font-semibold text-text-base">Commission amount</label>
-                    <Input v-model="form.commission_amount" type="number" min="0" step="0.01" placeholder="0.00" :disabled="!form.agent_id" />
-                    <p v-if="form.errors.commission_amount" class="mt-1 text-sm text-danger">{{ form.errors.commission_amount }}</p>
-                </div>
-            </div>
 
-            <div>
-                <label class="mb-1 block text-sm font-semibold text-text-base">Narration</label>
-                <div class="flex gap-2">
-                    <Input v-model="form.narration" type="text" placeholder="Optional" class="flex-1" />
-                    <!-- Saved-note picker (audit section 4 polish, "note
-                         templates"): fills Narration above, still freely
-                         editable afterwards. -->
-                    <Select
-                        v-if="noteTemplateOptions.length"
-                        :model-value="null"
-                        :options="noteTemplateOptions"
-                        placeholder="Saved notes"
-                        class="w-48"
-                        @update:model-value="applyNoteTemplate"
-                    />
-                    <Button
-                        variant="secondary"
-                        tone="purple"
+                <p v-if="totals && showPartialFields && !partialBalanced" class="text-xs font-semibold text-danger">
+                    Cash + bank amounts must add up to exactly {{ formatMoney(totals.settlement_due) }}.
+                </p>
+
+                <div class="flex items-center justify-between gap-2">
+                    <button
                         type="button"
-                        class="!px-2.5"
-                        title="Save this narration as a reusable note"
-                        :disabled="!form.narration.trim() || noteTemplateForm.processing"
-                        @click="saveNoteTemplate"
+                        class="flex items-center gap-1 text-xs font-semibold text-text-muted hover:text-primary"
+                        @click="showMoreOptions = !showMoreOptions"
                     >
-                        <Plus class="h-3.5 w-3.5" />
+                        <ChevronUp v-if="showMoreOptions" class="h-3.5 w-3.5" />
+                        <ChevronDown v-else class="h-3.5 w-3.5" />
+                        Charges &amp; more options (store, bill discount, TDS, agent)
+                    </button>
+
+                    <div class="flex items-center gap-2">
+                    <Button variant="secondary" tone="purple" type="button" @click="requestCancel">Cancel</Button>
+                    <div class="flex">
+                        <Button
+                            variant="secondary"
+                            tone="purple"
+                            type="button"
+                            class="!rounded-r-none"
+                            :disabled="!canSubmit"
+                            @click="submitAndPrint(printCopies)"
+                        >
+                            Save &amp; Print ({{ printCopies }} {{ printCopies === 1 ? 'copy' : 'copies' }})
+                        </Button>
+                        <DropdownMenu align="end">
+                            <template #trigger>
+                                <Button variant="secondary" tone="purple" type="button" class="!rounded-l-none !border-l-0 !px-2" :disabled="!canSubmit">
+                                    <ChevronDown class="size-3.5" />
+                                </Button>
+                            </template>
+                            <DropdownMenuItem v-for="n in PRINT_COPY_OPTIONS" :key="n" @select="submitAndPrint(n)">
+                                {{ n }} {{ n === 1 ? 'copy' : 'copies' }}
+                            </DropdownMenuItem>
+                        </DropdownMenu>
+                    </div>
+                    <Button variant="primary" tone="purple" type="submit" :loading="form.processing" :disabled="!canSubmit">
+                        {{ form.processing ? 'Posting...' : 'Save & post sale' }}
                     </Button>
+                    <p v-if="!canSubmit && !form.processing" class="sr-only" role="status">
+                        Choose a customer and date and add at least one item to save.
+                    </p>
+                    </div>
                 </div>
-            </div>
-
-            <p v-if="previewError" class="border-[1.5px] border-danger bg-danger-bg px-3 py-2 text-sm text-danger">
-                {{ previewError }}
-            </p>
-
-            <!-- Subtotal, Discount, Taxable, Non-taxable, VAT, Total: the same
-                 order and the same six figures the printed bill shows, so the
-                 cashier can reconcile the screen against the paper line by
-                 line instead of having to trust that Taxable + VAT reaches the
-                 Total on a mixed bill. -->
-            <div v-if="totals" class="grid grid-cols-6 gap-2 border-t-[1.5px] border-border pt-3 text-sm">
-                <div>
-                    <p class="text-[10px] font-bold tracking-[.8px] text-text-muted uppercase">Subtotal</p>
-                    <p class="font-bold text-text-strong">{{ formatMoney(addMoney(totals.vatable_subtotal, totals.non_vatable_subtotal)) }}</p>
-                </div>
-                <div>
-                    <p class="text-[10px] font-bold tracking-[.8px] text-text-muted uppercase">Discount</p>
-                    <p class="font-bold text-text-strong">{{ formatMoney(totals.header_discount) }}</p>
-                </div>
-                <div>
-                    <p class="text-[10px] font-bold tracking-[.8px] text-text-muted uppercase">Taxable</p>
-                    <p class="font-bold text-text-strong">{{ formatMoney(totals.taxable_amount) }}</p>
-                </div>
-                <div>
-                    <p class="text-[10px] font-bold tracking-[.8px] text-text-muted uppercase">Non-taxable</p>
-                    <p class="font-bold text-text-strong">{{ formatMoney(totals.nontaxable_amount) }}</p>
-                </div>
-                <div>
-                    <p class="text-[10px] font-bold tracking-[.8px] text-text-muted uppercase">VAT</p>
-                    <p class="font-bold text-text-strong">{{ formatMoney(totals.vat_amount) }}</p>
-                </div>
-                <div>
-                    <p class="text-[10px] font-bold tracking-[.8px] text-text-muted uppercase">Total</p>
-                    <p class="font-bold text-text-strong">{{ formatMoney(totals.total) }}</p>
-                </div>
-            </div>
-
-            <p v-if="totals && showPartialFields && !partialBalanced" class="text-xs font-semibold text-danger">
-                Cash + bank amounts must add up to exactly {{ formatMoney(totals.settlement_due) }}.
-            </p>
-
-            <div class="flex items-center justify-end gap-2">
-                <Button variant="secondary" tone="purple" type="button" @click="emit('cancel')">Cancel</Button>
-                <Button variant="secondary" tone="purple" type="button" :disabled="!canSubmit" @click="submit(true)">
-                    Save &amp; Print
-                </Button>
-                <Button variant="primary" tone="purple" type="submit" :disabled="!canSubmit">Create Sale</Button>
             </div>
         </form>
-    </Card>
 
     <!-- Quick "+ New customer" -->
     <Modal :open="customerModalOpen" title="New customer" size="compact" @update:open="(v) => (v ? null : closeCustomerModal())">
@@ -972,3 +1347,20 @@ onMounted(() => applyPendingCustomer());
     </Modal>
     </div>
 </template>
+
+<style scoped>
+/* Bonus/MRP staging row and the More-options panel both pop in/out via
+   v-if; without this they'd snap instantly and read as a layout jump
+   rather than an intentional toggle. */
+.extras-enter-active,
+.extras-leave-active {
+    transition:
+        opacity 150ms ease,
+        transform 150ms ease;
+}
+.extras-enter-from,
+.extras-leave-to {
+    opacity: 0;
+    transform: translateY(-4px);
+}
+</style>

@@ -7,6 +7,7 @@ use App\Models\Account;
 use App\Models\Payment;
 use App\Models\Purchase;
 use App\Models\Supplier;
+use App\Rules\AccountUnderHead;
 use App\Support\Money\Money;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
@@ -45,7 +46,7 @@ class PaymentController extends Controller
             'date' => ['required', 'date'],
             'amount' => ['required', 'numeric', 'min:0.01', 'decimal:0,2'],
             'payment_mode' => ['required', 'in:cash,bank'],
-            'bank_account_id' => ['nullable', 'exists:accounts,id'],
+            'bank_account_id' => ['nullable', 'exists:accounts,id', new AccountUnderHead('Assets')],
             'reference_number' => ['nullable', 'string', 'max:255'],
             'narration' => ['nullable', 'string', 'max:255'],
             'allocations' => ['nullable', 'array'],

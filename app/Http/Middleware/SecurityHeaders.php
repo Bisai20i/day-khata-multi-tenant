@@ -10,7 +10,7 @@ class SecurityHeaders
 {
     /**
      * Set a strict CSP and a small set of standard security headers on every
-     * response outside local dev — Vite's dev-mode client injects a
+     * response outside local dev - Vite's dev-mode client injects a
      * cross-origin script tag that a strict script-src would block, and
      * there's no way to verify a dev-mode carve-out without a browser, so
      * local is simply exempted rather than guessed at.

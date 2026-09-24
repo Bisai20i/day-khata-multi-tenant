@@ -6,10 +6,27 @@ use App\Casts\Decimal;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use LogicException;
 
 #[Fillable(['journal_voucher_id', 'account_id', 'debit', 'credit', 'narration'])]
 class JournalVoucherLine extends Model
 {
+    /**
+     * Ledger lines are immutable once written (audit JE-01). Bulk query-builder
+     * writes bypass model events, so the lines FK is also restrictOnDelete
+     * (see the JE-01 migration).
+     */
+    protected static function booted(): void
+    {
+        static::updating(function (): never {
+            throw new LogicException('A journal voucher line is immutable. Post a reversal instead.');
+        });
+
+        static::deleting(function (): never {
+            throw new LogicException('A journal voucher line can never be deleted. Post a reversal instead.');
+        });
+    }
+
     /**
      * Decimal, not `decimal:2`: `decimal:2` let a value with more than two
      * decimals through to the column and left MySQL to round it per line, so

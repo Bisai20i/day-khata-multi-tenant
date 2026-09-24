@@ -13,6 +13,7 @@ use App\Models\Store;
 use App\Models\Supplier;
 use App\Support\Billing\BillingException;
 use App\Support\Money\Money;
+use Illuminate\Auth\Access\AuthorizationException;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Validation\Rule;
@@ -28,10 +29,13 @@ class CapitalPurchaseController extends Controller
     {
         return Inertia::render('Tenant/Purchases/CapitalPurchases/Index', [
             'capitalPurchases' => CapitalPurchase::query()
-                ->with(['supplier:id,name,tpin', 'lines.account:id,code,name', 'journalVoucher:id,voucher_number'])
+                ->with(['supplier:id,name,tpin', 'lines.account:id,code,name', 'journalVoucher:id,voucher_number', 'settlements'])
                 ->orderByDesc('date')
                 ->orderByDesc('id')
-                ->get(),
+                ->get()
+                ->each(function (CapitalPurchase $capitalPurchase): void {
+                    $capitalPurchase->setAttribute('outstanding_amount', $capitalPurchase->outstandingAmount()->toString());
+                }),
             // Exact SQL sum over every capital purchase (item 8, "totals
             // row") - never a page's worth of client-side addition.
             'totals' => [
@@ -41,6 +45,7 @@ class CapitalPurchaseController extends Controller
             ],
             'suppliers' => Supplier::query()->orderBy('name')->get(['id', 'name', 'tpin']),
             'accounts' => Account::query()->orderBy('name')->get(['id', 'code', 'name']),
+            'canCancel' => request()->user()?->role?->slug === 'admin',
             'stores' => Store::where('is_active', true)->orderBy('name')->get(['id', 'name']),
             'defaultVatRate' => (string) (CompanySetting::current()->default_vat_rate ?? '13.00'),
             // Asset register (item 5): only accounts filed under Fixed
@@ -101,6 +106,8 @@ class CapitalPurchaseController extends Controller
                     ? ['expected_total' => 'The bill total changed. Please review it before saving.']
                     : ['lines' => $e->getMessage()]
             );
+        } catch (AuthorizationException $e) {
+            return back()->withErrors(['date' => $e->getMessage()])->withInput();
         } catch (InvalidArgumentException $e) {
             return back()->withErrors(['lines' => $e->getMessage()])->withInput();
         }

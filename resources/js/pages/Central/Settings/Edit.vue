@@ -7,6 +7,7 @@ import { useLayoutChrome } from '@/composables/useLayoutChrome';
 import Card from '@/components/ui/Card.vue';
 import Button from '@/components/ui/Button.vue';
 import Input from '@/components/ui/Input.vue';
+import PageHeader from '@/components/ui/PageHeader.vue';
 import { useToast } from '@/composables/useToast';
 
 defineOptions({ layout: AppLayout });
@@ -53,6 +54,11 @@ function submit() {
     form.put('/settings');
 }
 
+function discard() {
+    form.reset();
+    form.clearErrors();
+}
+
 const sendingTestEmail = ref(false);
 
 function sendTestEmail() {
@@ -66,9 +72,10 @@ function sendTestEmail() {
 
 <template>
     <div>
-        <div class="mb-4 flex items-center justify-between">
-            <h2 class="text-base font-bold text-text-strong">Platform Settings</h2>
-        </div>
+        <PageHeader
+            title="Platform Settings"
+            description="Branding, default trial and grace periods for new tenants, and the email account the platform sends from."
+        />
 
         <form class="flex flex-col gap-4" @submit.prevent="submit">
             <Card variant="panel">
@@ -76,11 +83,13 @@ function sendTestEmail() {
                 <div class="grid grid-cols-2 gap-4">
                     <div>
                         <label for="platform_name" class="mb-1 block text-sm font-semibold text-text-base">Platform name</label>
+                        <p class="mb-1 text-xs text-text-muted">Shown in emails and page titles.</p>
                         <Input id="platform_name" v-model="form.platform_name" type="text" placeholder="e.g. Acme Cloud" />
                         <p v-if="form.errors.platform_name" class="mt-1 text-sm text-danger">{{ form.errors.platform_name }}</p>
                     </div>
                     <div>
                         <label for="support_email" class="mb-1 block text-sm font-semibold text-text-base">Support email</label>
+                        <p class="mb-1 text-xs text-text-muted">Where tenants are told to write for help.</p>
                         <Input id="support_email" v-model="form.support_email" type="email" placeholder="you@example.com" />
                         <p v-if="form.errors.support_email" class="mt-1 text-sm text-danger">{{ form.errors.support_email }}</p>
                     </div>
@@ -91,14 +100,16 @@ function sendTestEmail() {
                 <h3 class="mb-3 text-sm font-bold text-text-strong">Tenant lifecycle defaults</h3>
                 <div class="grid grid-cols-2 gap-4">
                     <div>
-                        <label for="default_trial_days" class="mb-1 block text-sm font-semibold text-text-base">Default trial days <span class="text-danger">*</span></label>
+                        <label for="default_trial_days" class="mb-1 block text-sm font-semibold text-text-base">Free trial length (days) <span class="text-danger">*</span></label>
+                        <p class="mb-1 text-xs text-text-muted">How long a new tenant can use the platform free before it must subscribe.</p>
                         <Input id="default_trial_days" v-model="form.default_trial_days" type="number" min="0" max="365" required />
                         <p v-if="form.errors.default_trial_days" class="mt-1 text-sm text-danger">{{ form.errors.default_trial_days }}</p>
                     </div>
                     <div>
                         <label for="default_grace_period_days" class="mb-1 block text-sm font-semibold text-text-base">
-                            Default grace period days <span class="text-danger">*</span>
+                            Grace period after expiry (days) <span class="text-danger">*</span>
                         </label>
+                        <p class="mb-1 text-xs text-text-muted">Days a tenant keeps access after its plan expires before being suspended.</p>
                         <Input
                             id="default_grace_period_days"
                             v-model="form.default_grace_period_days"
@@ -116,7 +127,7 @@ function sendTestEmail() {
 
             <Card variant="panel">
                 <div class="mb-3 flex items-center justify-between">
-                    <h3 class="text-sm font-bold text-text-strong">Mail</h3>
+                    <h3 class="text-sm font-bold text-text-strong">Email (SMTP) settings</h3>
                     <Button variant="secondary" tone="purple" type="button" :loading="sendingTestEmail" @click="sendTestEmail">
                         <Send class="size-4" />
                         Send test email
@@ -124,33 +135,35 @@ function sendTestEmail() {
                 </div>
                 <div class="grid grid-cols-2 gap-4">
                     <div>
-                        <label for="mail_mailer" class="mb-1 block text-sm font-semibold text-text-base">Mailer</label>
+                        <label for="mail_mailer" class="mb-1 block text-sm font-semibold text-text-base">Mail driver</label>
+                        <p class="mb-1 text-xs text-text-muted">Usually smtp.</p>
                         <Input id="mail_mailer" v-model="form.mail_mailer" type="text" placeholder="smtp" />
                         <p v-if="form.errors.mail_mailer" class="mt-1 text-sm text-danger">{{ form.errors.mail_mailer }}</p>
                     </div>
                     <div>
-                        <label for="mail_encryption" class="mb-1 block text-sm font-semibold text-text-base">Encryption</label>
+                        <label for="mail_encryption" class="mb-1 block text-sm font-semibold text-text-base">Connection security</label>
+                        <p class="mb-1 text-xs text-text-muted">tls or ssl; match your mail provider.</p>
                         <Input id="mail_encryption" v-model="form.mail_encryption" type="text" placeholder="tls" />
                         <p v-if="form.errors.mail_encryption" class="mt-1 text-sm text-danger">{{ form.errors.mail_encryption }}</p>
                     </div>
                     <div>
-                        <label for="mail_host" class="mb-1 block text-sm font-semibold text-text-base">Host</label>
+                        <label for="mail_host" class="mb-1 block text-sm font-semibold text-text-base">SMTP server</label>
                         <Input id="mail_host" v-model="form.mail_host" type="text" placeholder="smtp.example.com" />
                         <p v-if="form.errors.mail_host" class="mt-1 text-sm text-danger">{{ form.errors.mail_host }}</p>
                     </div>
                     <div>
-                        <label for="mail_port" class="mb-1 block text-sm font-semibold text-text-base">Port</label>
+                        <label for="mail_port" class="mb-1 block text-sm font-semibold text-text-base">SMTP port</label>
                         <Input id="mail_port" v-model="form.mail_port" type="number" min="1" max="65535" placeholder="587" />
                         <p v-if="form.errors.mail_port" class="mt-1 text-sm text-danger">{{ form.errors.mail_port }}</p>
                     </div>
                     <div>
-                        <label for="mail_username" class="mb-1 block text-sm font-semibold text-text-base">Username</label>
+                        <label for="mail_username" class="mb-1 block text-sm font-semibold text-text-base">SMTP username</label>
                         <Input id="mail_username" v-model="form.mail_username" type="text" placeholder="you@example.com" />
                         <p v-if="form.errors.mail_username" class="mt-1 text-sm text-danger">{{ form.errors.mail_username }}</p>
                     </div>
                     <div>
                         <label for="mail_password" class="mb-1 block text-sm font-semibold text-text-base">
-                            Password
+                            SMTP password
                             <span v-if="settings.mail_password_set" class="font-normal text-text-muted">(leave blank to keep current)</span>
                         </label>
                         <Input
@@ -163,23 +176,30 @@ function sendTestEmail() {
                         <p v-if="form.errors.mail_password" class="mt-1 text-sm text-danger">{{ form.errors.mail_password }}</p>
                     </div>
                     <div>
-                        <label for="mail_from_address" class="mb-1 block text-sm font-semibold text-text-base">From address</label>
+                        <label for="mail_from_address" class="mb-1 block text-sm font-semibold text-text-base">Sender email address</label>
+                        <p class="mb-1 text-xs text-text-muted">Address recipients see as the sender.</p>
                         <Input id="mail_from_address" v-model="form.mail_from_address" type="email" placeholder="noreply@example.com" />
                         <p v-if="form.errors.mail_from_address" class="mt-1 text-sm text-danger">{{ form.errors.mail_from_address }}</p>
                     </div>
                     <div>
-                        <label for="mail_from_name" class="mb-1 block text-sm font-semibold text-text-base">From name</label>
+                        <label for="mail_from_name" class="mb-1 block text-sm font-semibold text-text-base">Sender name</label>
                         <Input id="mail_from_name" v-model="form.mail_from_name" type="text" placeholder="e.g. Support Team" />
                         <p v-if="form.errors.mail_from_name" class="mt-1 text-sm text-danger">{{ form.errors.mail_from_name }}</p>
                     </div>
                 </div>
             </Card>
 
-            <div class="flex items-center justify-end gap-2">
-                <Button variant="primary" tone="purple" type="submit" :loading="form.processing">
-                    <Check class="size-4" />
-                    Save changes
-                </Button>
+            <div class="sticky bottom-0 z-10 flex items-center justify-between gap-3 border-t border-border bg-white px-4 py-3">
+                <span class="text-sm" :class="form.isDirty ? 'font-semibold text-text-strong' : 'text-text-muted'">
+                    {{ form.isDirty ? 'Unsaved changes' : 'All changes saved' }}
+                </span>
+                <div class="flex items-center gap-2">
+                    <Button variant="secondary" tone="purple" type="button" :disabled="!form.isDirty || form.processing" @click="discard">Discard</Button>
+                    <Button variant="primary" tone="purple" type="submit" :loading="form.processing" :disabled="!form.isDirty">
+                        <Check class="size-4" />
+                        Save changes
+                    </Button>
+                </div>
             </div>
         </form>
     </div>

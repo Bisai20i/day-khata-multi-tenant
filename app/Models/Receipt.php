@@ -150,6 +150,13 @@ class Receipt extends Model
                     throw new InvalidArgumentException('A bank account is required for a bank receipt.');
                 }
                 $settlementAccountId = (int) $data['bank_account_id'];
+
+                // Only a cash/bank account may be debited as the "bank", and
+                // never the customer's own ledger account (SAL-02).
+                if ($settlementAccountId === (int) $customer->account_id
+                    || ! SalesReturn::refundAccountQuery()->whereKey($settlementAccountId)->exists()) {
+                    throw new InvalidArgumentException('A receipt can only be banked into a cash or bank account.');
+                }
             } else {
                 throw new InvalidArgumentException("Unknown payment mode: {$paymentMode}");
             }

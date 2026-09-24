@@ -15,10 +15,31 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\Relations\HasOne;
 use Illuminate\Support\Facades\DB;
 use InvalidArgumentException;
+use LogicException;
 
 #[Fillable(['fiscal_year_id', 'voucher_type', 'voucher_number', 'date', 'narration', 'reason', 'status', 'created_by', 'reversal_of_id'])]
 class JournalVoucher extends Model
 {
+    /**
+     * Posted vouchers are immutable ledger records (audit JE-01). The only
+     * permitted update is the cancellation bookkeeping reverse() performs:
+     * `status` and `reversal_of_id`. Deleting is never permitted.
+     */
+    protected static function booted(): void
+    {
+        static::updating(function (self $voucher): void {
+            $forbidden = array_diff(array_keys($voucher->getDirty()), ['status', 'reversal_of_id', 'updated_at']);
+
+            if ($forbidden !== []) {
+                throw new LogicException('A posted journal voucher is immutable; only its status and reversal link may change. Post a reversal instead.');
+            }
+        });
+
+        static::deleting(function (): never {
+            throw new LogicException('A journal voucher can never be deleted. Post a reversal instead.');
+        });
+    }
+
     /**
      * @return array<string, string>
      */
@@ -91,15 +112,25 @@ class JournalVoucher extends Model
      * (enforced in write()); a date from a different year is refused rather
      * than quietly filed under the wrong one.
      *
+     * $logCorrection is false only for callers (Purchase::post()) that wrap
+     * this voucher in a document of their own and log a more specific
+     * correction message themselves once that document exists - leaving it
+     * true here as well would write two correction rows for the one
+     * logical posting, and ActivityLog has no stable order to pick the
+     * right one back out by.
+     *
      * @param  array{voucher_type?: string, date: string, narration: string, reason?: string, fiscal_year_id?: int}  $header
      * @param  array<int, array{account_id: int, debit?: float|string, credit?: float|string, narration?: string}>  $lines
      */
-    public static function post(array $header, array $lines, User $actor): self
+    public static function post(array $header, array $lines, User $actor, bool $logCorrection = true): self
     {
-        return DB::transaction(function () use ($header, $lines, $actor) {
+        return DB::transaction(function () use ($header, $lines, $actor, $logCorrection) {
+            // Row-locked so a concurrent FiscalYear::close() (which takes the
+            // same lock) either finishes first and this sees a Closed year, or
+            // waits for this posting to commit (audit JE-04).
             $fiscalYear = isset($header['fiscal_year_id'])
-                ? FiscalYear::findOrFail($header['fiscal_year_id'])
-                : FiscalYear::current();
+                ? FiscalYear::query()->whereKey($header['fiscal_year_id'])->lockForUpdate()->firstOrFail()
+                : FiscalYear::query()->where('status', FiscalYearStatus::Open)->lockForUpdate()->firstOrFail();
 
             $reason = $header['reason'] ?? null;
             $isOverride = $fiscalYear->status === FiscalYearStatus::Closed;
@@ -127,7 +158,10 @@ class JournalVoucher extends Model
 
             if ($isOverride) {
                 static::rollForward($voucher, $actor);
-                ClosedFiscalYearGuard::logCorrection($fiscalYear, $reason, "Journal voucher #{$voucher->voucher_number}: {$header['narration']}");
+
+                if ($logCorrection) {
+                    ClosedFiscalYearGuard::logCorrection($fiscalYear, $reason, "Journal voucher #{$voucher->voucher_number}: {$header['narration']}");
+                }
             }
 
             return $voucher;
@@ -393,7 +427,7 @@ class JournalVoucher extends Model
                 throw new InvalidArgumentException('This document has already been reversed.');
             }
 
-            $fiscalYear = $locked->fiscalYear()->firstOrFail();
+            $fiscalYear = FiscalYear::query()->whereKey($locked->fiscal_year_id)->lockForUpdate()->firstOrFail();
 
             if ($fiscalYear->status !== FiscalYearStatus::Open) {
                 throw new InvalidArgumentException(

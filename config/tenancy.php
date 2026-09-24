@@ -36,7 +36,7 @@ return [
      * CacheTenancyBootstrapper and FilesystemTenancyBootstrapper are
      * deliberately NOT enabled. This app has zero direct Cache::/cache() or
      * Storage::/storage_path() usage anywhere (verified via a full grep of
-     * app/) — no tenant-scoped file storage, no cache reliance — so neither
+     * app/) - no tenant-scoped file storage, no cache reliance - so neither
      * has any functional value here.
      *
      * Both surfaced real crashes once tenant provisioning became a
@@ -52,7 +52,7 @@ return [
      * mid-cycle, tenancy()->end() is simply never called and `initialized`
      * stays stuck true for the rest of the request/test. The NEXT
      * initialize()/end() transition (for the same or a different tenant)
-     * then unconditionally reverts every configured bootstrapper — including
+     * then unconditionally reverts every configured bootstrapper - including
      * ones whose per-cycle captured "original" state was never (re)populated
      * this time around. CacheTenancyBootstrapper hit this first (its
      * bootstrap()/revert() swap the 'cache' container binding via
@@ -62,13 +62,13 @@ return [
      * construct a CachedTenantResolver). With Cache removed,
      * FilesystemTenancyBootstrapper hit the exact same class of bug next
      * (its revert() indexes into $originalPaths['disks'][$disk], populated
-     * per-disk during bootstrap() — "Undefined array key 'local'" when that
+     * per-disk during bootstrap() - "Undefined array key 'local'" when that
      * capture never happened). Database's revert() (reconnectToCentral())
      * doesn't depend on any per-cycle captured state, and Queue's
-     * bootstrap()/revert() are no-ops — neither is at risk from this same
+     * bootstrap()/revert() are no-ops - neither is at risk from this same
      * defect, which is why they're the only two left enabled. Revisit only
      * if this app ever adds real tenant-scoped Cache::/Storage:: usage that
-     * needs isolation — and consider fixing the actual exception-safety gap
+     * needs isolation - and consider fixing the actual exception-safety gap
      * in the vendor package at that point rather than disabling more
      * bootstrappers.
      */

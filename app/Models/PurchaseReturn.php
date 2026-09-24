@@ -499,7 +499,18 @@ class PurchaseReturn extends Model
                 ];
             }
 
+            $supplier = ! empty($data['supplier_id']) ? Supplier::find($data['supplier_id']) : null;
+            $creditToSupplier = ($data['payment_mode'] ?? 'cash') === 'credit';
+
+            if ($creditToSupplier && ! $supplier) {
+                throw new InvalidArgumentException('A supplier is required to credit the return to a supplier account.');
+            }
+
             [$cash, $bank] = static::unlinkedSettlementSplit($data, $total);
+
+            if ($creditToSupplier) {
+                $voucherLines[] = ['account_id' => $supplier->account_id, 'debit' => $total->toString(), 'credit' => '0', 'narration' => 'Credited to supplier'];
+            }
 
             if ($cash->isPositive()) {
                 $voucherLines[] = ['account_id' => Account::where('code', 'AS1')->firstOrFail()->id, 'debit' => $cash->toString(), 'credit' => '0', 'narration' => 'Refund received'];
@@ -508,8 +519,6 @@ class PurchaseReturn extends Model
             if ($bank->isPositive()) {
                 $voucherLines[] = ['account_id' => $data['bank_account_id'], 'debit' => $bank->toString(), 'credit' => '0', 'narration' => 'Refund received'];
             }
-
-            $supplier = ! empty($data['supplier_id']) ? Supplier::find($data['supplier_id']) : null;
 
             $voucher = JournalVoucher::post(
                 [
@@ -1093,6 +1102,7 @@ class PurchaseReturn extends Model
     {
         return match ($data['payment_mode'] ?? 'cash') {
             'cash' => [$total, Money::zero()],
+            'credit' => [Money::zero(), Money::zero()],
             'bank' => static::unlinkedBankOnlySplit($data, $total),
             'partial' => static::unlinkedPartialSplit($data, $total),
             default => throw new InvalidArgumentException("Unknown payment mode: {$data['payment_mode']}"),

@@ -8,6 +8,7 @@ use App\Models\FiscalYear;
 use App\Models\Item;
 use App\Models\ItemStockMovement;
 use App\Models\JournalVoucher;
+use App\Models\Role;
 use App\Models\Sale;
 use App\Models\SalesReturn;
 use App\Models\Tenant;
@@ -241,6 +242,8 @@ test('the request/approve/reject routes drive the same workflow end to end over 
     $saleLineId = null;
     $tenant->run(function () use (&$saleId, &$saleLineId) {
         User::factory()->create(['email' => 'owner@example.com']);
+        // Approve/reject are admin-only and a requester cannot approve their own request (SAL-04).
+        User::factory()->create(['email' => 'approver@example.com', 'role_id' => Role::where('slug', 'admin')->value('id')]);
         salesReturnWorkflowTestOpenFiscalYear();
         $admin = salesReturnWorkflowTestAdmin();
         $customer = Customer::factory()->create();
@@ -272,6 +275,8 @@ test('the request/approve/reject routes drive the same workflow end to end over 
         expect($pending->journal_voucher_id)->toBeNull();
     });
 
+    $this->post("http://{$domain}/login", ['email' => 'approver@example.com', 'password' => 'password']);
+
     $this->post("http://{$domain}/sales-returns/{$returnId}/reject")
         ->assertSessionHasErrors('reason');
 
@@ -285,6 +290,7 @@ test('the request/approve/reject routes drive the same workflow end to end over 
     });
 
     // A fresh request that IS approved actually posts.
+    loginSalesReturnWorkflowTestUser($domain);
     $this->post("http://{$domain}/sales-returns/request", [
         'sale_id' => $saleId,
         'date' => '2026-06-03',
@@ -297,6 +303,8 @@ test('the request/approve/reject routes drive the same workflow end to end over 
     $tenant->run(function () use (&$secondReturnId) {
         $secondReturnId = SalesReturn::where('status', 'pending')->firstOrFail()->id;
     });
+
+    $this->post("http://{$domain}/login", ['email' => 'approver@example.com', 'password' => 'password']);
 
     $this->post("http://{$domain}/sales-returns/{$secondReturnId}/approve")
         ->assertRedirect("http://{$domain}/sales-returns");
