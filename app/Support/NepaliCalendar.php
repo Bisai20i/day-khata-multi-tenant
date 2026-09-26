@@ -33,6 +33,12 @@ final class NepaliCalendar
     private const EPOCH_AD_DAY = 14;
 
     /**
+     * Shrawan - Nepal's fiscal year runs Shrawan 1 through the following
+     * Ashad's last day.
+     */
+    public const FISCAL_YEAR_START_MONTH = 4;
+
+    /**
      * Days in each of the 12 BS months, keyed by BS year. Copied verbatim
      * from legacy's `Nepali_Calendar::$bs` table (BS 2000 through 2090)
      * rather than recomputed, since a wrong day-count here would silently
@@ -250,6 +256,42 @@ final class NepaliCalendar
         $daysSinceEpoch += $bsDay - 1;
 
         return self::epoch()->addDays($daysSinceEpoch);
+    }
+
+    /**
+     * Nepal's fiscal year that starts in BS year $startBsYear: Shrawan 1
+     * (BS month 4) of that year through the last day of Ashad (BS month 3)
+     * of the next one. The end is computed as "the day before the next
+     * Shrawan 1" so it always lands on Ashad's real last day, whatever that
+     * year's day-count table says (29 to 32 days).
+     *
+     * @return array{start: Carbon, end: Carbon, name: string}
+     */
+    public static function fiscalYear(int $startBsYear): array
+    {
+        if ($startBsYear < self::MIN_BS_YEAR || $startBsYear >= self::MAX_BS_YEAR) {
+            throw new InvalidArgumentException(
+                'A fiscal year must start between BS '.self::MIN_BS_YEAR.' and '.(self::MAX_BS_YEAR - 1).", got {$startBsYear}."
+            );
+        }
+
+        return [
+            'start' => self::bsToAd($startBsYear, self::FISCAL_YEAR_START_MONTH, 1),
+            'end' => self::bsToAd($startBsYear + 1, self::FISCAL_YEAR_START_MONTH, 1)->subDay(),
+            'name' => sprintf('%d/%02d', $startBsYear, ($startBsYear + 1) % 100),
+        ];
+    }
+
+    /**
+     * The BS year in which the fiscal year containing $adDate started -
+     * Baishakh-Ashad (BS months 1-3) still belong to the previous BS year's
+     * fiscal year.
+     */
+    public static function fiscalYearStartBsYear(Carbon|string $adDate): int
+    {
+        $bs = self::adToBs($adDate);
+
+        return $bs['month'] >= self::FISCAL_YEAR_START_MONTH ? $bs['year'] : $bs['year'] - 1;
     }
 
     private static function epoch(): Carbon

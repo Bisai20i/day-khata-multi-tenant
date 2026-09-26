@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers\Tenant\Inventory;
 
+use App\Enums\FiscalYearStatus;
 use App\Http\Controllers\Concerns\ImportsCsv;
 use App\Http\Controllers\Controller;
 use App\Models\CompanySetting;
@@ -48,7 +49,7 @@ class StockAdjustmentController extends Controller
      */
     public function index(Request $request): Response
     {
-        $currentYear = FiscalYear::current();
+        $currentYear = FiscalYear::where('status', FiscalYearStatus::Open)->first();
 
         $from = $request->string('from')->toString() ?: $currentYear?->start_date?->toDateString();
         $to = $request->string('to')->toString() ?: $currentYear?->end_date?->toDateString();

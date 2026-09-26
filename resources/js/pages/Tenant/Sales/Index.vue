@@ -17,6 +17,7 @@ import Combobox from '@/components/ui/Combobox.vue';
 import DropdownMenu from '@/components/ui/DropdownMenu.vue';
 import DropdownMenuItem from '@/components/ui/DropdownMenuItem.vue';
 import { useToast } from '@/composables/useToast';
+import { useOpenFiscalYear } from '@/composables/useOpenFiscalYear';
 import { formatMoney } from '@/lib/money';
 import { formatBsDate } from '@/lib/format';
 import Create from './Create.vue';
@@ -222,6 +223,7 @@ watch(
     { immediate: true },
 );
 
+const { hasOpenFiscalYear } = useOpenFiscalYear();
 const showCreateForm = ref(false);
 
 // Restores an in-progress New sale draft after Create.vue's inline
@@ -244,13 +246,14 @@ onMounted(() => {
     try {
         sessionStorage.removeItem(DRAFT_KEY);
         initialDraft.value = JSON.parse(raw);
-        showCreateForm.value = true;
+        showCreateForm.value = hasOpenFiscalYear.value;
     } catch {
         // malformed sessionStorage payload - nothing to recover, ignore.
     }
 });
 
 function openCreateForm() {
+    if (!hasOpenFiscalYear.value) return;
     initialDraft.value = null;
     showCreateForm.value = true;
 }
@@ -416,7 +419,7 @@ const columns = [
 
         <template v-else>
             <PageHeader title="Sales" description="All sales invoices. Filter, print or export them, and cancel a sale posted in error.">
-                <Button variant="primary" tone="purple" @click="openCreateForm">
+                <Button v-if="hasOpenFiscalYear" variant="primary" tone="purple" @click="openCreateForm">
                     <Plus class="size-4" />
                     New sale
                 </Button>
@@ -504,8 +507,8 @@ const columns = [
                     </template>
                     <template v-else>
                         <p class="text-sm font-semibold text-text-strong">No sales yet</p>
-                        <p class="text-xs text-text-muted">Create your first sale and it will be listed here.</p>
-                        <Button variant="primary" tone="purple" @click="openCreateForm">
+                        <p v-if="hasOpenFiscalYear" class="text-xs text-text-muted">Create your first sale and it will be listed here.</p>
+                        <Button v-if="hasOpenFiscalYear" variant="primary" tone="purple" @click="openCreateForm">
                             <Plus class="size-4" />
                             New sale
                         </Button>

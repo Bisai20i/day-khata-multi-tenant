@@ -80,8 +80,9 @@ class AutoStartFiscalYear extends Command
         // Nepal's fiscal year starts on Shrawan 1 (BS month 4). If we're
         // still in Baishak-Ashad (BS months 1-3), that boundary belongs to
         // last BS year's fiscal year, not this one.
-        $expectedStartBsYear = $todayBs['month'] >= 4 ? $todayBs['year'] : $todayBs['year'] - 1;
-        $expectedStart = NepaliCalendar::bsToAd($expectedStartBsYear, 4, 1);
+        $expectedStartBsYear = $todayBs['month'] >= NepaliCalendar::FISCAL_YEAR_START_MONTH ? $todayBs['year'] : $todayBs['year'] - 1;
+        $bounds = NepaliCalendar::fiscalYear($expectedStartBsYear);
+        $expectedStart = $bounds['start'];
 
         $openFiscalYear = FiscalYear::query()->where('status', FiscalYearStatus::Open)->first();
 
@@ -104,8 +105,8 @@ class AutoStartFiscalYear extends Command
             return;
         }
 
-        $nextEnd = NepaliCalendar::bsToAd($expectedStartBsYear + 1, 4, 1)->subDay();
-        $name = sprintf('%d/%02d', $expectedStartBsYear, ($expectedStartBsYear + 1) % 100);
+        $nextEnd = $bounds['end'];
+        $name = $bounds['name'];
 
         // Idempotent: a previous run that created the year and then failed
         // part way through the close reuses it, instead of colliding with

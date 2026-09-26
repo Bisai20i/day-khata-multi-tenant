@@ -17,6 +17,7 @@ import { formatMoney, sumMoney } from '@/lib/money';
 import { formatBsDate } from '@/lib/format';
 import Create from './Create.vue';
 import CashBankCreate from './CashBankCreate.vue';
+import { useOpenFiscalYear } from '@/composables/useOpenFiscalYear';
 
 // A manually posted Journal voucher and the five plain cash/bank vouchers
 // (Cash Receipt, Cash Payment, Bank Receipt, Bank Payment, Contra - T14)
@@ -27,6 +28,8 @@ import CashBankCreate from './CashBankCreate.vue';
 const MANUALLY_CANCELLABLE_TYPES = ['journal', 'cash_receipt', 'cash_payment', 'bank_receipt', 'bank_payment', 'contra'];
 
 defineOptions({ layout: AppLayout });
+
+const { hasOpenFiscalYear } = useOpenFiscalYear();
 
 const props = defineProps({
     journalVouchers: {
@@ -290,11 +293,11 @@ const columns = [
         <template v-else>
             <PageHeader title="Journal Vouchers" description="The record of every accounting entry. Post a journal voucher for general adjustments, or a cash/bank voucher for simple money in and out. Entries from sales and purchases also appear here.">
                 <template v-if="isAdmin">
-                    <Button variant="secondary" tone="purple" @click="showCashBankForm = true">
+                    <Button v-if="hasOpenFiscalYear" variant="secondary" tone="purple" @click="showCashBankForm = true">
                         <Plus class="size-4" />
                         New cash/bank voucher
                     </Button>
-                    <Button variant="primary" tone="purple" @click="showCreateForm = true">
+                    <Button v-if="hasOpenFiscalYear" variant="primary" tone="purple" @click="showCreateForm = true">
                         <Plus class="size-4" />
                         New journal voucher
                     </Button>

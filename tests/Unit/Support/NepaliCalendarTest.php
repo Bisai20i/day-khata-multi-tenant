@@ -111,3 +111,25 @@ test('formatBs agrees with adToBs for every date adToBs can convert', function (
             ->toBe(sprintf('%04d-%02d-%02d', $bs['year'], $bs['month'], $bs['day']));
     }
 });
+
+test('fiscalYear runs from Shrawan 1 to the last day of the following Ashad', function () {
+    $fiscalYear = NepaliCalendar::fiscalYear(2082);
+
+    expect($fiscalYear['name'])->toBe('2082/83')
+        ->and($fiscalYear['start']->toDateString())->toBe('2025-07-17')
+        ->and($fiscalYear['end']->toDateString())->toBe('2026-07-16')
+        ->and(NepaliCalendar::adToBs($fiscalYear['start']))->toBe(['year' => 2082, 'month' => 4, 'day' => 1])
+        ->and(NepaliCalendar::adToBs($fiscalYear['end'])['year'])->toBe(2083)
+        ->and(NepaliCalendar::adToBs($fiscalYear['end'])['month'])->toBe(3)
+        ->and(NepaliCalendar::adToBs($fiscalYear['end']->copy()->addDay()))->toBe(['year' => 2083, 'month' => 4, 'day' => 1]);
+});
+
+test('fiscalYear rejects a start year whose Ashad end falls outside the supported range', function (int $bsYear) {
+    NepaliCalendar::fiscalYear($bsYear);
+})->with([1999, 2090])->throws(InvalidArgumentException::class);
+
+test('fiscalYearStartBsYear places Baishakh-Ashad in the previous BS year\'s fiscal year', function () {
+    expect(NepaliCalendar::fiscalYearStartBsYear('2025-07-16'))->toBe(2081)
+        ->and(NepaliCalendar::fiscalYearStartBsYear('2025-07-17'))->toBe(2082)
+        ->and(NepaliCalendar::fiscalYearStartBsYear('2026-04-14'))->toBe(2082);
+});

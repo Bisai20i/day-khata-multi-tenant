@@ -19,8 +19,11 @@ import { useConfirm } from '@/composables/useConfirm';
 import { formatMoney } from '@/lib/money';
 import { formatBsDate } from '@/lib/format';
 import Create from './Create.vue';
+import { useOpenFiscalYear } from '@/composables/useOpenFiscalYear';
 
 defineOptions({ layout: AppLayout });
+
+const { hasOpenFiscalYear } = useOpenFiscalYear();
 
 const props = defineProps({
     returns: {
@@ -388,11 +391,11 @@ const columns = [
                     <!-- Goods back with no bill this system ever issued
                          (audit section 3 "Sales") - posts immediately, so it
                          has no request/approve counterpart. -->
-                    <Button variant="secondary" tone="purple" @click="createMode = 'unlinked'">
+                    <Button v-if="hasOpenFiscalYear" variant="secondary" tone="purple" @click="createMode = 'unlinked'">
                         <Plus class="size-4" />
                         Return without a bill
                     </Button>
-                    <Button variant="primary" tone="purple" @click="createMode = 'post'">
+                    <Button v-if="hasOpenFiscalYear" variant="primary" tone="purple" @click="createMode = 'post'">
                         <Plus class="size-4" />
                         New sales return
                     </Button>
@@ -446,7 +449,7 @@ const columns = [
                     <template v-else>
                         <p class="text-sm font-semibold text-text-strong">No sales returns yet</p>
                         <p class="text-xs text-text-muted">When a customer sends goods back, record a return and it will be listed here.</p>
-                        <Button variant="primary" tone="purple" @click="createMode = 'post'">
+                        <Button v-if="hasOpenFiscalYear" variant="primary" tone="purple" @click="createMode = 'post'">
                             <Plus class="size-4" aria-hidden="true" />
                             New sales return
                         </Button>

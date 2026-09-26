@@ -59,14 +59,11 @@ function disable() {
 const acknowledgedRecoveryCodes = ref(false);
 
 function copyRecoveryCodes() {
-    navigator.clipboard?.writeText(props.recoveryCodes.join('
-')).then(() => toast({ message: 'Recovery codes copied.', variant: 'success' }));
+    navigator.clipboard?.writeText(props.recoveryCodes.join('\n')).then(() => toast({ message: 'Recovery codes copied.', variant: 'success' }));
 }
 
 function downloadRecoveryCodes() {
-    const url = URL.createObjectURL(new Blob([props.recoveryCodes.join('
-') + '
-'], { type: 'text/plain' }));
+    const url = URL.createObjectURL(new Blob([props.recoveryCodes.join('\n') + '\n'], { type: 'text/plain' }));
     const link = document.createElement('a');
     link.href = url;
     link.download = 'recovery-codes.txt';

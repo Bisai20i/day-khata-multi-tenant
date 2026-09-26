@@ -16,8 +16,11 @@ import { useToast } from '@/composables/useToast';
 import { formatMoney, sumMoney } from '@/lib/money';
 import { formatBsDate } from '@/lib/format';
 import Create from './Create.vue';
+import { useOpenFiscalYear } from '@/composables/useOpenFiscalYear';
 
 defineOptions({ layout: AppLayout });
+
+const { hasOpenFiscalYear } = useOpenFiscalYear();
 
 const props = defineProps({
     payments: { type: Array, default: () => [] },
@@ -148,7 +151,7 @@ const columns = [
 
         <template v-else>
             <PageHeader title="Supplier payments" description="Money paid to suppliers against their bills. Cancel a payment entered in error.">
-                <Button variant="primary" tone="purple" @click="showCreateForm = true">
+                <Button v-if="hasOpenFiscalYear" variant="primary" tone="purple" @click="showCreateForm = true">
                     <Plus class="size-4" aria-hidden="true" />
                     New payment
                 </Button>
@@ -158,7 +161,7 @@ const columns = [
                 <div v-if="payments.length === 0" class="py-10 text-center">
                     <p class="text-sm font-semibold text-text-strong">No payments yet</p>
                     <p class="mt-1 text-sm text-text-muted">Record the first payment you made to a supplier.</p>
-                    <Button class="mt-3" variant="primary" tone="purple" type="button" @click="showCreateForm = true">
+                    <Button v-if="hasOpenFiscalYear" class="mt-3" variant="primary" tone="purple" type="button" @click="showCreateForm = true">
                         <Plus class="size-4" aria-hidden="true" />
                         New payment
                     </Button>

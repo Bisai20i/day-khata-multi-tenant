@@ -3,10 +3,13 @@
 use App\Http\Middleware\EnsureUserHasRole;
 use App\Http\Middleware\HandleInertiaRequests;
 use App\Http\Middleware\SecurityHeaders;
+use App\Models\FiscalYear;
+use Illuminate\Database\Eloquent\ModelNotFoundException;
 use Illuminate\Foundation\Application;
 use Illuminate\Foundation\Configuration\Exceptions;
 use Illuminate\Foundation\Configuration\Middleware;
 use Illuminate\Http\Request;
+use Illuminate\Validation\ValidationException;
 
 return Application::configure(basePath: dirname(__DIR__))
     ->withRouting(
@@ -38,4 +41,18 @@ return Application::configure(basePath: dirname(__DIR__))
         $exceptions->shouldRenderJsonWhen(
             fn (Request $request) => $request->is('api/*') || $request->expectsJson(),
         );
+
+        // Every posting path resolves the open fiscal year with firstOrFail(),
+        // which would otherwise surface as a bare 404. When a tenant simply has
+        // none yet, send the user back with a readable error instead.
+        $exceptions->map(function (ModelNotFoundException $e) {
+            $isMissingOpenYear = $e->getModel() === FiscalYear::class
+                && tenancy()->initialized
+                && ! request()->isMethod('GET')
+                && ! FiscalYear::hasOpen();
+
+            return $isMissingOpenYear
+                ? ValidationException::withMessages(['fiscal_year' => FiscalYear::NO_OPEN_YEAR_MESSAGE])
+                : $e;
+        });
     })->create();

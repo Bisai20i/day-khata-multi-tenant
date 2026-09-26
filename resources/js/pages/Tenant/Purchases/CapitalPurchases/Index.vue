@@ -19,8 +19,11 @@ import { useToast } from '@/composables/useToast';
 import { formatMoney } from '@/lib/money';
 import { formatBsDate, todayInKathmandu } from '@/lib/format';
 import Create from './Create.vue';
+import { useOpenFiscalYear } from '@/composables/useOpenFiscalYear';
 
 defineOptions({ layout: AppLayout });
+
+const { hasOpenFiscalYear } = useOpenFiscalYear();
 
 const props = defineProps({
     capitalPurchases: { type: Array, default: () => [] },
@@ -268,7 +271,7 @@ const columns = [
                 <a href="/capital-purchases/export">
                     <Button variant="secondary" tone="purple" type="button">Export list</Button>
                 </a>
-                <Button variant="primary" tone="purple" @click="showCreateForm = true">
+                <Button v-if="hasOpenFiscalYear" variant="primary" tone="purple" @click="showCreateForm = true">
                     <Plus class="size-4" aria-hidden="true" />
                     New capital purchase
                 </Button>
@@ -278,7 +281,7 @@ const columns = [
                 <div v-if="capitalPurchases.length === 0" class="py-10 text-center">
                     <p class="text-sm font-semibold text-text-strong">No capital purchases yet</p>
                     <p class="mt-1 text-sm text-text-muted">Record the first asset or service bill you received.</p>
-                    <Button class="mt-3" variant="primary" tone="purple" type="button" @click="showCreateForm = true">
+                    <Button v-if="hasOpenFiscalYear" class="mt-3" variant="primary" tone="purple" type="button" @click="showCreateForm = true">
                         <Plus class="size-4" aria-hidden="true" />
                         New capital purchase
                     </Button>

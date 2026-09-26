@@ -16,8 +16,11 @@ import { useToast } from '@/composables/useToast';
 import { formatMoney } from '@/lib/money';
 import { formatBsDate } from '@/lib/format';
 import Create from './Create.vue';
+import { useOpenFiscalYear } from '@/composables/useOpenFiscalYear';
 
 defineOptions({ layout: AppLayout });
+
+const { hasOpenFiscalYear } = useOpenFiscalYear();
 
 defineProps({
     capitalSales: { type: Array, default: () => [] },
@@ -196,7 +199,7 @@ const columns = [
                 title="Capital sales"
                 description="Sales of business assets such as equipment or vehicles, not of your regular stock. The gain or loss is posted to your accounts."
             >
-                <Button variant="primary" tone="purple" @click="showCreateForm = true">
+                <Button v-if="hasOpenFiscalYear" variant="primary" tone="purple" @click="showCreateForm = true">
                     <Plus class="size-4" aria-hidden="true" />
                     New capital sale
                 </Button>
@@ -206,7 +209,7 @@ const columns = [
                 <div v-if="capitalSales.length === 0" class="flex flex-col items-center gap-3 py-10 text-center">
                     <p class="text-sm font-semibold text-text-strong">No capital sales yet</p>
                     <p class="text-xs text-text-muted">Record the sale of an asset and it will be listed here.</p>
-                    <Button variant="primary" tone="purple" @click="showCreateForm = true">
+                    <Button v-if="hasOpenFiscalYear" variant="primary" tone="purple" @click="showCreateForm = true">
                         <Plus class="size-4" aria-hidden="true" />
                         New capital sale
                     </Button>

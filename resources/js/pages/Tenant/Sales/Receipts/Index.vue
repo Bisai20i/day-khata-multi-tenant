@@ -15,8 +15,11 @@ import { useToast } from '@/composables/useToast';
 import { formatMoney, sumMoney } from '@/lib/money';
 import { formatBsDate } from '@/lib/format';
 import Create from './Create.vue';
+import { useOpenFiscalYear } from '@/composables/useOpenFiscalYear';
 
 defineOptions({ layout: AppLayout });
+
+const { hasOpenFiscalYear } = useOpenFiscalYear();
 
 const props = defineProps({
     receipts: {
@@ -147,7 +150,7 @@ const columns = [
                 title="Receipts"
                 description="Money received from customers. Each receipt reduces what the customer owes you and can be matched to their unpaid bills."
             >
-                <Button variant="primary" tone="purple" @click="showCreateForm = true">
+                <Button v-if="hasOpenFiscalYear" variant="primary" tone="purple" @click="showCreateForm = true">
                     <Plus class="size-4" aria-hidden="true" />
                     New receipt
                 </Button>
@@ -157,7 +160,7 @@ const columns = [
                 <div v-if="receipts.data.length === 0" class="flex flex-col items-center gap-3 py-10 text-center">
                     <p class="text-sm font-semibold text-text-strong">No receipts yet</p>
                     <p class="text-xs text-text-muted">Record money received from a customer and it will be listed here.</p>
-                    <Button variant="primary" tone="purple" @click="showCreateForm = true">
+                    <Button v-if="hasOpenFiscalYear" variant="primary" tone="purple" @click="showCreateForm = true">
                         <Plus class="size-4" aria-hidden="true" />
                         New receipt
                     </Button>

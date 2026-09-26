@@ -17,8 +17,11 @@ import { useToast } from '@/composables/useToast';
 import { formatMoney, formatQuantity } from '@/lib/money.js';
 import { formatBsDate, todayInKathmandu } from '@/lib/format.js';
 import Create from './Create.vue';
+import { useOpenFiscalYear } from '@/composables/useOpenFiscalYear';
 
 defineOptions({ layout: AppLayout });
+
+const { hasOpenFiscalYear } = useOpenFiscalYear();
 
 const props = defineProps({
     stockAdjustments: { type: Array, default: () => [] },
@@ -269,8 +272,8 @@ const columns = [
 
         <template v-else>
             <PageHeader title="Stock Adjustments" description="Stock adjustments: correct stock after a count, damage or loss.">
-                    <Button variant="secondary" tone="purple" @click="openImport">Import opening stock (CSV)</Button>
-                    <Button variant="primary" tone="purple" @click="showCreateForm = true">
+                    <Button v-if="hasOpenFiscalYear" variant="secondary" tone="purple" @click="openImport">Import opening stock (CSV)</Button>
+                    <Button v-if="hasOpenFiscalYear" variant="primary" tone="purple" @click="showCreateForm = true">
                         <Plus class="size-4" />
                         New adjustment
                     </Button>

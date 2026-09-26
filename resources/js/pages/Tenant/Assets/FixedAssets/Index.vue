@@ -18,8 +18,11 @@ import { useConfirm } from '@/composables/useConfirm';
 import { formatMoney } from '@/lib/money.js';
 import { todayInKathmandu } from '@/lib/format.js';
 import Create from './Create.vue';
+import { useOpenFiscalYear } from '@/composables/useOpenFiscalYear';
 
 defineOptions({ layout: AppLayout });
+
+const { hasOpenFiscalYear } = useOpenFiscalYear();
 
 const props = defineProps({
     fixedAssets: { type: Array, default: () => [] },
@@ -176,16 +179,16 @@ const columns = [
 
         <template v-else>
             <PageHeader title="Fixed Assets" description="Long-lived assets and their depreciation.">
-                <Button v-if="isAdmin" variant="secondary" tone="purple" @click="postDepreciation">
+                <Button v-if="isAdmin && hasOpenFiscalYear" variant="secondary" tone="purple" @click="postDepreciation">
                     Post depreciation
                 </Button>
-                <Button variant="primary" tone="purple" @click="showCreateForm = true">New asset</Button>
+                <Button v-if="hasOpenFiscalYear" variant="primary" tone="purple" @click="showCreateForm = true">New asset</Button>
             </PageHeader>
 
             <Card v-if="fixedAssets.length === 0" variant="panel">
                 <div class="px-1 py-8 text-center">
                     <p class="text-sm text-text-muted">No fixed assets yet. Add equipment, vehicles or property to track their value and depreciation.</p>
-                    <Button class="mt-3" variant="primary" tone="purple" @click="showCreateForm = true">Add your first asset</Button>
+                    <Button v-if="hasOpenFiscalYear" class="mt-3" variant="primary" tone="purple" @click="showCreateForm = true">Add your first asset</Button>
                 </div>
             </Card>
             <Card v-else variant="panel">

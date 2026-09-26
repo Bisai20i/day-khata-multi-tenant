@@ -11,8 +11,26 @@ import ConfirmDialog from '@/components/ui/ConfirmDialog.vue';
 import logoMark from '@/assets/brand/logo-mark.png';
 import { navGroups, centralNavItems } from '@/lib/nav-items';
 import { useLayoutChrome } from '@/composables/useLayoutChrome';
+import { useOpenFiscalYear } from '@/composables/useOpenFiscalYear';
+import { useToast } from '@/composables/useToast';
 
 const page = usePage();
+
+// No open fiscal year means nothing can be posted: a banner explains why the
+// create buttons are gone, and a posting request that slips through (e.g.
+// from a tab opened earlier) comes back with a `fiscal_year` error that no
+// form field owns, so it is surfaced as a toast here instead.
+const { hasOpenFiscalYear } = useOpenFiscalYear();
+const showFiscalYearBanner = computed(() => !hasOpenFiscalYear.value && !page.url.startsWith('/fiscal-years'));
+const { toast } = useToast();
+watch(
+    () => page.props.errors?.fiscal_year,
+    (message) => {
+        if (message) {
+            toast({ message, variant: 'danger' });
+        }
+    },
+);
 
 // title comes from useLayoutChrome (set by whichever page is currently
 // mounted inside our slot); fullscreen hides the sidebar/navbar entirely,
@@ -490,6 +508,14 @@ function selectActiveCommand() {
             </header>
 
             <main :class="['min-h-0 flex-1 overflow-y-auto bg-bg-page', !chrome.padded ? 'p-0' : chrome.fullscreen ? 'p-4' : 'p-6']">
+                <div
+                    v-if="showFiscalYearBanner"
+                    class="mb-4 flex flex-wrap items-center justify-between gap-3 border-[1.5px] border-warning-text bg-warning-bg px-3 py-3 text-sm text-warning-text"
+                    role="alert"
+                >
+                    <p><span class="font-semibold">No open fiscal year.</span> Set up a fiscal year before you can post sales, purchases or other entries.</p>
+                    <Link href="/fiscal-years" class="font-semibold underline hover:no-underline focus-visible:outline-2 focus-visible:outline-primary">Set up fiscal year</Link>
+                </div>
                 <slot />
             </main>
         </div>

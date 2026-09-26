@@ -12,6 +12,7 @@ import PosMergeModal from '@/components/pos/PosMergeModal.vue';
 import PosReceiptModal from '@/components/pos/PosReceiptModal.vue';
 import PosShortcutsModal from '@/components/pos/PosShortcutsModal.vue';
 import { useToast } from '@/composables/useToast';
+import { useOpenFiscalYear } from '@/composables/useOpenFiscalYear';
 import { useConfirm } from '@/composables/useConfirm';
 import { usePosCarts } from '@/composables/usePosCarts';
 import { usePosCheckout } from '@/composables/usePosCheckout';
@@ -56,6 +57,8 @@ import { addQuantity, compareQuantity, stepQuantity } from '@/lib/quantity';
  * needs backend work this screen-level rebuild doesn't attempt).
  */
 defineOptions({ layout: AppLayout });
+
+const { hasOpenFiscalYear } = useOpenFiscalYear();
 
 const props = defineProps({
     customers: { type: Array, default: () => [] },
@@ -461,6 +464,7 @@ const { receiptOpen, receipt, completeSale, applyPendingReceipt, closeReceipt } 
 /** Plain-words reason Complete sale is disabled, or '' when it can proceed. */
 const submitBlockedReason = computed(() => {
     if (form.processing) return '';
+    if (!hasOpenFiscalYear.value) return 'No open fiscal year. Set up a fiscal year before completing sales.';
     if (form.lines.length === 0) return 'Add at least one item to the cart to complete the sale.';
     if (!form.customer_id) return 'Select a customer to complete the sale.';
     if (!form.date) return 'Choose a sale date in the top bar.';
@@ -474,6 +478,7 @@ const submitBlockedReason = computed(() => {
 });
 
 const canSubmit = computed(() => {
+    if (!hasOpenFiscalYear.value) return false;
     if (form.processing || !form.customer_id || !form.date || form.lines.length === 0) return false;
     if (!totals.value) return false;
 

@@ -18,8 +18,11 @@ import { useToast } from '@/composables/useToast';
 import { formatMoney } from '@/lib/money';
 import { formatBsDate } from '@/lib/format';
 import Create from './Create.vue';
+import { useOpenFiscalYear } from '@/composables/useOpenFiscalYear';
 
 defineOptions({ layout: AppLayout });
+
+const { hasOpenFiscalYear } = useOpenFiscalYear();
 
 const props = defineProps({
     purchases: {
@@ -134,7 +137,7 @@ onMounted(() => {
     try {
         sessionStorage.removeItem(DRAFT_KEY);
         initialDraft.value = JSON.parse(raw);
-        showCreateForm.value = true;
+        showCreateForm.value = hasOpenFiscalYear.value;
     } catch {
         // malformed sessionStorage payload - nothing to recover, ignore.
     }
@@ -292,7 +295,7 @@ const columns = [
 
         <template v-else>
             <PageHeader title="Purchases" description="Bills received from suppliers. Filter, print or export them, and cancel a purchase posted in error.">
-                <Button variant="primary" tone="purple" @click="openCreateForm">
+                <Button v-if="hasOpenFiscalYear" variant="primary" tone="purple" @click="openCreateForm">
                     <Plus class="size-4" aria-hidden="true" />
                     New purchase
                 </Button>
@@ -336,7 +339,7 @@ const columns = [
                     <template v-else>
                         <p class="text-sm font-semibold text-text-strong">No purchases yet</p>
                         <p class="mt-1 text-sm text-text-muted">Record the first bill you received from a supplier.</p>
-                        <Button class="mt-3" variant="primary" tone="purple" type="button" @click="openCreateForm">
+                        <Button v-if="hasOpenFiscalYear" class="mt-3" variant="primary" tone="purple" type="button" @click="openCreateForm">
                             <Plus class="size-4" aria-hidden="true" />
                             New purchase
                         </Button>

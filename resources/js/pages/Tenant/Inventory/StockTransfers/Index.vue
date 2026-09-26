@@ -15,8 +15,11 @@ import { useToast } from '@/composables/useToast';
 import { formatMoney, formatQuantity } from '@/lib/money.js';
 import { formatBsDate } from '@/lib/format.js';
 import Create from './Create.vue';
+import { useOpenFiscalYear } from '@/composables/useOpenFiscalYear';
 
 defineOptions({ layout: AppLayout });
+
+const { hasOpenFiscalYear } = useOpenFiscalYear();
 
 const props = defineProps({
     stockTransfers: { type: Array, default: () => [] },
@@ -181,7 +184,7 @@ const columns = [
 
         <template v-else>
             <PageHeader title="Stock Transfers" description="Stock transfers: move stock from one store to another.">
-                <Button variant="primary" tone="purple" @click="showCreateForm = true">
+                <Button v-if="hasOpenFiscalYear" variant="primary" tone="purple" @click="showCreateForm = true">
                     <Plus class="size-4" />
                     New transfer
                 </Button>

@@ -71,14 +71,12 @@ test('the first fiscal year a tenant creates opens automatically, subsequent one
 
     $this->post("http://{$domain}/fiscal-years", [
         'name' => 'FY1',
-        'start_date' => '2026-01-01',
-        'end_date' => '2026-12-31',
+        'bs_year' => 2082,
     ])->assertRedirect("http://{$domain}/fiscal-years");
 
     $this->post("http://{$domain}/fiscal-years", [
         'name' => 'FY2',
-        'start_date' => '2027-01-01',
-        'end_date' => '2027-12-31',
+        'bs_year' => 2083,
     ])->assertRedirect("http://{$domain}/fiscal-years");
 
     $tenant->run(function () {

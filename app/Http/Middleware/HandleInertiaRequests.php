@@ -2,6 +2,7 @@
 
 namespace App\Http\Middleware;
 
+use App\Models\FiscalYear;
 use Illuminate\Http\Request;
 use Inertia\Middleware;
 
@@ -42,7 +43,13 @@ class HandleInertiaRequests extends Middleware
                 'user' => $request->user('web'),
             ],
             'tenant' => fn (): ?array => tenancy()->initialized
-                ? ['company_name' => tenant('company_name')]
+                ? [
+                    'company_name' => tenant('company_name'),
+                    // Every posting path needs an open fiscal year
+                    // (JournalVoucher::post()); pages use this to hide their
+                    // create buttons and AppLayout to show a setup banner.
+                    'has_open_fiscal_year' => FiscalYear::hasOpen(),
+                ]
                 : null,
             'flash' => [
                 'status' => fn (): ?string => $request->session()->get('status'),

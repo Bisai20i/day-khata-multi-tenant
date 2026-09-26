@@ -18,8 +18,11 @@ import { useToast } from '@/composables/useToast';
 import { formatMoney, isZeroMoney } from '@/lib/money';
 import { formatBsDate } from '@/lib/format';
 import Create from './Create.vue';
+import { useOpenFiscalYear } from '@/composables/useOpenFiscalYear';
 
 defineOptions({ layout: AppLayout });
+
+const { hasOpenFiscalYear } = useOpenFiscalYear();
 
 const props = defineProps({
     returns: {
@@ -290,7 +293,7 @@ const columns = [
 
         <template v-else>
             <PageHeader title="Purchase returns" description="Goods sent back to suppliers. Each return issues a debit note; cancel one entered in error.">
-                <Button variant="primary" tone="purple" @click="showCreateForm = true">
+                <Button v-if="hasOpenFiscalYear" variant="primary" tone="purple" @click="showCreateForm = true">
                     <Plus class="size-4" aria-hidden="true" />
                     New return
                 </Button>
@@ -334,7 +337,7 @@ const columns = [
                     <template v-else>
                         <p class="text-sm font-semibold text-text-strong">No purchase returns yet</p>
                         <p class="mt-1 text-sm text-text-muted">Record goods you sent back to a supplier.</p>
-                        <Button class="mt-3" variant="primary" tone="purple" type="button" @click="showCreateForm = true">
+                        <Button v-if="hasOpenFiscalYear" class="mt-3" variant="primary" tone="purple" type="button" @click="showCreateForm = true">
                             <Plus class="size-4" aria-hidden="true" />
                             New return
                         </Button>

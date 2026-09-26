@@ -11,7 +11,6 @@ import Input from '@/components/ui/Input.vue';
 import Modal from '@/components/ui/Modal.vue';
 import Select from '@/components/ui/Select.vue';
 import DataTable from '@/components/ui/DataTable.vue';
-import NepaliDateInput from '@/components/ui/NepaliDateInput.vue';
 import Badge from '@/components/ui/Badge.vue';
 import Tooltip from '@/components/ui/Tooltip.vue';
 import { useToast } from '@/composables/useToast';
@@ -22,6 +21,12 @@ defineOptions({ layout: AppLayout });
 
 const props = defineProps({
     fiscalYears: {
+        type: Array,
+        default: () => [],
+    },
+    // Nepal's fiscal year is fixed to Shrawan 1 - Ashad end, so the form
+    // only picks the BS year it starts in; the server derives both dates.
+    fiscalYearOptions: {
         type: Array,
         default: () => [],
     },
@@ -48,10 +53,11 @@ watch(
 const createModalOpen = ref(false);
 
 const form = useForm({
+    bs_year: null,
     name: '',
-    start_date: '',
-    end_date: '',
 });
+
+const selectedFiscalYearOption = computed(() => props.fiscalYearOptions.find((option) => option.value === form.bs_year) ?? null);
 
 function openCreate() {
     form.reset();
@@ -316,22 +322,21 @@ const columns = [
         <Modal :open="createModalOpen" title="New fiscal year" @update:open="onCreateModalOpenChange">
             <form class="flex flex-col gap-4" @submit.prevent="submitCreate">
                 <div>
-                    <label for="name" class="mb-1 block text-sm font-semibold text-text-base">Name <span class="text-danger">*</span></label>
-                    <Input id="name" v-model="form.name" type="text" placeholder="e.g. FY 2082/83" required />
-                    <p class="mt-1 text-xs text-text-muted">A label for this accounting period, shown on reports and ledgers.</p>
+                    <label for="bs_year" class="mb-1 block text-sm font-semibold text-text-base">Fiscal year (BS) <span class="text-danger">*</span></label>
+                    <Select id="bs_year" v-model="form.bs_year" :options="fiscalYearOptions" placeholder="Select fiscal year…" />
+                    <p v-if="selectedFiscalYearOption" class="mt-1 text-xs text-text-muted">
+                        Runs {{ formatBsDate(selectedFiscalYearOption.start_date) }} (Shrawan 1) to
+                        {{ formatBsDate(selectedFiscalYearOption.end_date) }} (end of Ashad).
+                    </p>
+                    <p v-else class="mt-1 text-xs text-text-muted">A fiscal year always runs from Shrawan 1 to the end of Ashad.</p>
+                    <p v-if="form.errors.bs_year" class="mt-1 text-sm text-danger">{{ form.errors.bs_year }}</p>
+                </div>
+
+                <div>
+                    <label for="name" class="mb-1 block text-sm font-semibold text-text-base">Name</label>
+                    <Input id="name" v-model="form.name" type="text" :placeholder="selectedFiscalYearOption?.label ?? 'e.g. 2082/83'" />
+                    <p class="mt-1 text-xs text-text-muted">Optional. Defaults to the BS year, e.g. 2082/83.</p>
                     <p v-if="form.errors.name" class="mt-1 text-sm text-danger">{{ form.errors.name }}</p>
-                </div>
-
-                <div>
-                    <label for="start_date" class="mb-1 block text-sm font-semibold text-text-base">Start date (BS) <span class="text-danger">*</span></label>
-                    <NepaliDateInput id="start_date" v-model="form.start_date" required />
-                    <p v-if="form.errors.start_date" class="mt-1 text-sm text-danger">{{ form.errors.start_date }}</p>
-                </div>
-
-                <div>
-                    <label for="end_date" class="mb-1 block text-sm font-semibold text-text-base">End date (BS) <span class="text-danger">*</span></label>
-                    <NepaliDateInput id="end_date" v-model="form.end_date" required />
-                    <p v-if="form.errors.end_date" class="mt-1 text-sm text-danger">{{ form.errors.end_date }}</p>
                 </div>
             </form>
 
@@ -341,7 +346,7 @@ const columns = [
                     variant="primary"
                     tone="purple"
                     type="button"
-                    :disabled="form.processing"
+                    :disabled="form.processing || !form.bs_year"
                     :loading="form.processing"
                     @click="submitCreate"
                 >

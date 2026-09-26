@@ -86,6 +86,64 @@ test('an authenticated user can post a sale through the store route', function (
     $tenant->delete();
 });
 
+test('every tenant page is told whether an open fiscal year exists', function () {
+    $domain = 'sales-fiscal-year-prop.tenant-test';
+    $tenant = provisionSaleControllerTestTenant($domain);
+
+    $tenant->run(function () {
+        User::factory()->create(['email' => 'owner@example.com']);
+    });
+
+    loginSaleControllerTestUser($domain);
+
+    $this->get("http://{$domain}/sales")
+        ->assertOk()
+        ->assertInertia(fn ($page) => $page->where('tenant.has_open_fiscal_year', false));
+
+    $tenant->run(function () {
+        FiscalYear::create(['name' => 'FY1', 'start_date' => '2026-01-01', 'end_date' => '2026-12-31', 'status' => FiscalYearStatus::Open]);
+    });
+
+    $this->get("http://{$domain}/sales")
+        ->assertOk()
+        ->assertInertia(fn ($page) => $page->where('tenant.has_open_fiscal_year', true));
+
+    $tenant->delete();
+});
+
+test('posting a sale without an open fiscal year returns a validation error instead of a 404', function () {
+    $domain = 'sale-store-no-fiscal-year.tenant-test';
+    $tenant = provisionSaleControllerTestTenant($domain);
+
+    $customerId = null;
+    $itemId = null;
+    $tenant->run(function () use (&$customerId, &$itemId) {
+        User::factory()->create(['email' => 'owner@example.com']);
+        CompanySetting::current()->update(['allow_negative_stock' => true]);
+        $customerId = Customer::factory()->create()->id;
+        $itemId = Item::factory()->create(['is_vatable' => true, 'is_stockable' => true])->id;
+    });
+
+    loginSaleControllerTestUser($domain);
+
+    $this->from("http://{$domain}/sales")->post("http://{$domain}/sales", [
+        'customer_id' => $customerId,
+        'invoice_type' => 'full',
+        'date' => '2026-06-01',
+        'payment_mode' => 'cash',
+        'lines' => [
+            ['item_id' => $itemId, 'quantity' => 1, 'rate' => 100],
+        ],
+    ])->assertRedirect("http://{$domain}/sales")
+        ->assertSessionHasErrors(['fiscal_year' => FiscalYear::NO_OPEN_YEAR_MESSAGE]);
+
+    $tenant->run(function () {
+        expect(Sale::query()->count())->toBe(0);
+    });
+
+    $tenant->delete();
+});
+
 test('cancelling a sale through the cancel route requires a reason and posts a reversal', function () {
     $domain = 'sale-cancel-http.tenant-test';
     $tenant = provisionSaleControllerTestTenant($domain);

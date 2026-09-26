@@ -155,9 +155,20 @@ class FiscalYear extends Model
         return $this->belongsTo(User::class, 'reopened_by');
     }
 
+    /**
+     * Shown whenever something tries to post while the company has no open
+     * fiscal year (shared banner, and the error a posting request gets back).
+     */
+    public const NO_OPEN_YEAR_MESSAGE = 'No open fiscal year. Set up a fiscal year before posting sales, purchases or other entries.';
+
     public static function current(): self
     {
         return static::where('status', FiscalYearStatus::Open)->firstOrFail();
+    }
+
+    public static function hasOpen(): bool
+    {
+        return static::where('status', FiscalYearStatus::Open)->exists();
     }
 
     /**

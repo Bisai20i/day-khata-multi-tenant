@@ -8,6 +8,8 @@ use App\Http\Controllers\Tenant\Admin\BackupController;
 use App\Models\Backup;
 use App\Models\FiscalYear;
 use App\Models\User;
+use App\Support\NepaliCalendar;
+use Carbon\CarbonImmutable;
 use Illuminate\Auth\Access\AuthorizationException;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
@@ -23,26 +25,41 @@ class FiscalYearController extends Controller
     {
         return Inertia::render('Tenant/Accounting/FiscalYears/Index', [
             'fiscalYears' => FiscalYear::query()->with('archive')->orderByDesc('start_date')->get(),
+            'fiscalYearOptions' => $this->fiscalYearOptions(),
         ]);
     }
 
+    /**
+     * A fiscal year is always Nepal's official one - Shrawan 1 through the
+     * last day of the following Ashad - so the only thing the user picks is
+     * the BS year it starts in; both dates are derived here via
+     * NepaliCalendar::fiscalYear() rather than typed in, so a year can never
+     * be created on arbitrary dates.
+     */
     public function store(Request $request): RedirectResponse
     {
         $data = $request->validate([
-            'name' => ['required', 'string', 'max:255'],
-            'start_date' => ['required', 'date'],
-            'end_date' => ['required', 'date', 'after:start_date'],
+            'bs_year' => ['required', 'integer', 'between:2000,2089'],
+            'name' => ['nullable', 'string', 'max:255'],
         ]);
+
+        $bounds = NepaliCalendar::fiscalYear((int) $data['bs_year']);
+        $name = trim((string) ($data['name'] ?? ''));
 
         // The very first fiscal year a tenant ever creates opens
         // automatically (there's nothing to close first); every one after
         // that starts Closed and is opened deliberately via close() below.
-        $data['status'] = FiscalYear::query()->exists() ? FiscalYearStatus::Closed : FiscalYearStatus::Open;
+        $attributes = [
+            'name' => $name !== '' ? $name : $bounds['name'],
+            'start_date' => $bounds['start']->toDateString(),
+            'end_date' => $bounds['end']->toDateString(),
+            'status' => FiscalYear::query()->exists() ? FiscalYearStatus::Closed : FiscalYearStatus::Open,
+        ];
 
         try {
-            FiscalYear::create($data);
+            FiscalYear::create($attributes);
         } catch (InvalidArgumentException $e) {
-            return back()->withErrors(['start_date' => $e->getMessage()])->withInput();
+            return back()->withErrors(['bs_year' => $e->getMessage()])->withInput();
         }
 
         return redirect()->route('tenant.fiscal-years.index')->with('status', 'Fiscal year added.');
@@ -131,6 +148,31 @@ class FiscalYearController extends Controller
         }
 
         return redirect()->route('tenant.fiscal-years.index')->with('status', "\"{$fiscalYear->name}\" relocked.");
+    }
+
+    /**
+     * The BS fiscal years offered on the create form: five back and two
+     * ahead of the one today falls in, each with its derived Shrawan 1 /
+     * Ashad-end dates so the form can show exactly what will be created.
+     *
+     * @return array<int, array{value: int, label: string, start_date: string, end_date: string}>
+     */
+    private function fiscalYearOptions(): array
+    {
+        $current = NepaliCalendar::fiscalYearStartBsYear(CarbonImmutable::now('Asia/Kathmandu')->toDateString());
+
+        return collect(range(min($current + 2, 2089), max($current - 5, 2000)))
+            ->map(function (int $bsYear): array {
+                $bounds = NepaliCalendar::fiscalYear($bsYear);
+
+                return [
+                    'value' => $bsYear,
+                    'label' => $bounds['name'],
+                    'start_date' => $bounds['start']->toDateString(),
+                    'end_date' => $bounds['end']->toDateString(),
+                ];
+            })
+            ->all();
     }
 
     /**
