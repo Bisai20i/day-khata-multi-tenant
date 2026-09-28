@@ -61,8 +61,10 @@ class DashboardController extends Controller
             ],
             'kpis' => [
                 'customers' => [
-                    'total' => Customer::count(),
-                    'thisWeek' => Customer::where('created_at', '>=', now()->subWeek())->count(),
+                    // The seeded walk-in row is a system placeholder, not a
+                    // customer the business has, so it never counts here.
+                    'total' => Customer::where('is_walk_in', false)->count(),
+                    'thisWeek' => Customer::where('is_walk_in', false)->where('created_at', '>=', now()->subWeek())->count(),
                 ],
                 'suppliers' => [
                     'total' => Supplier::count(),
@@ -137,7 +139,7 @@ class DashboardController extends Controller
                     'total' => Money::of($sale->total)->toString(),
                     'paymentMode' => $sale->payment_mode,
                 ]),
-            'recentCustomers' => Customer::with('account')->latest()->take(5)->get()->map(fn (Customer $customer) => [
+            'recentCustomers' => Customer::with('account')->where('is_walk_in', false)->latest()->take(5)->get()->map(fn (Customer $customer) => [
                 'name' => $customer->name,
                 'mobile' => $customer->mobile_no,
                 'code' => $customer->account?->code,

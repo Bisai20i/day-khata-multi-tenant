@@ -21,7 +21,9 @@ class ActivityLogController extends Controller
 {
     public function index(Request $request): Response
     {
-        $tenantId = $request->filled('tenant_id') ? $request->integer('tenant_id') : null;
+        // Tenant ids are UUID strings (tenancy.id_generator), so reading this
+        // with integer() turned every id into 0 and silently dropped the filter.
+        $tenantId = $request->filled('tenant_id') ? $request->string('tenant_id')->toString() : null;
         $action = $request->filled('action') ? $request->string('action')->toString() : null;
         $platformAdminId = $request->filled('platform_admin_id') ? $request->integer('platform_admin_id') : null;
 

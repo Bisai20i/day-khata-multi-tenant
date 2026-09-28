@@ -57,9 +57,16 @@ test('a platform admin can trigger impersonation and land authenticated as the t
 
     $landing = $this->get($signedUrl);
 
-    $landing->assertRedirect('http://impersonateme.localhost/dashboard');
+    // The signed URL carries APP_URL's port over (local dev runs on :8000),
+    // so the tenant dashboard redirect stays on that same host and port.
+    $port = parse_url((string) config('app.url'), PHP_URL_PORT);
+    $landing->assertRedirect('http://impersonateme.localhost'.($port ? ":{$port}" : '').'/dashboard');
     expect(Auth::guard('web')->check())->toBeTrue();
     expect(Auth::guard('web')->id())->toBe($adminUserId);
+
+    // Landing on the tenant domain initialised tenancy; the audit row lives
+    // in the central database.
+    tenancy()->end();
 
     expect(PlatformAdminActivityLog::where('action', 'tenant.impersonate')
         ->where('tenant_id', $tenant->id)

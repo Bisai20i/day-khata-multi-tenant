@@ -111,6 +111,7 @@ test('viewing settings for a tenant with a missing database returns a clean erro
 test('a guest cannot view a tenant\'s settings', function () {
     $admin = PlatformAdmin::factory()->create();
     $tenant = provisionTenantSettingsTestTenant($this, $admin, 'settingsguest');
+    Auth::guard('platform')->logout();
 
     $this->get(route('central.tenants.settings.edit', $tenant))
         ->assertRedirect(route('login'));
@@ -119,6 +120,7 @@ test('a guest cannot view a tenant\'s settings', function () {
 test('a tenant-side web-guard user cannot view the central tenant settings page', function () {
     $admin = PlatformAdmin::factory()->create();
     $tenant = provisionTenantSettingsTestTenant($this, $admin, 'settingswebguard');
+    Auth::guard('platform')->logout();
 
     $tenantUser = $tenant->run(fn () => User::where('email', 'admin@settingswebguard.test')->firstOrFail());
 

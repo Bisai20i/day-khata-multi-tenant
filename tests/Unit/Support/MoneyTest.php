@@ -106,7 +106,7 @@ test('percent rounds once, the audit P0-1 percentage proofs', function (string $
 
 test('plus and minus are exact', function () {
     expect(Money::of('0.10')->plus('0.20')->toString())->toBe('0.30')
-        ->and(Money::of('1000000.01')->plus('0.99')->toString())->toBe('1000000.99')
+        ->and(Money::of('1000000.01')->plus('0.99')->toString())->toBe('1000001.00')
         ->and(Money::of('56.50')->minus('56.50')->toString())->toBe('0.00')
         ->and(Money::of('10.00')->minus('25.50')->toString())->toBe('-15.50');
 });

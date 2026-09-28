@@ -87,6 +87,7 @@ test('viewing users for a tenant with a missing database returns a clean error i
 test('a guest cannot view a tenant\'s users', function () {
     $admin = PlatformAdmin::factory()->create();
     $tenant = provisionTenantUsersTestTenant($this, $admin, 'guestblocked');
+    Auth::guard('platform')->logout();
 
     $this->get(route('central.tenants.users', $tenant))
         ->assertRedirect(route('login'));
@@ -95,6 +96,7 @@ test('a guest cannot view a tenant\'s users', function () {
 test('a tenant-side web-guard user cannot view the tenant users page', function () {
     $admin = PlatformAdmin::factory()->create();
     $tenant = provisionTenantUsersTestTenant($this, $admin, 'webguarded');
+    Auth::guard('platform')->logout();
 
     $tenantUser = $tenant->run(fn () => User::where('email', 'admin@webguarded.test')->firstOrFail());
 

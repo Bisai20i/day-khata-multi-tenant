@@ -41,16 +41,18 @@ test('the pos page renders its expected Inertia component with items and custome
 
     $tenant->run(function () {
         User::factory()->create(['email' => 'owner@example.com']);
-        Customer::factory()->create(['name' => 'Walk-in Customer']);
         Item::factory()->create(['name' => 'Instant Noodles', 'is_vatable' => true, 'is_stockable' => true]);
     });
 
     loginPosTestUser($domain);
 
+    // The tenant migrations seed the walk-in customer, so a fresh tenant
+    // already has exactly one.
     $this->get("http://{$domain}/pos")
         ->assertOk()
         ->assertInertia(fn ($page) => $page->component('Tenant/Sales/Pos')
             ->has('customers', 1)
+            ->where('customers.0.name', 'Walk-in customer')
             ->has('items', 1)
             ->has('categories')
             ->has('bankAccounts')

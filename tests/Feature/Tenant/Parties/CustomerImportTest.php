@@ -113,7 +113,7 @@ test('bulk import skips invalid or duplicate rows and reports why without import
 
         // The pre-existing row and the two genuinely valid rows only - no
         // partial writes from the invalid ones leaked into the table.
-        expect(Customer::query()->count())->toBe(3);
+        expect(Customer::query()->where('is_walk_in', false)->count())->toBe(3);
     });
 
     $tenant->delete();
@@ -132,7 +132,7 @@ test('guests cannot reach the customer import endpoints', function () {
         ->assertRedirect("http://{$domain}/login");
 
     $tenant->run(function () {
-        expect(Customer::query()->count())->toBe(0);
+        expect(Customer::query()->where('is_walk_in', false)->count())->toBe(0);
     });
 
     $tenant->delete();
