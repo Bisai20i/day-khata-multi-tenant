@@ -40,6 +40,29 @@ Files: app/Models/CapitalPurchase.php, app/Http/Controllers/Tenant/Purchases/Cap
 - Not covered in tests/Feature/Tenant/Purchases/CapitalPurchaseTest.php: cancelling a purchase that created a FixedAsset (CS-02), cancel in a closed fiscal year, non-admin cancel route returns 403, double cancel through the route, posting into a closed year, bank_account_id of a non-bank account, bill number re-entry after cancel (guard release), cash mode with supplier, purchase without VAT account seeded.
 - No settlement tests (CS-01).
 
+## CS-08 (P0) No view or print of a capital or service purchase, live or cancelled
+- Where: routes/tenant-purchase.php:36-48 (index, store, export, cancel and settlement routes only; no show or print); resources/views/pdf has capital-sale.blade.php but no capital purchase layout; resources/js/pages/Tenant/Purchases/CapitalPurchases/Index.vue:156-157 and :185-190 (the Accounts column lists account names only).
+- Evidence: line amounts, line narrations, the vatable split and VAT are sent to the page (CapitalPurchaseController.php:32 loads lines) but never displayed or printable. Legacy: day_khata resources/views/instock/listCapitalServices.blade.php:196,201 offers Print (printJournalCapitalRecord) for capital and service journals.
+- Impact: a user cannot review or print what a capital or service bill contained, and after cancelling cannot see the lines that were reversed. The only workaround is finding the purchase voucher in Journal Vouchers and printing it (routes/tenant-ledger.php:51), which the capital page does not link to. No ledger effect.
+- Fix: add a print route and PDF (lines, VAT, totals, payment mode, settlements) usable for cancelled bills too, with a Print action on every row.
+
+## CS-09 (P2) Cancel reason, date and user are stored but never shown
+- Where: app/Models/CapitalPurchase.php:633-640 (writes cancelled_at, cancelled_by, cancel_reason); CapitalPurchaseController.php:32 (index loads no canceller), :144 (export has status only); CapitalPurchases/Index.vue:211-219 (Status column is a badge only).
+- Evidence: grep for cancel_reason, cancelled_at and canceller in resources/js/pages/Tenant/Purchases and CapitalPurchaseListExport finds nothing.
+- Impact: no one can see why, when or by whom a capital purchase was cancelled. Legacy: day_khata InventoryStockController::cancelJournalRecord now writes purchasecancelrecords so the cancelled list shows it.
+- Fix: load canceller:id,name; show reason, date and user in the list, the print from CS-08 and the export.
+
+## CS-10 (P2) Totals row and export total include cancelled bills
+- Where: CapitalPurchaseController.php:41-45 (totals over every row), :147 (export total).
+- Evidence: no status filter in either sum; sales excludes cancelled rows (SaleController.php:154).
+- Impact: the capital purchase total on screen and in Excel overstates spending by every cancelled bill and disagrees with the ledger.
+- Fix: sum only rows where status is not cancelled.
+
+## CS-11 (P2) Cancel button shown to non-admins although canCancel is passed
+- Where: CapitalPurchases/Index.vue:239-246 (Cancel offered on every posted row); canCancel prop at :30 is only used for settlement cancel (:340); CapitalPurchaseController.php:48; routes/tenant-purchase.php:40-42 (role:admin).
+- Evidence: a non-admin can open the dialog and submit; EnsureUserHasRole aborts 403, which is not a validation error, so the dialog shows nothing and Inertia shows a bare error page.
+- Fix: wrap the purchase Cancel button in `canCancel` like the settlement one.
+
 ## TDS
 Legacy TDS handling is in saveInStock (regular purchase), not in capital or service purchase, so there is no parity gap. Multi-tenant capital purchases carry no TDS; noted only in case the business rule changes.
 
@@ -53,3 +76,12 @@ Legacy TDS handling is in saveInStock (regular purchase), not in capital or serv
 - Fixed asset creation reuses the purchase voucher (no double booking), enforces Fixed Assets group, salvage not above cost, capital type only.
 - Tenancy: routes are in the tenant auth group; models resolve through the tenant connection; ActivityLogObserver attached (AppServiceProvider.php:57-58).
 - Purchase VAT book consumption fields (bill_number, supplier_pan snapshot) present.
+
+Checked 2026-09-28 against the legacy cancelled-purchase fixes (day_khata InventoryStockController::cancelJournalRecord, listCapitalServices.blade.php, uncommitted):
+- Cancel records a reason: required in the controller (CapitalPurchaseController.php:154-156) and re-checked in the model (CapitalPurchase.php:596-604), stored with the cancel date and user (:636-638).
+- Cancel is one transaction: row lock, settlement and fixed asset checks, JournalVoucher::reverse, asset status and header update all run inside DB::transaction (CapitalPurchase.php:588-643).
+- Cancel lines stay intact (the model never touches capital_purchase_lines on cancel), and cancelled bills stay in the list with a badge. The gap is only that nothing displays them (CS-08).
+- No edit path (routes/tenant-purchase.php:36-48, no update method on CapitalPurchase), so no superseded lines.
+- Cancel trusts only the route-bound record; the request validates only `reason`.
+- Cancel dialog requires a reason and shows server errors under the field (CapitalPurchases/Index.vue:386-405, controller :160-161).
+- Closed years: JournalVoucher::reverse refuses any year that is not open, even one reopened for correction (JournalVoucher.php:432-436), and the message reaches the dialog. The legacy missing-reason failure cannot happen. This differs from legacy on purpose (legacy let a Super Admin cancel with a reason); confirm that is intended.

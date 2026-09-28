@@ -89,6 +89,23 @@ C3, C4, C5, C6, C10 rather than line by line.
   line in PurchaseReturn::prepareLine).
 - Fix: add Pest cases for each.
 
+### PUR-10 (P2) Cancel reason, date and user are stored but never shown
+- Where: app/Models/Purchase.php:572-579 (writes cancelled_at, cancelled_by, cancel_reason); PurchaseController.php:52 (index loads no canceller), :221 (export has status only); resources/js/pages/Tenant/Purchases/Index.vue:230-240 (Status column is a badge only); resources/views/pdf/purchase.blade.php:10-12 (print shows a "Cancelled" badge only).
+- Evidence: grep for cancel_reason, cancelled_at and canceller in resources/js/pages/Tenant/Purchases, the purchase PDF and PurchaseListExport finds nothing. The reason survives only inside the reversal voucher narration.
+- Impact: a user reviewing or printing a cancelled bill cannot see why, when or by whom it was cancelled. Legacy: day_khata InventoryStockController::getcanceledpurchaserecordforprint and resources/views/instock/listcanceledinstock.blade.php now show all three.
+- Fix: load canceller:id,name in index and print; show reason, cancel date and user in the list (row detail or tooltip), under the Cancelled badge on the PDF, and as export columns.
+
+### PUR-11 (P2) Purchase list totals and export total include cancelled bills
+- Where: PurchaseController.php:288-302 (filteredTotals), :224 (export total); query builder at :277-283 has no status filter.
+- Evidence: the "Total (filtered)", taxable, non-taxable and VAT tiles on Index.vue:351-368 sum every row, cancelled ones included. Sales already excludes them (SaleController.php:154 `where('status', '!=', 'cancelled')`).
+- Impact: the on-screen and exported purchase totals overstate purchases and input VAT by every cancelled bill, so they disagree with the ledger and the VAT book.
+- Fix: add `where('status', '!=', 'cancelled')` to filteredTotals and sum only posted rows for the export total (keep cancelled rows listed).
+
+### PUR-12 (P2) Cancel button shown to non-admins; the 403 is not shown in the dialog
+- Where: resources/js/pages/Tenant/Purchases/Index.vue:262-270 (Cancel offered on every posted row); routes/tenant-purchase.php:30-32 (role:admin); app/Http/Middleware/EnsureUserHasRole.php (abort(403)).
+- Evidence: PurchaseController::index passes no canCancel flag. A non-admin can fill the reason dialog and submit; the 403 is not a validation error, so reasonForm.errors stays empty and Inertia shows a bare error page instead of a message in the dialog.
+- Fix: pass canCancel (as CapitalPurchaseController.php:48 does) and hide the button for non-admins.
+
 ## Checked and fine
 - Purchase voucher balances: expense debits (net of line and header discount, grouped by account) plus input VAT (ASA23)
   equal the supplier credit of total; TDS is a separate credit TDS-payable and debit supplier pair; settlement debits the
@@ -109,3 +126,11 @@ C3, C4, C5, C6, C10 rather than line by line.
   outstanding cap are checked; voucher is balanced; over-allocation beyond the payment amount is rejected.
 - Tenancy: database-per-tenant, so no tenant_id scoping gaps were found in these controllers.
 - Correction posting into a reopened fiscal year is admin only and logged.
+
+Checked 2026-09-28 against the legacy cancelled-purchase fixes (day_khata InventoryStockController, StockOutController, listcanceledinstock.blade.php, uncommitted):
+- Cancelled bill lines stay intact: cancel() flags only the stock movements and the header (Purchase.php:570-579), and print loads every line (PurchaseController.php:253). A cancelled bill stays in the list with its badge and Print link (Index.vue:247-260), and the PDF shows its lines, rates and totals. The legacy empty item table cannot happen.
+- Reason is required (PurchaseController.php:232, Purchase.php:528-532) and stored with the cancel date and user (Purchase.php:575-577).
+- No edit path: the purchase routes are index, store, export, cancel and print only (routes/tenant-purchase.php:22-34), and Purchase has no update method, so there are no superseded lines to mix with the final ones.
+- Cancel trusts only the route-bound purchase; the request validates only `reason` (PurchaseController.php:229-236).
+- Cancel dialog requires a reason and shows server errors under the field (Index.vue:411-431); model errors come back as a `reason` error (PurchaseController.php:237-238).
+- Closed years: JournalVoucher::reverse refuses any year that is not open, including one reopened for correction (JournalVoucher.php:432-436). The message reaches the dialog. The legacy missing-reason failure cannot happen here. This differs from legacy on purpose (legacy let a Super Admin cancel with a reason); confirm that is intended.

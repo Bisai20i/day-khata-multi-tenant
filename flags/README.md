@@ -5,11 +5,13 @@ Audited 2026-09-21 by read-only agents. Severities were assigned by each agent w
 | File | Flags | P0/P1 status | P2 status |
 |---|---|---|---|
 | sales.md | SAL-01..12 | SAL-01..04 FIXED | SAL-05..12 open |
-| purchases.md | PUR-01..09 | PUR-01..03 FIXED | PUR-04..09 open |
+| purchases.md | PUR-01..12 | PUR-01..03 FIXED | PUR-04..12 open (9) |
 | journal-entries.md | JE-01..11 | JE-01..04 FIXED | JE-05..11 open |
-| capital-and-services.md | CS-01..07 | CS-01..03 FIXED (CS-05 also) | CS-04, CS-06, CS-07 open |
+| capital-and-services.md | CS-01..11 | CS-01..03 FIXED (CS-05 also); CS-08 (P0) open | CS-04, CS-06, CS-07, CS-09..11 open (6) |
 
 "FIXED" means the code was changed and tests were written. It does not mean verified by a test run.
+
+PUR-10..12 and CS-08..11 came from checking the legacy cancelled-purchase fixes (2026-09-28) against this repo, using the single rubric below.
 
 ## Start of next session
 
