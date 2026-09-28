@@ -112,3 +112,26 @@ test('the purchases export honours the search and streams a csv when format=csv 
 
     $tenant->delete();
 });
+
+test('a cancelled purchase stays in the list but is left out of the totals row and the export total', function () {
+    Excel::fake();
+
+    $domain = 'purchase-totals-cancelled.tenant-test';
+    $tenant = provisionPurchaseListSearchSortTenant($domain);
+
+    $tenant->run(function () {
+        Purchase::where('bill_number', 'B-100')->firstOrFail()->cancel(User::where('email', '!=', 'owner@example.com')->firstOrFail(), 'Entered twice');
+    });
+
+    $this->get("http://{$domain}/purchases")
+        ->assertOk()
+        ->assertInertia(fn ($page) => $page
+            ->where('purchases.total', 3)
+            ->where('totals.total', '300.00'));
+
+    $this->get("http://{$domain}/purchases/export")->assertOk();
+
+    Excel::assertDownloaded('purchases.xlsx', fn (PurchaseListExport $export) => $export->collection()->last()['total'] === '300.00');
+
+    $tenant->delete();
+});

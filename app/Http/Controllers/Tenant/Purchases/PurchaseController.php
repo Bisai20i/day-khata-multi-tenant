@@ -230,7 +230,9 @@ class PurchaseController extends Controller
             'status' => $purchase->status === 'cancelled' ? 'Cancelled' : 'Posted',
         ]);
 
-        $total = Money::sum($purchases->map(fn (Purchase $purchase): Money => Money::of($purchase->total)))->toString();
+        $total = Money::sum($purchases
+            ->reject(fn (Purchase $purchase): bool => $purchase->status === 'cancelled')
+            ->map(fn (Purchase $purchase): Money => Money::of($purchase->total)))->toString();
 
         return Excel::download(new PurchaseListExport($rows, $total), "purchases.{$extension}");
     }
@@ -319,7 +321,9 @@ class PurchaseController extends Controller
      */
     private function filteredTotals(array $filters): array
     {
-        $row = $this->filteredPurchasesQuery($filters)->toBase()->selectRaw(
+        // Cancelled purchases stay in the list but never move the totals row,
+        // the same as the sales list (SaleController::filteredTotals()).
+        $row = $this->filteredPurchasesQuery($filters)->where('status', '!=', 'cancelled')->toBase()->selectRaw(
             'COALESCE(SUM(taxable_amount), 0) as taxable_amount, '
             .'COALESCE(SUM(nontaxable_amount), 0) as nontaxable_amount, '
             .'COALESCE(SUM(vat_amount), 0) as vat_amount, '
