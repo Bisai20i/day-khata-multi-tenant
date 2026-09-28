@@ -36,7 +36,20 @@ use Maatwebsite\Excel\Facades\Excel;
 class PurchaseController extends Controller
 {
     /**
-     * Listing is server-side filtered (date range + supplier) and paginated
+     * Columns the list may be sorted by, keyed by the `sort` query value - an
+     * allow-list so a crafted value never reaches orderBy().
+     *
+     * @var array<string, string>
+     */
+    private const SORTABLE_COLUMNS = [
+        'date' => 'date',
+        'bill_number' => 'bill_number',
+        'total' => 'total',
+    ];
+
+    /**
+     * Listing is server-side filtered (date range + supplier + supplier bill
+     * number search), sorted and paginated
      * - same `when()`/`paginate()->withQueryString()` shape
      * Central\Tenants\TenantController::index() established, so it stays
      * consistent across the app rather than loading every purchase
@@ -44,13 +57,11 @@ class PurchaseController extends Controller
      */
     public function index(Request $request): Response
     {
-        $from = $request->filled('from') ? $request->string('from')->toString() : null;
-        $to = $request->filled('to') ? $request->string('to')->toString() : null;
-        $supplierId = $request->filled('supplier_id') ? (int) $request->input('supplier_id') : null;
+        $filters = $this->listFilters($request);
 
-        $purchases = $this->filteredPurchasesQuery($from, $to, $supplierId)
+        $purchases = $this->filteredPurchasesQuery($filters)
             ->with(['supplier:id,name', 'lines.item:id,name,unit', 'journalVoucher:id,voucher_number'])
-            ->orderByDesc('date')
+            ->orderBy(self::SORTABLE_COLUMNS[$filters['sort']], $filters['sort_dir'])
             ->orderByDesc('id')
             ->paginate(25)
             ->withQueryString();
@@ -59,14 +70,10 @@ class PurchaseController extends Controller
 
         return Inertia::render('Tenant/Purchases/Index', [
             'purchases' => $purchases,
-            'filters' => [
-                'from' => $from,
-                'to' => $to,
-                'supplier_id' => $supplierId,
-            ],
+            'filters' => $filters,
             // Exact SQL sums over the whole filtered set (item 8, "totals
             // row") - never a page's worth of client-side addition.
-            'totals' => $this->filteredTotals($from, $to, $supplierId),
+            'totals' => $this->filteredTotals($filters),
             'suppliers' => Supplier::query()->orderBy('name')->get(['id', 'name', 'mobile_no', 'is_vat_registered']),
             // Inactive items are deliberately withheld: an item that has been
             // retired must not be purchasable again from the form, and showing
@@ -196,16 +203,18 @@ class PurchaseController extends Controller
 
     /**
      * Excel export of the purchase list (item 8), honouring the same
-     * from/to/supplier filters the Index page's own list uses - never a
-     * client recomputation, the exported rows are the stored server values.
+     * from/to/supplier/search filters the Index page's own list uses - never
+     * a client recomputation, the exported rows are the stored server values.
+     * Rows stay in date order so the SN column reads chronologically.
+     * `format=csv` streams a .csv instead of the default .xlsx - Laravel
+     * Excel infers the writer from the filename extension.
      */
     public function export(Request $request)
     {
-        $from = $request->filled('from') ? $request->string('from')->toString() : null;
-        $to = $request->filled('to') ? $request->string('to')->toString() : null;
-        $supplierId = $request->filled('supplier_id') ? (int) $request->input('supplier_id') : null;
+        $filters = $this->listFilters($request);
+        $extension = $request->query('format') === 'csv' ? 'csv' : 'xlsx';
 
-        $purchases = $this->filteredPurchasesQuery($from, $to, $supplierId)
+        $purchases = $this->filteredPurchasesQuery($filters)
             ->with(['supplier:id,name'])
             ->orderBy('date')
             ->orderBy('id')
@@ -223,7 +232,7 @@ class PurchaseController extends Controller
 
         $total = Money::sum($purchases->map(fn (Purchase $purchase): Money => Money::of($purchase->total)))->toString();
 
-        return Excel::download(new PurchaseListExport($rows, $total), 'purchases.xlsx');
+        return Excel::download(new PurchaseListExport($rows, $total), "purchases.{$extension}");
     }
 
     public function cancel(Request $request, Purchase $purchase): RedirectResponse
@@ -272,22 +281,45 @@ class PurchaseController extends Controller
     }
 
     /**
-     * @return Builder<Purchase>
+     * @return array{from: ?string, to: ?string, supplier_id: ?int, search: ?string, sort: string, sort_dir: string}
      */
-    private function filteredPurchasesQuery(?string $from, ?string $to, ?int $supplierId)
+    private function listFilters(Request $request): array
     {
-        return Purchase::query()
-            ->when($from, fn ($query, string $from) => $query->whereDate('date', '>=', $from))
-            ->when($to, fn ($query, string $to) => $query->whereDate('date', '<=', $to))
-            ->when($supplierId, fn ($query, int $supplierId) => $query->where('supplier_id', $supplierId));
+        $sort = $request->string('sort')->toString();
+        $sortDir = $request->string('sort_dir')->toString();
+
+        return [
+            'from' => $request->filled('from') ? $request->string('from')->toString() : null,
+            'to' => $request->filled('to') ? $request->string('to')->toString() : null,
+            'supplier_id' => $request->filled('supplier_id') ? (int) $request->input('supplier_id') : null,
+            // A partial match against the number printed on the supplier's
+            // own bill - the one reference a clerk has in hand.
+            'search' => $request->filled('search') ? trim($request->string('search')->toString()) : null,
+            'sort' => array_key_exists($sort, self::SORTABLE_COLUMNS) ? $sort : 'date',
+            'sort_dir' => $sortDir === 'asc' ? 'asc' : 'desc',
+        ];
     }
 
     /**
+     * @param  array{from: ?string, to: ?string, supplier_id: ?int, search: ?string, sort: string, sort_dir: string}  $filters
+     * @return Builder<Purchase>
+     */
+    private function filteredPurchasesQuery(array $filters): Builder
+    {
+        return Purchase::query()
+            ->when($filters['from'], fn ($query, string $from) => $query->whereDate('date', '>=', $from))
+            ->when($filters['to'], fn ($query, string $to) => $query->whereDate('date', '<=', $to))
+            ->when($filters['supplier_id'], fn ($query, int $supplierId) => $query->where('supplier_id', $supplierId))
+            ->when($filters['search'], fn ($query, string $search) => $query->where('bill_number', 'like', "%{$search}%"));
+    }
+
+    /**
+     * @param  array{from: ?string, to: ?string, supplier_id: ?int, search: ?string, sort: string, sort_dir: string}  $filters
      * @return array<string, string>
      */
-    private function filteredTotals(?string $from, ?string $to, ?int $supplierId): array
+    private function filteredTotals(array $filters): array
     {
-        $row = $this->filteredPurchasesQuery($from, $to, $supplierId)->toBase()->selectRaw(
+        $row = $this->filteredPurchasesQuery($filters)->toBase()->selectRaw(
             'COALESCE(SUM(taxable_amount), 0) as taxable_amount, '
             .'COALESCE(SUM(nontaxable_amount), 0) as nontaxable_amount, '
             .'COALESCE(SUM(vat_amount), 0) as vat_amount, '

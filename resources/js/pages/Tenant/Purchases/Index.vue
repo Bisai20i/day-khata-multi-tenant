@@ -1,7 +1,7 @@
 <script setup>
 import { computed, h, onMounted, reactive, ref, watch } from 'vue';
 import { Link, router, useForm, usePage } from '@inertiajs/vue3';
-import { Plus, Search, X } from '@lucide/vue';
+import { Ban, ChevronDown, ChevronUp, ChevronsUpDown, Download, Plus, Printer, Search, SlidersHorizontal, X } from '@lucide/vue';
 import AppLayout from '@/layouts/AppLayout.vue';
 import { useLayoutChrome } from '@/composables/useLayoutChrome';
 import Card from '@/components/ui/Card.vue';
@@ -14,6 +14,8 @@ import Modal from '@/components/ui/Modal.vue';
 import DataTable from '@/components/ui/DataTable.vue';
 import NepaliDateInput from '@/components/ui/NepaliDateInput.vue';
 import Combobox from '@/components/ui/Combobox.vue';
+import DropdownMenu from '@/components/ui/DropdownMenu.vue';
+import DropdownMenuItem from '@/components/ui/DropdownMenuItem.vue';
 import { useToast } from '@/composables/useToast';
 import { formatMoney } from '@/lib/money';
 import { formatBsDate } from '@/lib/format';
@@ -31,7 +33,7 @@ const props = defineProps({
     },
     filters: {
         type: Object,
-        default: () => ({ from: null, to: null, supplier_id: null }),
+        default: () => ({ from: null, to: null, supplier_id: null, search: null, sort: 'date', sort_dir: 'desc' }),
     },
     // Exact SQL sums over the whole filtered set, computed server-side
     // (PurchaseController::filteredTotals()) - never a page's worth of
@@ -57,21 +59,114 @@ const filterState = reactive({
     from: props.filters.from ?? '',
     to: props.filters.to ?? '',
     supplier_id: props.filters.supplier_id ?? null,
+    // Supplier bill number search - matched server-side against the number
+    // printed on the supplier's own bill.
+    search: props.filters.search ?? '',
 });
 const filtering = ref(false);
 
+/**
+ * Sorting is server-side, over the whole filtered set: the table's own
+ * header sort would only reorder the 25 rows of the current page, which on a
+ * list this long reads as a wrong answer. Mirrors Sales/Index.vue.
+ */
+const sortableColumns = { date: 'date', bill_number: 'bill_number', total: 'total' };
+
+const sortState = reactive({
+    sort: props.filters.sort ?? 'date',
+    sort_dir: props.filters.sort_dir ?? 'desc',
+});
+
+function queryParams(overrides = {}) {
+    return {
+        from: filterState.from || undefined,
+        to: filterState.to || undefined,
+        supplier_id: filterState.supplier_id || undefined,
+        search: filterState.search || undefined,
+        sort: sortState.sort || undefined,
+        sort_dir: sortState.sort_dir || undefined,
+        ...overrides,
+    };
+}
+
+function reload() {
+    router.get(window.location.pathname, queryParams(), {
+        preserveState: true,
+        preserveScroll: true,
+        onStart: () => (filtering.value = true),
+        onFinish: () => (filtering.value = false),
+    });
+}
+
 function applyFilters() {
-    router.get(
-        window.location.pathname,
-        { from: filterState.from || undefined, to: filterState.to || undefined, supplier_id: filterState.supplier_id || undefined },
-        { preserveState: true, preserveScroll: true, onStart: () => (filtering.value = true), onFinish: () => (filtering.value = false) },
-    );
+    reload();
+}
+
+// Clicking the column you are already sorted by flips the direction, the way
+// a sortable table header behaves.
+function sortBy(column) {
+    if (sortState.sort === column) {
+        sortState.sort_dir = sortState.sort_dir === 'asc' ? 'desc' : 'asc';
+    } else {
+        sortState.sort = column;
+        sortState.sort_dir = column === 'date' ? 'desc' : 'asc';
+    }
+
+    reload();
+}
+
+/**
+ * Column header for a server-sorted column: a button, so the sort is reachable
+ * by keyboard, with the arrow only lit on the column currently sorted by.
+ */
+function sortableHeader(columnId, label) {
+    const sortKey = sortableColumns[columnId];
+
+    return () => {
+        const active = sortState.sort === sortKey;
+        const Icon = !active ? ChevronsUpDown : sortState.sort_dir === 'asc' ? ChevronUp : ChevronDown;
+
+        return h(
+            'button',
+            {
+                type: 'button',
+                class: `inline-flex cursor-pointer items-center gap-1 uppercase transition-colors duration-150 hover:text-text-strong focus-visible:outline-2 focus-visible:outline-primary ${active ? 'text-text-strong' : ''}`,
+                'aria-label': `Sort by ${label}`,
+                onClick: () => sortBy(sortKey),
+            },
+            [label, h(Icon, { class: `h-3 w-3 shrink-0 ${active ? 'text-primary' : 'text-text-faint'}` })],
+        );
+    };
+}
+
+const showFilters = ref(false);
+
+const activeFilterChips = computed(() => {
+    const chips = [];
+
+    if (props.filters.from) chips.push({ key: 'from', label: `From ${formatBsDate(props.filters.from)}` });
+    if (props.filters.to) chips.push({ key: 'to', label: `To ${formatBsDate(props.filters.to)}` });
+    if (props.filters.supplier_id) {
+        const supplier = props.suppliers.find((s) => s.id === Number(props.filters.supplier_id));
+        chips.push({ key: 'supplier_id', label: supplier?.name ?? 'Supplier' });
+    }
+    if (props.filters.search) chips.push({ key: 'search', label: `Bill "${props.filters.search}"` });
+
+    return chips;
+});
+
+function removeFilter(key) {
+    filterState[key] = key === 'supplier_id' ? null : '';
+    reload();
 }
 
 function clearFilters() {
     filterState.from = '';
     filterState.to = '';
     filterState.supplier_id = null;
+    filterState.search = '';
+    sortState.sort = 'date';
+    sortState.sort_dir = 'desc';
     router.get(
         window.location.pathname,
         {},
@@ -79,25 +174,28 @@ function clearFilters() {
     );
 }
 
-const hasActiveFilters = computed(() => !!(props.filters.from || props.filters.to || props.filters.supplier_id));
+const hasActiveFilters = computed(
+    () => !!(props.filters.from || props.filters.to || props.filters.supplier_id || props.filters.search),
+);
 
-// The export covers the same filtered set the page is showing, all rows and
-// not just this page (item 8, PurchaseController::export()).
-const exportUrl = computed(() => {
+// The export covers the same filtered and searched set the page is showing,
+// all rows and not just this page (item 8, PurchaseController::export()).
+function exportUrl(format) {
     const params = new URLSearchParams();
 
-    for (const [key, value] of Object.entries({
-        from: filterState.from || undefined,
-        to: filterState.to || undefined,
-        supplier_id: filterState.supplier_id || undefined,
-    })) {
+    for (const [key, value] of Object.entries(queryParams())) {
         if (value !== undefined && value !== null && value !== '') params.append(key, value);
     }
+    params.append('format', format);
 
-    const query = params.toString();
+    return `/purchases/export?${params.toString()}`;
+}
 
-    return query ? `/purchases/export?${query}` : '/purchases/export';
-});
+// Prints the currently visible list via the browser's own print dialog -
+// per-purchase copies (Actions column) stay a separate concern.
+function printList() {
+    window.print();
+}
 
 const page = usePage();
 const { toast } = useToast();
@@ -105,7 +203,7 @@ useLayoutChrome('Purchases');
 
 // Store/cancel both redirect back to this same route + component, which
 // Inertia re-renders in place without an onMounted re-run - watch flash
-// status instead (same pattern as JournalVouchers/Index.vue).
+// status instead (same pattern as Sales/Index.vue).
 watch(
     () => page.props.flash?.status,
     (status) => {
@@ -144,6 +242,7 @@ onMounted(() => {
 });
 
 function openCreateForm() {
+    if (!hasOpenFiscalYear.value) return;
     initialDraft.value = null;
     showCreateForm.value = true;
 }
@@ -186,16 +285,20 @@ function itemSummary(purchase) {
     return purchase.lines.map((line) => line.item?.name).filter(Boolean).join(', ');
 }
 
-// Dates are shown in Bikram Sambat with the AD date beside them, the way every
-// printed document in this app reads. Amounts are the stored server values run
-// through the shared Indian-grouping formatter, never a client recomputation
-// (CONTRACTS C8).
+// Amounts are the stored server values run through the shared Indian-grouping
+// formatter, never a client recomputation (CONTRACTS C8).
 const columns = [
     {
         id: 'date',
-        header: 'Date (BS)',
+        header: sortableHeader('date', 'Date (BS)'),
         numeric: false,
-        cell: ({ row }) => `${formatBsDate(row.original.date)} (${String(row.original.date).slice(0, 10)})`,
+        cell: ({ row }) => formatBsDate(row.original.date),
+    },
+    {
+        id: 'bill_number',
+        header: sortableHeader('bill_number', 'Supplier bill #'),
+        numeric: false,
+        cell: ({ row }) => row.original.bill_number ?? '-',
     },
     {
         id: 'supplier',
@@ -204,16 +307,11 @@ const columns = [
         cell: ({ row }) => row.original.supplier?.name ?? '-',
     },
     {
-        id: 'bill_number',
-        header: 'Supplier bill no.',
-        numeric: false,
-        cell: ({ row }) => row.original.bill_number ?? '-',
-    },
-    {
         id: 'items',
         header: 'Items',
         numeric: false,
-        cell: ({ row }) => itemSummary(row.original) || '-',
+        cell: ({ row }) =>
+            h('span', { class: 'block max-w-[260px] truncate', title: itemSummary(row.original) }, itemSummary(row.original) || '-'),
     },
     {
         id: 'payment_mode',
@@ -223,7 +321,7 @@ const columns = [
     },
     {
         id: 'total',
-        header: 'Total (Rs.)',
+        header: sortableHeader('total', 'Total'),
         numeric: true,
         cell: ({ row }) => formatMoney(row.original.total),
     },
@@ -234,7 +332,7 @@ const columns = [
         cell: ({ row }) =>
             h(
                 Badge,
-                { pill: true, variant: row.original.status === 'cancelled' ? 'danger' : 'success' },
+                { variant: row.original.status === 'cancelled' ? 'danger' : 'success' },
                 () => (row.original.status === 'cancelled' ? 'Cancelled' : 'Posted'),
             ),
     },
@@ -243,31 +341,32 @@ const columns = [
         header: 'Actions',
         numeric: false,
         cell: ({ row }) =>
-            h('div', { class: 'flex items-center gap-2' }, [
-                h(Tooltip, { label: 'Open a printable copy in a new tab' }, () =>
+            h('div', { class: 'flex items-center gap-1' }, [
+                h(Tooltip, { label: 'Print purchase' }, () =>
                     h(
-                        Button,
+                        'a',
                         {
-                            as: 'a',
-                            variant: 'secondary',
-                            tone: 'purple',
                             href: `/purchases/${row.original.id}/print`,
                             target: '_blank',
                             rel: 'noopener',
+                            class: 'flex h-[26px] w-[26px] items-center justify-center bg-bg-subtle text-text-faint transition-colors duration-150 hover:bg-primary-tint hover:text-primary',
                             'aria-label': `Print purchase from ${row.original.supplier?.name ?? 'supplier'}`,
                         },
-                        () => 'Print',
+                        [h(Printer, { class: 'h-[13px] w-[13px]' })],
                     ),
                 ),
                 row.original.status === 'posted'
-                    ? h(Tooltip, { label: 'Cancel this purchase and reverse its entries' }, () =>
-                          h(Button, {
-                              variant: 'secondary',
-                              tone: 'purple',
-                              type: 'button',
-                              'aria-label': `Cancel purchase from ${row.original.supplier?.name ?? 'supplier'}`,
-                              onClick: () => openCancel(row.original),
-                          }, () => 'Cancel'),
+                    ? h(Tooltip, { label: 'Cancel purchase (posts reversing entry)' }, () =>
+                          h(
+                              'button',
+                              {
+                                  type: 'button',
+                                  class: 'flex h-[26px] w-[26px] items-center justify-center bg-bg-subtle text-text-faint transition-colors duration-150 hover:bg-danger-bg hover:text-danger',
+                                  'aria-label': `Cancel purchase from ${row.original.supplier?.name ?? 'supplier'}`,
+                                  onClick: () => openCancel(row.original),
+                              },
+                              [h(Ban, { class: 'h-[13px] w-[13px]' })],
+                          ),
                       )
                     : null,
             ]),
@@ -301,8 +400,15 @@ const columns = [
                 </Button>
             </PageHeader>
 
-            <Card variant="panel" class="mb-4">
-                <div class="flex flex-wrap items-end gap-3">
+            <Card variant="panel" class="mb-4 bg-white">
+                <div class="flex items-center justify-between gap-2 md:hidden">
+                    <Button variant="secondary" tone="neutral" type="button" :aria-expanded="showFilters" @click="showFilters = !showFilters">
+                        <SlidersHorizontal class="size-4" />
+                        Filters
+                        <span v-if="activeFilterChips.length" class="bg-bg-muted px-1.5 text-[11px] text-text-strong">{{ activeFilterChips.length }}</span>
+                    </Button>
+                </div>
+                <div :class="[showFilters ? 'mt-3 flex' : 'hidden', 'flex-wrap items-end gap-3 md:mt-0 md:flex']">
                     <div class="min-w-[160px]">
                         <label class="mb-1 block text-xs font-semibold text-text-muted">From date (BS)</label>
                         <NepaliDateInput v-model="filterState.from" />
@@ -313,39 +419,77 @@ const columns = [
                     </div>
                     <div class="min-w-[220px]">
                         <label class="mb-1 block text-xs font-semibold text-text-muted">Supplier</label>
-                        <Combobox v-model="filterState.supplier_id" :options="supplierOptions" placeholder="All suppliers" />
+                        <Combobox v-model="filterState.supplier_id" @update:model-value="applyFilters" :options="supplierOptions" placeholder="All suppliers" />
                     </div>
-                    <Button variant="primary" tone="purple" :loading="filtering" @click="applyFilters">
+                    <div class="min-w-[200px] flex-1">
+                        <label class="mb-1 block text-xs font-semibold text-text-muted">Supplier bill #</label>
+                        <div class="relative">
+                            <Search class="pointer-events-none absolute top-1/2 left-2.5 size-4 -translate-y-1/2 text-text-faint" />
+                            <Input v-model="filterState.search" type="text" placeholder="Search supplier bill number" class="pl-8" @keydown.enter.prevent="applyFilters" />
+                        </div>
+                    </div>
+                    <Button variant="secondary" tone="neutral" :loading="filtering" @click="applyFilters">
                         <Search class="size-4" />
-                        Apply filters
+                        Filter
                     </Button>
-                    <Button v-if="hasActiveFilters" variant="secondary" tone="purple" @click="clearFilters">
-                        <X class="size-4" />
-                        Clear filters
-                    </Button>
-                    <a :href="exportUrl">
-                        <Button variant="secondary" tone="purple" type="button">Export filtered list</Button>
-                    </a>
+                </div>
+                <div v-if="activeFilterChips.length" class="mt-3 flex flex-wrap items-center gap-2 border-t border-border pt-3">
+                    <button
+                        v-for="chip in activeFilterChips"
+                        :key="chip.key"
+                        type="button"
+                        class="inline-flex cursor-pointer items-center gap-1 border-[1.5px] border-border bg-bg-subtle px-2 py-1 text-xs font-semibold text-text-base transition-colors duration-150 hover:bg-bg-muted focus-visible:outline-2 focus-visible:outline-primary"
+                        :aria-label="`Remove filter: ${chip.label}`"
+                        @click="removeFilter(chip.key)"
+                    >
+                        {{ chip.label }}
+                        <X class="size-3 text-text-muted" />
+                    </button>
+                    <button type="button" class="cursor-pointer text-xs font-semibold text-primary hover:underline focus-visible:outline-2 focus-visible:outline-primary" @click="clearFilters">
+                        Clear all
+                    </button>
                 </div>
             </Card>
 
-            <Card variant="panel">
-                <div v-if="purchases.data.length === 0" class="py-10 text-center">
+            <Card variant="panel" class="bg-white">
+                <div class="mb-3 flex flex-wrap items-center justify-between gap-2">
+                    <div class="ml-auto flex items-center gap-2">
+                        <Button variant="secondary" tone="neutral" type="button" @click="printList">
+                            <Printer class="size-4" />
+                            Print
+                        </Button>
+                        <DropdownMenu align="end">
+                            <template #trigger>
+                                <Button variant="secondary" tone="neutral" type="button">
+                                    <Download class="size-4" />
+                                    Export
+                                    <ChevronDown class="size-3.5" />
+                                </Button>
+                            </template>
+                            <DropdownMenuItem as="a" :href="exportUrl('csv')">CSV</DropdownMenuItem>
+                            <DropdownMenuItem as="a" :href="exportUrl('xlsx')">Excel</DropdownMenuItem>
+                        </DropdownMenu>
+                    </div>
+                </div>
+
+                <div v-if="purchases.data.length === 0" class="flex flex-col items-center gap-3 py-10 text-center">
                     <template v-if="hasActiveFilters">
                         <p class="text-sm font-semibold text-text-strong">No purchases match these filters</p>
-                        <p class="mt-1 text-sm text-text-muted">Try a wider date range or a different supplier.</p>
-                        <Button class="mt-3" variant="secondary" tone="purple" type="button" @click="clearFilters">Clear filters</Button>
+                        <Button variant="secondary" tone="neutral" @click="clearFilters">
+                            <X class="size-4" />
+                            Clear filters
+                        </Button>
                     </template>
                     <template v-else>
                         <p class="text-sm font-semibold text-text-strong">No purchases yet</p>
-                        <p class="mt-1 text-sm text-text-muted">Record the first bill you received from a supplier.</p>
-                        <Button v-if="hasOpenFiscalYear" class="mt-3" variant="primary" tone="purple" type="button" @click="openCreateForm">
+                        <p v-if="hasOpenFiscalYear" class="text-xs text-text-muted">Record the first bill you received from a supplier and it will be listed here.</p>
+                        <Button v-if="hasOpenFiscalYear" variant="primary" tone="purple" @click="openCreateForm">
                             <Plus class="size-4" aria-hidden="true" />
                             New purchase
                         </Button>
                     </template>
                 </div>
-                <DataTable v-else :columns="columns" :data="purchases.data" :page-size="Math.max(purchases.data.length, 1)" empty-message="No purchases yet" />
+                <DataTable v-else :columns="columns" :data="purchases.data" :page-size="Math.max(purchases.data.length, 1)" empty-message="No purchases" />
 
                 <!-- Server-computed SQL sums for the whole filtered set, not
                      just this page (item 8, "totals row"). -->
@@ -368,41 +512,31 @@ const columns = [
                     </div>
                 </div>
 
-                <nav v-if="purchases.data.length > 0" aria-label="Purchases pagination" class="mt-3 flex flex-wrap items-center justify-between gap-3">
-                    <p class="text-xs text-text-muted">Showing {{ purchases.from }}–{{ purchases.to }} of {{ purchases.total }}</p>
-                    <div class="flex items-center gap-2">
-                        <Link
-                            v-if="purchases.prev_page_url"
-                            :href="purchases.prev_page_url"
-                            preserve-state
-                            preserve-scroll
-                            class="inline-flex items-center border-[1.5px] border-border bg-white px-3 py-1.5 text-xs font-semibold text-text-muted transition-colors duration-150 ease-out hover:border-primary hover:text-primary"
-                        >
-                            Previous
-                        </Link>
-                        <span
-                            v-else
-                            class="inline-flex cursor-not-allowed items-center border-[1.5px] border-border bg-white px-3 py-1.5 text-xs font-semibold text-text-faint opacity-40"
-                        >
-                            Previous
-                        </span>
-                        <span class="text-xs text-text-muted">Page {{ purchases.current_page }} of {{ purchases.last_page }}</span>
-                        <Link
-                            v-if="purchases.next_page_url"
-                            :href="purchases.next_page_url"
-                            preserve-state
-                            preserve-scroll
-                            class="inline-flex items-center border-[1.5px] border-border bg-white px-3 py-1.5 text-xs font-semibold text-text-muted transition-colors duration-150 ease-out hover:border-primary hover:text-primary"
-                        >
-                            Next
-                        </Link>
-                        <span
-                            v-else
-                            class="inline-flex cursor-not-allowed items-center border-[1.5px] border-border bg-white px-3 py-1.5 text-xs font-semibold text-text-faint opacity-40"
-                        >
-                            Next
-                        </span>
-                    </div>
+                <p v-if="purchases.data.length > 0" class="mt-3 text-xs text-text-muted" aria-live="polite">Showing {{ purchases.from }}–{{ purchases.to }} of {{ purchases.total }}</p>
+                <nav v-if="purchases.data.length > 0 && purchases.last_page > 1" aria-label="Purchases pagination" class="mt-3 flex items-center justify-end gap-2">
+                    <Link
+                        v-if="purchases.prev_page_url"
+                        :href="purchases.prev_page_url"
+                        preserve-state
+                        preserve-scroll
+                        aria-label="Previous page"
+                        class="inline-flex items-center border-[1.5px] border-border bg-white px-3 py-1.5 text-xs font-semibold text-text-muted transition-colors duration-150 ease-out hover:border-primary hover:text-primary"
+                    >
+                        Previous
+                    </Link>
+                    <span v-else aria-disabled="true" class="inline-flex cursor-not-allowed items-center border-[1.5px] border-border bg-white px-3 py-1.5 text-xs font-semibold text-text-faint opacity-40">Previous</span>
+                    <span class="text-xs text-text-muted" aria-current="page">Page {{ purchases.current_page }} of {{ purchases.last_page }}</span>
+                    <Link
+                        v-if="purchases.next_page_url"
+                        :href="purchases.next_page_url"
+                        preserve-state
+                        preserve-scroll
+                        aria-label="Next page"
+                        class="inline-flex items-center border-[1.5px] border-border bg-white px-3 py-1.5 text-xs font-semibold text-text-muted transition-colors duration-150 ease-out hover:border-primary hover:text-primary"
+                    >
+                        Next
+                    </Link>
+                    <span v-else aria-disabled="true" class="inline-flex cursor-not-allowed items-center border-[1.5px] border-border bg-white px-3 py-1.5 text-xs font-semibold text-text-faint opacity-40">Next</span>
                 </nav>
             </Card>
         </template>
@@ -426,7 +560,7 @@ const columns = [
             </div>
 
             <template #footer>
-                <Button variant="secondary" tone="purple" type="button" @click="cancelling = null">Keep purchase</Button>
+                <Button variant="secondary" tone="neutral" type="button" @click="cancelling = null">Keep purchase</Button>
                 <Button variant="primary" tone="purple" type="button" :loading="reasonForm.processing" @click="submitCancel">
                     Cancel this purchase
                 </Button>
