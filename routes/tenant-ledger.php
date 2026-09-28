@@ -40,6 +40,7 @@ Route::name('tenant.')->group(function () {
     // role:admin on journal vouchers ... or cancel paths").
     Route::prefix('journal-vouchers')->name('journal-vouchers.')->group(function () {
         Route::get('/', [JournalVoucherController::class, 'index'])->name('index');
+        Route::get('/export', [JournalVoucherController::class, 'export'])->name('export');
         Route::post('/', [JournalVoucherController::class, 'store'])->middleware('role:admin')->name('store');
         // Cash/Bank vouchers (T14, CONTRACTS/accounting parity): Cash
         // Receipt, Cash Payment, Bank Receipt, Bank Payment, Contra. Posted
