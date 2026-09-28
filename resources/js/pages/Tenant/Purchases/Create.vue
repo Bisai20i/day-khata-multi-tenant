@@ -1,22 +1,32 @@
 <script setup>
-import { computed, onMounted, ref } from 'vue';
-import { router, useForm, usePage } from '@inertiajs/vue3';
+import { computed, ref, watch } from 'vue';
+import { useForm, usePage } from '@inertiajs/vue3';
 import { Plus } from '@lucide/vue';
 import Card from '@/components/ui/Card.vue';
-import PageHeader from '@/components/ui/PageHeader.vue';
 import Button from '@/components/ui/Button.vue';
-import Input from '@/components/ui/Input.vue';
 import Select from '@/components/ui/Select.vue';
-import Combobox from '@/components/ui/Combobox.vue';
-import NepaliDateInput from '@/components/ui/NepaliDateInput.vue';
-import PurchaseCreateCharges from '@/components/purchases/PurchaseCreateCharges.vue';
-import PurchaseCreateLines from '@/components/purchases/PurchaseCreateLines.vue';
+import PurchaseCreateSupplierCard from '@/components/purchases/PurchaseCreateSupplierCard.vue';
+import PurchaseCreateStagingRow from '@/components/purchases/PurchaseCreateStagingRow.vue';
+import PurchaseCreateLinesTable from '@/components/purchases/PurchaseCreateLinesTable.vue';
+import PurchaseCreatePaymentNotes from '@/components/purchases/PurchaseCreatePaymentNotes.vue';
+import PurchaseCreateMoreOptions from '@/components/purchases/PurchaseCreateMoreOptions.vue';
+import PurchaseCreateTotalsBar from '@/components/purchases/PurchaseCreateTotalsBar.vue';
 import PurchaseCreateModals from '@/components/purchases/PurchaseCreateModals.vue';
-import PurchaseCreateSummary from '@/components/purchases/PurchaseCreateSummary.vue';
-import { useToast } from '@/composables/useToast';
+import { useConfirm } from '@/composables/useConfirm';
 import { usePurchaseCreatePreview } from '@/composables/usePurchaseCreatePreview';
+import { usePurchaseCreateQuickAdd } from '@/composables/usePurchaseCreateQuickAdd';
+import { emptyPurchaseLine, restorePurchaseDraft } from '@/lib/purchaseCreate';
 import { todayInKathmandu } from '@/lib/format';
 
+/**
+ * Laid out exactly like Sales/Create.vue: supplier card, one "Add item" row
+ * feeding the bill's lines, payment + notes, rare fields behind "More
+ * options", and a sticky totals bar. Every rupee shown comes from
+ * calculateDocument() via usePurchaseCreatePreview(), the mirror of the
+ * server's DocumentCalculator, and the preview's total is submitted as
+ * `expected_total` so the server refuses a save that would book anything
+ * other than what is on screen (CONTRACTS C8).
+ */
 const props = defineProps({
     suppliers: { type: Array, default: () => [] },
     items: { type: Array, default: () => [] },
@@ -40,102 +50,16 @@ const props = defineProps({
     // md ("Locked decisions" #3 / Phase D's recommended option (a)).
     correctionFiscalYear: { type: Object, default: null },
     // Set by the parent Index page when it bounces back here after the
-    // inline "+ New supplier" modal redirects away and back (see
-    // submitSupplier() below) - restores the in-progress draft that would
-    // otherwise be lost when Index re-mounts this component.
+    // inline "+ New supplier"/"+ New item" modal redirects away and back
+    // (see usePurchaseCreateQuickAdd()) - restores the in-progress draft
+    // that would otherwise be lost when Index re-mounts this component.
     initialDraft: { type: Object, default: null },
 });
 
 const emit = defineEmits(['cancel', 'posted']);
-const { toast } = useToast();
+const { confirm } = useConfirm();
 const page = usePage();
 const isAdmin = computed(() => page.props.auth?.user?.role?.slug === 'admin');
-const isCorrectionSelected = computed(
-    () => !!props.correctionFiscalYear && form.fiscal_year_id === props.correctionFiscalYear.id,
-);
-const fiscalYearOptions = computed(() =>
-    props.correctionFiscalYear
-        ? [{ value: props.correctionFiscalYear.id, label: `${props.correctionFiscalYear.name} (reopened for correction)` }]
-        : [],
-);
-
-const supplierOptions = computed(() => props.suppliers.map((s) => ({ value: s.id, label: s.name })));
-const storeOptions = computed(() => props.stores.map((s) => ({ value: s.id, label: s.name })));
-// searchValue lets a barcode match the item even though it isn't shown in
-// the option's label - see Combobox.vue's searchText().
-const itemOptions = computed(() =>
-    props.items.map((i) => ({
-        value: i.id,
-        label: `${i.name} (${i.unit})`,
-        searchValue: i.barcode ? `${i.name} ${i.barcode}` : i.name,
-    })),
-);
-function accountOptions(accounts) {
-    return accounts.map((account) => ({
-        value: account.id,
-        label: account.code ? `${account.code} - ${account.name}` : account.name,
-    }));
-}
-
-const bankAccountOptions = computed(() => accountOptions(props.bankAccounts));
-const tdsAccountOptions = computed(() => accountOptions(props.tdsAccounts));
-
-const paymentModeOptions = [
-    { value: 'cash', label: 'Cash' },
-    { value: 'bank', label: 'Bank' },
-    { value: 'partial', label: 'Partial (Cash + Bank)' },
-    { value: 'credit', label: 'Credit' },
-];
-
-const itemsById = computed(() => new Map(props.items.map((i) => [i.id, i])));
-
-function emptyLine() {
-    // item_unit_id '' means "the item's own base unit" - see Sales/
-    // Create.vue's identical emptyLine() for the full rationale.
-    // bonus_quantity (item 9): free units received alongside the paid ones -
-    // stocked at (quantity + bonus) x factor but never billed (item 3), so
-    // it is not part of previewLines/calculateDocument at all. note (item 9)
-    // is a free-text per-line remark stored as-is on purchase_lines.note.
-    return {
-        item_id: null,
-        item_unit_id: '',
-        quantity: '',
-        bonus_quantity: '',
-        rate: '',
-        discount: '',
-        discount_type: 'flat',
-        note: '',
-    };
-}
-
-// Mirrors Sales/Create.vue's selectLineUnit() exactly, except this form
-// auto-fills from a unit's purchase_rate override (not sale_rate). Switching
-// BACK to the base unit restores the item's own purchase rate, which the old
-// version left showing the alternate unit's rate against a base quantity.
-function selectLineUnit(line, unitId) {
-    line.item_unit_id = unitId;
-
-    const item = itemsById.value.get(line.item_id);
-
-    if (unitId === '' || unitId === null) {
-        if (item?.purchase_rate != null) {
-            line.rate = String(item.purchase_rate);
-        }
-
-        return;
-    }
-
-    const unit = item?.units?.find((u) => u.id === unitId);
-    if (unit?.purchase_rate != null) {
-        line.rate = String(unit.purchase_rate);
-    }
-}
-
-// Mirrors Sales/Create.vue's selectLineItem() exactly.
-function selectLineItem(line, itemId) {
-    line.item_id = itemId;
-    line.item_unit_id = '';
-}
 
 function defaultFormData() {
     return {
@@ -173,78 +97,67 @@ function defaultFormData() {
         // (see isCorrectionSelected/submit()).
         fiscal_year_id: null,
         reason: '',
-        lines: [emptyLine()],
+        // Items only ever enter the bill through the "Add item" staging row
+        // (PurchaseCreateStagingRow) - no starter blank row here.
+        lines: [],
     };
 }
 
-const form = useForm(props.initialDraft ?? defaultFormData());
+const form = useForm(props.initialDraft ? restorePurchaseDraft(props.initialDraft) : defaultFormData());
 
-function addLine() {
-    form.lines.push(emptyLine());
-}
+const isCorrectionSelected = computed(
+    () => !!props.correctionFiscalYear && form.fiscal_year_id === props.correctionFiscalYear.id,
+);
+const fiscalYearOptions = computed(() =>
+    props.correctionFiscalYear
+        ? [{ value: props.correctionFiscalYear.id, label: `${props.correctionFiscalYear.name} (reopened for correction)` }]
+        : [],
+);
 
-function removeLine(index) {
-    form.lines.splice(index, 1);
-}
+// searchValue lets a barcode match the item even though it isn't shown in
+// the option's label - see Combobox.vue's searchText().
+const itemOptions = computed(() =>
+    props.items.map((i) => ({
+        value: i.id,
+        label: `${i.name} (${i.unit})`,
+        searchValue: i.barcode ? `${i.name} ${i.barcode}` : i.name,
+    })),
+);
+const itemsById = computed(() => new Map(props.items.map((i) => [i.id, i])));
+const suppliersById = computed(() => new Map(props.suppliers.map((s) => [s.id, s])));
 
-// --- Scan-to-add barcode (item 9) --------------------------------------
-// Calls ItemController::lookupBarcode() (GET /items/lookup-barcode), which
-// checks item_units.barcode first (a specific alternate unit) then falls
-// back to items.barcode (the base unit, item_unit_id: null). Response
-// shape and the 404 contract are documented in the T13 items 5-6 pass's
-// cross-file request note. Only items already loaded into this page's own
-// itemsById are addable - a match the browser has never seen (e.g. an
-// inactive item) is reported through barcodeError rather than silently
-// skipped.
-const barcodeCode = ref('');
-const barcodeError = ref(null);
-const barcodeScanning = ref(false);
+// Selecting an alternate unit auto-fills the rate from that unit's own
+// purchase_rate override; switching BACK to the base unit restores the
+// item's own purchase rate. Still freely editable afterwards.
+function selectLineUnit(line, unitId) {
+    line.item_unit_id = unitId;
 
-async function scanBarcode() {
-    const code = barcodeCode.value.trim();
-    if (code === '') {
+    const item = itemsById.value.get(line.item_id);
+
+    if (unitId === '' || unitId === null) {
+        if (item?.purchase_rate != null) {
+            line.rate = String(item.purchase_rate);
+        }
+
         return;
     }
 
-    barcodeError.value = null;
-    barcodeScanning.value = true;
-
-    try {
-        const response = await fetch(`/items/lookup-barcode?code=${encodeURIComponent(code)}`, {
-            headers: { Accept: 'application/json' },
-        });
-        const body = await response.json();
-
-        if (!response.ok) {
-            barcodeError.value = body.message ?? 'No item matches that barcode.';
-            return;
-        }
-
-        const matchedItem = itemsById.value.get(body.item.id);
-        if (!matchedItem) {
-            barcodeError.value = `"${body.item.name}" is not available on this purchase (it may be inactive).`;
-            return;
-        }
-
-        const target = form.lines.find((line) => line.item_id === null) ?? emptyLine();
-        if (!form.lines.includes(target)) {
-            form.lines.push(target);
-        }
-        target.item_id = matchedItem.id;
-        target.item_unit_id = body.item_unit_id ?? '';
-        selectLineUnit(target, target.item_unit_id);
-        if (target.quantity === '') {
-            target.quantity = '1';
-        }
-    } catch {
-        barcodeError.value = 'Could not reach the server. Try again.';
-    } finally {
-        barcodeScanning.value = false;
-        barcodeCode.value = '';
+    const unit = item?.units?.find((u) => u.id === unitId);
+    if (unit?.purchase_rate != null) {
+        line.rate = String(unit.purchase_rate);
     }
 }
 
-const suppliersById = computed(() => new Map(props.suppliers.map((s) => [s.id, s])));
+// A unit id from one item's alt-units list is meaningless for another item,
+// so changing the item resets the unit to the base one and prefills that
+// item's own purchase rate - mirrors useSaleCreateItems().selectLineItem().
+function selectLineItem(line, itemId) {
+    line.item_id = itemId;
+    line.item_unit_id = '';
+
+    const item = itemsById.value.get(itemId);
+    line.rate = item?.purchase_rate != null ? String(item.purchase_rate) : '';
+}
 
 // Picking a supplier re-defaults the PAN / non-VAT toggle from that
 // supplier's registration: a supplier who is not VAT registered can only
@@ -256,11 +169,61 @@ function selectSupplier(supplierId) {
     form.force_non_taxable = supplierId == null ? false : suppliersById.value.get(supplierId)?.is_vat_registered === false;
 }
 
+const stagingRow = ref(null);
+
 const { totals, previewError, partialSplitError, canSubmit, preview, toggleLineDiscountType, toggleHeaderDiscountType } =
     usePurchaseCreatePreview(form, itemsById, isCorrectionSelected);
 
-const showBankAccount = computed(() => form.payment_mode === 'bank' || form.payment_mode === 'partial');
-const showPartialSplit = computed(() => form.payment_mode === 'partial');
+const {
+    supplierModalOpen,
+    supplierForm,
+    openSupplierModal,
+    closeSupplierModal,
+    submitSupplier,
+    itemModalOpen,
+    itemForm,
+    itemCategoryOptions,
+    openItemModal,
+    closeItemModal,
+    submitItem,
+} = usePurchaseCreateQuickAdd(form, props, {
+    selectSupplier,
+    stageItem: (itemId) => stagingRow.value?.stage(itemId),
+});
+
+const showBankField = computed(() => form.payment_mode === 'bank' || form.payment_mode === 'partial');
+const showPartialFields = computed(() => form.payment_mode === 'partial');
+
+// Progressive disclosure for the rare fields - same as the sale form.
+const showMoreOptions = ref(false);
+const showLineExtras = ref(false);
+
+// A server error on a field that lives behind "More options" would otherwise
+// be invisible, so the panel opens itself to show it.
+const MORE_OPTIONS_FIELDS = ['store_id', 'pan_number', 'chalani_number', 'discount', 'vat_rate', 'tds_account_id', 'tds_rate', 'tds_amount'];
+
+watch(
+    () => form.errors,
+    (errors) => {
+        if (MORE_OPTIONS_FIELDS.some((field) => errors[field])) showMoreOptions.value = true;
+    },
+);
+
+/** Cancel straight away when nothing was entered, otherwise ask before discarding. */
+async function requestCancel() {
+    const hasEntries = form.isDirty || form.lines.length > 0;
+    if (hasEntries) {
+        const discard = await confirm({
+            title: 'Discard this purchase?',
+            message: 'The items and details you entered have not been saved and will be lost.',
+            tone: 'danger',
+            confirmLabel: 'Discard purchase',
+            cancelLabel: 'Keep editing',
+        });
+        if (!discard) return;
+    }
+    emit('cancel');
+}
 
 // Every numeric field is submitted as the string the user typed. Number()
 // would turn "1.005" into a float that no longer round-trips, and the server's
@@ -311,187 +274,39 @@ function submit(print = false) {
         },
     });
 }
-
-// --- Inline "+ New supplier" -------------------------------------------
-// Mirrors Sales/Create.vue's inline "+ New customer" modal exactly - see
-// that file for the full rationale on the sessionStorage draft bridge.
-const DRAFT_KEY = 'purchases-create-draft';
-const PENDING_SUPPLIER_KEY = 'purchases-create-pending-supplier';
-
-const supplierModalOpen = ref(false);
-const supplierForm = useForm({ name: '', mobile_no: '' });
-
-function openSupplierModal() {
-    supplierForm.reset();
-    supplierForm.clearErrors();
-    supplierModalOpen.value = true;
-}
-
-function closeSupplierModal() {
-    supplierModalOpen.value = false;
-    supplierForm.reset();
-    supplierForm.clearErrors();
-}
-
-function submitSupplier() {
-    const pendingSupplier = { name: supplierForm.name, mobile_no: supplierForm.mobile_no };
-
-    supplierForm.post('/suppliers', {
-        onSuccess: () => {
-            try {
-                sessionStorage.setItem(DRAFT_KEY, JSON.stringify(form.data()));
-                sessionStorage.setItem(PENDING_SUPPLIER_KEY, JSON.stringify(pendingSupplier));
-            } catch {
-                // Storage unavailable - the modal still worked, the draft just
-                // won't survive the bounce back to /purchases.
-            }
-            supplierModalOpen.value = false;
-            router.visit('/purchases');
-        },
-    });
-}
-
-function applyPendingSupplier() {
-    let raw;
-    try {
-        raw = sessionStorage.getItem(PENDING_SUPPLIER_KEY);
-    } catch {
-        return;
-    }
-    if (!raw) return;
-
-    try {
-        sessionStorage.removeItem(PENDING_SUPPLIER_KEY);
-        const pending = JSON.parse(raw);
-        const matches = props.suppliers.filter(
-            (s) => s.name === pending.name && (pending.mobile_no ? s.mobile_no === pending.mobile_no : true),
-        );
-        const match = matches.sort((a, b) => b.id - a.id)[0];
-        if (match) selectSupplier(match.id);
-        toast({ message: 'Supplier added.', variant: 'success' });
-    } catch {
-        // malformed sessionStorage payload - nothing to recover, ignore.
-    }
-}
-
-// --- Inline "quick add item" (item 9) -----------------------------------
-// Same sessionStorage draft-bridge technique as the "+ New supplier" modal
-// above: ItemController::store() always redirects to the Items index (it
-// has no JSON mode), so this form's own in-progress lines are stashed
-// before the post and restored once Index.vue re-mounts this component
-// back at /purchases.
-const PENDING_ITEM_KEY = 'purchases-create-pending-item';
-
-const itemModalOpen = ref(false);
-const itemForm = useForm({ item_category_id: null, name: '', unit: '', purchase_rate: '', sale_rate: '' });
-const itemCategoryOptions = computed(() => props.itemCategories.map((c) => ({ value: c.id, label: c.name })));
-
-function openItemModal() {
-    itemForm.reset();
-    itemForm.clearErrors();
-    itemModalOpen.value = true;
-}
-
-function closeItemModal() {
-    itemModalOpen.value = false;
-    itemForm.reset();
-    itemForm.clearErrors();
-}
-
-function submitItem() {
-    const pendingItem = { name: itemForm.name };
-
-    itemForm.transform((data) => ({
-        ...data,
-        purchase_rate: data.purchase_rate === '' ? null : data.purchase_rate,
-        sale_rate: data.sale_rate === '' ? null : data.sale_rate,
-    })).post('/items', {
-        onSuccess: () => {
-            try {
-                sessionStorage.setItem(DRAFT_KEY, JSON.stringify(form.data()));
-                sessionStorage.setItem(PENDING_ITEM_KEY, JSON.stringify(pendingItem));
-            } catch {
-                // Storage unavailable - the modal still worked, the draft just
-                // won't survive the bounce back to /purchases.
-            }
-            itemModalOpen.value = false;
-            router.visit('/purchases');
-        },
-    });
-}
-
-// Mirrors applyPendingSupplier() exactly, matched case-insensitively since
-// ItemController::uniqueNameRule() itself is case-insensitive (item 6).
-function applyPendingItem() {
-    let raw;
-    try {
-        raw = sessionStorage.getItem(PENDING_ITEM_KEY);
-    } catch {
-        return;
-    }
-    if (!raw) return;
-
-    try {
-        sessionStorage.removeItem(PENDING_ITEM_KEY);
-        const pending = JSON.parse(raw);
-        const matches = props.items.filter((i) => i.name.toLowerCase() === String(pending.name).toLowerCase());
-        const match = matches.sort((a, b) => b.id - a.id)[0];
-        if (match) {
-            const target = form.lines.find((line) => line.item_id === null) ?? emptyLine();
-            if (!form.lines.includes(target)) {
-                form.lines.push(target);
-            }
-            selectLineItem(target, match.id);
-        }
-        toast({ message: 'Item added.', variant: 'success' });
-    } catch {
-        // malformed sessionStorage payload - nothing to recover, ignore.
-    }
-}
-
-onMounted(() => {
-    applyPendingSupplier();
-    applyPendingItem();
-});
 </script>
 
 <template>
     <div>
-    <Card variant="panel">
-        <PageHeader title="New purchase" description="Record a bill received from a supplier. Stock and the supplier's balance update when you create it. Fields marked * are required.">
-            <Button variant="secondary" tone="purple" type="button" @click="emit('cancel')">Cancel</Button>
-        </PageHeader>
+    <div class="mb-4 flex items-center justify-between">
+        <div>
+            <h3 class="text-base font-bold text-text-strong">New purchase</h3>
+            <p class="text-xs text-text-muted">Record a bill received from a supplier. Fields marked * are required. Totals update as you add items.</p>
+        </div>
+        <Button variant="secondary" tone="purple" type="button" @click="requestCancel">Cancel</Button>
+    </div>
 
-        <p v-if="form.errors.lines" class="mb-4 border-[1.5px] border-danger bg-danger-bg px-3 py-2 text-sm text-danger">
-            {{ form.errors.lines }}
-        </p>
+    <p v-if="form.errors.lines" class="mb-4 border-[1.5px] border-danger bg-danger-bg px-3 py-2 text-sm text-danger">
+        {{ form.errors.lines }}
+    </p>
+    <p v-if="form.errors.expected_total" class="mb-4 border-[1.5px] border-danger bg-danger-bg px-3 py-2 text-sm text-danger">
+        {{ form.errors.expected_total }}
+    </p>
 
-        <p v-if="form.errors.expected_total" class="mb-4 border-[1.5px] border-danger bg-danger-bg px-3 py-2 text-sm text-danger">
-            {{ form.errors.expected_total }}
-        </p>
-
-        <p v-if="previewError" class="mb-4 border-[1.5px] border-warning-text bg-warning-bg px-3 py-2 text-sm text-warning-text">
-            {{ previewError }}
-        </p>
-
-        <form class="flex flex-col gap-4" @submit.prevent="submit(false)">
-            <div v-if="isAdmin && correctionFiscalYear">
-                <label for="purchase-fiscal-year" class="mb-1 block text-sm font-semibold text-text-base">Fiscal year</label>
-                <Select
-                    id="purchase-fiscal-year"
-                    v-model="form.fiscal_year_id"
-                    :options="fiscalYearOptions"
-                    placeholder="Currently open fiscal year"
-                />
-                <p v-if="form.errors.fiscal_year_id" class="mt-1 text-sm text-danger">{{ form.errors.fiscal_year_id }}</p>
-            </div>
-
-            <div v-if="isCorrectionSelected" class="flex flex-col gap-3 border-[1.5px] border-warning-text bg-warning-bg px-3 py-3">
-                <p class="text-sm text-warning-text">
-                    {{ correctionFiscalYear.name }} is reopened for correction. This purchase will post into that
-                    year instead of the currently open one.
-                </p>
+    <form class="flex flex-col gap-4 pb-4" @submit.prevent="submit(false)">
+        <Card v-if="isAdmin && correctionFiscalYear" variant="panel" title="Fiscal year" class="!p-4">
+            <div class="grid grid-cols-1 gap-4 sm:grid-cols-3">
                 <div>
+                    <label for="purchase-fiscal-year" class="mb-1 block text-sm font-semibold text-text-base">Post into</label>
+                    <Select
+                        id="purchase-fiscal-year"
+                        v-model="form.fiscal_year_id"
+                        :options="fiscalYearOptions"
+                        placeholder="Currently open fiscal year"
+                    />
+                    <p v-if="form.errors.fiscal_year_id" class="mt-1 text-sm text-danger">{{ form.errors.fiscal_year_id }}</p>
+                </div>
+                <div v-if="isCorrectionSelected" class="sm:col-span-2">
                     <label for="purchase-reason" class="mb-1 block text-sm font-semibold text-text-base">Reason <span class="text-danger">*</span></label>
                     <textarea
                         id="purchase-reason"
@@ -504,138 +319,89 @@ onMounted(() => {
                     <p v-if="form.errors.reason" class="mt-1 text-sm text-danger">{{ form.errors.reason }}</p>
                 </div>
             </div>
+            <p v-if="isCorrectionSelected" class="mt-3 border-[1.5px] border-warning-text bg-warning-bg px-3 py-2 text-sm text-warning-text">
+                {{ correctionFiscalYear.name }} is reopened for correction. This purchase will post into that
+                year instead of the currently open one.
+            </p>
+        </Card>
 
-            <h4 class="border-b-[1.5px] border-border pb-1 text-sm font-bold text-text-strong">Supplier &amp; date</h4>
-            <div class="grid grid-cols-1 gap-4 sm:grid-cols-3">
-                <div>
-                    <label class="mb-1 block text-sm font-semibold text-text-base">Supplier <span class="text-danger">*</span></label>
-                    <div class="flex gap-2">
-                        <Combobox
-                            :model-value="form.supplier_id"
-                            :options="supplierOptions"
-                            placeholder="Select supplier"
-                            class="flex-1"
-                            @update:model-value="selectSupplier"
-                        />
-                        <Button variant="secondary" tone="purple" type="button" class="!px-2.5" aria-label="Add a new supplier" title="Add a new supplier" @click="openSupplierModal">
-                            <Plus class="h-3.5 w-3.5" aria-hidden="true" />
-                        </Button>
-                    </div>
-                    <p v-if="form.errors.supplier_id" class="mt-1 text-sm text-danger">{{ form.errors.supplier_id }}</p>
-                </div>
-                <div>
-                    <label class="mb-1 block text-sm font-semibold text-text-base">Purchase date (BS) <span class="text-danger">*</span></label>
-                    <NepaliDateInput v-model="form.date" required />
-                    <p class="mt-1 text-xs text-text-faint">Bikram Sambat date printed on the supplier's bill.</p>
-                    <p v-if="form.errors.date" class="mt-1 text-sm text-danger">{{ form.errors.date }}</p>
-                </div>
-                <div>
-                    <label class="mb-1 block text-sm font-semibold text-text-base">Supplier bill number</label>
-                    <Input v-model="form.bill_number" type="text" placeholder="Number printed on the bill" />
-                    <p class="mt-1 text-xs text-text-faint">Optional. Helps you match this entry to the paper bill.</p>
-                    <p v-if="form.errors.bill_number" class="mt-1 text-sm text-danger">{{ form.errors.bill_number }}</p>
-                </div>
-                <div>
-                    <label class="mb-1 block text-sm font-semibold text-text-base">Supplier PAN number</label>
-                    <Input v-model="form.pan_number" type="text" placeholder="Optional" />
-                </div>
-                <div>
-                    <label class="mb-1 block text-sm font-semibold text-text-base">Chalani (dispatch) number</label>
-                    <Input v-model="form.chalani_number" type="text" placeholder="Optional" />
-                    <p v-if="form.errors.chalani_number" class="mt-1 text-sm text-danger">{{ form.errors.chalani_number }}</p>
-                </div>
-                <div>
-                    <label class="mb-1 block text-sm font-semibold text-text-base">Receive stock into store</label>
-                    <Combobox
-                        :model-value="form.store_id"
-                        :options="storeOptions"
-                        placeholder="Default store"
-                        @update:model-value="(v) => (form.store_id = v)"
-                    />
-                    <p v-if="form.errors.store_id" class="mt-1 text-sm text-danger">{{ form.errors.store_id }}</p>
+        <PurchaseCreateSupplierCard :form="form" :suppliers="suppliers" @select-supplier="selectSupplier" @add-supplier="openSupplierModal" />
+
+        <!-- Items: staging row + the bill's committed lines, one section -
+             same as the sale form. -->
+        <Card variant="panel" class="!p-4">
+            <div class="mb-3 flex items-center justify-between gap-3">
+                <div class="text-[10px] font-bold tracking-[.8px] text-text-muted uppercase">Items <span class="text-danger">*</span></div>
+                <div class="flex items-center gap-4">
+                    <button type="button" class="flex items-center gap-1 text-xs font-semibold text-primary" @click="openItemModal">
+                        <Plus class="h-3.5 w-3.5" /> New item
+                    </button>
+                    <button type="button" class="text-xs font-semibold text-primary" @click="showLineExtras = !showLineExtras">
+                        {{ showLineExtras ? 'Hide' : 'Show' }} free qty &amp; note columns
+                    </button>
                 </div>
             </div>
 
-            <h4 class="border-b-[1.5px] border-border pb-1 text-sm font-bold text-text-strong">Payment</h4>
-            <div class="grid grid-cols-1 gap-4 sm:grid-cols-3">
-                <div>
-                    <label class="mb-1 block text-sm font-semibold text-text-base">Payment mode <span class="text-danger">*</span></label>
-                    <Select
-                        :model-value="form.payment_mode"
-                        :options="paymentModeOptions"
-                        @update:model-value="(v) => (form.payment_mode = v)"
-                    />
-                </div>
-                <div v-if="showBankAccount">
-                    <label class="mb-1 block text-sm font-semibold text-text-base">Bank account</label>
-                    <Combobox
-                        :model-value="form.bank_account_id"
-                        :options="bankAccountOptions"
-                        placeholder="Select bank account"
-                        @update:model-value="(v) => (form.bank_account_id = v)"
-                    />
-                    <p v-if="form.errors.bank_account_id" class="mt-1 text-sm text-danger">{{ form.errors.bank_account_id }}</p>
-                </div>
-            </div>
-
-            <div v-if="showPartialSplit" class="grid grid-cols-2 gap-4">
-                <div>
-                    <label class="mb-1 block text-sm font-semibold text-text-base">Paid in cash (Rs.)</label>
-                    <Input v-model="form.cash_amount" type="number" min="0" step="0.01" placeholder="0.00" />
-                </div>
-                <div>
-                    <label class="mb-1 block text-sm font-semibold text-text-base">Paid by bank (Rs.)</label>
-                    <Input v-model="form.bank_amount" type="number" min="0" step="0.01" placeholder="0.00" />
-                </div>
-                <p v-if="partialSplitError" class="col-span-2 text-sm text-danger">{{ partialSplitError }}</p>
-            </div>
-
-            <h4 class="border-b-[1.5px] border-border pb-1 text-sm font-bold text-text-strong">Items <span class="text-danger">*</span></h4>
-            <PurchaseCreateLines
-                v-model:barcode-code="barcodeCode"
-                :form="form"
+            <PurchaseCreateStagingRow
+                ref="stagingRow"
                 :item-options="itemOptions"
                 :items-by-id="itemsById"
+                :show-line-extras="showLineExtras"
+                :select-item="selectLineItem"
+                :select-unit="selectLineUnit"
+                @add="(line) => form.lines.push(line)"
+            />
+
+            <PurchaseCreateLinesTable
+                :lines="form.lines"
+                :errors="form.errors"
+                :item-options="itemOptions"
+                :items-by-id="itemsById"
+                :show-line-extras="showLineExtras"
+                :vat-rate="String(form.vat_rate)"
+                :force-non-taxable="form.force_non_taxable"
                 :totals="totals"
-                :barcode-error="barcodeError"
-                :barcode-scanning="barcodeScanning"
-                @scan="scanBarcode"
-                @new-item="openItemModal"
-                @add-line="addLine"
-                @remove-line="removeLine"
-                @select-item="selectLineItem"
-                @select-unit="selectLineUnit"
+                :select-item="selectLineItem"
+                :select-unit="selectLineUnit"
+                @remove="(index) => form.lines.splice(index, 1)"
                 @toggle-discount-type="toggleLineDiscountType"
             />
 
-            <h4 class="border-b-[1.5px] border-border pb-1 text-sm font-bold text-text-strong">Charges &amp; discount</h4>
-            <PurchaseCreateCharges
+            <p v-if="previewError" class="mt-2 border-[1.5px] border-danger bg-danger-bg px-3 py-2 text-sm text-danger">
+                {{ previewError }}
+            </p>
+        </Card>
+
+        <PurchaseCreatePaymentNotes
+            :form="form"
+            :bank-accounts="bankAccounts"
+            :show-bank-field="showBankField"
+            :show-partial-fields="showPartialFields"
+        />
+
+        <!-- Toggled from the sticky bar below; rendered here, directly above
+             the totals, so it never fights the floating bar for space. -->
+        <Transition name="extras">
+            <PurchaseCreateMoreOptions
+                v-if="showMoreOptions"
                 :form="form"
-                :tds-account-options="tdsAccountOptions"
+                :stores="stores"
+                :tds-accounts="tdsAccounts"
                 :totals="totals"
-                @toggle-header-discount-type="toggleHeaderDiscountType"
+                @toggle-discount-type="toggleHeaderDiscountType"
             />
+        </Transition>
 
-            <h4 class="border-b-[1.5px] border-border pb-1 text-sm font-bold text-text-strong">Notes</h4>
-            <div>
-                <label class="mb-1 block text-sm font-semibold text-text-base">Narration</label>
-                <Input v-model="form.narration" type="text" placeholder="Optional note kept with this purchase" />
-            </div>
-
-            <h4 class="border-b-[1.5px] border-border pb-1 text-sm font-bold text-text-strong">Bill summary</h4>
-            <PurchaseCreateSummary :totals="totals" />
-
-            <div class="flex items-center justify-end gap-2">
-                <Button variant="secondary" tone="purple" type="button" @click="emit('cancel')">Cancel</Button>
-                <Button variant="secondary" tone="purple" type="button" :disabled="form.processing || !canSubmit" @click="submit(true)">
-                    Create &amp; print bill
-                </Button>
-                <Button variant="primary" tone="purple" type="submit" :loading="form.processing" :disabled="form.processing || !canSubmit">
-                    Create purchase
-                </Button>
-            </div>
-        </form>
-    </Card>
+        <PurchaseCreateTotalsBar
+            v-model:show-more-options="showMoreOptions"
+            :totals="totals"
+            :partial-split-error="partialSplitError"
+            :can-submit="canSubmit"
+            :processing="form.processing"
+            @cancel="requestCancel"
+            @print="submit(true)"
+        />
+    </form>
 
     <PurchaseCreateModals
         :supplier-open="supplierModalOpen"
@@ -650,3 +416,19 @@ onMounted(() => {
     />
     </div>
 </template>
+
+<style scoped>
+/* The More-options panel pops in/out via v-if; without this it would snap
+   instantly and read as a layout jump rather than an intentional toggle. */
+.extras-enter-active,
+.extras-leave-active {
+    transition:
+        opacity 150ms ease,
+        transform 150ms ease;
+}
+.extras-enter-from,
+.extras-leave-to {
+    opacity: 0;
+    transform: translateY(-4px);
+}
+</style>
