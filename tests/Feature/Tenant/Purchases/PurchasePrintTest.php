@@ -114,7 +114,7 @@ test('the purchase print route resolves the document number prefix from configur
 
     loginPurchasePrintTestUser($domain);
 
-    $fakePdf = Mockery::mock();
+    $fakePdf = Mockery::mock(Barryvdh\DomPDF\PDF::class);
     $fakePdf->shouldReceive('stream')->once()->andReturn(response('fake-pdf-bytes', 200, ['Content-Type' => 'application/pdf']));
 
     Pdf::shouldReceive('loadView')
@@ -149,7 +149,7 @@ test('the purchase print passes the C9 compliance variables and logs every copy'
 
     // First print: the original. The BS date, the fiscal year and the amount
     // in words all have to reach the view (CONTRACTS C9).
-    $fakePdf = Mockery::mock();
+    $fakePdf = Mockery::mock(Barryvdh\DomPDF\PDF::class);
     $fakePdf->shouldReceive('stream')->once()->andReturn(response('pdf', 200, ['Content-Type' => 'application/pdf']));
 
     Pdf::shouldReceive('loadView')
@@ -166,7 +166,7 @@ test('the purchase print passes the C9 compliance variables and logs every copy'
 
     // Every reprint is a numbered copy, which is what stamps "Copy of
     // Original" on the face of the paper.
-    $secondPdf = Mockery::mock();
+    $secondPdf = Mockery::mock(Barryvdh\DomPDF\PDF::class);
     $secondPdf->shouldReceive('stream')->once()->andReturn(response('pdf', 200, ['Content-Type' => 'application/pdf']));
 
     Pdf::shouldReceive('loadView')

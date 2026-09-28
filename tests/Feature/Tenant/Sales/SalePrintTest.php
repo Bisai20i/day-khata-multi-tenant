@@ -126,10 +126,13 @@ function buildSalePrintTestSale(string $invoiceType, string $paymentMode): array
     $item = Item::factory()->create(['is_vatable' => true, 'is_stockable' => false]);
     $bankAccountId = $paymentMode === 'bank' ? Account::factory()->create()->id : null;
 
+    // The invoice type is the tenant's setting, never a Sale::post() input
+    // (see Sale::post()), so the tenant is registered for it first.
+    CompanySetting::current()->update(['active_invoice_type' => $invoiceType]);
+
     $sale = Sale::post(
         [
             'customer_id' => $customer->id,
-            'invoice_type' => $invoiceType,
             'date' => '2026-06-01',
             'payment_mode' => $paymentMode,
             'bank_account_id' => $bankAccountId,
@@ -165,7 +168,7 @@ test('an abbreviated invoice hides buyer info and the VAT breakdown, and prints 
             ->not->toContain('VAT (')
             ->not->toContain('Net Payable')
             ->toContain('Tax Rate')
-            ->toContain("(Seller's Signature)")
+            ->toContain('(Seller&#039;s Signature)')
             ->toContain('This invoice shall not be issued for the sale of goods or services where the taxable value exceeds NPR 10,000.')
             ->toContain('<table class="pan-boxes">');
     });
@@ -370,12 +373,14 @@ test('the sale print route resolves the document number prefix from configured i
 
     loginSalePrintTestUser($domain);
 
-    $fakePdf = Mockery::mock();
+    $fakePdf = Mockery::mock(Barryvdh\DomPDF\PDF::class);
     $fakePdf->shouldReceive('stream')->once()->andReturn(response('fake-pdf-bytes', 200, ['Content-Type' => 'application/pdf']));
 
-    Pdf::shouldReceive('loadView')
+    // SaleController::print() renders every copy itself and hands dompdf
+    // the stitched HTML, so the prefix is asserted on that HTML.
+    Pdf::shouldReceive('loadHTML')
         ->once()
-        ->withArgs(fn (string $view, array $data) => $view === 'pdf.sale' && $data['documentNumber'] === "CUSTOM-{$voucherNumber}")
+        ->withArgs(fn (string $html) => str_contains($html, "CUSTOM-{$voucherNumber}"))
         ->andReturn($fakePdf);
 
     $this->get("http://{$domain}/sales/{$saleId}/print")->assertOk();

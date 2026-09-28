@@ -146,7 +146,7 @@ test('the debit note print carries the stored number, the C9 variables and a cop
 
     loginPurchaseReturnPrintTestUser($domain);
 
-    $fakePdf = Mockery::mock();
+    $fakePdf = Mockery::mock(Barryvdh\DomPDF\PDF::class);
     $fakePdf->shouldReceive('stream')->once()->andReturn(response('pdf', 200, ['Content-Type' => 'application/pdf']));
 
     Pdf::shouldReceive('loadView')
@@ -162,7 +162,7 @@ test('the debit note print carries the stored number, the C9 variables and a cop
 
     $this->get("http://{$domain}/purchase-returns/{$returnId}/print")->assertOk();
 
-    $secondPdf = Mockery::mock();
+    $secondPdf = Mockery::mock(Barryvdh\DomPDF\PDF::class);
     $secondPdf->shouldReceive('stream')->once()->andReturn(response('pdf', 200, ['Content-Type' => 'application/pdf']));
 
     Pdf::shouldReceive('loadView')
