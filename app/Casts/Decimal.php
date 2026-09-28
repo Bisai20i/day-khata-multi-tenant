@@ -25,6 +25,15 @@ use Illuminate\Database\Eloquent\Model;
  */
 class Decimal implements CastsAttributes
 {
+    /**
+     * Without this, Eloquent caches whatever object was assigned (a Money
+     * value from Purchase::post(), say) and hands that object back on read
+     * until the model is re-fetched - so `$purchase->total` was a Money right
+     * after create() but a string everywhere else. Reads always go through
+     * get() and come back as the canonical decimal string.
+     */
+    public bool $withoutObjectCaching = true;
+
     private readonly int $scale;
 
     /**

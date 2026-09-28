@@ -224,7 +224,7 @@ class Payment extends Model
     {
         return match ($data['payment_mode']) {
             'cash' => Account::where('code', 'AS1')->firstOrFail()->id,
-            'bank' => (int) ($data['bank_account_id'] ?: throw new InvalidArgumentException('A bank account is required for a bank payment.')),
+            'bank' => (int) (($data['bank_account_id'] ?? null) ?: throw new InvalidArgumentException('A bank account is required for a bank payment.')),
             default => throw new InvalidArgumentException("Unknown payment mode: {$data['payment_mode']}"),
         };
     }

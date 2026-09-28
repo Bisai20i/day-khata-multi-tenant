@@ -421,7 +421,9 @@ test('cancelling a purchase posts a mirrored reversal and flags stock movements 
 
         expect($purchase->fresh()->status)->toBe('cancelled');
 
-        $reversal = JournalVoucher::where('voucher_type', VoucherType::PurchaseReturn)->firstOrFail();
+        // Every cancellation posts into the one Reversal series, so it never
+        // burns a debit-note number (see App\Enums\VoucherType).
+        $reversal = JournalVoucher::where('voucher_type', VoucherType::Reversal)->firstOrFail();
         $reversedLines = $reversal->lines()->get()->map(fn ($l) => [$l->account_id, (float) $l->credit, (float) $l->debit])->all();
 
         sort($originalLines);

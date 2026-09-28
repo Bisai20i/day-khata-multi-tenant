@@ -145,14 +145,16 @@ test('the capital purchases list totals row and export cover every capital purch
         purchaseListTotalsOpenFiscalYear();
         $admin = User::factory()->create();
         $account = Account::factory()->create();
+        // A credit capital purchase is owed to someone (CapitalPurchase::post()).
+        $supplier = Supplier::factory()->create();
 
         CapitalPurchase::post(
-            ['type' => 'capital', 'date' => '2026-06-01', 'payment_mode' => 'credit'],
+            ['type' => 'capital', 'supplier_id' => $supplier->id, 'date' => '2026-06-01', 'payment_mode' => 'credit'],
             [['account_id' => $account->id, 'amount' => 1000, 'vatable' => false]],
             $admin,
         );
         CapitalPurchase::post(
-            ['type' => 'capital', 'date' => '2026-06-02', 'payment_mode' => 'credit'],
+            ['type' => 'capital', 'supplier_id' => $supplier->id, 'date' => '2026-06-02', 'payment_mode' => 'credit'],
             [['account_id' => $account->id, 'amount' => 500, 'vatable' => false]],
             $admin,
         );

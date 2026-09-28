@@ -19,6 +19,7 @@ use Illuminate\Support\Facades\Storage;
     'default_vat_rate', 'allow_negative_stock', 'default_store_id',
     'sale_full_prefix', 'sale_abbreviated_prefix', 'sale_pan_prefix', 'active_invoice_type',
     'purchase_prefix', 'sale_return_prefix', 'purchase_return_prefix',
+    'logo_path',
 ])]
 class CompanySetting extends Model
 {
@@ -49,9 +50,18 @@ class CompanySetting extends Model
      */
     protected $appends = ['logo_url'];
 
+    /**
+     * The tenant's one settings row, created on first use. A freshly created
+     * model only carries the attributes it was given, not the column
+     * defaults the database filled in (default_vat_rate 13.00, and so on),
+     * so it is re-read once - otherwise the very first sale of a new tenant
+     * saw a null VAT rate and was refused.
+     */
     public static function current(): self
     {
-        return static::firstOrCreate([], ['company_name' => 'My Company', 'active_invoice_type' => 'full']);
+        $settings = static::firstOrCreate([], ['company_name' => 'My Company', 'active_invoice_type' => 'full']);
+
+        return $settings->wasRecentlyCreated ? $settings->refresh() : $settings;
     }
 
     /**
