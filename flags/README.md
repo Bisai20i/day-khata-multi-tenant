@@ -30,6 +30,6 @@ PUR-10..12 and CS-08..11 came from checking the legacy cancelled-purchase fixes 
 - Query-builder bulk deletes skip model guards; only the FK protects vouchers.
 - Purchase flags were checked against CONTRACTS.md, not legacy (legacy purchase controllers are empty). Sales flags were not compared with legacy.
 
-## Suggested next step
+## Next step
 
-Re-triage all flags against a single rubric (P0: wrong books or a missing legacy feature, P1: books can be made wrong or a control is missing, P2: hardening), then work the P2s.
+Re-triaged on 2026-09-28 against one rubric and re-verified on the development head. The gap-fill plan (merged flags G-01..G-25, decisions D1-D4, chunks F00-F10, status board) is in `todo/flags/START.md`.
