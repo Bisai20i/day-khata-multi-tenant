@@ -39,6 +39,9 @@ class CapitalPurchaseListExport implements FromCollection, WithColumnFormatting,
             'payment_mode' => null,
             'total' => $this->total,
             'status' => null,
+            'cancelled_on' => null,
+            'cancelled_by' => null,
+            'cancel_reason' => null,
         ]);
     }
 
@@ -47,7 +50,7 @@ class CapitalPurchaseListExport implements FromCollection, WithColumnFormatting,
      */
     public function headings(): array
     {
-        return ['SN', 'Date (BS)', 'Date (AD)', 'Bill #', 'Type', 'Supplier', 'Payment Mode', 'Total', 'Status'];
+        return ['SN', 'Date (BS)', 'Date (AD)', 'Bill #', 'Type', 'Supplier', 'Payment Mode', 'Total', 'Status', 'Cancelled on', 'Cancelled by', 'Reason'];
     }
 
     /**
@@ -74,6 +77,9 @@ class CapitalPurchaseListExport implements FromCollection, WithColumnFormatting,
             $row['payment_mode'] ?? '',
             Money::of($row['total'])->toFloat(),
             $row['status'] ?? '',
+            $row['cancelled_on'] ?? '',
+            $row['cancelled_by'] ?? '',
+            $row['cancel_reason'] ?? '',
         ];
     }
 }

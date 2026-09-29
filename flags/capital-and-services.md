@@ -47,18 +47,21 @@ Files: app/Models/CapitalPurchase.php, app/Http/Controllers/Tenant/Purchases/Cap
 - Fix: add a print route and PDF (lines, VAT, totals, payment mode, settlements) usable for cancelled bills too, with a Print action on every row.
 
 ## CS-09 (P2) Cancel reason, date and user are stored but never shown
+- PARTLY FIXED (2026-09-29, F01): list and export show cancel date, user and reason. Print part is F04. Tests: tests/Feature/Tenant/Purchases/PurchaseListCancelInfoTest.php.
 - Where: app/Models/CapitalPurchase.php:633-640 (writes cancelled_at, cancelled_by, cancel_reason); CapitalPurchaseController.php:32 (index loads no canceller), :144 (export has status only); CapitalPurchases/Index.vue:211-219 (Status column is a badge only).
 - Evidence: grep for cancel_reason, cancelled_at and canceller in resources/js/pages/Tenant/Purchases and CapitalPurchaseListExport finds nothing.
 - Impact: no one can see why, when or by whom a capital purchase was cancelled. Legacy: day_khata InventoryStockController::cancelJournalRecord now writes purchasecancelrecords so the cancelled list shows it.
 - Fix: load canceller:id,name; show reason, date and user in the list, the print from CS-08 and the export.
 
 ## CS-10 (P2) Totals row and export total include cancelled bills
+- FIXED (2026-09-29, F01): totals row and export total skip cancelled bills. Tests: tests/Feature/Tenant/Purchases/PurchaseListCancelInfoTest.php.
 - Where: CapitalPurchaseController.php:41-45 (totals over every row), :147 (export total).
 - Evidence: no status filter in either sum; sales excludes cancelled rows (SaleController.php:154).
 - Impact: the capital purchase total on screen and in Excel overstates spending by every cancelled bill and disagrees with the ledger.
 - Fix: sum only rows where status is not cancelled.
 
 ## CS-11 (P2) Cancel button shown to non-admins although canCancel is passed
+- FIXED (2026-09-29, F01): Cancel button wrapped in canCancel. Tests: tests/Feature/Tenant/Purchases/PurchaseListCancelInfoTest.php.
 - Where: CapitalPurchases/Index.vue:239-246 (Cancel offered on every posted row); canCancel prop at :30 is only used for settlement cancel (:340); CapitalPurchaseController.php:48; routes/tenant-purchase.php:40-42 (role:admin).
 - Evidence: a non-admin can open the dialog and submit; EnsureUserHasRole aborts 403, which is not a validation error, so the dialog shows nothing and Inertia shows a bare error page.
 - Fix: wrap the purchase Cancel button in `canCancel` like the settlement one.

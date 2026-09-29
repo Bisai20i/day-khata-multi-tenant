@@ -60,7 +60,7 @@ class PurchaseController extends Controller
         $filters = $this->listFilters($request);
 
         $purchases = $this->filteredPurchasesQuery($filters)
-            ->with(['supplier:id,name', 'lines.item:id,name,unit', 'journalVoucher:id,voucher_number'])
+            ->with(['supplier:id,name', 'lines.item:id,name,unit', 'journalVoucher:id,voucher_number', 'canceller:id,name'])
             ->orderBy(self::SORTABLE_COLUMNS[$filters['sort']], $filters['sort_dir'])
             ->orderByDesc('id')
             ->paginate(25)
@@ -74,6 +74,9 @@ class PurchaseController extends Controller
             // Exact SQL sums over the whole filtered set (item 8, "totals
             // row") - never a page's worth of client-side addition.
             'totals' => $this->filteredTotals($filters),
+            // The Cancel action is admin-only at the route (CONTRACTS C5); the
+            // page hides it for everyone else rather than offering a 403.
+            'canCancel' => $request->user()?->role?->slug === 'admin',
             'suppliers' => Supplier::query()->orderBy('name')->get(['id', 'name', 'mobile_no', 'is_vat_registered']),
             // Inactive items are deliberately withheld: an item that has been
             // retired must not be purchasable again from the form, and showing
@@ -215,7 +218,7 @@ class PurchaseController extends Controller
         $extension = $request->query('format') === 'csv' ? 'csv' : 'xlsx';
 
         $purchases = $this->filteredPurchasesQuery($filters)
-            ->with(['supplier:id,name'])
+            ->with(['supplier:id,name', 'canceller:id,name'])
             ->orderBy('date')
             ->orderBy('id')
             ->get();
@@ -228,6 +231,9 @@ class PurchaseController extends Controller
             'payment_mode' => ucfirst((string) $purchase->payment_mode),
             'total' => $purchase->total,
             'status' => $purchase->status === 'cancelled' ? 'Cancelled' : 'Posted',
+            'cancelled_on' => $purchase->cancelled_at?->toDateString(),
+            'cancelled_by' => $purchase->canceller?->name,
+            'cancel_reason' => $purchase->cancel_reason,
         ]);
 
         $total = Money::sum($purchases

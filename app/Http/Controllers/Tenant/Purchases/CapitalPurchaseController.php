@@ -29,7 +29,7 @@ class CapitalPurchaseController extends Controller
     {
         return Inertia::render('Tenant/Purchases/CapitalPurchases/Index', [
             'capitalPurchases' => CapitalPurchase::query()
-                ->with(['supplier:id,name,tpin', 'lines.account:id,code,name', 'journalVoucher:id,voucher_number', 'settlements'])
+                ->with(['supplier:id,name,tpin', 'lines.account:id,code,name', 'journalVoucher:id,voucher_number', 'settlements', 'canceller:id,name'])
                 ->orderByDesc('date')
                 ->orderByDesc('id')
                 ->get()
@@ -37,10 +37,11 @@ class CapitalPurchaseController extends Controller
                     $capitalPurchase->setAttribute('outstanding_amount', $capitalPurchase->outstandingAmount()->toString());
                 }),
             // Exact SQL sum over every capital purchase (item 8, "totals
-            // row") - never a page's worth of client-side addition.
+            // row") - never a page's worth of client-side addition. Cancelled
+            // bills stay listed but never move the total (flags G-02).
             'totals' => [
                 'total' => Money::round(
-                    CapitalPurchase::query()->toBase()->selectRaw('COALESCE(SUM(total), 0) as total')->value('total')
+                    CapitalPurchase::query()->where('status', '!=', 'cancelled')->toBase()->selectRaw('COALESCE(SUM(total), 0) as total')->value('total')
                 )->toString(),
             ],
             'suppliers' => Supplier::query()->orderBy('name')->get(['id', 'name', 'tpin']),
@@ -128,7 +129,7 @@ class CapitalPurchaseController extends Controller
     public function export()
     {
         $capitalPurchases = CapitalPurchase::query()
-            ->with(['supplier:id,name'])
+            ->with(['supplier:id,name', 'canceller:id,name'])
             ->orderBy('date')
             ->orderBy('id')
             ->get();
@@ -142,9 +143,14 @@ class CapitalPurchaseController extends Controller
             'payment_mode' => ucfirst($capitalPurchase->payment_mode),
             'total' => $capitalPurchase->total,
             'status' => $capitalPurchase->status === 'cancelled' ? 'Cancelled' : 'Posted',
+            'cancelled_on' => $capitalPurchase->cancelled_at?->toDateString(),
+            'cancelled_by' => $capitalPurchase->canceller?->name,
+            'cancel_reason' => $capitalPurchase->cancel_reason,
         ]);
 
-        $total = Money::sum($capitalPurchases->map(fn (CapitalPurchase $capitalPurchase): Money => Money::of($capitalPurchase->total)))->toString();
+        $total = Money::sum($capitalPurchases
+            ->reject(fn (CapitalPurchase $capitalPurchase): bool => $capitalPurchase->status === 'cancelled')
+            ->map(fn (CapitalPurchase $capitalPurchase): Money => Money::of($capitalPurchase->total)))->toString();
 
         return Excel::download(new CapitalPurchaseListExport($rows, $total), 'capital-purchases.xlsx');
     }

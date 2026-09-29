@@ -110,11 +110,11 @@ matching the existing code, so P06/P09 can convert them in one pass. List every 
 ### F01 Purchase and capital purchase lists: totals, cancel info, cancel button (G-02, G-11 list part, G-12)
 Owned: `PurchaseController.php`, `CapitalPurchaseController.php` (index, export only), `Purchases/Index.vue`,
 `Purchases/CapitalPurchases/Index.vue`, `app/Exports/PurchaseListExport.php`, `CapitalPurchaseListExport.php`, tests.
-- [ ] 1. Totals tiles and export total sum only rows where `status != cancelled`, both modules (mirror
+- [x] 1. Totals tiles and export total sum only rows where `status != cancelled`, both modules (mirror
   `SaleController.php:154`). Cancelled rows stay listed. Tests: a cancelled bill does not move totals.
-- [ ] 2. Index eager-loads `canceller:id,name`; list shows reason, cancel date and user under the Cancelled
+- [x] 2. Index eager-loads `canceller:id,name`; list shows reason, cancel date and user under the Cancelled
   badge (tooltip or row detail); exports add Cancelled on, Cancelled by, Reason columns.
-- [ ] 3. `PurchaseController::index` passes `canCancel` like `CapitalPurchaseController.php:48`; both pages hide
+- [x] 3. `PurchaseController::index` passes `canCancel` like `CapitalPurchaseController.php:48`; both pages hide
   the purchase Cancel button unless `canCancel`. Test: prop is false for a non-admin; route still 403s.
 
 ### F02 Unlinked purchase return form and expected_total (G-10, G-16)
@@ -213,7 +213,7 @@ Owned: `JournalVoucher.php` (after F07) and the nine callers listed in G-22, tes
 |---|---|---|---|
 | Gate 0 | Run 2026-09-21 fixes | all FIXED | pending |
 | F00 | Record decisions | G-24, D1-D4 | done |
-| F01 | Purchase lists | G-02, G-11, G-12 | pending |
+| F01 | Purchase lists | G-02, G-11, G-12 | done |
 | F02 | Unlinked purchase return form | G-10, G-16 | pending |
 | F03 | Capital posting | G-03, G-04, G-23 | pending |
 | F04 | Capital view and print | G-01, G-11 | pending |

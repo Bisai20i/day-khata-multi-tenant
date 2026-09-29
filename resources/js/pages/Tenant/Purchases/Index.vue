@@ -8,8 +8,8 @@ import Card from '@/components/ui/Card.vue';
 import Button from '@/components/ui/Button.vue';
 import Input from '@/components/ui/Input.vue';
 import PageHeader from '@/components/ui/PageHeader.vue';
-import Badge from '@/components/ui/Badge.vue';
 import Tooltip from '@/components/ui/Tooltip.vue';
+import PurchaseStatusCell from '@/components/purchases/PurchaseStatusCell.vue';
 import Modal from '@/components/ui/Modal.vue';
 import DataTable from '@/components/ui/DataTable.vue';
 import NepaliDateInput from '@/components/ui/NepaliDateInput.vue';
@@ -51,6 +51,8 @@ const props = defineProps({
     stores: { type: Array, default: () => [] },
     settings: { type: Object, default: () => ({}) },
     correctionFiscalYear: { type: Object, default: null },
+    // Cancel is admin-only at the route; hide the button for everyone else.
+    canCancel: { type: Boolean, default: false },
 });
 
 const supplierOptions = computed(() => props.suppliers.map((supplier) => ({ value: supplier.id, label: supplier.name })));
@@ -329,12 +331,7 @@ const columns = [
         id: 'status',
         header: 'Status',
         numeric: false,
-        cell: ({ row }) =>
-            h(
-                Badge,
-                { variant: row.original.status === 'cancelled' ? 'danger' : 'success' },
-                () => (row.original.status === 'cancelled' ? 'Cancelled' : 'Posted'),
-            ),
+        cell: ({ row }) => h(PurchaseStatusCell, { document: row.original }),
     },
     {
         id: 'actions',
@@ -355,7 +352,7 @@ const columns = [
                         [h(Printer, { class: 'h-[13px] w-[13px]' })],
                     ),
                 ),
-                row.original.status === 'posted'
+                props.canCancel && row.original.status === 'posted'
                     ? h(Tooltip, { label: 'Cancel purchase (posts reversing entry)' }, () =>
                           h(
                               'button',
