@@ -142,8 +142,9 @@ class CapitalPurchase extends Model
 
     /**
      * What was still owed to the supplier the moment the bill was posted:
-     * the whole total for a credit bill, the unpaid part for a partial one,
-     * nothing for cash or bank.
+     * the whole total for a credit bill, nothing for cash or bank. A partial
+     * bill is an exact cash + bank split of the total (CONTRACTS C3), so its
+     * branch below also comes to zero; it stays as a guard, not a feature.
      */
     public function initialUnpaidAmount(): Money
     {

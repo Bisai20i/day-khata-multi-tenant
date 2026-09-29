@@ -93,8 +93,8 @@ function submitCancel() {
     });
 }
 
-// Later settlements (audit CS-01): pay off the outstanding part of a credit or
-// partial bill, and (admin) cancel a settlement again.
+// Later settlements (audit CS-01): pay off the outstanding part of a credit
+// bill, and (admin) cancel a settlement again.
 const settling = ref(null);
 const settleForm = useForm({
     date: todayInKathmandu(),
@@ -220,7 +220,9 @@ const columns = [
         cell: ({ row }) =>
             row.original.status === 'posted'
                 ? h('div', { class: 'flex gap-2' }, [
-                      row.original.supplier_id && (row.original.payment_mode === 'credit' || row.original.payment_mode === 'partial')
+                      // Only a credit bill owes anything later: "partial" is an exact
+                      // cash + bank split of the whole total (CONTRACTS C3).
+                      row.original.supplier_id && row.original.payment_mode === 'credit'
                           ? h(Tooltip, { label: 'Record a payment, or review payments made, against this bill' }, () =>
                                 h(Button, {
                                     variant: 'secondary',

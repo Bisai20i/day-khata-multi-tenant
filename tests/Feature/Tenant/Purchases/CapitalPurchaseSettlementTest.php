@@ -12,6 +12,7 @@ use App\Models\Role;
 use App\Models\Supplier;
 use App\Models\Tenant;
 use App\Models\User;
+use App\Support\Billing\BillingException;
 use App\Support\Money\Money;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 
@@ -94,12 +95,22 @@ test('a credit bill shows its full amount outstanding and a settlement posts a b
     $tenant->delete();
 });
 
-test('a partial bill only owes its unpaid part and cash or bank bills owe nothing', function () {
+test('a partial bill is a cash plus bank split of the whole total, so it owes nothing afterwards', function () {
+    // "Partial" is the same exact cash + bank split here as on sales and
+    // purchases (CONTRACTS C3, DocumentCalculator::assertExactSplit), not
+    // "pay some now, owe the rest"; only a credit bill is settled later.
     $tenant = csTenant('cs-partial.tenant-test');
 
     $tenant->run(function () {
-        [$purchase] = csCreditPurchase('partial', ['cash_amount' => '3000', 'bank_amount' => '0']);
-        expect($purchase->outstandingAmount()->toString())->toBe('7000.00');
+        $bank = Account::factory()->create();
+        [$purchase] = csCreditPurchase('partial', ['cash_amount' => '3000', 'bank_amount' => '7000', 'bank_account_id' => $bank->id]);
+        expect($purchase->outstandingAmount()->toString())->toBe('0.00');
+
+        expect(fn () => CapitalPurchase::post(
+            ['type' => 'service', 'supplier_id' => $purchase->supplier_id, 'date' => '2026-06-02', 'payment_mode' => 'partial', 'cash_amount' => '3000', 'bank_amount' => '0'],
+            [['account_id' => Account::factory()->create()->id, 'amount' => '10000']],
+            User::first(),
+        ))->toThrow(BillingException::class);
     });
 
     $tenant->delete();
