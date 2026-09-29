@@ -231,12 +231,16 @@ test('an admin can post a correction into a closed fiscal year through the store
     $cashId = null;
     $salesId = null;
     $tenant->run(function () use (&$closedId, &$openId, &$cashId, &$salesId) {
-        User::factory()->create([
+        $admin = User::factory()->create([
             'email' => 'owner@example.com',
             'role_id' => Role::where('slug', 'admin')->value('id'),
         ]);
-        $closedId = FiscalYear::create(['name' => 'FY1', 'start_date' => '2026-01-01', 'end_date' => '2026-12-31', 'status' => FiscalYearStatus::Closed])->id;
+        $closed = FiscalYear::create(['name' => 'FY1', 'start_date' => '2026-01-01', 'end_date' => '2026-12-31', 'status' => FiscalYearStatus::Closed]);
         $openId = FiscalYear::create(['name' => 'FY2', 'start_date' => '2027-01-01', 'end_date' => '2027-12-31', 'status' => FiscalYearStatus::Open])->id;
+        // A closed year takes corrections only after an explicit reopen
+        // (ClosedFiscalYearGuard::ensurePostable()).
+        $closed->reopen($admin, 'Correct a duplicate sale');
+        $closedId = $closed->id;
         $cashId = Account::where('code', 'AS1')->value('id');
         $salesId = Account::where('code', 'INI20')->value('id');
     });
