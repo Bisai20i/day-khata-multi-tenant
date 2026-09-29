@@ -60,6 +60,8 @@ test('a purchase line note and bonus quantity round-trip through the store route
         'supplier_id' => $supplierId,
         'date' => '2026-06-01',
         'payment_mode' => 'cash',
+        // 10 x 100 = 1000 taxable plus 13% VAT; the bonus units are free.
+        'expected_total' => '1130.00',
         'lines' => [
             ['item_id' => $itemId, 'quantity' => 10, 'bonus_quantity' => 2, 'rate' => 100, 'note' => 'Batch #42'],
         ],

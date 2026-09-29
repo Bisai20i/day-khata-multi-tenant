@@ -64,6 +64,7 @@ C3, C4, C5, C6, C10 rather than line by line.
 - Fix: add purchase_number/payment_number plus fiscal_year_id columns filled inside post(), print from them.
 
 ### PUR-06 (P2) expected_total is optional on purchases and unlinked returns
+- **FIXED** (2026-09-29, F02): `expected_total` required on purchases; `postUnlinked` compares it with `!== null`. The unlinked return form gets its exact total from `GET purchase-returns/unlinked/quote`. Tests: UnlinkedPurchaseReturnQuoteTest.php.
 - Files: PurchaseController.php:140, Purchase.php:338, PurchaseReturn::postUnlinked (uses empty() on expected_total).
 - Wrong: the client/server total cross-check (C3 step 9, C8) is skipped when the field is omitted, and on the unlinked
   path empty() also skips the string "0". API callers bypass the guard.

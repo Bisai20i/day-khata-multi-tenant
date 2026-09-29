@@ -121,10 +121,13 @@ Owned: `PurchaseController.php`, `CapitalPurchaseController.php` (index, export 
 Owned: `Purchases/Returns/Create.vue` (705 lines, over the soft cap: extract the unlinked form into
 `components/purchases/PurchaseReturnUnlinkedFields.vue` or a composable, as sales returns did), `PurchaseReturn.php`
 (`postUnlinked` only), `PurchaseController.php` (rules only, after F01), tests.
-- [ ] 1. Unlinked form: reason required (label and placeholder), `credit` payment mode "Credit to supplier" shown
+- [x] 1. Unlinked form: reason required (label and placeholder), `credit` payment mode "Credit to supplier" shown
   only when a supplier is chosen, bank field hidden for credit. JS test for the options helper.
-- [ ] 2. `expected_total` required on `PurchaseController::store` rules; `postUnlinked` checks
+- [x] 2. `expected_total` required on `PurchaseController::store` rules; `postUnlinked` checks
   `$data['expected_total'] !== null` instead of `empty()`. Update any existing test that posts without it.
+  Done with a user decision (2026-09-29): the unlinked form gets its total from a new read-only
+  `GET purchase-returns/unlinked/quote` (same pricing code as the post, admin only), because an average-cost
+  line is priced at 12 decimals the browser cannot reproduce.
 
 ### F03 Capital purchase posting: VAT rate, supplier pair, observer (G-03, G-04, G-23)
 Owned: `CapitalPurchase.php` (`post()` only), `CapitalPurchaseController.php` (store rules, after F01),
@@ -214,7 +217,7 @@ Owned: `JournalVoucher.php` (after F07) and the nine callers listed in G-22, tes
 | Gate 0 | Run 2026-09-21 fixes | all FIXED | pending |
 | F00 | Record decisions | G-24, D1-D4 | done |
 | F01 | Purchase lists | G-02, G-11, G-12 | done |
-| F02 | Unlinked purchase return form | G-10, G-16 | pending |
+| F02 | Unlinked purchase return form | G-10, G-16 | done |
 | F03 | Capital posting | G-03, G-04, G-23 | pending |
 | F04 | Capital view and print | G-01, G-11 | pending |
 | F05 | Receipt print, allocation dates | G-07, G-14 | pending |

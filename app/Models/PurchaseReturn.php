@@ -384,6 +384,104 @@ class PurchaseReturn extends Model
     }
 
     /**
+     * What an unlinked return would credit, without posting it: the form
+     * shows this before saving and sends the total back as `expected_total`
+     * (flags G-16). A line with no typed rate is valued at the item's
+     * weighted average cost as of the return date, carried at 12 decimals
+     * (StockCosting::averageCost), which the browser cannot reproduce, so the
+     * server is the only place this total can be worked out.
+     *
+     * @param  array{date: string, vat_rate?: mixed}  $data
+     * @param  array<int, array{item_id: int, item_unit_id?: int|null, quantity: mixed, rate?: mixed}>  $lines
+     * @return array{taxable_amount: string, nontaxable_amount: string, vat_amount: string, total: string, lines: list<string>}
+     */
+    public static function quoteUnlinked(array $data, array $lines): array
+    {
+        $date = CarbonImmutable::parse($data['date'])->startOfDay()->toDateString();
+        $vatRate = $data['vat_rate'] ?? CompanySetting::current()->default_vat_rate ?? '13';
+
+        $priced = static::priceUnlinkedLines($date, $lines, $vatRate);
+
+        return [
+            'taxable_amount' => $priced['taxable']->toString(),
+            'nontaxable_amount' => $priced['nonTaxable']->toString(),
+            'vat_amount' => $priced['vat']->toString(),
+            'total' => $priced['total']->toString(),
+            'lines' => array_map(fn (array $line): string => $line['net']->toString(), $priced['lines']),
+        ];
+    }
+
+    /**
+     * Prices every unlinked line and totals the return. Shared by
+     * postUnlinked() and quoteUnlinked() so the preview and the posted debit
+     * note can never disagree.
+     *
+     * @param  array<int, array{item_id: int, item_unit_id?: int|null, quantity: mixed, rate?: mixed}>  $lines
+     * @return array{lines: list<array<string, mixed>>, taxable: Money, nonTaxable: Money, vat: Money, total: Money}
+     */
+    private static function priceUnlinkedLines(string $date, array $lines, mixed $vatRate): array
+    {
+        $items = Item::with('units')
+            ->whereIn('id', array_map(static fn (array $line): int => (int) $line['item_id'], $lines))
+            ->get()
+            ->keyBy('id');
+
+        $prepared = [];
+
+        foreach ($lines as $line) {
+            $item = $items->get((int) $line['item_id']);
+
+            if (! $item) {
+                throw new InvalidArgumentException("Unknown item [{$line['item_id']}].");
+            }
+
+            if (! $item->is_stockable) {
+                throw new InvalidArgumentException("\"{$item->name}\" is not a stockable item.");
+            }
+
+            [$itemUnitId, $factor] = static::resolveUnlinkedItemUnit($item, $line['item_unit_id'] ?? null);
+
+            $quantity = Quantity::of($line['quantity']);
+
+            if (! $quantity->isPositive()) {
+                throw new InvalidArgumentException('Return quantity must be greater than zero.');
+            }
+
+            $baseQuantity = $quantity->multipliedBy($factor);
+            $enteredRate = isset($line['rate']) && $line['rate'] !== null && $line['rate'] !== ''
+                ? Quantity::of($line['rate'])
+                : null;
+
+            if ($enteredRate !== null) {
+                $net = Money::round($quantity->toBigDecimal()->multipliedBy($enteredRate->toBigDecimal()));
+            } else {
+                $averageCost = StockCosting::averageCost($item, $date)
+                    ?? Quantity::ofNullable($item->purchase_rate)?->toBigDecimal()
+                    ?? BigDecimal::zero();
+                $net = Money::round($baseQuantity->toBigDecimal()->multipliedBy($averageCost));
+            }
+
+            $prepared[] = [
+                'item' => $item,
+                'item_unit_id' => $itemUnitId,
+                'conversionFactor' => $factor,
+                'quantity' => $quantity,
+                'baseQuantity' => $baseQuantity,
+                'rate' => $enteredRate ?? Quantity::zero(),
+                'vatable' => $item->is_vatable,
+                'net' => $net,
+            ];
+        }
+
+        $taxable = Money::sum(array_map(fn (array $l): Money => $l['vatable'] ? $l['net'] : Money::zero(), $prepared));
+        $nonTaxable = Money::sum(array_map(fn (array $l): Money => $l['vatable'] ? Money::zero() : $l['net'], $prepared));
+        $vat = $taxable->percent($vatRate);
+        $total = $taxable->plus($nonTaxable)->plus($vat);
+
+        return ['lines' => $prepared, 'taxable' => $taxable, 'nonTaxable' => $nonTaxable, 'vat' => $vat, 'total' => $total];
+    }
+
+    /**
      * An "unlinked" purchase return (item 4): goods from opening stock, or
      * from a purchase made before this system went live, that have to go
      * back to a supplier with no Purchase row to point at. Unlike post()
@@ -419,70 +517,16 @@ class PurchaseReturn extends Model
             $company = CompanySetting::current();
             $vatRate = $data['vat_rate'] ?? $company->default_vat_rate ?? '13';
 
-            $items = Item::with('units')
-                ->whereIn('id', array_map(static fn (array $line): int => (int) $line['item_id'], $lines))
-                ->get()
-                ->keyBy('id');
-
-            $prepared = [];
-
-            foreach ($lines as $line) {
-                $item = $items->get((int) $line['item_id']);
-
-                if (! $item) {
-                    throw new InvalidArgumentException("Unknown item [{$line['item_id']}].");
-                }
-
-                if (! $item->is_stockable) {
-                    throw new InvalidArgumentException("\"{$item->name}\" is not a stockable item.");
-                }
-
-                [$itemUnitId, $factor] = static::resolveUnlinkedItemUnit($item, $line['item_unit_id'] ?? null);
-
-                $quantity = Quantity::of($line['quantity']);
-
-                if (! $quantity->isPositive()) {
-                    throw new InvalidArgumentException('Return quantity must be greater than zero.');
-                }
-
-                $baseQuantity = $quantity->multipliedBy($factor);
-                $enteredRate = isset($line['rate']) && $line['rate'] !== null && $line['rate'] !== ''
-                    ? Quantity::of($line['rate'])
-                    : null;
-
-                if ($enteredRate !== null) {
-                    $net = Money::round($quantity->toBigDecimal()->multipliedBy($enteredRate->toBigDecimal()));
-                } else {
-                    $averageCost = StockCosting::averageCost($item, $date)
-                        ?? Quantity::ofNullable($item->purchase_rate)?->toBigDecimal()
-                        ?? BigDecimal::zero();
-                    $net = Money::round($baseQuantity->toBigDecimal()->multipliedBy($averageCost));
-                }
-
-                $prepared[] = [
-                    'item' => $item,
-                    'item_unit_id' => $itemUnitId,
-                    'conversionFactor' => $factor,
-                    'quantity' => $quantity,
-                    'baseQuantity' => $baseQuantity,
-                    'rate' => $enteredRate ?? Quantity::zero(),
-                    'vatable' => $item->is_vatable,
-                    'net' => $net,
-                ];
-            }
+            ['lines' => $prepared, 'taxable' => $taxable, 'nonTaxable' => $nonTaxable, 'vat' => $vat, 'total' => $total]
+                = static::priceUnlinkedLines($date, $lines, $vatRate);
 
             static::assertUnlinkedStockAvailable($prepared, $storeId);
-
-            $taxable = Money::sum(array_map(fn (array $l): Money => $l['vatable'] ? $l['net'] : Money::zero(), $prepared));
-            $nonTaxable = Money::sum(array_map(fn (array $l): Money => $l['vatable'] ? Money::zero() : $l['net'], $prepared));
-            $vat = $taxable->percent($vatRate);
-            $total = $taxable->plus($nonTaxable)->plus($vat);
 
             if (! $total->isPositive()) {
                 throw new InvalidArgumentException('An unlinked purchase return must credit more than zero.');
             }
 
-            if (! empty($data['expected_total']) && ! Money::of($data['expected_total'])->isEqualTo($total)) {
+            if (($data['expected_total'] ?? null) !== null && ! Money::of($data['expected_total'])->isEqualTo($total)) {
                 throw new InvalidArgumentException('The return total changed. Please review it before saving.');
             }
 

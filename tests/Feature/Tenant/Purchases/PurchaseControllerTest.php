@@ -68,6 +68,8 @@ test('an authenticated user can post a purchase through the store route', functi
         'supplier_id' => $supplierId,
         'date' => '2026-06-01',
         'payment_mode' => 'cash',
+        // 2 x 250 = 500 taxable, plus 13% VAT: the total the form shows.
+        'expected_total' => '565.00',
         'lines' => [
             ['item_id' => $itemId, 'quantity' => 2, 'rate' => 250],
         ],
@@ -198,6 +200,7 @@ test('the store route rejects a supplier bill number that is already on a live p
         'bill_number' => 'INV-4410',
         'date' => '2026-06-01',
         'payment_mode' => 'credit',
+        'expected_total' => '100.00',
         'lines' => [['item_id' => $itemId, 'quantity' => '1', 'rate' => '100']],
     ];
 

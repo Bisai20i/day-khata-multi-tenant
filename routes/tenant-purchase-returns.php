@@ -24,6 +24,11 @@ Route::name('tenant.')->group(function () {
         Route::post('/unlinked', [PurchaseReturnController::class, 'storeUnlinked'])
             ->middleware('role:admin')
             ->name('store-unlinked');
+        // Read-only price check for the unlinked form (flags G-16); same
+        // admin gate as the post it previews.
+        Route::get('/unlinked/quote', [PurchaseReturnController::class, 'quoteUnlinked'])
+            ->middleware('role:admin')
+            ->name('quote-unlinked');
         Route::get('/export', [PurchaseReturnController::class, 'export'])->name('export');
         // Admin only: cancelling a debit note reverses its voucher and puts
         // the returned stock back (CONTRACTS C5).

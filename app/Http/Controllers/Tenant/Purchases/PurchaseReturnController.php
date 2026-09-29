@@ -23,10 +23,12 @@ use App\Support\NepaliCalendar;
 use Barryvdh\DomPDF\Facade\Pdf;
 use Illuminate\Contracts\Pagination\LengthAwarePaginator;
 use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\Response as HttpResponse;
 use Illuminate\Support\Collection;
+use Illuminate\Validation\Rule;
 use Inertia\Inertia;
 use Inertia\Response;
 use InvalidArgumentException;
@@ -151,6 +153,31 @@ class PurchaseReturnController extends Controller
                 'id' => $purchaseReturn->id,
                 'print_url' => route('tenant.purchase-returns.print', $purchaseReturn),
             ]);
+    }
+
+    /**
+     * The exact total an unlinked return would credit, for the form to show
+     * and send back as `expected_total` (flags G-16). Read-only, so a GET.
+     * Lines left without a rate are valued at average cost on the server
+     * (PurchaseReturn::quoteUnlinked()), which the browser cannot do.
+     */
+    public function quoteUnlinked(Request $request): JsonResponse
+    {
+        $data = $request->validate([
+            'date' => ['required', 'date'],
+            'vat_rate' => ['nullable', 'numeric', 'min:0', 'max:100', 'decimal:0,2'],
+            'lines' => ['required', 'array', 'min:1'],
+            'lines.*.item_id' => ['required', 'integer', Rule::exists('items', 'id')->where('is_active', true)],
+            'lines.*.item_unit_id' => ['nullable', 'integer', 'exists:item_units,id'],
+            'lines.*.quantity' => ['required', 'numeric', 'min:0.0001', 'decimal:0,4'],
+            'lines.*.rate' => ['nullable', 'numeric', 'min:0', 'decimal:0,4'],
+        ]);
+
+        try {
+            return response()->json(PurchaseReturn::quoteUnlinked($data, $data['lines']));
+        } catch (InvalidArgumentException $e) {
+            return response()->json(['message' => $e->getMessage()], 422);
+        }
     }
 
     /**

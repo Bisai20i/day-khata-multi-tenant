@@ -151,7 +151,8 @@ class PurchaseController extends Controller
             // rejected bill further in.
             'tds_rate' => ['nullable', 'numeric', 'min:0', 'max:100', 'decimal:0,2'],
             'tds_amount' => ['nullable', 'numeric', 'min:0', 'decimal:0,2'],
-            'expected_total' => ['nullable', 'numeric', 'decimal:0,2'],
+            // Required (flags G-16): the total the user saw is what gets booked.
+            'expected_total' => ['required', 'numeric', 'decimal:0,2'],
             'narration' => ['nullable', 'string', 'max:255'],
             'fiscal_year_id' => ['nullable', 'integer', 'exists:fiscal_years,id'],
             'reason' => ['nullable', 'string', 'max:255'],
