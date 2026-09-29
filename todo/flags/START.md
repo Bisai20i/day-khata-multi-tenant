@@ -51,6 +51,18 @@ control is missing. P2: hardening, UX, performance. Flags about the same defect 
 the list and add any code the engine looks up by code or name; D4 yes, new cash/bank capital bills with a
 supplier post the pair, old bills stay as posted. F00 still has to copy these into CONTRACTS.
 
+**Further answers 2026-09-29:** F09 freezes today's printed format (`{purchase_prefix}-{voucher_number}`, and the
+same shape for payments), so old bills keep the number they printed with. F07 `reverse()` refuses Reversal,
+ClosingEntry and RollForwardAdjustment unless internal year-close or reopen code passes a flag. F06 checks the
+whole run: a backdated sale is refused if stock goes negative on its date or any later day (respecting
+`allow_negative_stock`).
+
+**Working rules for this plan (user, 2026-09-29), overriding the inherited ones:** the coordinating cloud session
+runs Pint, targeted Pest tests and `npm run build` itself before each commit, clicks through changed pages in a
+browser, and pushes to `development` after each chunk. The 5 tests already failing on `development`
+(AccountingReportTest x2, DamageLostStockReportTest x3) get fixed first. Migrations on real databases stay with
+the user.
+
 - **D1 (G-06, blocks F07 task 1).** When today is past the open year's `end_date` and the year is not yet closed,
   what date does a reversal take? Recommended: clamp to `min(today, fiscal_year.end_date)`, and say so in the
   success message. The alternative (refuse with a clear "close or roll over the year first" message) keeps
