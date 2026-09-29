@@ -46,6 +46,11 @@ control is missing. P2: hardening, UX, performance. Flags about the same defect 
 
 ## 2. Decisions needed before the marked chunks
 
+**Answered by the user 2026-09-29, each as recommended:** D1 clamp the reversal date to
+`min(today, fiscal_year.end_date)`; D2 no interim admin gate, ledger keys go to permissions P01/P06; D3 accept
+the list and add any code the engine looks up by code or name; D4 yes, new cash/bank capital bills with a
+supplier post the pair, old bills stay as posted. F00 still has to copy these into CONTRACTS.
+
 - **D1 (G-06, blocks F07 task 1).** When today is past the open year's `end_date` and the year is not yet closed,
   what date does a reversal take? Recommended: clamp to `min(today, fiscal_year.end_date)`, and say so in the
   success message. The alternative (refuse with a clear "close or roll over the year first" message) keeps
@@ -198,11 +203,11 @@ Owned: `JournalVoucher.php` (after F07) and the nine callers listed in G-22, tes
 | F00 | Record decisions | G-24, D1-D4 | pending |
 | F01 | Purchase lists | G-02, G-11, G-12 | pending |
 | F02 | Unlinked purchase return form | G-10, G-16 | pending |
-| F03 | Capital posting | G-03, G-04, G-23 | pending (D4) |
+| F03 | Capital posting | G-03, G-04, G-23 | pending |
 | F04 | Capital view and print | G-01, G-11 | pending |
 | F05 | Receipt print, allocation dates | G-07, G-14 | pending |
 | F06 | Sales posting guards | G-05, G-13, G-15 | pending |
-| F07 | Journal core hardening | G-06, G-19, G-20 | pending (D1) |
+| F07 | Journal core hardening | G-06, G-19, G-20 | pending |
 | F08 | Trial balance and inputs | G-08, G-21 | pending |
 | F09 | Stored numbers, payment list | G-17, G-18 | pending |
 | F10 | Narration without bulk updates | G-22 | pending |
