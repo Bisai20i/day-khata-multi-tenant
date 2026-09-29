@@ -58,6 +58,10 @@ const from = ref(props.from);
 const to = ref(props.to);
 const storeId = ref(props.storeId);
 
+// The backend always echoes a from/to (the fiscal year by default), so the
+// props cannot tell a chosen window from the default one; the query string can.
+const hasExplicitFilters = ['from', 'to', 'store_id'].some((key) => new URLSearchParams(window.location.search).has(key));
+
 const storeOptions = computed(() => [
     { value: null, label: 'All stores' },
     ...props.stores.map((store) => ({ value: store.id, label: store.name })),
@@ -155,7 +159,7 @@ const columns = [
                     <Select v-model="storeId" :options="storeOptions" />
                 </div>
                 <Button variant="primary" tone="purple" @click="applyFilters">Apply filters</Button>
-                <Button v-if="from || to || storeId" variant="secondary" tone="purple" @click="clearFilters">Clear filters</Button>
+                <Button v-if="hasExplicitFilters" variant="secondary" tone="purple" @click="clearFilters">Clear filters</Button>
             </div>
             <p class="mt-2 text-xs text-text-muted">With no dates the current fiscal year is shown. The opening balance is the stock on hand the day before your From date.</p>
         </Card>

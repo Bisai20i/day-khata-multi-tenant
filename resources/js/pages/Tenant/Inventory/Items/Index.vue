@@ -295,7 +295,10 @@ const columns = [
         numeric: false,
         cell: ({ row }) =>
             h('div', { class: 'flex items-center justify-end gap-2' }, [
-                itemLedgerLink(row.original.id),
+                itemLedgerLink(
+                    row.original.id,
+                    'flex h-[26px] shrink-0 items-center border-[1.5px] border-border px-2 text-[11px] font-bold text-text-muted transition-colors duration-150 hover:border-primary hover:text-primary',
+                ),
                 h(
                     'button',
                     {

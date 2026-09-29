@@ -12,12 +12,11 @@ export function itemLedgerUrl(itemId) {
     return `/items/${itemId}/ledger`;
 }
 
-export function itemLedgerLink(itemId) {
-    return h(
-        Link,
-        { href: itemLedgerUrl(itemId), class: 'text-xs font-semibold text-primary hover:underline' },
-        { default: () => 'Ledger' },
-    );
+const LINK_CLASS = 'text-xs font-semibold text-primary hover:underline';
+
+/** `linkClass` lets a row whose other actions are bordered buttons match them. */
+export function itemLedgerLink(itemId, linkClass = LINK_CLASS) {
+    return h(Link, { href: itemLedgerUrl(itemId), class: linkClass }, { default: () => 'Ledger' });
 }
 
 /** A trailing DataTable column holding the link, for reports that have no actions column yet. */
