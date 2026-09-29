@@ -49,7 +49,7 @@ control is missing. P2: hardening, UX, performance. Flags about the same defect 
 **Answered by the user 2026-09-29, each as recommended:** D1 clamp the reversal date to
 `min(today, fiscal_year.end_date)`; D2 no interim admin gate, ledger keys go to permissions P01/P06; D3 accept
 the list and add any code the engine looks up by code or name; D4 yes, new cash/bank capital bills with a
-supplier post the pair, old bills stay as posted. F00 still has to copy these into CONTRACTS.
+supplier post the pair, old bills stay as posted. Copied into CONTRACTS C4/C5 by F00.
 
 **Further answers 2026-09-29:** F09 freezes today's printed format (`{purchase_prefix}-{voucher_number}`, and the
 same shape for payments), so old bills keep the number they printed with. F07 `reverse()` refuses Reversal,
@@ -103,9 +103,9 @@ and swap `role:admin` for `can:` keys. New gates added here use `role:admin` and
 matching the existing code, so P06/P09 can convert them in one pass. List every new gate in the chunk report.
 
 ### F00 Record decisions (coordinator only, no agent)
-- [ ] 1. Add the SAL-04 rule to CONTRACTS C5: unlinked sales returns, approve and reject are `role:admin`; the
+- [x] 1. Add the SAL-04 rule to CONTRACTS C5: unlinked sales returns, approve and reject are `role:admin`; the
   requester cannot approve their own request; direct linked store and request stay open (G-24).
-- [ ] 2. Record D1-D4 answers in CONTRACTS (C4 for D1) and add G-09 to `todo/permissions/P01` if D2 is accepted.
+- [x] 2. Record D1-D4 answers in CONTRACTS (C4 for D1) and add G-09 to `todo/permissions/P01` if D2 is accepted.
 
 ### F01 Purchase and capital purchase lists: totals, cancel info, cancel button (G-02, G-11 list part, G-12)
 Owned: `PurchaseController.php`, `CapitalPurchaseController.php` (index, export only), `Purchases/Index.vue`,
@@ -212,7 +212,7 @@ Owned: `JournalVoucher.php` (after F07) and the nine callers listed in G-22, tes
 | Chunk | Title | Flags | Status |
 |---|---|---|---|
 | Gate 0 | Run 2026-09-21 fixes | all FIXED | pending |
-| F00 | Record decisions | G-24, D1-D4 | pending |
+| F00 | Record decisions | G-24, D1-D4 | done |
 | F01 | Purchase lists | G-02, G-11, G-12 | pending |
 | F02 | Unlinked purchase return form | G-10, G-16 | pending |
 | F03 | Capital posting | G-03, G-04, G-23 | pending |

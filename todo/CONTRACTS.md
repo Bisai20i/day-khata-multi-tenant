@@ -153,10 +153,25 @@ throw; they return `{ ok: false, reason }` as C8 requires.
   `VoucherType::Reversal` dated **today in `Asia/Kathmandu`**, sets the new voucher's `reversal_of_id`, marks
   the original voucher `status = 'cancelled'`, returns the reversal. Every module `cancel()` uses this instead
   of its own mirroring code.
+- **Amended 2026-09-29 (flags D1, G-06).** The reversal date is `min(today, open fiscal year end_date)`: once
+  today is past the open year's end but the year is not yet closed, the reversal is dated on that end date,
+  and the cancel success message says so. Cancels keep working through the rollover gap.
+- **Amended 2026-09-29 (flags F07, G-19).** `reverse()` refuses a Reversal, ClosingEntry or
+  RollForwardAdjustment target unless the internal year-close or reopen code passes an explicit flag.
 - App timezone becomes `Asia/Kathmandu` (T03 edits `config/app.php`).
 - `VoucherSequence::setStartingNumber(FiscalYear $fy, VoucherType $type, int $nextNumber): void` (admin
   setting): allowed only while no voucher of that type exists in that year; the next posted voucher gets
   `$nextNumber`.
+
+### C4 addendum: system accounts and capital bills (flags D3, D4, 2026-09-29)
+
+- **Protected system accounts (D3, G-25).** `Account::SYSTEM_CODES` (AS1, AS11, AS31, ASA23, CA2, EXE8, EXE9,
+  EXE20-22, INI20, INI22, INI30, LIA20, LIA21) is the confirmed list. EXE9 (opening stock) and INI22 (closing
+  stock) were added because FiscalYear's year-end stock entry looks them up by code; every other code or name
+  the engine looks up was already on it.
+- **Cash/bank capital bills with a supplier (D4, G-04).** New bills post the supplier pair (Cr supplier total,
+  Dr supplier total, Cr cash/bank), as legacy did, so the supplier ledger shows the bill and its settlement.
+  Bills posted before the change stay as posted; nothing is back-posted.
 
 ## C5. Document lifecycle (every task that owns a cancellable document)
 
@@ -169,6 +184,9 @@ Cancellable tables: `sales`, `sales_returns`, `receipts`, `purchases`, `purchase
   `lockForUpdate()`, re-check status and blockers, call `JournalVoucher::reverse()`, flag stock movements as
   today, fill the four columns, set `status = 'cancelled'`. Reason required, max 500 chars (validate).
 - Cancel routes get `role:admin` middleware (the task owning the route file adds it).
+- **Sales returns (SAL-04, recorded 2026-09-29, G-24).** Unlinked sales returns, and approve and reject of a
+  return request, are `role:admin`; the requester can never approve their own request. A direct linked return
+  and a return request stay open to staff.
 - **Every state transition** (cancel, approve, reject, convert, allocate, return against) re-reads the rows it
   depends on with `lockForUpdate()` inside the transaction and re-checks the rule there. Lock several rows in
   ascending id order to avoid deadlocks.

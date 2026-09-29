@@ -109,6 +109,13 @@ test('JE-02 system accounts cannot be deleted, renamed or recoded, and accounts 
         $pl = Account::where('name', 'Profit & Loss')->firstOrFail();
         expect(fn () => $pl->delete())->toThrow(InvalidArgumentException::class);
 
+        // The year-end stock accounts FiscalYear resolves by code (flags D3).
+        foreach ([FiscalYear::OPENING_STOCK_CODE, FiscalYear::CLOSING_STOCK_CODE] as $stockCode) {
+            $stockAccount = Account::where('code', $stockCode)->firstOrFail();
+            expect(fn () => $stockAccount->delete())->toThrow(InvalidArgumentException::class)
+                ->and(fn () => $stockAccount->update(['name' => 'Renamed']))->toThrow(InvalidArgumentException::class);
+        }
+
         // A non-protected account with postings cannot be deleted either.
         $custom = Account::create(['account_group_id' => AccountGroup::first()->id, 'name' => 'Used']);
         JournalVoucher::post(

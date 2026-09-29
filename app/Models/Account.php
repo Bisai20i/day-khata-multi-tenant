@@ -15,14 +15,17 @@ class Account extends Model
     use HasFactory;
 
     /**
-     * Accounts the posting engine looks up by code (CA2 is "Profit & Loss").
-     * They cannot be deleted, recoded, renamed or moved (audit JE-02).
+     * Accounts the posting engine looks up by code (CA2 is "Profit & Loss",
+     * also looked up by that name). They cannot be deleted, recoded, renamed
+     * or moved (audit JE-02). EXE9 and INI22 are the opening and closing stock
+     * accounts FiscalYear's year-end stock entry resolves by code (confirmed
+     * list, flags D3).
      *
      * @var list<string>
      */
     public const SYSTEM_CODES = [
-        'AS1', 'AS11', 'AS31', 'ASA23', 'CA2', 'EXE8', 'EXE20', 'EXE21', 'EXE22',
-        'INI20', 'INI30', 'LIA20', 'LIA21',
+        'AS1', 'AS11', 'AS31', 'ASA23', 'CA2', 'EXE8', 'EXE9', 'EXE20', 'EXE21', 'EXE22',
+        'INI20', 'INI22', 'INI30', 'LIA20', 'LIA21',
     ];
 
     public function isSystemAccount(): bool

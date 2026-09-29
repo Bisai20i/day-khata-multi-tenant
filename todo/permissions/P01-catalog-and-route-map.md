@@ -40,3 +40,9 @@ ROUTE-MAP.md covers every tenant route (count matches the route files), config e
 ## Notes
 
 Key names chosen here are permanent API (stored in role JSON). Prefer stable nouns over UI wording.
+
+Account ledger (flags G-09, decision D2, 2026-09-29): `accounts/{account}/ledger`, `/print` and `/export`
+(`routes/tenant-ledger.php`) are ungated today and get no interim `role:admin`. Give them their own keys (view,
+print, export) plus a "party ledgers only" key so counter staff can open customer and supplier ledgers without
+seeing the rest of the chart. P06 gates them. The new item ledger (`items/{item}/ledger*`,
+`routes/tenant-business.php`) belongs with the stock report keys.
