@@ -49,12 +49,14 @@ test('a sale shows up with a negative signed quantity and a purchase with a posi
 
     $purchaseReference = null;
     $saleReference = null;
-    $tenant->run(function () use (&$purchaseReference, &$saleReference) {
+    $itemId = null;
+    $tenant->run(function () use (&$purchaseReference, &$saleReference, &$itemId) {
         stockMovementRegisterOpenFiscalYear();
         $admin = User::factory()->create(['email' => 'owner@example.com']);
         $customer = Customer::factory()->create();
         $supplier = Supplier::factory()->create();
         $item = Item::factory()->create(['is_vatable' => false, 'is_stockable' => true]);
+        $itemId = $item->id;
 
         $purchase = Purchase::post(
             ['supplier_id' => $supplier->id, 'date' => '2026-06-01', 'payment_mode' => 'cash'],
@@ -85,6 +87,8 @@ test('a sale shows up with a negative signed quantity and a purchase with a posi
             ->component('Tenant/Reports/StockMovementRegister')
             ->has('movements', 2)
             ->where('movements.0.movementType', 'Purchase')
+            // The page builds each row's Item Ledger link from this id.
+            ->where('movements.0.itemId', $itemId)
             // Signed 4-decimal strings now, never floats: this register is
             // what a stock dispute gets settled from.
             ->where('movements.0.quantity', '10.0000')

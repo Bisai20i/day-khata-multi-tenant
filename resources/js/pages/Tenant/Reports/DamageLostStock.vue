@@ -11,6 +11,7 @@ import Button from '@/components/ui/Button.vue';
 import DataTable from '@/components/ui/DataTable.vue';
 import { formatQuantity } from '@/lib/money';
 import { formatBsDate } from '@/lib/format';
+import { itemLedgerColumn } from '@/lib/itemLedger';
 
 defineOptions({ layout: AppLayout });
 
@@ -106,6 +107,7 @@ const itemWiseColumns = [
     { accessorKey: 'unit', header: 'Unit' },
     { id: 'total_quantity', header: 'Total Quantity', numeric: true, cell: ({ row }) => formatQuantity(row.original.total_quantity) },
     { accessorKey: 'transaction_count', header: 'Entries', numeric: true },
+    itemLedgerColumn((row) => row.item_id),
 ];
 
 const rangeLabel = computed(

@@ -9,6 +9,7 @@ use App\Http\Controllers\Tenant\Inventory\BarcodeLabelController;
 use App\Http\Controllers\Tenant\Inventory\BrandController;
 use App\Http\Controllers\Tenant\Inventory\ItemCategoryController;
 use App\Http\Controllers\Tenant\Inventory\ItemController;
+use App\Http\Controllers\Tenant\Inventory\ItemLedgerController;
 use App\Http\Controllers\Tenant\Inventory\ItemSubcategoryController;
 use App\Http\Controllers\Tenant\Parties\CustomerController;
 use App\Http\Controllers\Tenant\Parties\SupplierController;
@@ -131,4 +132,11 @@ Route::name('tenant.')->group(function () {
         Route::put('/{itemUnit}', [ItemController::class, 'updateUnit'])->name('update');
         Route::delete('/{itemUnit}', [ItemController::class, 'destroyUnit'])->name('destroy');
     });
+
+    // One item's stock history with running balance, beside the item like
+    // accounts/{account}/ledger sits beside the accounts. Read-only and open
+    // to the same staff as the Stock Movement Register it drills into.
+    Route::get('/items/{item}/ledger', [ItemLedgerController::class, 'show'])->name('items.ledger');
+    Route::get('/items/{item}/ledger/print', [ItemLedgerController::class, 'print'])->name('items.ledger.print');
+    Route::get('/items/{item}/ledger/export', [ItemLedgerController::class, 'export'])->name('items.ledger.export');
 });

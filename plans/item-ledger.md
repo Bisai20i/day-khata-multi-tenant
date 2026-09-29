@@ -1,6 +1,11 @@
 # Item Ledger
 
-**Status as of 2026-09-29**: planned, not started. Scope locked with the user (see "Locked decisions").
+**Status as of 2026-09-29**: all 5 rollout steps done. Deviations from the design below: the actions live in
+a new `ItemLedgerController` (`show`/`print`/`export`) instead of growing `ItemController` (already ~600 lines);
+the label, reference and signed-quantity helpers moved into the `DescribesStockMovements` controller concern,
+shared with `StockMovementRegisterController`; the `Ledger` link/column is one helper in
+`resources/js/lib/itemLedger.js`. On `DamageLostStock.vue` only the item-wise table gets the link (its line
+rows carry no item id). `from`/`to`/`store_id` are validated (`to >= from`).
 This doc is the build plan for this feature - read it before starting work, update its Status line as
 phases land, same discipline as `plans/central-panel-build.md`.
 

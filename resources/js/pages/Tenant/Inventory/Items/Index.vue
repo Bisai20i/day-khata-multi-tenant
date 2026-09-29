@@ -17,6 +17,7 @@ import { useToast } from '@/composables/useToast';
 import { useConfirm } from '@/composables/useConfirm';
 import { formatQuantity, formatRate } from '@/lib/money.js';
 import { todayInKathmandu } from '@/lib/format.js';
+import { itemLedgerLink } from '@/lib/itemLedger.js';
 
 defineOptions({ layout: AppLayout });
 
@@ -294,6 +295,7 @@ const columns = [
         numeric: false,
         cell: ({ row }) =>
             h('div', { class: 'flex items-center justify-end gap-2' }, [
+                itemLedgerLink(row.original.id),
                 h(
                     'button',
                     {

@@ -10,6 +10,7 @@ import Select from '@/components/ui/Select.vue';
 import DataTable from '@/components/ui/DataTable.vue';
 import { formatMoney, formatQuantity, formatRate } from '@/lib/money';
 import { formatBsDate } from '@/lib/format';
+import { itemLedgerColumn } from '@/lib/itemLedger';
 
 defineOptions({ layout: AppLayout });
 
@@ -68,6 +69,7 @@ const columns = [
     { accessorKey: 'closing', header: 'Closing qty', numeric: true, cell: ({ row }) => formatQuantity(row.original.closing) },
     { accessorKey: 'avgCost', header: 'Average cost per unit', numeric: true, cell: ({ row }) => formatRate(row.original.avgCost) },
     { accessorKey: 'valuation', header: 'Valuation', numeric: true, cell: ({ row }) => formatMoney(row.original.valuation) },
+    itemLedgerColumn((row) => row.itemId),
 ];
 </script>
 

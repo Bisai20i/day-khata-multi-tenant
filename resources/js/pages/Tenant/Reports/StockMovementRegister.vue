@@ -11,6 +11,7 @@ import Button from '@/components/ui/Button.vue';
 import DataTable from '@/components/ui/DataTable.vue';
 import { formatQuantity, formatRate } from '@/lib/money';
 import { formatBsDate } from '@/lib/format';
+import { itemLedgerColumn } from '@/lib/itemLedger';
 
 defineOptions({ layout: AppLayout });
 
@@ -150,6 +151,7 @@ const columns = [
         cell: ({ row }) => (row.original.unitCostRate === null ? '-' : formatRate(row.original.unitCostRate)),
     },
     { accessorKey: 'reference', header: 'Reference' },
+    itemLedgerColumn((row) => row.itemId),
 ];
 </script>
 
