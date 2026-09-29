@@ -23,6 +23,7 @@ Files: app/Models/CapitalPurchase.php, app/Http/Controllers/Tenant/Purchases/Cap
 - Fix: validate bank_account_id belongs to the bank/cash group, and line accounts exclude ASA23, party accounts and the payment account. Re-check in CapitalPurchase::post since it is callable outside the controller.
 
 ## CS-04 (P2) Cash or bank mode with a supplier posts nothing to the supplier, so the supplier statement omits the bill
+- FIXED (2026-09-29, F03): a cash or bank bill with a supplier posts Cr supplier, Dr supplier, Cr cash/bank (new bills only, decision D4). Tests: tests/Feature/Tenant/Purchases/CapitalPurchasePostingRulesTest.php.
 - Where: CapitalPurchase.php:~250-265 (cash and bank branches).
 - Evidence: for cash/bank the credit goes straight to cash/bank, the supplier account is never touched even when supplier_id is set. Balanced, but the supplier ledger has no purchase and payment pair (credit and partial do post the pair). Legacy said cash/bank "net to zero" on Sid, i.e. legacy posted the pair.
 - Fix: when a supplier is set, post Cr supplier total then Dr supplier total and Cr cash/bank, matching the partial shape.
@@ -32,6 +33,7 @@ Files: app/Models/CapitalPurchase.php, app/Http/Controllers/Tenant/Purchases/Cap
 - Fix: catch AuthorizationException and return a field error.
 
 ## CS-06 (P2) vat_rate is client supplied per document
+- FIXED (2026-09-29, F03): vat_rate must be the company rate or 0, checked in the request and in post(); the form offers only those two. Tests: tests/Feature/Tenant/Purchases/CapitalPurchasePostingRulesTest.php.
 - Where: CapitalPurchaseController.php:67, CapitalPurchase.php:456.
 - Evidence: any rate 0 to 100 is accepted and Input VAT posted at it, defaulting to the company rate. Contract intent (T07 task 2) is VAT computed, not typed. A user can claim VAT at 100 percent.
 - Fix: restrict to the company default rate or 0 (or an allowed-rate list), and reject other values server side.

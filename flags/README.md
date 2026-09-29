@@ -7,7 +7,7 @@ Audited 2026-09-21 by read-only agents. Severities were assigned by each agent w
 | sales.md | SAL-01..12 | SAL-01..04 FIXED | SAL-05..12 open |
 | purchases.md | PUR-01..12 | PUR-01..03 FIXED | PUR-06, PUR-11, PUR-12 FIXED; PUR-10 partly (print left); PUR-04, PUR-05, PUR-07..09 open |
 | journal-entries.md | JE-01..11 | JE-01..04 FIXED | JE-05..11 open |
-| capital-and-services.md | CS-01..11 | CS-01..03 FIXED (CS-05 also); CS-08 (P0) open | CS-10, CS-11 FIXED; CS-09 partly (print is F04); CS-04, CS-06, CS-07 open |
+| capital-and-services.md | CS-01..11 | CS-01..03 FIXED (CS-05 also); CS-08 (P0) open | CS-04, CS-06, CS-10, CS-11 FIXED; CS-09 partly (print is F04); CS-07 open |
 
 "FIXED" means the code was changed and tests were written. It does not mean verified by a test run.
 
@@ -23,7 +23,7 @@ PUR-10..12 and CS-08..11 came from checking the legacy cancelled-purchase fixes 
 ## Open follow-ups from the fixes
 
 - ~~Vue unlinked purchase-return form needs the reason field and a "credit to supplier" option~~ Done 2026-09-29 (F02).
-- CapitalPurchaseSettlement is not registered with ActivityLogObserver (needs AppServiceProvider).
+- ~~CapitalPurchaseSettlement is not registered with ActivityLogObserver~~ Done 2026-09-29 (F03).
 - SAL-04 decision (role:admin on unlinked returns and approve/reject, no self-approval) is not recorded in todo/CONTRACTS.md C5.
 - Tests assume seeded account codes AS1, EXE8, LIA21, a non-admin role in seeded roles, and factory heads not marked profit-and-loss.
 - JE-04 lock (lockForUpdate) is only verified by review, since SQLite ignores it.

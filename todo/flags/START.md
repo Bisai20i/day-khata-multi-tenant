@@ -132,11 +132,11 @@ Owned: `Purchases/Returns/Create.vue` (705 lines, over the soft cap: extract the
 ### F03 Capital purchase posting: VAT rate, supplier pair, observer (G-03, G-04, G-23)
 Owned: `CapitalPurchase.php` (`post()` only), `CapitalPurchaseController.php` (store rules, after F01),
 capital purchase create page, `AppServiceProvider.php` (one line), tests. Needs D4 for task 2.
-- [ ] 1. `vat_rate` must be the company default rate or 0 (reject anything else in the rule and again in
+- [x] 1. `vat_rate` must be the company default rate or 0 (reject anything else in the rule and again in
   `post()`); the form offers only those two. Tests for 13, 0 and 100.
-- [ ] 2. Cash or bank mode with a supplier posts Cr supplier total, Dr supplier total, Cr cash/bank (the partial
+- [x] 2. Cash or bank mode with a supplier posts Cr supplier total, Dr supplier total, Cr cash/bank (the partial
   shape). No supplier: unchanged. Supplier ledger test shows both lines; voucher still balances.
-- [ ] 3. Register `CapitalPurchaseSettlement::observe(ActivityLogObserver::class)`; test an activity row.
+- [x] 3. Register `CapitalPurchaseSettlement::observe(ActivityLogObserver::class)`; test an activity row.
 
 ### F04 View and print a capital or service bill (G-01, G-11 print part)
 Owned: new route in `routes/tenant-purchase.php` (coordinator adds), `CapitalPurchaseController::print`, new
@@ -218,7 +218,7 @@ Owned: `JournalVoucher.php` (after F07) and the nine callers listed in G-22, tes
 | F00 | Record decisions | G-24, D1-D4 | done |
 | F01 | Purchase lists | G-02, G-11, G-12 | done |
 | F02 | Unlinked purchase return form | G-10, G-16 | done |
-| F03 | Capital posting | G-03, G-04, G-23 | pending |
+| F03 | Capital posting | G-03, G-04, G-23 | done |
 | F04 | Capital view and print | G-01, G-11 | pending |
 | F05 | Receipt print, allocation dates | G-07, G-14 | pending |
 | F06 | Sales posting guards | G-05, G-13, G-15 | pending |

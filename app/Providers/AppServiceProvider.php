@@ -4,6 +4,7 @@ namespace App\Providers;
 
 use App\Listeners\RecordProvisioningFailure;
 use App\Models\CapitalPurchase;
+use App\Models\CapitalPurchaseSettlement;
 use App\Models\CapitalSale;
 use App\Models\FiscalYear;
 use App\Models\FixedAsset;
@@ -56,6 +57,7 @@ class AppServiceProvider extends ServiceProvider
         Quotation::observe(ActivityLogObserver::class);
         CapitalSale::observe(ActivityLogObserver::class);
         CapitalPurchase::observe(ActivityLogObserver::class);
+        CapitalPurchaseSettlement::observe(ActivityLogObserver::class);
         User::observe(ActivityLogObserver::class);
         // Covers close()/reopen()/relock() - each is a plain field-setting
         // update() under the hood, so the generic observer's 'updated'

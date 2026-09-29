@@ -63,6 +63,16 @@ function emptyLine() {
     };
 }
 
+// The company rate or none: the server refuses any other figure (flags G-03).
+const vatRateOptions = computed(() => [
+    { value: props.defaultVatRate, label: `${formatRateLabel(props.defaultVatRate)}% (company rate)` },
+    { value: '0.00', label: '0% (no VAT)' },
+]);
+
+function formatRateLabel(rate) {
+    return String(rate).replace(/\.?0+$/, '');
+}
+
 const form = useForm({
     supplier_id: null,
     supplier_pan: '',
@@ -381,7 +391,7 @@ function submit() {
             <div class="grid grid-cols-1 gap-4 sm:grid-cols-3">
                 <div>
                     <label class="mb-1 block text-sm font-semibold text-text-base">VAT rate (%) <span class="text-danger">*</span></label>
-                    <Input v-model="form.vat_rate" type="number" min="0" max="100" step="0.01" inputmode="decimal" required />
+                    <Select :model-value="form.vat_rate" :options="vatRateOptions" @update:model-value="(v) => (form.vat_rate = v)" />
                     <p class="mt-1 text-xs text-text-faint">Charged only on rows ticked Taxable.</p>
                     <p v-if="form.errors.vat_rate" class="mt-1 text-sm text-danger">{{ form.errors.vat_rate }}</p>
                 </div>

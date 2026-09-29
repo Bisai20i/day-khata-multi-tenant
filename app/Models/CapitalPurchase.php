@@ -11,6 +11,7 @@ use App\Support\Billing\DocumentCalculator;
 use App\Support\Billing\DocumentTotals;
 use App\Support\Money\Money;
 use App\Support\SettlementNarration;
+use Brick\Math\BigDecimal;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
@@ -38,7 +39,9 @@ use InvalidArgumentException;
  * account (mirroring Purchase::post()'s full-liability-then-settle shape).
  * A cash or bank payment needs no supplier at all - the settlement account
  * is credited directly for the full total, since there is no liability
- * left outstanding to book.
+ * left outstanding to book. When a supplier is named anyway, the bill and
+ * its payment are both posted to the supplier's ledger so they net to zero
+ * there (flags G-04).
  */
 #[Fillable([
     'supplier_id', 'supplier_pan', 'store_id', 'journal_voucher_id', 'type',
@@ -314,6 +317,8 @@ class CapitalPurchase extends Model
                 }
             }
 
+            static::assertAllowedVatRate($data['vat_rate'] ?? null);
+
             $totals = static::calculateTotals($data, $lines);
             $total = $totals->total;
 
@@ -403,15 +408,25 @@ class CapitalPurchase extends Model
                         ['account_id' => $supplier->account_id, 'debit' => $total->toString(), 'credit' => '0.00'],
                     ];
                 }
-            } elseif ($paymentMode === 'cash') {
-                $cashAccount = Account::where('code', 'AS1')->firstOrFail();
-                $voucherLines[] = ['account_id' => $cashAccount->id, 'debit' => '0.00', 'credit' => $total->toString()];
-            } elseif ($paymentMode === 'bank') {
-                if (empty($data['bank_account_id'])) {
+            } elseif ($paymentMode === 'cash' || $paymentMode === 'bank') {
+                if ($paymentMode === 'bank' && empty($data['bank_account_id'])) {
                     throw new InvalidArgumentException('A bank account is required for a bank payment.');
                 }
 
-                $voucherLines[] = ['account_id' => $data['bank_account_id'], 'debit' => '0.00', 'credit' => $total->toString()];
+                $paidFromAccountId = $paymentMode === 'cash'
+                    ? Account::where('code', 'AS1')->firstOrFail()->id
+                    : $data['bank_account_id'];
+
+                // With a supplier named, the bill and its payment both show on
+                // the supplier's ledger and net to zero there, the same shape
+                // as a partial bill and as legacy posted it (flags G-04, D4).
+                // Bills posted before this change keep their old shape.
+                if ($supplier) {
+                    $voucherLines[] = ['account_id' => $supplier->account_id, 'debit' => '0.00', 'credit' => $total->toString()];
+                    $voucherLines[] = ['account_id' => $supplier->account_id, 'debit' => $total->toString(), 'credit' => '0.00'];
+                }
+
+                $voucherLines[] = ['account_id' => $paidFromAccountId, 'debit' => '0.00', 'credit' => $total->toString()];
             } else {
                 throw new InvalidArgumentException("Unknown payment mode: {$paymentMode}");
             }
@@ -570,6 +585,30 @@ class CapitalPurchase extends Model
                 'expected_total' => $data['expected_total'] ?? null,
             ],
         );
+    }
+
+    /**
+     * A capital or service bill charges VAT at the company's own rate or not
+     * at all (flags G-03). The rate used to be typed freely, so any figure
+     * from 0 to 100 reached the ledger and the VAT book. A missing rate falls
+     * back to the default in calculateTotals(), so it is allowed here.
+     */
+    public static function assertAllowedVatRate(mixed $vatRate): void
+    {
+        if ($vatRate === null || $vatRate === '') {
+            return;
+        }
+
+        if (! is_numeric($vatRate)) {
+            throw new InvalidArgumentException('The VAT rate must be a number.');
+        }
+
+        $rate = BigDecimal::of((string) $vatRate);
+        $default = BigDecimal::of((string) (CompanySetting::current()->default_vat_rate ?? '13'));
+
+        if (! $rate->isZero() && ! $rate->isEqualTo($default)) {
+            throw new InvalidArgumentException("The VAT rate must be the company rate ({$default->strippedOfTrailingZeros()}%) or 0.");
+        }
     }
 
     /**

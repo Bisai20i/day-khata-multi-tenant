@@ -13,6 +13,7 @@ use App\Models\Store;
 use App\Models\Supplier;
 use App\Support\Billing\BillingException;
 use App\Support\Money\Money;
+use Closure;
 use Illuminate\Auth\Access\AuthorizationException;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
@@ -70,7 +71,15 @@ class CapitalPurchaseController extends Controller
             'store_id' => ['nullable', 'integer', 'exists:stores,id'],
             'cash_amount' => ['nullable', 'numeric', 'min:0', 'decimal:0,2'],
             'bank_amount' => ['nullable', 'numeric', 'min:0', 'decimal:0,2'],
-            'vat_rate' => ['nullable', 'numeric', 'min:0', 'max:100', 'decimal:0,2'],
+            // The company rate or 0, nothing typed in between (flags G-03);
+            // the model re-checks inside post().
+            'vat_rate' => ['nullable', 'numeric', 'decimal:0,2', function (string $attribute, mixed $value, Closure $fail): void {
+                try {
+                    CapitalPurchase::assertAllowedVatRate($value);
+                } catch (InvalidArgumentException $e) {
+                    $fail($e->getMessage());
+                }
+            }],
             'expected_total' => ['nullable', 'string'],
             'lines' => ['required', 'array', 'min:1'],
             'lines.*.account_id' => ['required', 'exists:accounts,id'],
