@@ -93,7 +93,7 @@ function postAccountingReportFixture(FiscalYear $fy1, User $actor): void
  * @param  array<int, array<string, mixed>>  $heads
  * @return Collection<int, array<string, mixed>>
  */
-function flattenAccountingReportRows(array $heads): Collection
+function flattenAccountingReportRows(iterable $heads): Collection
 {
     return collect($heads)->flatMap(function (array $head) {
         return collect($head['groups'])->flatMap(function (array $group) {
@@ -766,7 +766,7 @@ test('trial balance still lists a brand-new account with no postings and an acco
         ->assertOk()
         ->assertInertia(fn ($page) => $page
             ->component('Tenant/Reports/TrialBalance')
-            ->where('heads', function (array $heads) use ($zeroAccountCode) {
+            ->where('heads', function (Collection $heads) use ($zeroAccountCode) {
                 $rows = flattenAccountingReportRows($heads);
 
                 $cashRow = $rows->firstWhere('code', 'AS1');
@@ -817,7 +817,7 @@ test('trial balance narrows to a single account when account_id is given (T15-5)
         ->assertInertia(fn ($page) => $page
             ->component('Tenant/Reports/TrialBalance')
             ->where('accountId', $cashId)
-            ->where('heads', function (array $heads) {
+            ->where('heads', function (Collection $heads) {
                 $rows = flattenAccountingReportRows($heads);
 
                 // Exactly one row, and it is the one account asked for -

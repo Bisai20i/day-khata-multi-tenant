@@ -1,6 +1,8 @@
 <?php
 
+use App\Enums\FiscalYearStatus;
 use App\Enums\StockMovementType;
+use App\Models\FiscalYear;
 use App\Models\Item;
 use App\Models\StockAdjustment;
 use App\Models\Store;
@@ -22,6 +24,15 @@ function provisionDamageLostStockReportTestTenant(string $domain): Tenant
     return $tenant;
 }
 
+/**
+ * Stock adjustments post only inside a fiscal year (ClosedFiscalYearGuard),
+ * so every fixture below needs one covering its 2026 dates.
+ */
+function openDamageLostStockReportFiscalYear(): void
+{
+    FiscalYear::create(['name' => 'FY1', 'start_date' => '2026-01-01', 'end_date' => '2026-12-31', 'status' => FiscalYearStatus::Open]);
+}
+
 function loginDamageLostStockReportTestUser(string $domain): void
 {
     test()->post("http://{$domain}/login", [
@@ -35,6 +46,7 @@ test('the damage and lost stock report lists damage/lost lines and aggregates th
     $tenant = provisionDamageLostStockReportTestTenant($domain);
 
     $tenant->run(function () {
+        openDamageLostStockReportFiscalYear();
         $admin = User::factory()->create(['email' => 'owner@example.com']);
         $item = Item::factory()->create(['name' => 'Widget', 'unit' => 'pcs', 'is_stockable' => true]);
         $item->recordStockMovement(StockMovementType::Opening, 100, '2026-06-01', Store::where('is_active', true)->orderBy('id')->value('id'));
@@ -99,6 +111,7 @@ test('a cancelled stock adjustment is excluded from the damage and lost stock re
     $tenant = provisionDamageLostStockReportTestTenant($domain);
 
     $tenant->run(function () {
+        openDamageLostStockReportFiscalYear();
         $admin = User::factory()->create(['email' => 'owner@example.com']);
         $item = Item::factory()->create(['name' => 'Widget', 'is_stockable' => true]);
         $item->recordStockMovement(StockMovementType::Opening, 10, '2026-06-01', Store::where('is_active', true)->orderBy('id')->value('id'));
@@ -129,6 +142,7 @@ test('the damage and lost stock report can be narrowed to a single reason', func
     $tenant = provisionDamageLostStockReportTestTenant($domain);
 
     $tenant->run(function () {
+        openDamageLostStockReportFiscalYear();
         $admin = User::factory()->create(['email' => 'owner@example.com']);
         $item = Item::factory()->create(['name' => 'Widget', 'is_stockable' => true]);
         $item->recordStockMovement(StockMovementType::Opening, 10, '2026-06-01', Store::where('is_active', true)->orderBy('id')->value('id'));

@@ -85,7 +85,7 @@ class AccountingReportController extends Controller
 
             $excluded = $this->sweepVoucherIds($fiscalYear);
             $opening = $this->openingBalancesByAccount($fiscalYear, $excluded, $from);
-            $period = $this->balancesByAccount($fiscalYear, [...$excluded, ...$this->openingVoucherIds($fiscalYear)], $from, $to);
+            $period = $this->periodTotalsByAccount($fiscalYear, [...$excluded, ...$this->openingVoucherIds($fiscalYear)], $from, $to);
 
             $rows = $this->trialBalanceRows($opening, $period, $accountId);
             $heads = $this->buildHierarchy($rows);
@@ -367,7 +367,7 @@ class AccountingReportController extends Controller
         [$from, $to] = $this->resolveWindow($request, $fiscalYear);
         $excluded = $this->sweepVoucherIds($fiscalYear);
         $opening = $this->openingBalancesByAccount($fiscalYear, $excluded, $from);
-        $period = $this->balancesByAccount($fiscalYear, [...$excluded, ...$this->openingVoucherIds($fiscalYear)], $from, $to);
+        $period = $this->periodTotalsByAccount($fiscalYear, [...$excluded, ...$this->openingVoucherIds($fiscalYear)], $from, $to);
         $rows = $this->trialBalanceRows($opening, $period, $accountId);
         $heads = $this->buildHierarchy($rows);
         $totals = $this->trialBalanceTotals($rows);
@@ -395,7 +395,7 @@ class AccountingReportController extends Controller
         [$from, $to] = $this->resolveWindow($request, $fiscalYear);
         $excluded = $this->sweepVoucherIds($fiscalYear);
         $opening = $this->openingBalancesByAccount($fiscalYear, $excluded, $from);
-        $period = $this->balancesByAccount($fiscalYear, [...$excluded, ...$this->openingVoucherIds($fiscalYear)], $from, $to);
+        $period = $this->periodTotalsByAccount($fiscalYear, [...$excluded, ...$this->openingVoucherIds($fiscalYear)], $from, $to);
         $heads = $this->buildHierarchy($this->trialBalanceRows($opening, $period, $accountId));
 
         return Excel::download(new TrialBalanceExport($heads), "trial-balance-{$fiscalYear->name}.xlsx");
@@ -916,8 +916,26 @@ class AccountingReportController extends Controller
     }
 
     /**
-     * Net (debit - credit) balance per account inside one fiscal year, in a
-     * single grouped query.
+     * Net (debit - credit) balance per account inside one fiscal year.
+     *
+     * @param  array<int, int>  $excludeVoucherIds
+     * @return array<int, Money>
+     */
+    private function balancesByAccount(FiscalYear $fiscalYear, array $excludeVoucherIds, ?string $from, ?string $to): array
+    {
+        return array_map(
+            fn (array $totals) => $totals['debit']->minus($totals['credit']),
+            $this->periodTotalsByAccount($fiscalYear, $excludeVoucherIds, $from, $to),
+        );
+    }
+
+    /**
+     * Gross debit and gross credit per account inside one fiscal year, in a
+     * single grouped query. The Trial Balance's Period columns show these
+     * two sums side by side (cash that took in 1,000 and paid out 400 shows
+     * 1,000 Dr and 400 Cr, not a net 600 Dr), which is what a six-column
+     * trial balance means; balancesByAccount() nets them for every report
+     * that only needs the position.
      *
      * Scaled-integer SUM for the same reason FiscalYear::netBalance() and
      * StockCosting use it: SQLite gives a decimal column REAL affinity, so a
@@ -927,9 +945,9 @@ class AccountingReportController extends Controller
      * filter sends - so the last day of any range silently fell out of it.
      *
      * @param  array<int, int>  $excludeVoucherIds
-     * @return array<int, Money>
+     * @return array<int, array{debit: Money, credit: Money}>
      */
-    private function balancesByAccount(FiscalYear $fiscalYear, array $excludeVoucherIds, ?string $from, ?string $to): array
+    private function periodTotalsByAccount(FiscalYear $fiscalYear, array $excludeVoucherIds, ?string $from, ?string $to): array
     {
         $cast = JournalVoucherLine::query()->getConnection()->getDriverName() === 'sqlite' ? 'INTEGER' : 'SIGNED';
 
@@ -942,20 +960,24 @@ class AccountingReportController extends Controller
             })
             ->selectRaw(
                 "account_id,
-                 COALESCE(SUM(CAST(ROUND(debit * 100) AS {$cast})), 0) - COALESCE(SUM(CAST(ROUND(credit * 100) AS {$cast})), 0) as net_scaled"
+                 COALESCE(SUM(CAST(ROUND(debit * 100) AS {$cast})), 0) as debit_scaled,
+                 COALESCE(SUM(CAST(ROUND(credit * 100) AS {$cast})), 0) as credit_scaled"
             )
             ->groupBy('account_id')
-            ->pluck('net_scaled', 'account_id');
+            ->get();
 
-        $balances = [];
+        $fromScaled = fn ($scaled) => Money::of(BigDecimal::of((int) $scaled)->dividedBy(100, 2, RoundingMode::Unnecessary));
 
-        foreach ($rows as $accountId => $netScaled) {
-            $balances[(int) $accountId] = Money::of(
-                BigDecimal::of((int) $netScaled)->dividedBy(100, 2, RoundingMode::Unnecessary)
-            );
+        $totals = [];
+
+        foreach ($rows as $row) {
+            $totals[(int) $row->account_id] = [
+                'debit' => $fromScaled($row->debit_scaled),
+                'credit' => $fromScaled($row->credit_scaled),
+            ];
         }
 
-        return $balances;
+        return $totals;
     }
 
     /**
@@ -1227,7 +1249,7 @@ class AccountingReportController extends Controller
      * that one ledger's opening/period/closing figures.
      *
      * @param  array<int, Money>  $opening
-     * @param  array<int, Money>  $period
+     * @param  array<int, array{debit: Money, credit: Money}>  $period
      * @return Collection<int, array<string, mixed>>
      */
     private function trialBalanceRows(array $opening, array $period, ?int $accountId = null): Collection
@@ -1248,8 +1270,9 @@ class AccountingReportController extends Controller
             }
 
             $openingNet = $opening[$account->id] ?? Money::zero();
-            $periodNet = $period[$account->id] ?? Money::zero();
-            $closingNet = $openingNet->plus($periodNet);
+            $periodDebit = $period[$account->id]['debit'] ?? Money::zero();
+            $periodCredit = $period[$account->id]['credit'] ?? Money::zero();
+            $closingNet = $openingNet->plus($periodDebit)->minus($periodCredit);
 
             $rows->push([
                 'account' => $account,
@@ -1258,8 +1281,8 @@ class AccountingReportController extends Controller
                 'subgroupName' => $account->subgroup?->name,
                 'openingDebit' => $openingNet->isPositive() ? $openingNet : Money::zero(),
                 'openingCredit' => $openingNet->isNegative() ? $openingNet->negated() : Money::zero(),
-                'periodDebit' => $periodNet->isPositive() ? $periodNet : Money::zero(),
-                'periodCredit' => $periodNet->isNegative() ? $periodNet->negated() : Money::zero(),
+                'periodDebit' => $periodDebit,
+                'periodCredit' => $periodCredit,
                 'closingDebit' => $closingNet->isPositive() ? $closingNet : Money::zero(),
                 'closingCredit' => $closingNet->isNegative() ? $closingNet->negated() : Money::zero(),
                 // The two columns the old report showed, kept so the page's
