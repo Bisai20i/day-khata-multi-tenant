@@ -10,6 +10,8 @@ import Toaster from '@/components/ui/Toaster.vue';
 import ConfirmDialog from '@/components/ui/ConfirmDialog.vue';
 import logoMark from '@/assets/brand/logo-mark.png';
 import { navGroups, centralNavItems } from '@/lib/nav-items';
+import { filterNavByPermission } from '@/lib/filterNavByPermission';
+import { createPermissionChecker } from '@/lib/permissions';
 import { useLayoutChrome } from '@/composables/useLayoutChrome';
 import { useOpenFiscalYear } from '@/composables/useOpenFiscalYear';
 import { useToast } from '@/composables/useToast';
@@ -45,7 +47,11 @@ const chrome = useLayoutChrome();
 // useLayoutChrome's docblock) derives it itself from the shared page props.
 const navItems = computed(() => {
     if (page.props.auth?.platformAdmin) return centralNavItems;
-    if (page.props.auth?.user) return navGroups(page.props.auth.user.role?.slug === 'admin');
+    if (page.props.auth?.user) {
+        // Tenant nav only: hide items the user's permissions do not grant.
+        const { can } = createPermissionChecker(page.props.auth.can, page.props.auth.isOwner);
+        return filterNavByPermission(navGroups(), can);
+    }
     return [];
 });
 

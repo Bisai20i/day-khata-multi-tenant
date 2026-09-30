@@ -3,6 +3,7 @@
 namespace App\Http\Middleware;
 
 use App\Models\FiscalYear;
+use App\Models\User;
 use App\Support\ReversalNotice;
 use Illuminate\Http\Request;
 use Inertia\Middleware;
@@ -46,6 +47,26 @@ class HandleInertiaRequests extends Middleware
                 // the role middleware, so admins lost their admin-only buttons
                 // and menu items on every route that had no role gate.
                 'user' => $request->user('web')?->loadMissing('role'),
+                // The UI only hides things; the server gate is the authority.
+                // Sorted permission keys of the tenant user (empty for guests
+                // and platform admins), read lazily from the memoized set.
+                'can' => function () use ($request): array {
+                    $user = $request->user('web');
+
+                    if (! $user instanceof User) {
+                        return [];
+                    }
+
+                    $keys = array_keys($user->effectivePermissions());
+                    sort($keys);
+
+                    return $keys;
+                },
+                'isOwner' => function () use ($request): bool {
+                    $user = $request->user('web');
+
+                    return $user instanceof User && $user->isOwner();
+                },
             ],
             'tenant' => fn (): ?array => tenancy()->initialized
                 ? [

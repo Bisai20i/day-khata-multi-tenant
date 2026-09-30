@@ -13,10 +13,10 @@ Coordinator: `resources/js/lib/nav-items.js` (add a `permission` field per item)
 
 ## Tasks
 
-- [ ] 1. **Shared props and composable.** `HandleInertiaRequests` shares `auth.can` (list of the user's effective
+- [x] 1. **Shared props and composable.** `HandleInertiaRequests` shares `auth.can` (list of the user's effective
   permission keys from the memoized set, empty for guests and platform admins) and `auth.isOwner`, both computed
   lazily (closures). `usePermissions()` exposes `can(key)`, `canAny(keys)`, `isOwner`. JS test for both helpers.
-- [ ] 2. **Nav filtering.** Coordinator adds an optional `permission` string (or `permissions` array meaning any) to
+- [x] 2. **Nav filtering.** Coordinator adds an optional `permission` string (or `permissions` array meaning any) to
   every tenant nav item in `nav-items.js` using the catalog keys; the layout filters items and drops groups that
   become empty. Central nav is untouched. Keep the layout file under the JS size cap.
 - [ ] 3. **Route audit (run LAST, after P05-P08).** Feature test iterating `Route::getRoutes()`: every route whose
