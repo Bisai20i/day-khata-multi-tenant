@@ -15,7 +15,7 @@ Modified: `app/Models/Role.php`, `app/Models/User.php`, `database/factories/User
 - [x] 1. **Schema migration (tenant).** `users.is_owner` boolean NOT NULL default false; `roles.permissions` JSON
   nullable; `roles.is_system` boolean NOT NULL default false. Working `down()`. Do not drop the old
   `permissions`/`permission_role` tables here (P16 does that after a release cycle).
-- [ ] 2. **Backfill.** `RoleBackfill` class with **frozen constants** (never read config, never edited after
+- [x] 2. **Backfill.** `RoleBackfill` class with **frozen constants** (never read config, never edited after
   release): the full grantable key list, and the Staff parity list from ROUTE-MAP. `run()` is idempotent and
   does: `admin` role gets all grantable (non-owner-only) keys and `is_system = true`; `staff` role gets the
   Staff parity keys; any other existing role gets an empty list; the **owner** is the active admin-role user

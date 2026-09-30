@@ -3,6 +3,8 @@
 use App\Models\Permission;
 use App\Models\Role;
 use App\Models\Tenant;
+use App\Support\Permissions\PermissionCatalog;
+use App\Support\Permissions\RoleBackfill;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 
 uses(RefreshDatabase::class);
@@ -71,6 +73,27 @@ test('the admin role grants every seeded permission via the legacy relation', fu
             expect($admin->legacyPermissions()->where('slug', $permission->slug)->exists())->toBeTrue();
             expect($staff->legacyPermissions()->where('slug', $permission->slug)->exists())->toBeFalse();
         });
+    });
+
+    $tenant->delete();
+});
+
+test('the seeded admin role is a system role granting the live grantable catalog and staff gets the parity list', function () {
+    $tenant = provisionSeederTestTenant('seeder-json-permissions.tenant-test');
+
+    $tenant->run(function () {
+        $admin = Role::query()->where('slug', 'admin')->firstOrFail();
+        $staff = Role::query()->where('slug', 'staff')->firstOrFail();
+
+        expect($admin->permissions)->toBe(PermissionCatalog::grantable())
+            ->and($admin->is_system)->toBeTrue()
+            ->and($staff->permissions)->toBe(RoleBackfill::STAFF_PARITY)
+            ->and($staff->is_system)->toBeFalse();
+
+        foreach (PermissionCatalog::ownerOnly() as $ownerOnlyKey) {
+            expect($admin->permissions)->not->toContain($ownerOnlyKey)
+                ->and($staff->permissions)->not->toContain($ownerOnlyKey);
+        }
     });
 
     $tenant->delete();

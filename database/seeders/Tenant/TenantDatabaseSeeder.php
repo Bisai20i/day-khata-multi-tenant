@@ -7,6 +7,8 @@ use App\Models\Customer;
 use App\Models\Permission;
 use App\Models\Role;
 use App\Models\Store;
+use App\Support\Permissions\PermissionCatalog;
+use App\Support\Permissions\RoleBackfill;
 use Illuminate\Database\Console\Seeds\WithoutModelEvents;
 use Illuminate\Database\Seeder;
 
@@ -38,10 +40,23 @@ class TenantDatabaseSeeder extends Seeder
             fn (array $permission) => Permission::create($permission),
         );
 
-        $admin = Role::create(['name' => 'Admin', 'slug' => 'admin']);
+        // A new tenant's admin role gets the live grantable catalog (unlike
+        // RoleBackfill, which must stay frozen for already-migrated tenants);
+        // Staff mirrors the backfilled parity list until the Manager/Cashier
+        // templates replace it.
+        $admin = Role::create([
+            'name' => 'Admin',
+            'slug' => 'admin',
+            'permissions' => PermissionCatalog::grantable(),
+            'is_system' => true,
+        ]);
         $admin->legacyPermissions()->attach($permissions->pluck('id'));
 
-        Role::create(['name' => 'Staff', 'slug' => 'staff']);
+        Role::create([
+            'name' => 'Staff',
+            'slug' => 'staff',
+            'permissions' => RoleBackfill::STAFF_PARITY,
+        ]);
 
         Store::create(['name' => 'Main Store', 'is_active' => true]);
 
