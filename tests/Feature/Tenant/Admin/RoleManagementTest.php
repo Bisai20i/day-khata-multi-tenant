@@ -197,7 +197,7 @@ test('update replaces the entitled grants, keeps dormant grants from switched-of
         expect($fresh->permissions)->toBe(inRoleEditorCatalogOrder(['sales.view', 'sales.create', 'purchases.view', 'purchases.create']));
 
         $log = ActivityLog::query()->where('subject_type', $fresh->getMorphClass())->where('subject_id', $fresh->id)->where('action', 'updated')->sole();
-        expect($log->changes['name'])->toBe(['from' => 'Mixed', 'to' => 'Mixed renamed']);
+        expect($log->changes['name'])->toEqual(['from' => 'Mixed', 'to' => 'Mixed renamed']);
         expect($log->changes['permissions']['added'])->toBe(['sales.create']);
         expect($log->changes['permissions']['removed'])->toEqualCanonicalizing(['sales.cancel', 'backups.manage', 'removed.key']);
         expect($log->changes['permissions']['before'])->toContain('purchases.view');

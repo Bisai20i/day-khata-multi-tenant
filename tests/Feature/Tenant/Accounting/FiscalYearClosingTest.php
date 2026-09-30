@@ -53,10 +53,12 @@ function closingTestOwner(string $email = 'closer@example.com'): User
  */
 function closingTestNet(int $accountId, int $fiscalYearId): string
 {
+    $cast = (new JournalVoucherLine)->getConnection()->getDriverName() === 'sqlite' ? 'INTEGER' : 'SIGNED';
+
     $net = JournalVoucherLine::query()
         ->where('account_id', $accountId)
         ->whereHas('journalVoucher', fn ($query) => $query->where('fiscal_year_id', $fiscalYearId))
-        ->selectRaw('COALESCE(SUM(CAST(ROUND(debit * 100) AS INTEGER)), 0) - COALESCE(SUM(CAST(ROUND(credit * 100) AS INTEGER)), 0) as net_scaled')
+        ->selectRaw("COALESCE(SUM(CAST(ROUND(debit * 100) AS {$cast})), 0) - COALESCE(SUM(CAST(ROUND(credit * 100) AS {$cast})), 0) as net_scaled")
         ->value('net_scaled');
 
     return number_format(((int) $net) / 100, 2, '.', '');

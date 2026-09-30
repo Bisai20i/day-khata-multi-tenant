@@ -163,7 +163,8 @@ test('a module change writes a central activity entry with before and after', fu
         ->where('platform_admin_id', $admin->id)
         ->sole();
 
-    expect($entry->metadata)->toBe([
+    // toEqual: MySQL's JSON type does not keep object key order.
+    expect($entry->metadata)->toEqual([
         'before' => ['sales', 'pos', 'purchases'],
         'after' => ['purchases', 'reports'],
         'added' => ['reports'],

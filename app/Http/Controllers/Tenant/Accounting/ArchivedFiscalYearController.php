@@ -25,13 +25,17 @@ class ArchivedFiscalYearController extends Controller
     {
         $connection = FiscalYearArchiver::connectionFor($fiscalYearArchive);
 
+        // The integer cast keyword differs by driver (SIGNED on MySQL,
+        // INTEGER on SQLite); the archive connection's own driver decides.
+        $cast = DB::connection($connection)->getDriverName() === 'sqlite' ? 'INTEGER' : 'SIGNED';
+
         $vouchers = DB::connection($connection)
             ->table('journal_vouchers as v')
             ->leftJoin('journal_voucher_lines as l', 'l.journal_voucher_id', '=', 'v.id')
             ->groupBy('v.id', 'v.voucher_type', 'v.voucher_number', 'v.date', 'v.narration', 'v.reason', 'v.created_by_name')
             ->orderBy('v.date')
             ->orderBy('v.voucher_number')
-            ->selectRaw('v.id, v.voucher_type, v.voucher_number, v.date, v.narration, v.reason, v.created_by_name, COALESCE(SUM(CAST(ROUND(l.debit * 100) AS INTEGER)), 0) as total_debit_scaled, COALESCE(SUM(CAST(ROUND(l.credit * 100) AS INTEGER)), 0) as total_credit_scaled')
+            ->selectRaw("v.id, v.voucher_type, v.voucher_number, v.date, v.narration, v.reason, v.created_by_name, COALESCE(SUM(CAST(ROUND(l.debit * 100) AS {$cast})), 0) as total_debit_scaled, COALESCE(SUM(CAST(ROUND(l.credit * 100) AS {$cast})), 0) as total_credit_scaled")
             ->get()
             ->map(fn ($voucher) => [
                 'id' => $voucher->id,

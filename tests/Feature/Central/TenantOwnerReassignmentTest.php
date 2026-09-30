@@ -188,7 +188,8 @@ test('a reassignment writes a central activity entry with before and after', fun
         ->where('platform_admin_id', $admin->id)
         ->sole();
 
-    expect($entry->metadata)->toBe([
+    // toEqual: MySQL's JSON type does not keep object key order.
+    expect($entry->metadata)->toEqual([
         'before' => ['id' => $owner->id, 'name' => 'Old Owner', 'email' => $owner->email],
         'after' => ['id' => $active->id, 'name' => 'Active Person', 'email' => $active->email],
     ]);
