@@ -51,8 +51,9 @@ test('creating a tenant via the endpoint provisions a working tenant database wi
     expect($tenant->contact_email)->toBe('billing@acme.test');
     expect($tenant->domains()->where('domain', 'acme.localhost')->exists())->toBeTrue();
 
-    // The tenant database is a real file created by the TenantCreated job pipeline.
-    expect(file_exists(database_path($tenant->database()->getName())))->toBeTrue();
+    // The tenant database is really created by the TenantCreated job pipeline
+    // (asked through tenancy's database manager so it holds on SQLite and MySQL).
+    expect($tenant->database()->manager()->databaseExists($tenant->database()->getName()))->toBeTrue();
 
     // Resolve everything (including the `role` relation) inside run(), since
     // the tenant DB connection is torn down again once the closure returns.
@@ -100,7 +101,7 @@ test('a request into a still-provisioning tenant is blocked instead of hitting a
     // Nothing was ever created for this tenant, so there's no database file
     // on disk to clean up - the afterEach's Tenant::delete() call is a no-op
     // database-file-wise here (also queued/faked), which is fine.
-    expect(file_exists(database_path($tenant->database()->getName())))->toBeFalse();
+    expect($tenant->database()->manager()->databaseExists($tenant->database()->getName()))->toBeFalse();
 
     // Matches the existing convention in TenantSuspensionTest (status-only,
     // hitting the public root route rather than an auth-gated one, since the

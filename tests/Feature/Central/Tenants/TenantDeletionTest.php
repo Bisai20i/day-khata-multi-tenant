@@ -24,15 +24,16 @@ test('deleting a tenant removes its database from disk', function () {
     ]);
 
     $tenant = Tenant::where('company_name', 'Deleteme Inc')->firstOrFail();
-    $databasePath = database_path($tenant->database()->getName());
+    // Asked through tenancy's database manager so it holds on SQLite and MySQL.
+    $database = $tenant->database();
 
-    expect(file_exists($databasePath))->toBeTrue();
+    expect($database->manager()->databaseExists($database->getName()))->toBeTrue();
 
     $this->actingAs($admin, 'platform')
         ->delete(route('central.tenants.destroy', $tenant))
         ->assertRedirect(route('central.tenants.index'));
 
-    expect(file_exists($databasePath))->toBeFalse();
+    expect($database->manager()->databaseExists($database->getName()))->toBeFalse();
     expect(Tenant::find($tenant->id))->toBeNull();
 
     // The log is written before $tenant->delete() runs (see the ordering

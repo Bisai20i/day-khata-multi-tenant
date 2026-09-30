@@ -152,7 +152,7 @@ class SaleController extends Controller
     private function filteredTotals(array $filters): array
     {
         // Cancelled invoices stay in the list but never move the totals row.
-        $row = $this->filteredSalesQuery($filters)->where('status', '!=', 'cancelled')->toBase()->selectRaw(
+        $row = $this->filteredSalesQuery($filters)->reorder()->where('status', '!=', 'cancelled')->toBase()->selectRaw(
             'COALESCE(SUM(taxable_amount), 0) as taxable_amount, '
             .'COALESCE(SUM(nontaxable_amount), 0) as nontaxable_amount, '
             .'COALESCE(SUM(vat_amount), 0) as vat_amount, '
