@@ -167,6 +167,43 @@ test('a password change is logged without the password hash or remember token', 
     $tenant->delete();
 });
 
+test('the redaction migration scrubs secrets already stored in User change sets, idempotently', function () {
+    $tenant = provisionActivityLogTestTenant('activity-log-scrub.tenant-test');
+
+    $tenant->run(function () {
+        $user = User::factory()->create(['role_id' => Role::where('slug', 'admin')->value('id')]);
+        $leaked = ActivityLog::create([
+            'user_id' => null,
+            'action' => 'updated',
+            'subject_type' => User::class,
+            'subject_id' => $user->id,
+            'description' => 'User updated',
+            'changes' => ['name' => 'New', 'password' => '$2y$12$leakedhash', 'remember_token' => 'leaked-token'],
+        ]);
+        $sale = ActivityLog::create([
+            'user_id' => null,
+            'action' => 'updated',
+            'subject_type' => Sale::class,
+            'subject_id' => 1,
+            'description' => 'Sale updated',
+            'changes' => ['password' => 'not a user row'],
+        ]);
+
+        $migration = require database_path('migrations/tenant/2026_09_30_010000_redact_secrets_in_activity_log_changes.php');
+        $migration->up();
+        $migration->up();
+
+        expect($leaked->fresh()->changes)->toBe([
+            'name' => 'New',
+            'password' => ActivityLogObserver::REDACTED,
+            'remember_token' => ActivityLogObserver::REDACTED,
+        ]);
+        expect($sale->fresh()->changes)->toBe(['password' => 'not a user row']);
+    });
+
+    $tenant->delete();
+});
+
 test('the activity log page is admin-only', function () {
     $domain = 'activity-log-admin-only.tenant-test';
     $tenant = provisionActivityLogTestTenant($domain);
