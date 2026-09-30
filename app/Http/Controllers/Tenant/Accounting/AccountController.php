@@ -172,6 +172,8 @@ class AccountController extends Controller
      */
     public function ledger(Request $request, Account $account): Response
     {
+        $this->validateLedgerInput($request);
+
         $fiscalYearId = $request->integer('fiscal_year_id') ?: FiscalYear::query()->where('status', FiscalYearStatus::Open)->value('id');
         $fiscalYear = $fiscalYearId ? FiscalYear::find($fiscalYearId) : null;
 
@@ -188,6 +190,8 @@ class AccountController extends Controller
 
     public function ledgerPrint(Request $request, Account $account)
     {
+        $this->validateLedgerInput($request);
+
         $fiscalYear = $this->resolveLedgerFiscalYear($request);
         abort_if($fiscalYear === null, 404, 'No fiscal year to print.');
 
@@ -213,6 +217,8 @@ class AccountController extends Controller
 
     public function ledgerExport(Request $request, Account $account)
     {
+        $this->validateLedgerInput($request);
+
         $fiscalYear = $this->resolveLedgerFiscalYear($request);
         abort_if($fiscalYear === null, 404, 'No fiscal year to export.');
 
@@ -222,6 +228,20 @@ class AccountController extends Controller
             new AccountBookExport($data['entries'], $data['openingBalance'], $data['closingBalance']),
             "ledger-{$account->id}.xlsx",
         );
+    }
+
+    /**
+     * A year that does not exist, or a date window that runs backwards, is a
+     * validation error rather than a silent fallback to the open year
+     * (flags G-21).
+     */
+    private function validateLedgerInput(Request $request): void
+    {
+        $request->validate([
+            'fiscal_year_id' => ['nullable', 'integer', 'exists:fiscal_years,id'],
+            'from' => ['nullable', 'date'],
+            'to' => ['nullable', 'date', 'after_or_equal:from'],
+        ]);
     }
 
     private function resolveLedgerFiscalYear(Request $request): ?FiscalYear

@@ -71,6 +71,17 @@ use RuntimeException;
  */
 class AccountingReportController extends Controller
 {
+    private const UNCLASSIFIED = 'Unclassified';
+
+    /**
+     * @var array<string, list<string>>
+     */
+    private const REPORT_INPUT_RULES = [
+        'fiscal_year_id' => ['nullable', 'integer', 'exists:fiscal_years,id'],
+        'from' => ['nullable', 'date'],
+        'to' => ['nullable', 'date', 'after_or_equal:from'],
+    ];
+
     public function trialBalance(Request $request): Response
     {
         $fiscalYear = $this->resolveFiscalYear($request);
@@ -78,6 +89,7 @@ class AccountingReportController extends Controller
 
         $heads = [];
         $totals = $this->emptyTrialBalanceTotals();
+        $unclassifiedCount = 0;
         [$from, $to] = [null, null];
 
         if ($fiscalYear !== null) {
@@ -90,9 +102,13 @@ class AccountingReportController extends Controller
             $rows = $this->trialBalanceRows($opening, $period, $accountId);
             $heads = $this->buildHierarchy($rows);
             $totals = $this->trialBalanceTotals($rows);
+            $unclassifiedCount = $this->unclassifiedCount($rows);
         }
 
         return Inertia::render('Tenant/Reports/TrialBalance', array_merge([
+            // Accounts with no head or group, shown under "Unclassified"; the
+            // page warns when there are any (flags G-08).
+            'unclassifiedCount' => $unclassifiedCount,
             'fiscalYears' => $this->fiscalYearOptions(),
             'fiscalYearId' => $fiscalYear?->id,
             // Legacy's `?accno=` single-ledger filter (audit T15-5): narrows
@@ -218,9 +234,11 @@ class AccountingReportController extends Controller
 
             $balanceWarning = $this->assertBalanced($fiscalYear, $totalAssets, $totalLiabilitiesAndCapital);
             $heads = $this->buildHierarchy($rows);
+            $unclassifiedCount = $this->unclassifiedCount($rows);
         }
 
         return Inertia::render('Tenant/Reports/BalanceSheet', [
+            'unclassifiedCount' => $unclassifiedCount ?? 0,
             'fiscalYears' => $this->fiscalYearOptions(),
             'fiscalYearId' => $fiscalYear?->id,
             'from' => $from,
@@ -846,10 +864,16 @@ class AccountingReportController extends Controller
 
     private function resolveFiscalYear(Request $request): ?FiscalYear
     {
+        // Every report action starts here, so a bad year or date window is a
+        // validation error for all of them, rather than a silent fallback
+        // to another year that the page then labels as the one asked for
+        // (flags G-21).
+        $request->validate(self::REPORT_INPUT_RULES);
+
         $requested = $request->integer('fiscal_year_id');
 
         if ($requested) {
-            return FiscalYear::find($requested) ?? FiscalYear::query()->where('status', FiscalYearStatus::Open)->first();
+            return FiscalYear::findOrFail($requested);
         }
 
         return FiscalYear::query()->where('status', FiscalYearStatus::Open)->first()
@@ -1158,28 +1182,25 @@ class AccountingReportController extends Controller
     {
         $accounts = Account::query()
             ->with(['group.accountHead', 'subgroup.accountGroup.accountHead'])
-            ->when($headNames !== null, fn (Builder $query) => $query
+            // Accounts whose head cannot be resolved are kept too, as
+            // "Unclassified", so their balance is visible instead of
+            // silently missing from the report (flags G-08).
+            ->when($headNames !== null, fn (Builder $query) => $query->where(fn (Builder $scope) => $scope
                 ->whereHas('group.accountHead', fn (Builder $q) => $q->whereIn('name', $headNames))
-                ->orWhereHas('subgroup.accountGroup.accountHead', fn (Builder $q) => $q->whereIn('name', $headNames)))
+                ->orWhereHas('subgroup.accountGroup.accountHead', fn (Builder $q) => $q->whereIn('name', $headNames))
+                ->orWhere(fn (Builder $orphan) => $orphan
+                    ->whereDoesntHave('group.accountHead')
+                    ->whereDoesntHave('subgroup.accountGroup.accountHead'))))
             ->get();
 
         $rows = collect();
 
         foreach ($accounts as $account) {
-            $head = $account->group?->accountHead ?? $account->subgroup?->accountGroup?->accountHead;
-            $group = $account->group ?? $account->subgroup?->accountGroup;
-
-            if (! $head || ! $group) {
-                continue;
-            }
-
             $net = $balances[$account->id] ?? Money::zero();
 
             $rows->push([
                 'account' => $account,
-                'headName' => $head->name,
-                'groupName' => $group->name,
-                'subgroupName' => $account->subgroup?->name,
+                ...$this->classification($account),
                 'debit' => $net->isPositive() ? $net : Money::zero(),
                 'credit' => $net->isNegative() ? $net->negated() : Money::zero(),
             ]);
@@ -1217,18 +1238,9 @@ class AccountingReportController extends Controller
             return $rows->replace([$index => $row]);
         }
 
-        $head = $stockInHand->group?->accountHead ?? $stockInHand->subgroup?->accountGroup?->accountHead;
-        $group = $stockInHand->group ?? $stockInHand->subgroup?->accountGroup;
-
-        if (! $head || ! $group) {
-            return $rows;
-        }
-
         return $rows->push([
             'account' => $stockInHand,
-            'headName' => $head->name,
-            'groupName' => $group->name,
-            'subgroupName' => $stockInHand->subgroup?->name,
+            ...$this->classification($stockInHand),
             'debit' => $adjustment->isPositive() ? $adjustment : Money::zero(),
             'credit' => $adjustment->isNegative() ? $adjustment->negated() : Money::zero(),
         ]);
@@ -1262,13 +1274,6 @@ class AccountingReportController extends Controller
         $rows = collect();
 
         foreach ($accounts as $account) {
-            $head = $account->group?->accountHead ?? $account->subgroup?->accountGroup?->accountHead;
-            $group = $account->group ?? $account->subgroup?->accountGroup;
-
-            if (! $head || ! $group) {
-                continue;
-            }
-
             $openingNet = $opening[$account->id] ?? Money::zero();
             $periodDebit = $period[$account->id]['debit'] ?? Money::zero();
             $periodCredit = $period[$account->id]['credit'] ?? Money::zero();
@@ -1276,9 +1281,7 @@ class AccountingReportController extends Controller
 
             $rows->push([
                 'account' => $account,
-                'headName' => $head->name,
-                'groupName' => $group->name,
-                'subgroupName' => $account->subgroup?->name,
+                ...$this->classification($account),
                 'openingDebit' => $openingNet->isPositive() ? $openingNet : Money::zero(),
                 'openingCredit' => $openingNet->isNegative() ? $openingNet->negated() : Money::zero(),
                 'periodDebit' => $periodDebit,
@@ -1525,6 +1528,37 @@ class AccountingReportController extends Controller
             'openingBalance' => $openingBalance->toString(),
             'closingBalance' => $runningBalance->toString(),
         ];
+    }
+
+    /**
+     * Where an account sits in the report tree. An account whose group or
+     * head cannot be resolved (a deleted group, a broken import) goes under
+     * "Unclassified" rather than being dropped: the trial balance used to
+     * `continue` past it, so its balance vanished and the totals no longer
+     * matched the ledger with nothing on screen to say why (flags G-08).
+     *
+     * @return array{headName: string, groupName: string, subgroupName: ?string}
+     */
+    private function classification(Account $account): array
+    {
+        $head = $account->group?->accountHead ?? $account->subgroup?->accountGroup?->accountHead;
+        $group = $account->group ?? $account->subgroup?->accountGroup;
+
+        if (! $head || ! $group) {
+            return ['headName' => self::UNCLASSIFIED, 'groupName' => self::UNCLASSIFIED, 'subgroupName' => null];
+        }
+
+        return ['headName' => $head->name, 'groupName' => $group->name, 'subgroupName' => $account->subgroup?->name];
+    }
+
+    /**
+     * How many report rows sit under "Unclassified", for the page's warning.
+     *
+     * @param  Collection<int, array<string, mixed>>  $rows
+     */
+    private function unclassifiedCount(Collection $rows): int
+    {
+        return $rows->where('headName', self::UNCLASSIFIED)->count();
     }
 
     /**

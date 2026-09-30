@@ -24,6 +24,8 @@ const props = defineProps({
     totalAssets: { type: String, default: '0.00' },
     totalLiabilitiesAndCapital: { type: String, default: '0.00' },
     balanceWarning: { type: [String, null], default: null },
+    // Accounts with no head or group, listed under "Unclassified" (flags G-08).
+    unclassifiedCount: { type: Number, default: 0 },
 });
 
 useLayoutChrome('Balance Sheet');
@@ -101,6 +103,14 @@ function exportUrl() {
         </p>
 
         <template v-else>
+            <p
+                v-if="unclassifiedCount > 0"
+                class="mb-3 rounded border border-warning-text bg-warning-bg px-3 py-2 text-[12.5px] font-semibold text-warning-text"
+            >
+                {{ unclassifiedCount }} {{ unclassifiedCount === 1 ? 'account is' : 'accounts are' }} not filed under any head or group, so
+                {{ unclassifiedCount === 1 ? 'it is' : 'they are' }} listed under Unclassified. Move {{ unclassifiedCount === 1 ? 'it' : 'them' }} into
+                the right group in the chart of accounts.
+            </p>
             <p
                 v-if="balanceWarning"
                 class="mb-4 rounded border border-danger px-3 py-2 text-[12.5px] font-semibold text-danger"

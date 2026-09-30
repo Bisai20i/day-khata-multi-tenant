@@ -179,10 +179,10 @@ Owned: `JournalVoucher.php`, `JournalVoucherController.php` (rules only), tests.
 ### F08 Reports: trial balance integrity and input validation (G-08, G-21)
 Owned: `app/Http/Controllers/Tenant/Reports/AccountingReportController.php`, `AccountController.php` (ledger
 actions only), trial balance page, tests.
-- [ ] 1. Accounts with no resolvable head or group go into an "Unclassified" row instead of `continue`, in all
+- [x] 1. Accounts with no resolvable head or group go into an "Unclassified" row instead of `continue`, in all
   three places (:1150, :1201, :1246); the page shows a warning when that row is non-empty; trial balance asserts
   closing debit total equals closing credit total like the balance sheet. Test with an orphaned account.
-- [ ] 2. Validate `fiscal_year_id` (`exists`), `from` and `to` (`date`, `to >= from`) on every ledger and report
+- [x] 2. Validate `fiscal_year_id` (`exists`), `from` and `to` (`date`, `to >= from`) on every ledger and report
   action; a bad year is a validation error, not a silent fallback. Tests.
 
 ### F09 Purchase numbers and payment list performance (G-17, G-18)
@@ -223,7 +223,7 @@ Owned: `JournalVoucher.php` (after F07) and the nine callers listed in G-22, tes
 | F05 | Receipt print, allocation dates | G-07, G-14 | done |
 | F06 | Sales posting guards | G-05, G-13, G-15 | done |
 | F07 | Journal core hardening | G-06, G-19, G-20 | done |
-| F08 | Trial balance and inputs | G-08, G-21 | pending |
+| F08 | Trial balance and inputs | G-08, G-21 | done |
 | F09 | Stored numbers, payment list | G-17, G-18 | done |
 | F10 | Narration without bulk updates | G-22 | pending |
 

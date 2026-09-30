@@ -91,14 +91,16 @@ Legacy day_khata has no comparable model layer (MySQL triggers), so parity notes
 - Fix: put ledger, print and export behind role:admin (or a permission), or restrict to party accounts.
   Paginate index().
 
-### JE-09 (P2) Ledger and report inputs are not validated
+### JE-09 (P2) FIXED: Ledger and report inputs are not validated
+- FIXED (F08): fiscal_year_id (exists), from and to (date, to >= from) validated on every accounting report and account ledger action; an unknown year is a validation error. Files: AccountingReportController.php, AccountController.php, tests/Feature/Tenant/Reports/TrialBalanceIntegrityTest.php.
 - File: AccountController.php:162-176, 216-224, 226-236; AccountingReportController.php:778-810.
 - Wrong: fiscal_year_id, from, to are read with integer()/string() and never validated as dates. A bogus
   fiscal_year_id on the reports silently falls back to the open year (wrong-year figures shown without an
   error). String max()/min() on unvalidated dates yields odd windows (from=abc sorts after any date).
 - Fix: validate fiscal_year_id (exists) and from/to (date) on every report and ledger action.
 
-### JE-10 (P2) Trial balance silently drops accounts with no resolvable head/group
+### JE-10 (P2) FIXED: Trial balance silently drops accounts with no resolvable head/group
+- FIXED (F08): such accounts are listed under Unclassified on the trial balance and balance sheet, with a warning on both pages. Files: AccountingReportController.php, TrialBalance.vue, BalanceSheet.vue, tests/Feature/Tenant/Reports/TrialBalanceIntegrityTest.php.
 - File: AccountingReportController.php:1098-1101.
 - Wrong: "if (! $head || ! $group) { continue; }" removes the row from the report and from the totals with no
   warning. Because the totals come from the rows, the trial balance can show equal Dr/Cr while the ledger is

@@ -6,7 +6,7 @@ Audited 2026-09-21 by read-only agents. Severities were assigned by each agent w
 |---|---|---|---|
 | sales.md | SAL-01..12 | SAL-01..04 FIXED | SAL-05, SAL-06, SAL-08..11 FIXED; SAL-07 deferred, SAL-12 open |
 | purchases.md | PUR-01..12 | PUR-01..03 FIXED | PUR-04..08, PUR-10..12 FIXED; PUR-09 open |
-| journal-entries.md | JE-01..11 | JE-01..04 FIXED | JE-05..07 FIXED; JE-08..11 open |
+| journal-entries.md | JE-01..11 | JE-01..04 FIXED | JE-05..07, JE-09, JE-10 FIXED; JE-08, JE-11 open |
 | capital-and-services.md | CS-01..11 | CS-01..03 FIXED (CS-05 also); CS-08 (P0) FIXED | CS-04, CS-06, CS-09..11 FIXED; CS-07 open |
 
 "FIXED" means the code was changed and tests were written. It does not mean verified by a test run.
