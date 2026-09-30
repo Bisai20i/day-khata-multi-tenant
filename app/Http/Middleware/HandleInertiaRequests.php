@@ -40,7 +40,11 @@ class HandleInertiaRequests extends Middleware
             ...parent::share($request),
             'auth' => [
                 'platformAdmin' => $request->user('platform'),
-                'user' => $request->user('web'),
+                // With its role: pages decide what to offer from
+                // auth.user.role.slug, and the relation was only ever loaded by
+                // the role middleware, so admins lost their admin-only buttons
+                // and menu items on every route that had no role gate.
+                'user' => $request->user('web')?->loadMissing('role'),
             ],
             'tenant' => fn (): ?array => tenancy()->initialized
                 ? [
