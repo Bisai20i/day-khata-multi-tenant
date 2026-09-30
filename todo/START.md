@@ -148,20 +148,20 @@ isolation. Agent prompt template:
 
 | Task | Title | Phase | Status | Commit(s) |
 |---|---|---|---|---|
-| T01 | Backend money foundation | 1 | done, tests not run | 91c68d3 |
-| T02 | Frontend money foundation | 1 | done, tests not run | 3a317f3 |
-| T03 | Ledger core, numbering, settings | 2 | done, tests not run | 748d195 |
-| T04 | Sales and POS | 2 | done, tests not run | 6c80439 |
-| T05 | Sales returns and receipts | 2 | done, tests not run | 2c013a3 |
-| T06 | Purchases, purchase returns, payments | 2 | done, tests not run | 287124f |
-| T07 | Capital documents and quotations | 2 | done, tests not run | fd2504e |
-| T08 | Inventory and costing | 2 | done, tests not run | 122959e |
-| T09 | Print compliance | 2 | done, tests not run | 10be87b |
-| T10 | Reports, VAT and TDS | 3 | done, tests not run | 790e90a |
-| T11 | Books, fiscal year, fixed assets | 3 | done, tests not run | c4ee057 |
-| T12 | Sales parity features | 4 | pending | |
-| T13 | Purchase and inventory parity features | 4 | pending | |
-| T14 | Accounting parity features | 4 | pending | |
+| T01 | Backend money foundation | 1 | done | 91c68d3 |
+| T02 | Frontend money foundation | 1 | done | 3a317f3 |
+| T03 | Ledger core, numbering, settings | 2 | done | 748d195 |
+| T04 | Sales and POS | 2 | done | 6c80439 |
+| T05 | Sales returns and receipts | 2 | done | 2c013a3 |
+| T06 | Purchases, purchase returns, payments | 2 | done | 287124f |
+| T07 | Capital documents and quotations | 2 | done | fd2504e |
+| T08 | Inventory and costing | 2 | done | 122959e |
+| T09 | Print compliance | 2 | done | 10be87b |
+| T10 | Reports, VAT and TDS | 3 | done | 790e90a |
+| T11 | Books, fiscal year, fixed assets | 3 | done | c4ee057 |
+| T12 | Sales parity features | 4 | done | e6e8b14 |
+| T13 | Purchase and inventory parity features | 4 | done | 2c02181 |
+| T14 | Accounting parity features | 4 | done | 275f98b |
 
 Gate notes / open questions:
 

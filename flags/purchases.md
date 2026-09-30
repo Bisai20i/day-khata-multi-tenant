@@ -93,6 +93,7 @@ C3, C4, C5, C6, C10 rather than line by line.
   validation (PUR-02), inactive item purchase (PUR-04), a bonus-only return (thisPaidPortion = 0 yields a zero-value
   line in PurchaseReturn::prepareLine).
 - Fix: add Pest cases for each.
+- **FIXED** (2026-09-29, F01/F02/F09): tests in PurchaseFlagFixesTest.php and the F-chunk tests under tests/Feature/Tenant/Purchases. Full suite green 2026-09-30.
 
 ### PUR-10 (P2) Cancel reason, date and user are stored but never shown
 - **FIXED** (2026-09-29, F01 + F04): list shows cancel date, user and reason under the Cancelled badge (PurchaseStatusCell.vue); export has Cancelled on/by and Reason columns; the purchase PDF prints them too. Tests: tests/Feature/Tenant/Purchases/PurchaseListCancelInfoTest.php.

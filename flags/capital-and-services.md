@@ -41,6 +41,7 @@ Files: app/Models/CapitalPurchase.php, app/Http/Controllers/Tenant/Purchases/Cap
 ## CS-07 (P2) Missing tests
 - Not covered in tests/Feature/Tenant/Purchases/CapitalPurchaseTest.php: cancelling a purchase that created a FixedAsset (CS-02), cancel in a closed fiscal year, non-admin cancel route returns 403, double cancel through the route, posting into a closed year, bank_account_id of a non-bank account, bill number re-entry after cancel (guard release), cash mode with supplier, purchase without VAT account seeded.
 - No settlement tests (CS-01).
+- **FIXED** (2026-09-29, F03/F04): CapitalPurchasePostingRulesTest.php, CapitalPurchasePrintTest.php, CapitalPurchaseSettlementTest.php. Full suite green 2026-09-30.
 
 ## CS-08 (P0) No view or print of a capital or service purchase, live or cancelled
 - FIXED (2026-09-29, F04): GET capital-purchases/{capitalPurchase}/print with PrintLog copies, lines, VAT, payment, settlements and outstanding; Print and Voucher links on every row. Tests: tests/Feature/Tenant/Purchases/CapitalPurchasePrintTest.php.

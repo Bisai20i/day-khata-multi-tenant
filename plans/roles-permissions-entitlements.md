@@ -184,29 +184,29 @@ does. Owned-file lists are indicative, the coordinator finalizes them per chunk.
 
 ### Phase A: foundation
 
-- [ ] **P01 Catalog.** `config/permissions.php`, `App\Support\Permissions\PermissionCatalog`, derive keys by
+- [x] **P01 Catalog.** `config/permissions.php`, `App\Support\Permissions\PermissionCatalog`, derive keys by
   scanning `route:list` (keep a mapping table route name to permission in the plan appendix for P05-P08).
   Tests: every permission has a module, every module known, `requires` acyclic, no duplicate legacy keys,
   owner-only never inside `always_on`-only leaks.
-- [ ] **P02 Central entitlements storage.** Central migration `enabled_modules` (backfill all modules,
+- [x] **P02 Central entitlements storage.** Central migration `enabled_modules` (backfill all modules,
   idempotent), `Tenant` cast/fillable/custom column, `hasModule()`, `entitledModules()`, factory default.
   Tests: fail-closed null, dependency closure, always-on core.
-- [ ] **P03 Tenant schema.** Tenant migrations: `users.is_owner`, `roles.permissions` JSON, `roles.is_system`;
+- [x] **P03 Tenant schema.** Tenant migrations: `users.is_owner`, `roles.permissions` JSON, `roles.is_system`;
   backfill per section 6 (idempotent, SQLite and MySQL safe, no doctrine/dbal). `Role` and `User` model
   updates (`hasPermission`, `isOwner`, memoized effective set). Tests for the backfill on a seeded legacy-shaped DB.
-- [ ] **P04 Gate.** Provider with `Gate::define` loop and `Gate::before`, tenancy-guarded. Tests: owner
+- [x] **P04 Gate.** Provider with `Gate::define` loop and `Gate::before`, tenancy-guarded. Tests: owner
   bypass, entitlement wins over owner, role grant, owner-only never via role, inactive denied, platform
   gate unaffected, unknown ability denied, query-count guard.
 
 ### Phase B: enforcement (coordinator wires routes; workers adjust controllers/tests)
 
-- [ ] **P05 Sales side.** sales, sales returns, receipts, POS, agents, quotations routes and pages.
-- [ ] **P06 Purchase and accounting side.** purchases, returns, payments, capital purchases, ledger/journal,
+- [x] **P05 Sales side.** sales, sales returns, receipts, POS, agents, quotations routes and pages.
+- [x] **P06 Purchase and accounting side.** purchases, returns, payments, capital purchases, ledger/journal,
   fixed assets, fiscal year archive.
-- [ ] **P07 Masters and inventory.** business/masters, stores, item varieties, stock adjustments,
+- [x] **P07 Masters and inventory.** business/masters, stores, item varieties, stock adjustments,
   transfers, conversions.
-- [ ] **P08 Reports and admin.** every `tenant-reports-*.php`, activity log, backups, notices, users.
-- [ ] **P09 Frontend plumbing and route audit.** Inertia shared `auth.can`/`isOwner`, `usePermissions`,
+- [x] **P08 Reports and admin.** every `tenant-reports-*.php`, activity log, backups, notices, users.
+- [x] **P09 Frontend plumbing and route audit.** Inertia shared `auth.can`/`isOwner`, `usePermissions`,
   `nav-items.js` permission field and `AppLayout` filtering, hide gated buttons on the main pages.
   **Route-audit test:** iterate `Route::getRoutes()`, for every tenant route under `auth:web` require a
   `can:` middleware, or presence in an explicit allowlist in the test (dashboard, profile, logout,
@@ -214,28 +214,28 @@ does. Owned-file lists are indicative, the coordinator finalizes them per chunk.
 
 ### Phase C: management UIs
 
-- [ ] **P10 Central modules UI.** `Central\Tenants\TenantModuleController` (edit/update), route in
+- [x] **P10 Central modules UI.** `Central\Tenants\TenantModuleController` (edit/update), route in
   `central-tenants.php`, "Modules" section on tenant Show, checkboxes with dependency auto-select and
   disabled always-on core, default selection on Create, activity-log entry with before/after.
-- [ ] **P11 Tenant Roles UI (owner-only).** `Tenant\Admin\RoleController` + FormRequests, `Roles.vue`
+- [x] **P11 Tenant Roles UI (owner-only).** `Tenant\Admin\RoleController` + FormRequests, `Roles.vue`
   permission matrix grouped by module, only entitled modules shown, select-all per group, duplicate role,
   in-use delete guard, optimistic-concurrency check.
-- [ ] **P12 Users page.** Role assignment with the escalation guard, owner protection replacing
+- [x] **P12 Users page.** Role assignment with the escalation guard, owner protection replacing
   `guardLastActiveAdmin`, ownership transfer action with confirmation.
-- [ ] **P13 Provisioning.** `TenantDatabaseSeeder` seeds starter role templates (Manager, Cashier) limited
+- [x] **P13 Provisioning.** `TenantDatabaseSeeder` seeds starter role templates (Manager, Cashier) limited
   to entitled modules, `CreateTenantFirstAdmin` sets `is_owner`, welcome mail unchanged. Tests via the
   existing provisioning test path.
 
 ### Phase D: migration and hardening
 
-- [ ] **P14 Existing-tenant verification.** Read-only dry-run command listing the owner the backfill would
+- [x] **P14 Existing-tenant verification.** Read-only dry-run command listing the owner the backfill would
   pick per tenant (review before migrating), plus a test proving Staff parity and owner selection on a
   copy of a real tenant schema. Deployment checklist (section 6) executed and documented in `mem.md`.
-- [ ] **P15 Central owner reassignment.** Platform-admin action on the tenant page to reassign the owner to
+- [x] **P15 Central owner reassignment.** Platform-admin action on the tenant page to reassign the owner to
   another active tenant user (recovery for a departed or locked-out owner). Runs the same transfer action as
   P12, keeps exactly one owner, writes a central activity-log entry. Tests: platform admin only, target must
   be active, exactly one owner afterwards.
-- [ ] **P16 Cleanup.** Remove `role` alias and `EnsureUserHasRole` once no route uses them, drop the old
+- [x] **P16 Cleanup.** Remove `role` alias and `EnsureUserHasRole` once no route uses them, drop the old
   `permissions` / `permission_role` tables (needs your approval), record durable rules with `record-rule`
   (permission naming, "every tenant route needs `can:`", owner-only list), update `mem.md`.
 

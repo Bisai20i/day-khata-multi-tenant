@@ -16,31 +16,31 @@ control is missing. P2: hardening, UX, performance. Flags about the same defect 
 
 | Id | Flags merged | Was | Now | Verified on head | Chunk |
 |---|---|---|---|---|---|
-| G-01 | CS-08 (view/print capital or service bill) | P0 | P0 | open: no show/print route, no `pdf/capital-purchase` view | F04 |
-| G-02 | PUR-11, CS-10 (list totals and export include cancelled bills) | P2 | P1 | open: `PurchaseController::filteredTotals` (:320) and `CapitalPurchaseController` (:41-45) have no status filter | F01 |
-| G-03 | CS-06 (capital VAT rate typed by the client, 0-100) | P2 | P1 | open: `CapitalPurchaseController.php:72` | F03 |
-| G-04 | CS-04 (cash/bank capital bill with a supplier skips the supplier ledger) | P2 | P1 | open: `CapitalPurchase.php:405-410`; regular purchases post the pair (`Purchase::settlementVoucherLines`) | F03 |
-| G-05 | SAL-05 (stock checked against today, not the sale date) | P2 | P1 | open: `Sale.php:616` calls `currentStock($storeId)` with no `$asOf` | F06 |
-| G-06 | SAL-08, JE-05 (cancel fails after the open year's end date) | P2 | P1 | open: `JournalVoucher::reverse()` dates the reversal `static::today()` (:448) | F07 (needs decision D1) |
-| G-07 | SAL-11 (receipts cannot be printed, no C9 stamp) | P2 | P1 | open: `routes/tenant-receipts.php` has no print route; `pdf/sale-receipt` is the thermal sale layout, not a receipt | F05 |
-| G-08 | JE-10 (trial balance silently drops unclassified accounts) | P2 | P1 | open: `Reports/AccountingReportController.php:1150, 1201, 1246` `continue` with no warning | F08 |
-| G-09 | JE-08 (ledger, print, export open to all staff) | P2 | P1 | partly fixed: JV index now paginates; `accounts/{account}/ledger*` still ungated (`routes/tenant-ledger.php:55-57`) | moved to permissions P06 (decision D2) |
-| G-10 | Follow-up: unlinked purchase return form | open item | P1 | open: `Purchases/Returns/Create.vue:563` says reason "(optional)" but the request requires it; `paymentModeOptions` (:300) has no `credit` | F02 |
-| G-11 | PUR-10, CS-09 (cancel reason, date, user never shown on list, print, export) | P2 | P2 | open: no `canceller`/`cancel_reason` in either controller, page, PDF or export (the Cancelled Documents report does show them) | F01, F04 |
-| G-12 | PUR-12, CS-11 (Cancel button shown to non-admins, 403 not shown) | P2 | P2 | open: `Purchases/Index.vue:359` no gate, `PurchaseController` passes no `canCancel`; `CapitalPurchases/Index.vue:239` ignores `canCancel` | F01 |
-| G-13 | SAL-09, PUR-04 (inactive items and stores accepted) | P2 | P2 | open: `SaleController.php:411,423`, `PurchaseController.php:128,156`, `PurchaseReturnController.php:107` (unlinked request already fixed) | F06 |
-| G-14 | SAL-10, PUR-08 (allocation dated before the bill; stray bank id on cash payment) | P2 | P2 | open: `Receipt::prepareAllocations`, `Payment.php:152` | F05 |
-| G-15 | SAL-06 (commission stored with no agent) | P2 | P2 | open: `Sale::validatedCommission` (:635) ignores `agent_id` | F06 |
-| G-16 | PUR-06 (expected_total optional on purchases; `empty()` on unlinked return) | P2 | P2 | open: `PurchaseController.php:151` nullable; `PurchaseReturn.php:485` uses `empty()` | F02 |
-| G-17 | PUR-07 (payments index unbounded and N+1) | P2 | P2 | open: `PaymentController.php:28, 94-108` | F09 |
-| G-18 | PUR-05 (no stored purchase/payment number) | P2 | P2 | open: print derives `{prefix}-{voucher_number}`, falls back to `{prefix}-{id}` (`PurchaseController.php:267-268`) | F09 |
-| G-19 | JE-06 (reverse() accepts Reversal, ClosingEntry, RollForwardAdjustment) | P2 | P2 | open | F07 |
-| G-20 | JE-07 (no max amount, no narration cap in the model, manual journal lacks `distinct`) | P2 | P2 | open: `JournalVoucherController.php:153` no `distinct` (cash/bank at :205 has it) | F07 |
-| G-21 | JE-09 (ledger/report inputs not validated) | P2 | P2 | open: `AccountController.php:175, 179, 229` | F08 |
+| G-01 | CS-08 (view/print capital or service bill) | P0 | P0 | FIXED (F04) | F04 |
+| G-02 | PUR-11, CS-10 (list totals and export include cancelled bills) | P2 | P1 | FIXED (F01) | F01 |
+| G-03 | CS-06 (capital VAT rate typed by the client, 0-100) | P2 | P1 | FIXED (F03) | F03 |
+| G-04 | CS-04 (cash/bank capital bill with a supplier skips the supplier ledger) | P2 | P1 | FIXED (F03) | F03 |
+| G-05 | SAL-05 (stock checked against today, not the sale date) | P2 | P1 | FIXED (F06) | F06 |
+| G-06 | SAL-08, JE-05 (cancel fails after the open year's end date) | P2 | P1 | FIXED (F07) | F07 (needs decision D1) |
+| G-07 | SAL-11 (receipts cannot be printed, no C9 stamp) | P2 | P1 | FIXED (F05) | F05 |
+| G-08 | JE-10 (trial balance silently drops unclassified accounts) | P2 | P1 | FIXED (F08) | F08 |
+| G-09 | JE-08 (ledger, print, export open to all staff) | P2 | P1 | FIXED (permissions P06): ledger and journal routes gated per key | moved to permissions P06 (decision D2) |
+| G-10 | Follow-up: unlinked purchase return form | open item | P1 | FIXED (F02) | F02 |
+| G-11 | PUR-10, CS-09 (cancel reason, date, user never shown on list, print, export) | P2 | P2 | FIXED (F01, F04) | F01, F04 |
+| G-12 | PUR-12, CS-11 (Cancel button shown to non-admins, 403 not shown) | P2 | P2 | FIXED (F01) | F01 |
+| G-13 | SAL-09, PUR-04 (inactive items and stores accepted) | P2 | P2 | FIXED (F06) | F06 |
+| G-14 | SAL-10, PUR-08 (allocation dated before the bill; stray bank id on cash payment) | P2 | P2 | FIXED (F05) | F05 |
+| G-15 | SAL-06 (commission stored with no agent) | P2 | P2 | FIXED (F06) | F06 |
+| G-16 | PUR-06 (expected_total optional on purchases; `empty()` on unlinked return) | P2 | P2 | FIXED (F02) | F02 |
+| G-17 | PUR-07 (payments index unbounded and N+1) | P2 | P2 | FIXED (F09) | F09 |
+| G-18 | PUR-05 (no stored purchase/payment number) | P2 | P2 | FIXED (F09) | F09 |
+| G-19 | JE-06 (reverse() accepts Reversal, ClosingEntry, RollForwardAdjustment) | P2 | P2 | FIXED (F07) | F07 |
+| G-20 | JE-07 (no max amount, no narration cap in the model, manual journal lacks `distinct`) | P2 | P2 | FIXED (F07) | F07 |
+| G-21 | JE-09 (ledger/report inputs not validated) | P2 | P2 | FIXED (F08) | F08 |
 | G-22 | New: nine models rewrite line narration with a query-builder `lines()->update()` after posting | new | P2 | FIXED (F10): lines inserted with final narration via a post() resolver; VoucherLinesWrittenOnceTest. Was: Sale:375, Receipt:189, SalesReturn:382, Purchase:502, PurchaseReturn:350/374/584, Payment:171, CapitalPurchase:475, CapitalPurchaseSettlement:136. Works only because bulk updates skip the JE-01 model guard | F10 |
-| G-23 | Follow-up: `CapitalPurchaseSettlement` not on `ActivityLogObserver` | open item | P2 | open: `AppServiceProvider.php:47-58` | F03 |
-| G-24 | Follow-up: SAL-04 decision not in CONTRACTS C5 | open item | doc | open: C5 lists only cancel routes (`todo/CONTRACTS.md:171`) | F00 |
-| G-25 | Follow-up: protected system account list inferred, not specified | open item | decision | `Account::SYSTEM_CODES` | D3 |
+| G-23 | Follow-up: `CapitalPurchaseSettlement` not on `ActivityLogObserver` | open item | P2 | FIXED (F03) | F03 |
+| G-24 | Follow-up: SAL-04 decision not in CONTRACTS C5 | open item | doc | FIXED (F00) | F00 |
+| G-25 | Follow-up: protected system account list inferred, not specified | open item | decision | decided: D3 accepted the `Account::SYSTEM_CODES` list | D3 |
 | - | SAL-07 (commission not reversed by returns) | P2 | deferred | already listed in `todo/DEFERRED.md` (commission policy) | none |
 | - | SAL-12, PUR-09, CS-07, JE-11 (test gaps) | P2 | folded | each chunk below writes the tests for its own flags | all |
 
@@ -214,7 +214,7 @@ Owned: `JournalVoucher.php` (after F07) and the nine callers listed in G-22, tes
 
 | Chunk | Title | Flags | Status |
 |---|---|---|---|
-| Gate 0 | Run 2026-09-21 fixes | all FIXED | pending |
+| Gate 0 | Run 2026-09-21 fixes | all FIXED | done (suite green 2026-09-30) |
 | F00 | Record decisions | G-24, D1-D4 | done |
 | F01 | Purchase lists | G-02, G-11, G-12 | done |
 | F02 | Unlinked purchase return form | G-10, G-16 | done |

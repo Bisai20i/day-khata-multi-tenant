@@ -90,6 +90,7 @@ Legacy day_khata has no comparable model layer (MySQL triggers), so parity notes
   (unbounded response, grows with the year).
 - Fix: put ledger, print and export behind role:admin (or a permission), or restrict to party accounts.
   Paginate index().
+- **FIXED** (2026-09-30, permissions P06): journal voucher routes gated by `can:journal_vouchers.*`; account ledger view/print/export authorized per key in AccountController::authorizeLedgerAccess(); JV index paginated (F09). RouteAuthorizationAuditTest guards every route.
 
 ### JE-09 (P2) FIXED: Ledger and report inputs are not validated
 - FIXED (F08): fiscal_year_id (exists), from and to (date, to >= from) validated on every accounting report and account ledger action; an unknown year is a validation error. Files: AccountingReportController.php, AccountController.php, tests/Feature/Tenant/Reports/TrialBalanceIntegrityTest.php.
@@ -116,6 +117,7 @@ Legacy day_khata has no comparable model layer (MySQL triggers), so parity notes
 - No test for line immutability (JE-01), reversal after the year end date (JE-05), or a trial balance with an
   unclassified account (JE-10).
 - No test for oversize amount or narration through JournalVoucher::post() directly (JE-07).
+- **FIXED** (2026-09-29, F07/F08): JournalCoreHardeningTest.php, JournalVoucherListTest.php, LedgerIntegrityTest.php. Full suite green 2026-09-30.
 
 ## Checked and fine
 - Balance enforcement: validateLines() uses Money (exact 2dp), rejects negatives, requires exactly one

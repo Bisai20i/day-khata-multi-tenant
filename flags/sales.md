@@ -103,6 +103,7 @@ postRefund() and Receipt::post() balances by construction, and JournalVoucher::v
   `bank_account_id`, return against a sale with a negative line, commission without an agent, backdated stock-out,
   non-admin posting an unlinked return or approving their own request. Already covered: role 403 on cancel and
   closed-year cancel (SaleBillingTest.php:416,778, ReceiptTest.php:534, SalesReturnTest.php:549).
+- **FIXED** (2026-09-29, F05/F06 and 2026-09-30 permissions): each risk path now has a test: SalesP1FixesTest.php, SalePostingGuardsTest.php, SaleCommissionTest.php, SalesReturnUnlinkedAndSplitRefundTest.php, SalesSidePermissionsTest.php. Full suite green 2026-09-30.
 
 ## Checked and fine
 - Sale voucher balances in every mode (credit, cash, bank, partial, TDS, commission, PAN, per-item revenue accounts,

@@ -1,19 +1,21 @@
 # Flags index (audit of sales, purchases, journal entries, capital and services)
 
-Audited 2026-09-21 by read-only agents. Severities were assigned by each agent with no shared rubric, so they are unchecked. Nothing here has been run, tested or committed.
+Audited 2026-09-21 by read-only agents. Severities were assigned by each agent with no shared rubric, so they are unchecked. All fixes are committed; the full suite (1,540 tests) passed on 2026-09-30.
 
 | File | Flags | P0/P1 status | P2 status |
 |---|---|---|---|
-| sales.md | SAL-01..12 | SAL-01..04 FIXED | SAL-05, SAL-06, SAL-08..11 FIXED; SAL-07 deferred, SAL-12 open |
-| purchases.md | PUR-01..12 | PUR-01..03 FIXED | PUR-04..08, PUR-10..12 FIXED; PUR-09 open |
-| journal-entries.md | JE-01..11 | JE-01..04 FIXED | JE-05..07, JE-09, JE-10 FIXED; JE-08, JE-11 open |
-| capital-and-services.md | CS-01..11 | CS-01..03 FIXED (CS-05 also); CS-08 (P0) FIXED | CS-04, CS-06, CS-09..11 FIXED; CS-07 open |
+| sales.md | SAL-01..12 | SAL-01..04 FIXED | SAL-05, SAL-06, SAL-08..11 FIXED; SAL-12 FIXED; SAL-07 deferred |
+| purchases.md | PUR-01..12 | PUR-01..03 FIXED | PUR-04..08, PUR-09..12 FIXED |
+| journal-entries.md | JE-01..11 | JE-01..04 FIXED | JE-05..11 FIXED |
+| capital-and-services.md | CS-01..11 | CS-01..03 FIXED (CS-05 also); CS-08 (P0) FIXED | CS-04, CS-06, CS-07, CS-09..11 FIXED |
 
-"FIXED" means the code was changed and tests were written. It does not mean verified by a test run.
+"FIXED" means the code was changed and tests were written. Verified by the full test run on 2026-09-30.
 
 PUR-10..12 and CS-08..11 came from checking the legacy cancelled-purchase fixes (2026-09-28) against this repo, using the single rubric below.
 
-## Start of next session
+## Start of next session (done 2026-09-30)
+
+All four steps below are complete: migrations ran, the suite is green, the cross-module review ran through F07/F10, and D3 accepted the list.
 
 1. Run the new migrations: FK restrict on journal lines, purchase fiscal_year_id scope (check how existing rows are backfilled), capital purchase settlements.
 2. Run the new tests: LedgerIntegrityTest, SalesP1FixesTest, PurchaseFlagFixesTest, CapitalPurchaseSettlementTest. Then the existing suites. SalesReturnWorkflowTest was edited (request as owner, approve/reject as a separate admin).

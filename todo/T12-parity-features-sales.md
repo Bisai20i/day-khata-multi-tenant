@@ -42,14 +42,14 @@ your own idempotent data migration.)
   work, and was verified line by line rather than redone. This chunk added the two UI fields, the bill
   column and the tests. A bonus-ONLY return (paid quantity zero) stays out of scope, as
   `SalesReturn::prepare()` documents.
-- [ ] 6. Returns without a bill (sales): an "unlinked" return mode for pre-cutover sales and walk-ins, valued
+- [x] 6. Returns without a bill (sales): an "unlinked" return mode for pre-cutover sales and walk-ins, valued
   at an entered rate, VAT at the company rate, cash/bank split refund (exact split), credit note numbering as
   usual; still posted-only for money effects. Linked returns also get the cash + bank split refund option.
   IN PROGRESS: model side (`SalesReturn::postUnlinked()`, `postRefund()` split via `assertExactSplit()`,
   migrations `120200`/`120300`) was already in the tree and verified by reading. This chunk added the
   missing `Arr`/`Rule` imports `storeUnlinked()` needed (it would have fatalled), the `/sales-returns/
   unlinked` route, split-refund + `bonus_quantity` validation on the linked path, unlinked-safe list
-  filtering/eager loads/PDF, and the Returns form UI. Tests still to write.
+  filtering/eager loads/PDF, and the Returns form UI. Tests: SalesReturnUnlinkedAndSplitRefundTest.php.
 - [x] 7. Sales list: Excel export, totals row for the filtered set (SQL sums), sorting, search by invoice
   number; "Save & Print N copies" option (prints N PDFs, each recorded in the print log).
 - [x] 8. Note templates: saved notes selectable on Sales/Create (small `sale_note_templates` table, admin CRUD
