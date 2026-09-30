@@ -11,6 +11,7 @@ use App\Models\Store;
 use App\Models\Supplier;
 use App\Models\Tenant;
 use App\Models\User;
+use Carbon\Carbon;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
 
@@ -25,6 +26,7 @@ uses(RefreshDatabase::class);
  */
 afterEach(function () {
     tenancy()->end();
+    Carbon::setTestNow();
 });
 
 test('dashboard renders with real kpis, recent customers, and account head breakdown', function () {
@@ -84,7 +86,11 @@ test('dashboard renders with real kpis, recent customers, and account head break
     $tenant->delete();
 });
 
-test('dashboard reports the financial snapshot: cash in hand, stock value, debtors, creditors, purchases, tax summary, trends, and top performers', function () {
+test('dashboard reports the financial snapshot: cash in hand, stock value, debtors, creditors, purchases, tax summary, trends, and top performers', function (?string $frozenAt) {
+    if ($frozenAt !== null) {
+        Carbon::setTestNow(Carbon::parse($frozenAt));
+    }
+
     $domain = 'dashboard-financials.tenant-test';
     $tenant = Tenant::create(['company_name' => 'Acme Co']);
     $tenant->domains()->create(['domain' => $domain]);
@@ -186,7 +192,12 @@ test('dashboard reports the financial snapshot: cash in hand, stock value, debto
     );
 
     $tenant->delete();
-});
+})->with([
+    'mid-month' => [null],
+    // "This month" must include sales dated the 1st: comparing the date
+    // column to a start-of-month datetime string dropped them on SQLite.
+    'first of the month' => ['2026-10-01 00:30:00'],
+]);
 
 test('dashboard reports today\'s sales activity and lists recent sales, excluding cancelled ones', function () {
     $domain = 'dashboard-sales.tenant-test';
