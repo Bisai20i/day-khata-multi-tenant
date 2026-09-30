@@ -4,12 +4,14 @@ namespace App\Http\Controllers\Central\Tenants;
 
 use App\Enums\TenantStatus;
 use App\Http\Controllers\Controller;
+use App\Http\Requests\Central\UpdateTenantModulesRequest;
 use App\Jobs\CreateTenantFirstAdmin;
 use App\Mail\TenantSuspensionMail;
 use App\Models\PlatformAdminActivityLog;
 use App\Models\PlatformSetting;
 use App\Models\Tenant;
 use App\Models\User;
+use App\Support\Permissions\PermissionCatalog;
 use App\Support\PlatformMailer;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
@@ -80,11 +82,37 @@ class TenantController extends Controller
     }
 
     /**
-     * Show the form for creating a new tenant.
+     * Show the form for creating a new tenant. The module checkboxes start
+     * from the same default set a tenant created without a selection gets.
      */
     public function create(): Response
     {
-        return Inertia::render('Central/Tenants/Create');
+        return Inertia::render('Central/Tenants/Create', [
+            'moduleCatalog' => self::moduleCatalog(),
+            'defaultModules' => UpdateTenantModulesRequest::canonicalModules(config('permissions.default_modules', [])),
+        ]);
+    }
+
+    /**
+     * The module list the central checkbox UI renders, in config order. Built
+     * from the catalog on every call (config only, no queries) so the UI can
+     * never offer a module the server would reject.
+     *
+     * @return list<array{key: string, label: string, always_on: bool, requires: list<string>}>
+     */
+    private static function moduleCatalog(): array
+    {
+        $catalog = [];
+        foreach (PermissionCatalog::modules() as $key => $module) {
+            $catalog[] = [
+                'key' => $key,
+                'label' => $module['label'],
+                'always_on' => $module['always_on'],
+                'requires' => $module['requires'],
+            ];
+        }
+
+        return $catalog;
     }
 
     /**
@@ -112,7 +140,17 @@ class TenantController extends Controller
             'admin_name' => ['required', 'string', 'max:255'],
             'admin_email' => ['required', 'string', 'email', 'max:255'],
             'admin_password' => ['required', 'string', 'min:8'],
+            ...UpdateTenantModulesRequest::moduleRules(required: false),
         ]);
+
+        // Resolved and stored in the same canonical form as later edits
+        // (UpdateTenantModulesRequest::canonicalModules()), and set before
+        // save() so the TenantCreated provisioning pipeline already sees the
+        // final entitlements. Absent means the default set, the same thing
+        // the Tenant creating hook would apply, but made explicit here.
+        $enabledModules = UpdateTenantModulesRequest::canonicalModules(
+            $validated['enabled_modules'] ?? config('permissions.default_modules', []),
+        );
 
         $connection = DB::connection(config('tenancy.database.central_connection'));
         $connection->beginTransaction();
@@ -130,6 +168,7 @@ class TenantController extends Controller
                 'status' => TenantStatus::Provisioning,
                 'contact_email' => $validated['contact_email'] ?? null,
                 'trial_ends_at' => now()->addDays(PlatformSetting::current()->default_trial_days),
+                'enabled_modules' => $enabledModules,
             ]);
 
             // Not a real column (see Tenant::getCustomColumns()) - swept into
@@ -174,6 +213,7 @@ class TenantController extends Controller
         PlatformAdminActivityLog::record('tenant.create', $tenant, [
             'company_name' => $tenant->company_name,
             'subdomain' => $validated['subdomain'],
+            'enabled_modules' => $enabledModules,
         ]);
 
         return redirect()
@@ -226,7 +266,12 @@ class TenantController extends Controller
                 // error banner/retry flow, and a database not existing yet
                 // is completely expected mid-pipeline, not a fault.
                 'database_missing' => $tenant->status !== TenantStatus::Provisioning && ! $tenant->databaseExists(),
+                // What the tenant can actually use (always_on and required
+                // modules included), so the checkboxes show the real state
+                // even for a legacy row stored in non-canonical form.
+                'enabled_modules' => $tenant->entitledModules(),
             ],
+            'moduleCatalog' => self::moduleCatalog(),
         ]);
     }
 

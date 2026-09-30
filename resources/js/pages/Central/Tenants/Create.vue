@@ -1,4 +1,5 @@
 <script setup>
+import { computed } from 'vue';
 import { useForm, Link } from '@inertiajs/vue3';
 import { Plus } from '@lucide/vue';
 import AppLayout from '@/layouts/AppLayout.vue';
@@ -7,9 +8,15 @@ import Card from '@/components/ui/Card.vue';
 import Input from '@/components/ui/Input.vue';
 import Button from '@/components/ui/Button.vue';
 import PageHeader from '@/components/ui/PageHeader.vue';
+import ModuleSelector from './ModuleSelector.vue';
 
 defineOptions({ layout: AppLayout });
 useLayoutChrome('New Tenant');
+
+const props = defineProps({
+    moduleCatalog: { type: Array, default: () => [] },
+    defaultModules: { type: Array, default: () => [] },
+});
 
 const form = useForm({
     company_name: '',
@@ -18,7 +25,14 @@ const form = useForm({
     admin_name: '',
     admin_email: '',
     admin_password: '',
+    // Always sent explicitly, so the server never falls back to its default.
+    enabled_modules: [...props.defaultModules],
 });
+
+// Per-item errors (enabled_modules.2) are folded into one line under the list.
+const modulesError = computed(
+    () => form.errors.enabled_modules ?? Object.entries(form.errors).find(([key]) => key.startsWith('enabled_modules.'))?.[1] ?? '',
+);
 
 function submit() {
     form.post('/tenants');
@@ -88,6 +102,11 @@ function submit() {
                         <p v-else id="admin_password-help" class="mt-1 text-xs text-text-muted">Use a strong password. Share it with the admin securely; they can change it after signing in.</p>
                     </div>
                 </div>
+            </Card>
+
+            <Card variant="panel" title="Modules">
+                <p class="mb-3 text-sm text-text-muted">Features this company may use. Its owner can only give staff access to ticked modules. You can change this later.</p>
+                <ModuleSelector v-model="form.enabled_modules" :catalog="moduleCatalog" id-prefix="create-module" :error="modulesError" />
             </Card>
 
             <div class="flex gap-2">

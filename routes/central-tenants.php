@@ -2,6 +2,7 @@
 
 use App\Http\Controllers\Central\Tenants\TenantController;
 use App\Http\Controllers\Central\Tenants\TenantDomainController;
+use App\Http\Controllers\Central\Tenants\TenantModuleController;
 use Illuminate\Support\Facades\Route;
 
 /*
@@ -31,6 +32,10 @@ Route::middleware('auth:platform')->prefix('tenants')->name('central.tenants.')-
 
     Route::post('/{tenant}/domains', [TenantDomainController::class, 'store'])->name('domains.store');
     Route::delete('/{tenant}/domains/{domain}', [TenantDomainController::class, 'destroy'])->name('domains.destroy');
+
+    // Module entitlements: any platform admin, like the plain update() above
+    // (routine account support), not owner-only like trial or deletion.
+    Route::put('/{tenant}/modules', [TenantModuleController::class, 'update'])->name('modules.update');
 
     // Owner-only: a stuck-provisioning tenant being forced Active without its
     // database/admin user actually existing is a real footgun, not routine

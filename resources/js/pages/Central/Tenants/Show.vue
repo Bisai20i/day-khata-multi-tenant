@@ -1,5 +1,5 @@
 <script setup>
-import { computed, ref, onMounted } from 'vue';
+import { computed, ref, watch } from 'vue';
 import { Link, router, useForm, usePage } from '@inertiajs/vue3';
 import {
     AlertTriangle,
@@ -27,6 +27,7 @@ import Modal from '@/components/ui/Modal.vue';
 import PageHeader from '@/components/ui/PageHeader.vue';
 import { useToast } from '@/composables/useToast';
 import { useConfirm } from '@/composables/useConfirm';
+import ModuleSelector from './ModuleSelector.vue';
 
 defineOptions({ layout: AppLayout });
 
@@ -34,6 +35,10 @@ const props = defineProps({
     tenant: {
         type: Object,
         required: true,
+    },
+    moduleCatalog: {
+        type: Array,
+        default: () => [],
     },
 });
 
@@ -43,11 +48,17 @@ const { confirm } = useConfirm();
 const isOwner = computed(() => page.props.auth?.platformAdmin?.role === 'owner');
 useLayoutChrome(() => props.tenant.company_name);
 
-onMounted(() => {
-    if (page.props.flash?.status) {
-        toast({ message: page.props.flash.status, variant: 'success' });
-    }
-});
+// Actions here redirect back to this same page, and Inertia patches the
+// mounted instance rather than remounting it, so the flash prop is watched
+// (immediate for the first load) instead of read once in onMounted: that way
+// every save, including the modules save, shows its toast.
+watch(
+    () => page.props.flash?.status,
+    (status) => {
+        if (status) toast({ message: status, variant: 'success' });
+    },
+    { immediate: true },
+);
 
 const showDeleteModal = ref(false);
 const deleteConfirmName = ref('');
@@ -177,6 +188,27 @@ function updateTrial() {
     trialForm.put(`/tenants/${props.tenant.id}/trial`);
 }
 
+const modulesForm = useForm({ enabled_modules: [...(props.tenant.enabled_modules ?? [])] });
+
+// Per-item errors (enabled_modules.2) are folded into one line under the list.
+const modulesError = computed(
+    () =>
+        modulesForm.errors.enabled_modules ??
+        Object.entries(modulesForm.errors).find(([key]) => key.startsWith('enabled_modules.'))?.[1] ??
+        '',
+);
+
+function updateModules() {
+    modulesForm.put(`/tenants/${props.tenant.id}/modules`, {
+        preserveScroll: true,
+        // Re-sync from the server's resolved list, which is the stored truth.
+        onSuccess: () => {
+            modulesForm.defaults({ enabled_modules: [...(props.tenant.enabled_modules ?? [])] });
+            modulesForm.reset();
+        },
+    });
+}
+
 const domainForm = useForm({ domain: '' });
 
 function addDomain() {
@@ -290,6 +322,22 @@ function removeDomain(domain) {
                             <dd class="text-text-strong">{{ tenant.created_at || 'Not set' }}</dd>
                         </div>
                     </dl>
+                </Card>
+
+                <Card variant="panel" title="Modules">
+                    <p class="mb-3 text-sm text-text-muted">
+                        Features this tenant may use. Turning a module off hides its pages and blocks its URLs for
+                        everyone, the owner included. Staff role grants are kept and come back when it is turned on again.
+                    </p>
+                    <form class="flex flex-col gap-3" @submit.prevent="updateModules">
+                        <ModuleSelector v-model="modulesForm.enabled_modules" :catalog="moduleCatalog" id-prefix="show-module" :error="modulesError" />
+                        <div>
+                            <Button type="submit" variant="secondary" tone="blue" :loading="modulesForm.processing" :disabled="!modulesForm.isDirty">
+                                <Check class="size-4" />
+                                Save modules
+                            </Button>
+                        </div>
+                    </form>
                 </Card>
 
                 <Card variant="panel" title="Support and account actions">
