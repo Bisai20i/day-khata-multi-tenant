@@ -71,7 +71,7 @@ class StockConversion extends Model
     {
         return [
             'type' => StockConversionType::class,
-            'date' => 'date',
+            'date' => 'date:Y-m-d',
             'total_value' => Decimal::class.':2',
             'cancelled_at' => 'datetime',
         ];

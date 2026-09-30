@@ -33,7 +33,7 @@ class CapitalPurchaseSettlement extends Model
     protected function casts(): array
     {
         return [
-            'date' => 'date',
+            'date' => 'date:Y-m-d',
             'cancelled_at' => 'datetime',
             'amount' => Decimal::class.':2',
         ];

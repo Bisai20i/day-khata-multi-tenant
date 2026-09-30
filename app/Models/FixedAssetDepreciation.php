@@ -27,7 +27,7 @@ class FixedAssetDepreciation extends Model
     protected function casts(): array
     {
         return [
-            'posted_date' => 'date',
+            'posted_date' => 'date:Y-m-d',
             'opening_wdv' => Decimal::class.':2',
             'depreciation_amount' => Decimal::class.':2',
             'closing_wdv' => Decimal::class.':2',

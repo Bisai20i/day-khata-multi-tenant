@@ -49,7 +49,7 @@ class Quotation extends Model
     protected function casts(): array
     {
         return [
-            'date' => 'date',
+            'date' => 'date:Y-m-d',
             'discount' => Decimal::class.':2',
             'vat_rate' => Decimal::class.':2',
             'taxable_amount' => Decimal::class.':2',

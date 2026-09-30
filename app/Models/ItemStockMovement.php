@@ -36,7 +36,7 @@ class ItemStockMovement extends Model
             'quantity' => Decimal::class.':4',
             'unit_cost_rate' => Decimal::class.':4',
             'value' => Decimal::class.':2',
-            'date' => 'date',
+            'date' => 'date:Y-m-d',
             'cancelled' => 'boolean',
         ];
     }

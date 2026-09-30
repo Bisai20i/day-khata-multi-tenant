@@ -60,7 +60,7 @@ class StockAdjustment extends Model
     protected function casts(): array
     {
         return [
-            'date' => 'date',
+            'date' => 'date:Y-m-d',
             'total_value' => Decimal::class.':2',
             'is_opening_import' => 'boolean',
             'cancelled_at' => 'datetime',

@@ -67,7 +67,9 @@ test('the invoice number search narrows the sales list to a partial, case-insens
 
     loginSaleListExportTestUser($domain);
 
-    $this->get("http://{$domain}/sales?".http_build_query(['search' => strtolower(substr($invoiceNumber, 0, 3))]))
+    // Both invoices share the "SL-" prefix, so search on the lower-cased
+    // number itself: still a case-insensitive match, and one only it has.
+    $this->get("http://{$domain}/sales?".http_build_query(['search' => strtolower($invoiceNumber)]))
         ->assertOk()
         ->assertInertia(fn ($page) => $page
             ->where('sales.total', 1)

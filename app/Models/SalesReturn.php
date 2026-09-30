@@ -109,7 +109,7 @@ class SalesReturn extends Model
     protected function casts(): array
     {
         return [
-            'date' => 'date',
+            'date' => 'date:Y-m-d',
             'is_unlinked' => 'boolean',
             'taxable_amount' => Decimal::class.':2',
             'nontaxable_amount' => Decimal::class.':2',

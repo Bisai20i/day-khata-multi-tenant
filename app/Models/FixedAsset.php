@@ -77,13 +77,13 @@ class FixedAsset extends Model
     protected function casts(): array
     {
         return [
-            'purchase_date' => 'date',
+            'purchase_date' => 'date:Y-m-d',
             'cost' => Decimal::class.':2',
             'vat_amount' => Decimal::class.':2',
             'salvage_value' => Decimal::class.':2',
             'depreciation_rate' => Decimal::class.':2',
             'accumulated_depreciation' => Decimal::class.':2',
-            'disposal_date' => 'date',
+            'disposal_date' => 'date:Y-m-d',
             'disposal_amount' => Decimal::class.':2',
         ];
     }

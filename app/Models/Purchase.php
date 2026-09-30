@@ -57,7 +57,7 @@ class Purchase extends Model
     protected function casts(): array
     {
         return [
-            'date' => 'date',
+            'date' => 'date:Y-m-d',
             'cancelled_at' => 'datetime',
             'discount' => Decimal::class.':2',
             'taxable_amount' => Decimal::class.':2',

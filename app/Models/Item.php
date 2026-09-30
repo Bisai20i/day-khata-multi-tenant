@@ -47,7 +47,7 @@ class Item extends Model
     {
         return [
             'min_stock' => Decimal::class.':2',
-            'expiry_date' => 'date',
+            'expiry_date' => 'date:Y-m-d',
             'purchase_rate' => Decimal::class.':4',
             'sale_rate' => Decimal::class.':4',
             // Base-unit MRP, alongside the per-alternate-unit item_units.mrp

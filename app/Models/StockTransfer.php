@@ -48,7 +48,7 @@ class StockTransfer extends Model
     protected function casts(): array
     {
         return [
-            'date' => 'date',
+            'date' => 'date:Y-m-d',
             'total_value' => Decimal::class.':2',
             'cancelled_at' => 'datetime',
         ];

@@ -47,7 +47,7 @@ class JournalVoucher extends Model
     {
         return [
             'voucher_type' => VoucherType::class,
-            'date' => 'date',
+            'date' => 'date:Y-m-d',
         ];
     }
 
