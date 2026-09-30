@@ -28,6 +28,8 @@ import Card from '@/components/ui/Card.vue';
 import Button from '@/components/ui/Button.vue';
 import PageHeader from '@/components/ui/PageHeader.vue';
 import { formatMoney, formatQuantity, compareMoney, parseMoney } from '@/lib/money.js';
+import { allowedActions, holdsAll } from '@/lib/quickActions';
+import { usePermissions } from '@/composables/usePermissions';
 
 defineOptions({ layout: AppLayout });
 
@@ -36,61 +38,52 @@ const props = defineProps({
         type: Array,
         default: () => [],
     },
+    // Every widget prop below except notices/fiscalYear is sent ONLY when the
+    // user holds its key (see DashboardController::index), so a missing prop
+    // means "not allowed", never "zero". kpis carries only the allowed keys.
     kpis: {
         type: Object,
-        default: () => ({
-            customers: { total: 0, thisWeek: 0 },
-            suppliers: { total: 0, thisWeek: 0 },
-            items: { total: 0, thisWeek: 0 },
-            accounts: { total: 0 },
-            sales: { today: { count: 0, total: '0.00' }, thisWeek: { count: 0, total: '0.00' } },
-            purchases: { today: { count: 0, total: '0.00' }, thisWeek: { count: 0, total: '0.00' } },
-            cashInHand: '0.00',
-            stockValue: '0.00',
-            debtors: '0.00',
-            creditors: '0.00',
-            tax: { thisWeek: { taxable: '0.00', nontaxable: '0.00', vat: '0.00' } },
-        }),
+        default: () => ({}),
     },
     lowStockItems: {
-        type: Array,
-        default: () => [],
+        type: [Array, null],
+        default: null,
     },
     fiscalYear: {
         type: [Object, null],
         default: null,
     },
     recentCustomers: {
-        type: Array,
-        default: () => [],
+        type: [Array, null],
+        default: null,
     },
     recentSales: {
-        type: Array,
-        default: () => [],
+        type: [Array, null],
+        default: null,
     },
     accountHeadBreakdown: {
-        type: Array,
-        default: () => [],
+        type: [Array, null],
+        default: null,
     },
     expiringItemsCount: {
         type: Number,
         default: 0,
     },
     salesTrend: {
-        type: Array,
-        default: () => [],
+        type: [Array, null],
+        default: null,
     },
     purchaseTrend: {
-        type: Array,
-        default: () => [],
+        type: [Array, null],
+        default: null,
     },
     topItemsThisMonth: {
-        type: Array,
-        default: () => [],
+        type: [Array, null],
+        default: null,
     },
     topCustomersThisMonth: {
-        type: Array,
-        default: () => [],
+        type: [Array, null],
+        default: null,
     },
 });
 
@@ -107,23 +100,35 @@ function dismissNotice(id) {
 
 useLayoutChrome('Dashboard');
 
-const kpiCards = computed(() => [
-    { key: 'customers', label: 'Customers', hint: 'People you sell to', href: '/customers', icon: Users, total: props.kpis.customers.total, thisWeek: props.kpis.customers.thisWeek },
-    { key: 'suppliers', label: 'Suppliers', hint: 'People you buy from', href: '/suppliers', icon: Truck, total: props.kpis.suppliers.total, thisWeek: props.kpis.suppliers.thisWeek },
-    { key: 'items', label: 'Items', hint: 'Products in your catalogue', href: '/items', icon: Package, total: props.kpis.items.total, thisWeek: props.kpis.items.thisWeek },
-    { key: 'accounts', label: 'Ledger Accounts', hint: 'Accounts used for bookkeeping', href: '/accounts', icon: BookOpen, total: props.kpis.accounts.total, thisWeek: null },
-]);
+const kpiCards = computed(() =>
+    [
+        { key: 'customers', label: 'Customers', hint: 'People you sell to', href: '/customers', icon: Users },
+        { key: 'suppliers', label: 'Suppliers', hint: 'People you buy from', href: '/suppliers', icon: Truck },
+        { key: 'items', label: 'Items', hint: 'Products in your catalogue', href: '/items', icon: Package },
+        { key: 'accounts', label: 'Ledger Accounts', hint: 'Accounts used for bookkeeping', href: '/accounts', icon: BookOpen },
+    ]
+        .filter((card) => props.kpis[card.key])
+        .map((card) => ({ ...card, total: props.kpis[card.key].total, thisWeek: props.kpis[card.key].thisWeek ?? null })),
+);
 
 // Point-in-time balance sheet snapshot - cash, stock, and the two ledger
 // balances a shopkeeper checks daily (who owes us, who do we owe).
-const financialCards = computed(() => [
-    { key: 'cashInHand', label: 'Cash in Hand', hint: 'Cash you hold right now', href: '/accounts', icon: Wallet, amount: props.kpis.cashInHand },
-    { key: 'stockValue', label: 'Stock Value', hint: 'Worth of goods in stock', href: '/reports/stock-valuation', icon: Boxes, amount: props.kpis.stockValue },
-    { key: 'debtors', label: 'Customers Owe You', hint: 'Sundry Debtors - money to collect', href: '/receipts', icon: HandCoins, amount: props.kpis.debtors },
-    { key: 'creditors', label: 'You Owe Suppliers', hint: 'Sundry Creditors - money to pay', href: '/payments', icon: Landmark, amount: props.kpis.creditors },
-]);
+// Each card links to the report guarded by the same key that let its figure
+// through, so the click never lands on a 403.
+const financialCards = computed(() =>
+    [
+        { key: 'cashInHand', label: 'Cash in Hand', hint: 'Cash you hold right now', href: '/reports/cash-book', icon: Wallet },
+        { key: 'stockValue', label: 'Stock Value', hint: 'Worth of goods in stock', href: '/reports/stock-valuation', icon: Boxes },
+        { key: 'debtors', label: 'Customers Owe You', hint: 'Sundry Debtors - money to collect', href: '/reports/debtors', icon: HandCoins },
+        { key: 'creditors', label: 'You Owe Suppliers', hint: 'Sundry Creditors - money to pay', href: '/reports/creditors', icon: Landmark },
+    ]
+        .filter((card) => props.kpis[card.key] !== undefined && props.kpis[card.key] !== null)
+        .map((card) => ({ ...card, amount: props.kpis[card.key] })),
+);
 
-const taxSummary = computed(() => props.kpis.tax?.thisWeek ?? { taxable: '0.00', nontaxable: '0.00', vat: '0.00' });
+const taxSummary = computed(() => props.kpis.tax?.thisWeek ?? null);
+
+const hasSalesColumn = computed(() => Boolean(props.kpis.sales || props.kpis.purchases || taxSummary.value || canStartPosSale.value));
 
 /**
  * Tallest bar in the two trend strips, picked by exact money comparison.
@@ -134,7 +139,7 @@ const taxSummary = computed(() => props.kpis.tax?.thisWeek ?? { taxable: '0.00',
 const maxTrendTotal = computed(() => {
     let max = '0.00';
 
-    for (const day of [...props.salesTrend, ...props.purchaseTrend]) {
+    for (const day of [...(props.salesTrend ?? []), ...(props.purchaseTrend ?? [])]) {
         if (compareMoney(day.total, max) > 0) {
             max = day.total;
         }
@@ -158,13 +163,23 @@ function trendDayLabel(dateString) {
     return new Date(`${dateString}T00:00:00`).toLocaleDateString(undefined, { weekday: 'short', day: 'numeric' });
 }
 
-const quickActions = [
-    { label: 'New sale', href: '/sales', icon: Receipt },
-    { label: 'Quick POS sale', href: '/pos', icon: ScanBarcode },
-    { label: 'New purchase', href: '/purchases', icon: ShoppingCart },
-    { label: 'Receive payment', href: '/receipts', icon: ArrowDownLeft },
-    { label: 'Make payment', href: '/payments', icon: ArrowUpRight },
-];
+const { can } = usePermissions();
+
+// UI gating only: each target route is still guarded server-side by `can:`.
+const quickActions = computed(() =>
+    allowedActions(
+        [
+            { label: 'New sale', href: '/sales', icon: Receipt, permissions: ['sales.create'] },
+            { label: 'Quick POS sale', href: '/pos', icon: ScanBarcode, permissions: ['pos.view', 'sales.create'] },
+            { label: 'New purchase', href: '/purchases', icon: ShoppingCart, permissions: ['purchases.create'] },
+            { label: 'Receive payment', href: '/receipts', icon: ArrowDownLeft, permissions: ['receipts.create'] },
+            { label: 'Make payment', href: '/payments', icon: ArrowUpRight, permissions: ['payments.create'] },
+        ],
+        can,
+    ),
+);
+
+const canStartPosSale = computed(() => holdsAll(['pos.view', 'sales.create'], can));
 
 const dotPalette = ['#6600FF', '#0EA5E9', '#F59E0B', '#10B981', '#EC4899'];
 
@@ -196,7 +211,7 @@ function formatAmount(amount) {
             :description="fiscalYear ? `Your business at a glance - fiscal year ${fiscalYear.name}.` : 'Your business at a glance.'"
         />
 
-        <section aria-label="Quick actions" class="mb-5 flex flex-wrap gap-2">
+        <section v-if="quickActions.length" aria-label="Quick actions" class="mb-5 flex flex-wrap gap-2">
             <Button v-for="action in quickActions" :key="action.href" :as="Link" :href="action.href" variant="primary" tone="purple">
                 <component :is="action.icon" class="size-4" aria-hidden="true" />
                 {{ action.label }}
@@ -225,8 +240,8 @@ function formatAmount(amount) {
             </div>
         </div>
 
-        <h3 class="mb-2 text-sm font-bold text-text-strong">Your business</h3>
-        <div class="mb-5 grid grid-cols-2 gap-4 lg:grid-cols-4">
+        <h3 v-if="kpiCards.length" class="mb-2 text-sm font-bold text-text-strong">Your business</h3>
+        <div v-if="kpiCards.length" class="mb-5 grid grid-cols-2 gap-4 lg:grid-cols-4">
             <Link v-for="card in kpiCards" :key="card.key" :href="card.href" class="block">
             <Card variant="panel" class="h-full transition-colors hover:border-primary">
                 <div class="flex items-start justify-between">
@@ -247,12 +262,14 @@ function formatAmount(amount) {
             </Link>
         </div>
 
-        <h3 class="mb-2 text-sm font-bold text-text-strong">Money position</h3>
-        <p v-if="fiscalYear" class="mb-2 text-xs text-text-muted">
-            Ledger balances below are for fiscal year {{ fiscalYear.name }} only.
-        </p>
+        <template v-if="financialCards.length">
+            <h3 class="mb-2 text-sm font-bold text-text-strong">Money position</h3>
+            <p v-if="fiscalYear" class="mb-2 text-xs text-text-muted">
+                Ledger balances below are for fiscal year {{ fiscalYear.name }} only.
+            </p>
+        </template>
 
-        <div class="mb-5 grid grid-cols-2 gap-4 lg:grid-cols-4">
+        <div v-if="financialCards.length" class="mb-5 grid grid-cols-2 gap-4 lg:grid-cols-4">
             <Link v-for="card in financialCards" :key="card.key" :href="card.href" class="block">
             <Card variant="panel" class="h-full transition-colors hover:border-primary">
                 <div class="flex size-9 items-center justify-center bg-primary-tint">
@@ -277,7 +294,7 @@ function formatAmount(amount) {
             </div>
         </Card>
 
-        <Card v-if="lowStockItems.length > 0" variant="panel" title="Low Stock" class="mb-5">
+        <Card v-if="lowStockItems?.length > 0" variant="panel" title="Low Stock" class="mb-5">
             <div class="divide-y divide-border">
                 <div
                     v-for="item in lowStockItems"
@@ -295,8 +312,12 @@ function formatAmount(amount) {
             <p class="mt-2 text-xs text-text-muted">Items at or below their reorder level.</p>
         </Card>
 
-        <div class="mb-5 grid grid-cols-1 gap-5 lg:grid-cols-[2fr_1fr]">
-            <Card variant="panel" title="Recent Sales">
+        <div
+            v-if="recentSales || hasSalesColumn"
+            class="mb-5 grid grid-cols-1 gap-5"
+            :class="{ 'lg:grid-cols-[2fr_1fr]': recentSales && hasSalesColumn }"
+        >
+            <Card v-if="recentSales" variant="panel" title="Recent Sales">
                 <div v-if="recentSales.length === 0" class="py-6 text-center text-sm text-text-muted">
                     No sales yet.
                     <Link href="/sales" class="font-semibold text-primary hover:underline">Record your first sale</Link>
@@ -338,8 +359,8 @@ function formatAmount(amount) {
                 </div>
             </Card>
 
-            <div class="flex flex-col gap-5">
-                <Card variant="panel">
+            <div v-if="hasSalesColumn" class="flex flex-col gap-5">
+                <Card v-if="kpis.sales" variant="panel">
                     <div class="flex items-start justify-between">
                         <div class="flex size-9 items-center justify-center bg-primary-tint">
                             <Receipt class="size-5 text-primary" />
@@ -355,7 +376,7 @@ function formatAmount(amount) {
                     <p class="text-sm text-text-muted">Today's Sales - {{ kpis.sales.today.count }} bills</p>
                 </Card>
 
-                <Card variant="panel">
+                <Card v-if="kpis.purchases" variant="panel">
                     <div class="flex items-start justify-between">
                         <div class="flex size-9 items-center justify-center bg-primary-tint">
                             <ReceiptText class="size-5 text-primary" />
@@ -371,7 +392,7 @@ function formatAmount(amount) {
                     <p class="text-sm text-text-muted">Today's Purchases - {{ kpis.purchases.today.count }} bills</p>
                 </Card>
 
-                <Card variant="panel">
+                <Card v-if="taxSummary" variant="panel">
                     <div class="flex items-start justify-between">
                         <div class="flex size-9 items-center justify-center bg-primary-tint">
                             <Percent class="size-5 text-primary" />
@@ -394,7 +415,7 @@ function formatAmount(amount) {
                     </dl>
                 </Card>
 
-                <Card variant="panel">
+                <Card v-if="canStartPosSale" variant="panel">
                     <div class="flex size-9 items-center justify-center bg-primary-tint">
                         <ScanBarcode class="size-5 text-primary" aria-hidden="true" />
                     </div>
@@ -408,8 +429,12 @@ function formatAmount(amount) {
             </div>
         </div>
 
-        <div class="mb-5 grid grid-cols-1 gap-5 lg:grid-cols-[2fr_1fr]">
-            <Card variant="panel" title="Recent Customers">
+        <div
+            v-if="recentCustomers || accountHeadBreakdown"
+            class="mb-5 grid grid-cols-1 gap-5"
+            :class="{ 'lg:grid-cols-[2fr_1fr]': recentCustomers && accountHeadBreakdown }"
+        >
+            <Card v-if="recentCustomers" variant="panel" title="Recent Customers">
                 <div v-if="recentCustomers.length === 0" class="py-6 text-center text-sm text-text-muted">
                     No customers yet.
                     <Link href="/customers" class="font-semibold text-primary hover:underline">Add a customer</Link>
@@ -445,7 +470,7 @@ function formatAmount(amount) {
                 </table>
             </Card>
 
-            <Card variant="panel" title="Account Groups">
+            <Card v-if="accountHeadBreakdown" variant="panel" title="Account Groups">
                 <div v-if="accountHeadBreakdown.length === 0" class="py-6 text-center text-sm text-text-muted">
                     No account heads found
                 </div>
@@ -468,8 +493,12 @@ function formatAmount(amount) {
             </Card>
         </div>
 
-        <div class="mb-5 grid grid-cols-1 gap-5 md:grid-cols-2">
-            <Card variant="panel" title="Sales Trend (Last 7 Days)">
+        <div
+            v-if="salesTrend || purchaseTrend"
+            class="mb-5 grid grid-cols-1 gap-5"
+            :class="{ 'md:grid-cols-2': salesTrend && purchaseTrend }"
+        >
+            <Card v-if="salesTrend" variant="panel" title="Sales Trend (Last 7 Days)">
                 <div v-if="salesTrend.length === 0" class="py-6 text-center text-sm text-text-muted">
                     No sales in the last 7 days.
                     <Link href="/sales" class="font-semibold text-primary hover:underline">Record a sale</Link>
@@ -485,7 +514,7 @@ function formatAmount(amount) {
                 </ul>
             </Card>
 
-            <Card variant="panel" title="Purchase Trend (Last 7 Days)">
+            <Card v-if="purchaseTrend" variant="panel" title="Purchase Trend (Last 7 Days)">
                 <div v-if="purchaseTrend.length === 0" class="py-6 text-center text-sm text-text-muted">
                     No purchases in the last 7 days.
                     <Link href="/purchases" class="font-semibold text-primary hover:underline">Record a purchase</Link>
@@ -502,11 +531,15 @@ function formatAmount(amount) {
             </Card>
         </div>
 
-        <div class="grid grid-cols-1 gap-5 md:grid-cols-2">
-            <Card variant="panel" title="Top 5 Items This Month">
+        <div
+            v-if="topItemsThisMonth || topCustomersThisMonth"
+            class="grid grid-cols-1 gap-5"
+            :class="{ 'md:grid-cols-2': topItemsThisMonth && topCustomersThisMonth }"
+        >
+            <Card v-if="topItemsThisMonth" variant="panel" title="Top 5 Items This Month">
                 <div v-if="topItemsThisMonth.length === 0" class="py-6 text-center text-sm text-text-muted">
                     No sales this month yet.
-                    <Link href="/sales" class="font-semibold text-primary hover:underline">Record a sale</Link>
+                    <Link v-if="can('sales.view')" href="/sales" class="font-semibold text-primary hover:underline">Record a sale</Link>
                 </div>
                 <ol v-else class="flex flex-col gap-3">
                     <li v-for="(item, index) in topItemsThisMonth" :key="item.name" class="flex items-center justify-between text-sm">
@@ -521,10 +554,10 @@ function formatAmount(amount) {
                 </ol>
             </Card>
 
-            <Card variant="panel" title="Top 5 Customers This Month">
+            <Card v-if="topCustomersThisMonth" variant="panel" title="Top 5 Customers This Month">
                 <div v-if="topCustomersThisMonth.length === 0" class="py-6 text-center text-sm text-text-muted">
                     No sales this month yet.
-                    <Link href="/sales" class="font-semibold text-primary hover:underline">Record a sale</Link>
+                    <Link v-if="can('sales.view')" href="/sales" class="font-semibold text-primary hover:underline">Record a sale</Link>
                 </div>
                 <ol v-else class="flex flex-col gap-3">
                     <li v-for="(customer, index) in topCustomersThisMonth" :key="customer.name" class="flex items-center justify-between text-sm">

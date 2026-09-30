@@ -12,6 +12,7 @@ import logoMark from '@/assets/brand/logo-mark.png';
 import { navGroups, centralNavItems } from '@/lib/nav-items';
 import { filterNavByPermission } from '@/lib/filterNavByPermission';
 import { createPermissionChecker } from '@/lib/permissions';
+import { QUICK_CREATE_ACTIONS, POS_PERMISSIONS, allowedActions, holdsAll } from '@/lib/quickActions';
 import { useLayoutChrome } from '@/composables/useLayoutChrome';
 import { useOpenFiscalYear } from '@/composables/useOpenFiscalYear';
 import { useToast } from '@/composables/useToast';
@@ -190,13 +191,23 @@ function logout() {
  * to pages/actions rather than searching customer/item records, so matching
  * happens in-memory against a static command list - no backend round trip.
  */
-const QUICK_ACTIONS = [
-    { label: 'New sale', href: '/sales', icon: ShoppingCart, group: 'Quick Actions' },
-    { label: 'New purchase', href: '/purchases', icon: PackageSearch, group: 'Quick Actions' },
-    { label: 'New quotation', href: '/quotations', icon: FileSignature, group: 'Quick Actions' },
-    { label: 'New customer', href: '/customers', icon: Users, group: 'Quick Actions' },
-    { label: 'New item', href: '/items', icon: Package, group: 'Quick Actions' },
-];
+const QUICK_ACTION_ICONS = { sale: ShoppingCart, purchase: PackageSearch, quotation: FileSignature, customer: Users, item: Package };
+
+const layoutPermissions = computed(() => createPermissionChecker(page.props.auth?.can, page.props.auth?.isOwner));
+
+// The one permission-filtered create list (lib/quickActions) feeds both the
+// palette's "Quick Actions" group and the header "+" menu, so a user never
+// sees a shortcut to a create screen their role would 403 on.
+const quickActions = computed(() =>
+    allowedActions(QUICK_CREATE_ACTIONS, layoutPermissions.value.can).map((action) => ({
+        label: action.label,
+        href: action.href,
+        icon: QUICK_ACTION_ICONS[action.icon],
+        group: 'Quick Actions',
+    })),
+);
+
+const canOpenPos = computed(() => holdsAll(POS_PERMISSIONS, layoutPermissions.value.can));
 
 // Every sidebar destination, flattened out of `sections` (already normalized
 // and admin-filtered by the page that built the `navItems` prop) into the
@@ -212,7 +223,7 @@ const navCommands = computed(() =>
     ),
 );
 
-const allCommands = computed(() => [...QUICK_ACTIONS, ...navCommands.value]);
+const allCommands = computed(() => [...quickActions.value, ...navCommands.value]);
 
 const searchQuery = ref('');
 const searchOpen = ref(false);
@@ -454,31 +465,19 @@ function selectActiveCommand() {
                 <div v-else class="mx-auto flex max-w-[340px] flex-1 items-center"></div>
 
                 <div class="flex items-center gap-4">
-                    <DropdownMenu v-if="page.props.auth?.user" align="end">
+                    <DropdownMenu v-if="page.props.auth?.user && quickActions.length > 0" align="end">
                         <template #trigger>
                             <button type="button" title="Quick Create" aria-label="Quick Create" class="flex cursor-pointer items-center justify-center text-text-muted focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary">
                                 <Plus class="size-5" />
                             </button>
                         </template>
 
-                        <DropdownMenuItem @select="() => router.visit('/sales')">
-                            <component :is="ShoppingCart" class="mr-2 size-4 shrink-0 text-text-faint" />New sale
-                        </DropdownMenuItem>
-                        <DropdownMenuItem @select="() => router.visit('/purchases')">
-                            <component :is="PackageSearch" class="mr-2 size-4 shrink-0 text-text-faint" />New purchase
-                        </DropdownMenuItem>
-                        <DropdownMenuItem @select="() => router.visit('/quotations')">
-                            <component :is="FileSignature" class="mr-2 size-4 shrink-0 text-text-faint" />New quotation
-                        </DropdownMenuItem>
-                        <DropdownMenuItem @select="() => router.visit('/customers')">
-                            <component :is="Users" class="mr-2 size-4 shrink-0 text-text-faint" />New customer
-                        </DropdownMenuItem>
-                        <DropdownMenuItem @select="() => router.visit('/items')">
-                            <component :is="Package" class="mr-2 size-4 shrink-0 text-text-faint" />New item
+                        <DropdownMenuItem v-for="action in quickActions" :key="action.href" @select="() => router.visit(action.href)">
+                            <component :is="action.icon" class="mr-2 size-4 shrink-0 text-text-faint" />{{ action.label }}
                         </DropdownMenuItem>
                     </DropdownMenu>
 
-                    <Tooltip v-if="page.props.auth?.user" label="POS">
+                    <Tooltip v-if="page.props.auth?.user && canOpenPos" label="POS">
                         <Link href="/pos" aria-label="POS" class="flex cursor-pointer items-center justify-center text-text-muted focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary">
                             <ScanBarcode class="size-5" />
                         </Link>

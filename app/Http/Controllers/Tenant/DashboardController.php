@@ -23,6 +23,7 @@ use Brick\Math\RoundingMode;
 use Illuminate\Contracts\Database\Query\Builder as BuilderContract;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Http\Request;
+use Illuminate\Support\Collection;
 use Inertia\Inertia;
 use Inertia\Response;
 
@@ -40,120 +41,243 @@ use Inertia\Response;
  */
 class DashboardController extends Controller
 {
+    /**
+     * The dashboard is the landing page for EVERY user (ROUTE-MAP allowlist),
+     * so it is not gated as a whole; instead each widget is computed and sent
+     * only when the user holds the key that already guards the equivalent
+     * page or report. A figure the user may not see never reaches the
+     * browser, and its queries never run. Hiding it in Vue alone would still
+     * leak it through the Inertia page JSON.
+     *
+     * Widget -> key (same key as the screen that shows that data elsewhere):
+     * - kpis.customers, recentCustomers ........ customers.view
+     * - kpis.suppliers ......................... suppliers.view
+     * - kpis.items, expiringItemsCount ......... items.view (the items list
+     *   already shows every item's expiry date)
+     * - kpis.accounts, accountHeadBreakdown .... accounts.view
+     * - kpis.sales, salesTrend, recentSales .... sales.view (all derivable
+     *   from the sales list that key opens)
+     * - kpis.purchases, purchaseTrend .......... purchases.view
+     * - kpis.cashInHand ........................ cash_bank_book.view
+     * - kpis.stockValue ........................ stock_valuation.view
+     * - kpis.debtors ........................... receivables_reports.view
+     * - kpis.creditors ......................... payables_reports.view
+     * - kpis.tax (weekly VAT summary) .......... tax_reports.view
+     * - topItemsThisMonth, topCustomersThisMonth sales_reports.view (item-wise
+     *   and customer-wise sales are sales reports, not the sales list)
+     * - lowStockItems .......................... stock_reports.view (a reorder
+     *   report: on-hand vs minimum across all items, the stock-summary data)
+     * - notices, fiscalYear .................... everyone
+     *
+     * A missing widget is OMITTED from the props (never sent as zero, which
+     * would read as a real balance). `kpis` itself is omitted when empty.
+     * Owners hold every key their tenant is entitled to, so they see the
+     * full page; a widget of a module the tenant is not entitled to is
+     * hidden for the owner too, which is the Gate's module rule.
+     */
     public function index(Request $request): Response
     {
+        $user = $request->user();
+
         // Eager-load the role relation onto the same User instance that
         // HandleInertiaRequests shares as `auth.user`, so the page can
         // read `auth.user.role` without a separate prop.
-        $request->user()->loadMissing('role');
+        $user->loadMissing('role');
+
+        $can = fn (string $key): bool => $user->can($key);
 
         $fiscalYear = FiscalYear::query()->where('status', FiscalYearStatus::Open)->first();
         $today = now()->toDateString();
+        $weekAgo = now()->subWeek()->toDateString();
 
-        return Inertia::render('Tenant/Dashboard', [
+        $props = [
             'notices' => Notice::currentlyActive()->latest()->get(['id', 'title', 'body']),
-            'expiringItemsCount' => Item::expiringSoon()->count(),
             'fiscalYear' => $fiscalYear === null ? null : [
                 'id' => $fiscalYear->id,
                 'name' => $fiscalYear->name,
                 'startDate' => $fiscalYear->start_date->toDateString(),
                 'endDate' => $fiscalYear->end_date->toDateString(),
             ],
-            'kpis' => [
-                'customers' => [
-                    // The seeded walk-in row is a system placeholder, not a
-                    // customer the business has, so it never counts here.
-                    'total' => Customer::where('is_walk_in', false)->count(),
-                    'thisWeek' => Customer::where('is_walk_in', false)->where('created_at', '>=', now()->subWeek())->count(),
-                ],
-                'suppliers' => [
-                    'total' => Supplier::count(),
-                    'thisWeek' => Supplier::where('created_at', '>=', now()->subWeek())->count(),
-                ],
-                'items' => [
-                    'total' => Item::count(),
-                    'thisWeek' => Item::where('created_at', '>=', now()->subWeek())->count(),
-                ],
-                'accounts' => [
-                    'total' => Account::count(),
-                ],
-                'sales' => [
-                    'today' => $this->documentTotals(Sale::class, whereDate: $today),
-                    'thisWeek' => $this->documentTotals(Sale::class, since: now()->subWeek()->toDateString()),
-                ],
-                'purchases' => [
-                    'today' => $this->documentTotals(Purchase::class, whereDate: $today),
-                    'thisWeek' => $this->documentTotals(Purchase::class, since: now()->subWeek()->toDateString()),
-                ],
-                'cashInHand' => $this->accountBalance('AS1', $fiscalYear)->toString(),
-                // Read through StockCosting, the single place stock is valued
-                // (CONTRACTS C10), so the dashboard figure is the same one the
-                // Balance Sheet and the year-end closing entry use.
-                'stockValue' => StockCosting::totalClosingValue($today)->toString(),
-                'debtors' => $this->subgroupBalance('Sundry Debtors', $fiscalYear, creditNormal: false)->toString(),
-                'creditors' => $this->subgroupBalance('Sundry Creditors', $fiscalYear, creditNormal: true)->toString(),
-                'tax' => [
-                    'thisWeek' => [
-                        'taxable' => $this->sumColumn($this->activeDocuments(Sale::class, since: now()->subWeek()->toDateString()), 'taxable_amount')->toString(),
-                        'nontaxable' => $this->sumColumn($this->activeDocuments(Sale::class, since: now()->subWeek()->toDateString()), 'nontaxable_amount')->toString(),
-                        'vat' => $this->sumColumn($this->activeDocuments(Sale::class, since: now()->subWeek()->toDateString()), 'vat_amount')->toString(),
-                    ],
-                ],
-            ],
-            'salesTrend' => $this->dailyTotals(Sale::class, 7),
-            'purchaseTrend' => $this->dailyTotals(Purchase::class, 7),
-            'lowStockItems' => $this->lowStockItems(),
-            'topItemsThisMonth' => SaleLine::query()
-                ->join('sales', 'sales.id', '=', 'sale_lines.sale_id')
-                ->join('items', 'items.id', '=', 'sale_lines.item_id')
-                ->where('sales.status', '!=', 'cancelled')
-                ->where('sales.date', '>=', now()->startOfMonth())
-                ->groupBy('sale_lines.item_id', 'items.name')
-                ->orderByDesc('total_scaled')
-                ->selectRaw('items.name as name')
-                ->selectRaw('sum('.$this->scaledMoney('sale_lines.line_total').') as total_scaled')
-                ->limit(5)
-                ->get()
-                ->map(fn ($row) => ['name' => $row->name, 'total' => $this->fromScaled($row->total_scaled)->toString()]),
-            'topCustomersThisMonth' => Sale::query()
-                ->join('customers', 'customers.id', '=', 'sales.customer_id')
-                ->where('sales.status', '!=', 'cancelled')
-                ->where('sales.date', '>=', now()->startOfMonth())
-                ->groupBy('sales.customer_id', 'customers.name')
-                ->orderByDesc('total_scaled')
-                ->selectRaw('customers.name as name')
-                ->selectRaw('sum('.$this->scaledMoney('sales.total').') as total_scaled')
-                ->limit(5)
-                ->get()
-                ->map(fn ($row) => ['name' => $row->name, 'total' => $this->fromScaled($row->total_scaled)->toString()]),
-            'recentSales' => Sale::with('customer:id,name')
-                ->where('status', '!=', 'cancelled')
-                ->orderByDesc('date')
-                ->orderByDesc('id')
-                ->take(6)
-                ->get()
-                ->map(fn (Sale $sale) => [
-                    'id' => $sale->id,
-                    'customer' => $sale->customer?->name,
-                    'date' => $sale->date->format('M j, Y'),
-                    'total' => Money::of($sale->total)->toString(),
-                    'paymentMode' => $sale->payment_mode,
-                ]),
-            'recentCustomers' => Customer::with('account')->where('is_walk_in', false)->latest()->take(5)->get()->map(fn (Customer $customer) => [
-                'name' => $customer->name,
-                'mobile' => $customer->mobile_no,
-                'code' => $customer->account?->code,
-                'added' => $customer->created_at->diffForHumans(),
-            ]),
-            'accountHeadBreakdown' => AccountHead::all()->map(function (AccountHead $head) {
-                $count = Account::where(function ($query) use ($head) {
-                    $query->whereHas('group', fn ($g) => $g->where('account_head_id', $head->id))
-                        ->orWhereHas('subgroup.accountGroup', fn ($g) => $g->where('account_head_id', $head->id));
-                })->count();
+        ];
+        $kpis = [];
 
-                return ['name' => $head->name, 'count' => $count];
-            }),
+        if ($can('customers.view')) {
+            $kpis['customers'] = [
+                // The seeded walk-in row is a system placeholder, not a
+                // customer the business has, so it never counts here.
+                'total' => Customer::where('is_walk_in', false)->count(),
+                'thisWeek' => Customer::where('is_walk_in', false)->where('created_at', '>=', now()->subWeek())->count(),
+            ];
+            $props['recentCustomers'] = $this->recentCustomers();
+        }
+
+        if ($can('suppliers.view')) {
+            $kpis['suppliers'] = [
+                'total' => Supplier::count(),
+                'thisWeek' => Supplier::where('created_at', '>=', now()->subWeek())->count(),
+            ];
+        }
+
+        if ($can('items.view')) {
+            $kpis['items'] = [
+                'total' => Item::count(),
+                'thisWeek' => Item::where('created_at', '>=', now()->subWeek())->count(),
+            ];
+            $props['expiringItemsCount'] = Item::expiringSoon()->count();
+        }
+
+        if ($can('accounts.view')) {
+            $kpis['accounts'] = ['total' => Account::count()];
+            $props['accountHeadBreakdown'] = $this->accountHeadBreakdown();
+        }
+
+        if ($can('sales.view')) {
+            $kpis['sales'] = [
+                'today' => $this->documentTotals(Sale::class, whereDate: $today),
+                'thisWeek' => $this->documentTotals(Sale::class, since: $weekAgo),
+            ];
+            $props['salesTrend'] = $this->dailyTotals(Sale::class, 7);
+            $props['recentSales'] = $this->recentSales();
+        }
+
+        if ($can('purchases.view')) {
+            $kpis['purchases'] = [
+                'today' => $this->documentTotals(Purchase::class, whereDate: $today),
+                'thisWeek' => $this->documentTotals(Purchase::class, since: $weekAgo),
+            ];
+            $props['purchaseTrend'] = $this->dailyTotals(Purchase::class, 7);
+        }
+
+        if ($can('cash_bank_book.view')) {
+            $kpis['cashInHand'] = $this->accountBalance('AS1', $fiscalYear)->toString();
+        }
+
+        if ($can('stock_valuation.view')) {
+            // Read through StockCosting, the single place stock is valued
+            // (CONTRACTS C10), so the dashboard figure is the same one the
+            // Balance Sheet and the year-end closing entry use.
+            $kpis['stockValue'] = StockCosting::totalClosingValue($today)->toString();
+        }
+
+        if ($can('receivables_reports.view')) {
+            $kpis['debtors'] = $this->subgroupBalance('Sundry Debtors', $fiscalYear, creditNormal: false)->toString();
+        }
+
+        if ($can('payables_reports.view')) {
+            $kpis['creditors'] = $this->subgroupBalance('Sundry Creditors', $fiscalYear, creditNormal: true)->toString();
+        }
+
+        if ($can('tax_reports.view')) {
+            $weekSales = $this->activeDocuments(Sale::class, since: $weekAgo);
+
+            $kpis['tax'] = [
+                'thisWeek' => [
+                    'taxable' => $this->sumColumn($weekSales, 'taxable_amount')->toString(),
+                    'nontaxable' => $this->sumColumn($weekSales, 'nontaxable_amount')->toString(),
+                    'vat' => $this->sumColumn($weekSales, 'vat_amount')->toString(),
+                ],
+            ];
+        }
+
+        if ($can('sales_reports.view')) {
+            $props['topItemsThisMonth'] = $this->topItemsThisMonth();
+            $props['topCustomersThisMonth'] = $this->topCustomersThisMonth();
+        }
+
+        if ($can('stock_reports.view')) {
+            $props['lowStockItems'] = $this->lowStockItems();
+        }
+
+        if ($kpis !== []) {
+            $props['kpis'] = $kpis;
+        }
+
+        return Inertia::render('Tenant/Dashboard', $props);
+    }
+
+    /**
+     * @return Collection<int, array{name: string, total: string}>
+     */
+    private function topItemsThisMonth(): Collection
+    {
+        return SaleLine::query()
+            ->join('sales', 'sales.id', '=', 'sale_lines.sale_id')
+            ->join('items', 'items.id', '=', 'sale_lines.item_id')
+            ->where('sales.status', '!=', 'cancelled')
+            ->where('sales.date', '>=', now()->startOfMonth())
+            ->groupBy('sale_lines.item_id', 'items.name')
+            ->orderByDesc('total_scaled')
+            ->selectRaw('items.name as name')
+            ->selectRaw('sum('.$this->scaledMoney('sale_lines.line_total').') as total_scaled')
+            ->limit(5)
+            ->get()
+            ->map(fn ($row) => ['name' => $row->name, 'total' => $this->fromScaled($row->total_scaled)->toString()]);
+    }
+
+    /**
+     * @return Collection<int, array{name: string, total: string}>
+     */
+    private function topCustomersThisMonth(): Collection
+    {
+        return Sale::query()
+            ->join('customers', 'customers.id', '=', 'sales.customer_id')
+            ->where('sales.status', '!=', 'cancelled')
+            ->where('sales.date', '>=', now()->startOfMonth())
+            ->groupBy('sales.customer_id', 'customers.name')
+            ->orderByDesc('total_scaled')
+            ->selectRaw('customers.name as name')
+            ->selectRaw('sum('.$this->scaledMoney('sales.total').') as total_scaled')
+            ->limit(5)
+            ->get()
+            ->map(fn ($row) => ['name' => $row->name, 'total' => $this->fromScaled($row->total_scaled)->toString()]);
+    }
+
+    /**
+     * @return Collection<int, array{id: int, customer: ?string, date: string, total: string, paymentMode: string}>
+     */
+    private function recentSales(): Collection
+    {
+        return Sale::with('customer:id,name')
+            ->where('status', '!=', 'cancelled')
+            ->orderByDesc('date')
+            ->orderByDesc('id')
+            ->take(6)
+            ->get()
+            ->map(fn (Sale $sale) => [
+                'id' => $sale->id,
+                'customer' => $sale->customer?->name,
+                'date' => $sale->date->format('M j, Y'),
+                'total' => Money::of($sale->total)->toString(),
+                'paymentMode' => $sale->payment_mode,
+            ]);
+    }
+
+    /**
+     * @return Collection<int, array{name: string, mobile: ?string, code: ?string, added: string}>
+     */
+    private function recentCustomers(): Collection
+    {
+        return Customer::with('account')->where('is_walk_in', false)->latest()->take(5)->get()->map(fn (Customer $customer) => [
+            'name' => $customer->name,
+            'mobile' => $customer->mobile_no,
+            'code' => $customer->account?->code,
+            'added' => $customer->created_at->diffForHumans(),
         ]);
+    }
+
+    /**
+     * @return Collection<int, array{name: string, count: int}>
+     */
+    private function accountHeadBreakdown(): Collection
+    {
+        return AccountHead::all()->map(function (AccountHead $head) {
+            $count = Account::where(function ($query) use ($head) {
+                $query->whereHas('group', fn ($g) => $g->where('account_head_id', $head->id))
+                    ->orWhereHas('subgroup.accountGroup', fn ($g) => $g->where('account_head_id', $head->id));
+            })->count();
+
+            return ['name' => $head->name, 'count' => $count];
+        });
     }
 
     /**

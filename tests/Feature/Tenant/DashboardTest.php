@@ -12,6 +12,7 @@ use App\Models\Supplier;
 use App\Models\Tenant;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\DB;
 
 uses(RefreshDatabase::class);
 
@@ -299,6 +300,183 @@ test('dashboard lists items at or below their reorder level and leaves the rest 
             ->where('lowStockItems.1.name', 'Nearly Out')
             ->where('lowStockItems.1.stock', '4.0000')
             ->where('lowStockItems.1.minStock', '10.0000'));
+
+    $tenant->delete();
+});
+
+/**
+ * The Cashier preset from the browser check that found this gap: it can sell,
+ * look up items and customers, and take receipts, but holds no purchase,
+ * ledger, report or stock-valuation key.
+ *
+ * @var list<string>
+ */
+const DASHBOARD_CASHIER_KEYS = [
+    'pos.view', 'sales.view', 'sales.create', 'sales.print', 'items.view',
+    'customers.view', 'customers.create', 'receipts.view', 'receipts.create',
+];
+
+/**
+ * A tenant with an open year, one credit sale, one credit purchase and a
+ * low-stock item, so every dashboard widget has a real (non-zero) figure to
+ * leak. Returns the cashier's login email; the owner is owner@example.com.
+ */
+function seedDashboardPermissionTenant(Tenant $tenant): string
+{
+    return $tenant->run(function () {
+        $owner = User::factory()->create(['email' => 'owner@example.com']);
+        $cashier = userWithPermissions(DASHBOARD_CASHIER_KEYS);
+
+        FiscalYear::create([
+            'name' => 'FY1',
+            'start_date' => now()->subYear()->startOfYear(),
+            'end_date' => now()->addYear()->endOfYear(),
+            'status' => FiscalYearStatus::Open,
+        ]);
+
+        $customer = Customer::factory()->create(['name' => 'Ram Shrestha']);
+        $supplier = Supplier::factory()->create(['name' => 'ABC Traders']);
+        $item = Item::factory()->create(['is_vatable' => false, 'is_stockable' => false]);
+
+        Sale::post(
+            ['customer_id' => $customer->id, 'invoice_type' => 'full', 'date' => now()->toDateString(), 'payment_mode' => 'credit'],
+            [['item_id' => $item->id, 'quantity' => 1, 'rate' => 500, 'discount' => 0]],
+            $owner,
+        );
+
+        Purchase::post(
+            ['supplier_id' => $supplier->id, 'date' => now()->toDateString(), 'payment_mode' => 'credit', 'vat_rate' => 0],
+            [['item_id' => $item->id, 'quantity' => 1, 'rate' => 300, 'discount' => 0]],
+            $owner,
+        );
+
+        $store = Store::factory()->create();
+        $low = Item::factory()->create(['name' => 'Nearly Out', 'is_stockable' => true, 'min_stock' => '10.00']);
+        $low->recordStockMovement(StockMovementType::Purchase, '4', now()->toDateString(), $store->id, null, '5.0000', '20.00');
+
+        return $cashier->email;
+    });
+}
+
+test('a cashier role gets only the widgets its keys cover: no cash, stock, receivable, payable, purchase or ledger figures', function () {
+    $domain = 'dashboard-cashier.tenant-test';
+    $tenant = Tenant::create(['company_name' => 'Acme Co']);
+    $tenant->domains()->create(['domain' => $domain]);
+    $cashierEmail = seedDashboardPermissionTenant($tenant);
+
+    $this->post("http://{$domain}/login", ['email' => $cashierEmail, 'password' => 'password']);
+
+    $this->get("http://{$domain}/dashboard")
+        ->assertOk()
+        ->assertInertia(fn ($page) => $page
+            ->component('Tenant/Dashboard')
+            // Everyone: notices and the open year.
+            ->has('notices')
+            ->where('fiscalYear.name', 'FY1')
+            // Keys the cashier holds.
+            ->where('kpis.sales.today.count', 1)
+            ->where('kpis.sales.today.total', '500.00')
+            ->has('salesTrend', 7)
+            ->has('recentSales', 1)
+            ->has('kpis.customers.total')
+            ->has('recentCustomers')
+            ->has('kpis.items.total')
+            ->has('expiringItemsCount')
+            // Keys the cashier does not hold: never sent at all.
+            ->missing('kpis.cashInHand')
+            ->missing('kpis.stockValue')
+            ->missing('kpis.debtors')
+            ->missing('kpis.creditors')
+            ->missing('kpis.purchases')
+            ->missing('kpis.suppliers')
+            ->missing('kpis.accounts')
+            ->missing('kpis.tax')
+            ->missing('purchaseTrend')
+            ->missing('lowStockItems')
+            ->missing('accountHeadBreakdown')
+            ->missing('topItemsThisMonth')
+            ->missing('topCustomersThisMonth'));
+
+    $tenant->delete();
+});
+
+test('a role with no dashboard keys still lands on the dashboard with notices and no kpis at all', function () {
+    $domain = 'dashboard-bare.tenant-test';
+    $tenant = Tenant::create(['company_name' => 'Acme Co']);
+    $tenant->domains()->create(['domain' => $domain]);
+
+    $email = $tenant->run(fn () => userWithPermissions(['receipts.view'])->email);
+
+    $this->post("http://{$domain}/login", ['email' => $email, 'password' => 'password']);
+
+    $this->get("http://{$domain}/dashboard")
+        ->assertOk()
+        ->assertInertia(fn ($page) => $page
+            ->component('Tenant/Dashboard')
+            ->has('notices')
+            ->missing('kpis')
+            ->missing('recentSales')
+            ->missing('recentCustomers')
+            ->missing('salesTrend')
+            ->missing('expiringItemsCount'));
+
+    $tenant->delete();
+});
+
+test('the owner gets every dashboard widget, and the cashier\'s trimmed dashboard runs fewer queries', function () {
+    $domain = 'dashboard-owner-vs-cashier.tenant-test';
+    $tenant = Tenant::create(['company_name' => 'Acme Co']);
+    $tenant->domains()->create(['domain' => $domain]);
+    $cashierEmail = seedDashboardPermissionTenant($tenant);
+
+    $queries = 0;
+    $counting = false;
+    DB::listen(function () use (&$queries, &$counting) {
+        if ($counting) {
+            $queries++;
+        }
+    });
+
+    $this->post("http://{$domain}/login", ['email' => 'owner@example.com', 'password' => 'password']);
+
+    $counting = true;
+    $ownerResponse = $this->get("http://{$domain}/dashboard");
+    $counting = false;
+    $ownerQueries = $queries;
+
+    $ownerResponse->assertOk()->assertInertia(fn ($page) => $page
+        ->component('Tenant/Dashboard')
+        ->where('kpis.sales.today.total', '500.00')
+        ->where('kpis.purchases.today.total', '300.00')
+        ->where('kpis.debtors', '500.00')
+        ->where('kpis.creditors', '300.00')
+        ->has('kpis.cashInHand')
+        ->has('kpis.stockValue')
+        ->has('kpis.customers.total')
+        ->has('kpis.suppliers.total')
+        ->has('kpis.items.total')
+        ->has('kpis.accounts.total')
+        ->has('kpis.tax.thisWeek.vat')
+        ->has('salesTrend', 7)
+        ->has('purchaseTrend', 7)
+        ->has('recentSales', 1)
+        ->has('recentCustomers')
+        ->has('accountHeadBreakdown')
+        ->has('topItemsThisMonth')
+        ->has('topCustomersThisMonth')
+        ->has('lowStockItems', 1)
+        ->where('lowStockItems.0.name', 'Nearly Out')
+        ->has('expiringItemsCount'));
+
+    $this->post("http://{$domain}/logout");
+    $this->post("http://{$domain}/login", ['email' => $cashierEmail, 'password' => 'password']);
+
+    $queries = 0;
+    $counting = true;
+    $this->get("http://{$domain}/dashboard")->assertOk();
+    $counting = false;
+
+    expect($queries)->toBeLessThan($ownerQueries);
 
     $tenant->delete();
 });
