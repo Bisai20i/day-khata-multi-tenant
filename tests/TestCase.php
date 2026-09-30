@@ -12,6 +12,11 @@ abstract class TestCase extends BaseTestCase
         $this->discardTransactionLeftByAFailedTest();
 
         parent::setUp();
+
+        // Pages render through app.blade.php's @vite, which needs a built
+        // manifest. CI never builds one for the PHP jobs, so assert against
+        // the Inertia payload without it.
+        $this->withoutVite();
     }
 
     /**

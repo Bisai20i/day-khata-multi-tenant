@@ -110,6 +110,12 @@ jobs:
       - name: Generate application key
         run: php artisan key:generate
 
+      # One database per tenant (131 tables each) overflows MySQL 8's default
+      # table caches and surfaces as error 1615 "Prepared statement needs to
+      # be re-prepared". Production servers need the same tuning in my.cnf.
+      - name: Raise MySQL table caches
+        run: mysql -h 127.0.0.1 -uroot -proot -e "SET GLOBAL table_definition_cache = 20000; SET GLOBAL table_open_cache = 20000;"
+
       - name: Run tests against MySQL
         run: php artisan test
 
@@ -131,7 +137,7 @@ jobs:
         run: npm ci
 
       - name: Run JS tests
-        run: node --test tests/js
+        run: npm run test:js
 
       - name: Build frontend assets
         run: npm run build
