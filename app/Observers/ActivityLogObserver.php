@@ -13,6 +13,11 @@ use Illuminate\Support\Facades\Auth;
  */
 class ActivityLogObserver
 {
+    /**
+     * Stored in place of a hidden attribute's value in a logged change set.
+     */
+    public const REDACTED = '[redacted]';
+
     public function created(Model $model): void
     {
         $this->write($model, 'created');
@@ -22,6 +27,16 @@ class ActivityLogObserver
     {
         $changes = $model->getChanges();
         unset($changes['updated_at']);
+
+        // Hidden attributes (a User's password hash and remember_token) must
+        // never be copied into a log readable by anyone holding
+        // activity_log.view. The key stays, so the trail still shows that a
+        // password was changed, without the value.
+        foreach ($model->getHidden() as $hidden) {
+            if (array_key_exists($hidden, $changes)) {
+                $changes[$hidden] = self::REDACTED;
+            }
+        }
 
         // A bare touch() (or a save() that only bumped updated_at) is noise,
         // not a real change worth logging.

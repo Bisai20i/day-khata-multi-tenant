@@ -10,6 +10,7 @@ use App\Models\Role;
 use App\Models\Sale;
 use App\Models\Tenant;
 use App\Models\User;
+use App\Observers\ActivityLogObserver;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 
 uses(RefreshDatabase::class);
@@ -137,6 +138,30 @@ test('a real attribute update writes an ActivityLog row with only the changed at
         expect($log)->not->toBeNull();
         expect($log->changes)->toHaveKey('name');
         expect($log->changes)->not->toHaveKey('updated_at');
+    });
+
+    $tenant->delete();
+});
+
+test('a password change is logged without the password hash or remember token', function () {
+    $tenant = provisionActivityLogTestTenant('activity-log-redact.tenant-test');
+
+    $tenant->run(function () {
+        $user = User::factory()->create(['role_id' => Role::where('slug', 'admin')->value('id')]);
+
+        $user->forceFill(['password' => 'a-new-secret-1', 'remember_token' => 'token-value'])->save();
+
+        $log = ActivityLog::where('subject_type', User::class)
+            ->where('subject_id', $user->id)
+            ->where('action', 'updated')
+            ->latest('id')
+            ->firstOrFail();
+
+        expect($log->changes)->toBe([
+            'password' => ActivityLogObserver::REDACTED,
+            'remember_token' => ActivityLogObserver::REDACTED,
+        ]);
+        expect(json_encode($log->getAttributes()))->not->toContain($user->getAttributes()['password']);
     });
 
     $tenant->delete();
