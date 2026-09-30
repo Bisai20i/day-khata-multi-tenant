@@ -14,6 +14,7 @@ use App\Models\Tenant;
 use App\Models\User;
 use App\Support\Billing\BillingException;
 use App\Support\Money\Money;
+use App\Support\Permissions\RoleBackfill;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 
 uses(RefreshDatabase::class);
@@ -204,7 +205,8 @@ test('settlement routes: any user can settle, only an admin can cancel a settlem
     $tenant->run(function () use (&$ids) {
         [$purchase, , $actor] = csCreditPurchase();
         $settlement = CapitalPurchaseSettlement::settle($purchase, ['date' => '2026-06-10', 'amount' => '1000', 'payment_mode' => 'cash'], $actor);
-        User::factory()->create(['email' => 'staff@example.com', 'role_id' => Role::where('slug', '!=', 'admin')->value('id')]);
+        // The pre-rollout Staff grant set: may settle, may not cancel a settlement.
+        User::factory()->create(['email' => 'staff@example.com', 'role_id' => roleWithPermissions(RoleBackfill::STAFF_PARITY, 'Staff')->id]);
         $ids = [$purchase->id, $settlement->id];
     });
 

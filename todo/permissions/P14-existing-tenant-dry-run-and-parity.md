@@ -17,7 +17,7 @@ New: `app/Console/Commands/PermissionsOwnerDryRun.php`, `tests/Feature/Console/P
 - [x] 2. **Parity tests.** Unit test: frozen Staff parity keys contain no owner-only key and only keys present in
   the catalog at release time; the Admin frozen list equals all non-owner-only keys; a legacy-shaped fixture
   (admin + staff + inactive admin) backfills as documented; console test for the dry-run output and exit codes.
-- [ ] 3. **Coordinator.** Run through the START.md deployment checklist with the user on a copy of production
+- [x] 3. **Coordinator.** Run through the START.md deployment checklist with the user on a copy of production
   data if available, record the outcome and the architecture summary in `mem.md`.
 
 ## Done when

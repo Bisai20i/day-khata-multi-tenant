@@ -2676,6 +2676,48 @@ periodically against the two persistent dev tenants (`acme.localhost`/`test.loca
 relying on the suite alone, since this bug is proof a green suite can hide a real defect that only
 aged, pre-existing data exposes.
 
+## Roles, permissions and module entitlements (2026-09-30)
+
+Plan: `plans/roles-permissions-entitlements.md`; chunks `todo/permissions/P01-P16`; route to key map
+`todo/permissions/ROUTE-MAP.md`. Durable rules are in `.ai/rules/{routes,config,models,migrations,feature}.md`.
+
+- **Catalog.** `config/permissions.php`: 10 modules (core always on; pos, agents, quotations require sales)
+  and 147 keys `<resource>.<action>`, read via `App\Support\Permissions\PermissionCatalog` (static,
+  memoized, no DB). Owner-only: roles.manage, backups.manage, fiscal_year.close_archive, ownership.transfer.
+- **Entitlements (central).** `tenants.enabled_modules` JSON, fail closed (NULL = core only). Platform
+  admins edit it on the tenant page (`TenantModuleController`, activity-logged). Applies to the owner too.
+- **Tenant storage.** `roles.permissions` JSON (+ `is_system`), `users.is_owner` (not fillable, set only by
+  provisioning and `OwnershipTransfer::run/promote`). Old `permissions`/`permission_role` tables and
+  `Role::legacyPermissions()` remain until P16.
+- **Gate.** `EffectivePermissions::for()` is the one formula (entitled AND active AND (owner OR role grant
+  minus owner-only)); memoized per user, at most one role query per request. `AuthorizationServiceProvider`
+  defines a Gate per key plus a `before` that only denies (inactive, module off) and never touches the
+  central `platform-owner` gate.
+- **Enforcement.** Every tenant route has `can:<key>`; the account ledger (3 routes) authorizes in
+  `AccountController` (account_ledger.* or party_ledger.* for customer/supplier accounts).
+  `RouteAuthorizationAuditTest` fails CI on an ungated route. Reopened-year corrections need
+  fiscal_year.edit; early close needs the owner.
+- **Frontend.** Shared `auth.can` / `auth.isOwner`; `usePermissions()`; nav items carry `permission`;
+  dashboard widgets and quick actions are computed and sent only for the keys that guard them.
+- **Management.** Owner-only Roles editor (`/admin/roles`; dormant grants of disabled modules preserved,
+  stale saves rejected). Users page: a non-owner may only assign roles within their own grant set and
+  never edit the owner or themselves; password-confirmed ownership transfer. Platform owners can reassign a
+  tenant owner centrally.
+- **Provisioning.** New tenants get admin (all grantable keys), manager and cashier (`RoleTemplates`,
+  filtered to entitled modules); the first admin is the owner.
+- **Existing tenants.** Tenant migrations `2026_09_25_020000/020100` add the columns and run
+  `RoleBackfill` (frozen lists: admin gets all grantable, staff gets exactly its pre-rollout 100 keys,
+  owner = active admin matching contact_email, else lowest-id active admin).
+- **Audit fix.** `ActivityLogObserver` redacts hidden attributes (password hash, remember token);
+  migration `2026_09_30_010000` scrubs rows written before the fix.
+
+Deployment checklist (START.md) run on the dev copy, 2026-09-30: `php artisan migrate` (enabled_modules
+backfilled), `php artisan permissions:owner-dry-run` (0 flagged), `php artisan tenants:migrate` (admin 143
+keys, staff 100, owner picked by the lowest-id fallback since contact_email was empty), browser smoke as the
+owner and a cashier role (cashier 403 on purchases, reports, users, accounts; nav and dashboard trimmed).
+Production still needs backups, maintenance mode, a per-tenant review of the dry run, then
+`tenants:migrate`. P16 (drop legacy tables, remove the role alias) waits one release cycle and approval.
+
 ## Open items (also see `goal.md` roadmap)
 
 - Chart-of-accounts/customers/suppliers/items, the enterprise UI redesign, the ledger/journal
