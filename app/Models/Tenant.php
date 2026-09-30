@@ -3,13 +3,14 @@
 namespace App\Models;
 
 use App\Enums\TenantStatus;
+use App\Support\Permissions\PermissionCatalog;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Stancl\Tenancy\Contracts\TenantWithDatabase;
 use Stancl\Tenancy\Database\Concerns\HasDatabase;
 use Stancl\Tenancy\Database\Concerns\HasDomains;
 use Stancl\Tenancy\Database\Models\Tenant as BaseTenant;
 
-#[Fillable(['company_name', 'status', 'suspended_at', 'trial_ends_at', 'contact_email'])]
+#[Fillable(['company_name', 'status', 'suspended_at', 'trial_ends_at', 'contact_email', 'enabled_modules'])]
 class Tenant extends BaseTenant implements TenantWithDatabase
 {
     use HasDatabase, HasDomains;
@@ -25,7 +26,57 @@ class Tenant extends BaseTenant implements TenantWithDatabase
             'status' => TenantStatus::class,
             'suspended_at' => 'datetime',
             'trial_ends_at' => 'datetime',
+            'enabled_modules' => 'array',
         ];
+    }
+
+    /**
+     * Default `enabled_modules` for tenants created without an explicit list
+     * (tests, tinker, seeders). The central create form always sends an
+     * explicit list, and an explicit empty list is honoured (core only), so
+     * the default applies only when the attribute was never set. At `creating`
+     * time the column is a real attribute (stancl's data-column encoding runs
+     * after this listener), so array_key_exists on the raw attributes is exact.
+     */
+    protected static function booted(): void
+    {
+        static::creating(function (Tenant $tenant): void {
+            if (! array_key_exists('enabled_modules', $tenant->getAttributes())) {
+                $tenant->enabled_modules = config('permissions.default_modules', []);
+            }
+        });
+    }
+
+    /**
+     * The module keys this tenant is entitled to, always including `core` and
+     * every transitive dependency (`pos` implies `sales`).
+     *
+     * Fail-closed: a NULL `enabled_modules` (row never backfilled) means core
+     * only, never "everything". Existing tenants are backfilled with all
+     * modules by the migration, so NULL is only reachable by a deliberate or
+     * broken write. A JSON column on the tenant row beats a pivot table here:
+     * the tenant is already loaded on every request, so entitlement checks
+     * cost zero extra queries.
+     *
+     * Not memoized: the row can change mid-request (central edits) and
+     * resolveModules() is a cheap in-memory computation.
+     *
+     * @return array<int, string>
+     */
+    public function entitledModules(): array
+    {
+        $enabled = $this->enabled_modules;
+
+        return PermissionCatalog::resolveModules(is_array($enabled) ? $enabled : []);
+    }
+
+    /**
+     * Whether the tenant is entitled to the given module key. `core` is
+     * always true; unknown keys are false.
+     */
+    public function hasModule(string $module): bool
+    {
+        return in_array($module, $this->entitledModules(), true);
     }
 
     /**
@@ -83,6 +134,7 @@ class Tenant extends BaseTenant implements TenantWithDatabase
             'suspended_at',
             'trial_ends_at',
             'contact_email',
+            'enabled_modules',
         ];
     }
 }
