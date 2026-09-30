@@ -255,6 +255,50 @@ class Item extends Model
     }
 
     /**
+     * The least stock this item will have on any day from $from onwards: its
+     * balance at the end of $from, then walked forward through every later
+     * movement day by day (flags G-05). A back-dated sale can pass a check
+     * against the stock on its own date and still drive a later day
+     * negative, for example selling on the 1st goods that only arrived on
+     * the 5th, when the 3rd already sold them. Checking this minimum is what
+     * stops it.
+     */
+    public function lowestStockFrom(string $from, ?int $storeId = null): Quantity
+    {
+        $lowest = $running = $this->currentStock($storeId, $from);
+
+        $inTypes = array_map(
+            fn (StockMovementType $type) => $type->value,
+            array_values(array_filter(StockMovementType::cases(), fn (StockMovementType $type) => $type->direction() === 1)),
+        );
+        $scaled = static::scaledQuantityExpression();
+        $placeholders = implode(', ', array_fill(0, count($inTypes), '?'));
+
+        $laterDays = ItemStockMovement::query()
+            ->selectRaw(
+                "DATE(date) as movement_day, SUM(CASE WHEN movement_type IN ({$placeholders}) THEN {$scaled} ELSE -{$scaled} END) as net_scaled",
+                $inTypes,
+            )
+            ->where('item_id', $this->getKey())
+            ->where('cancelled', false)
+            ->when($storeId !== null, fn (Builder $query) => $query->where('store_id', $storeId))
+            ->whereDate('date', '>', $from)
+            ->groupByRaw('DATE(date)')
+            ->orderByRaw('DATE(date)')
+            ->pluck('net_scaled');
+
+        foreach ($laterDays as $netScaled) {
+            $running = $running->plus(static::quantityFromScaled($netScaled));
+
+            if ($running->isLessThan($lowest)) {
+                $lowest = $running;
+            }
+        }
+
+        return $lowest;
+    }
+
+    /**
      * Locks the given items' own rows, ascending by id, for the rest of the
      * current transaction (CONTRACTS C10).
      *

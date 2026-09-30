@@ -128,7 +128,8 @@ class PurchaseController extends Controller
             'date' => ['required', 'date'],
             'payment_mode' => ['required', 'in:cash,bank,partial,credit'],
             'bank_account_id' => ['nullable', 'exists:accounts,id', new AccountUnderHead('Assets')],
-            'store_id' => ['nullable', 'integer', 'exists:stores,id'],
+            // Retired stores and items cannot take new documents (flags G-13).
+            'store_id' => ['nullable', 'integer', Rule::exists('stores', 'id')->where('is_active', true)],
             // decimal:0,N mirrors the column: a value with more decimals than
             // the column can hold used to be charged for and then silently
             // rounded on insert (audit P0-5).
@@ -157,7 +158,7 @@ class PurchaseController extends Controller
             'fiscal_year_id' => ['nullable', 'integer', 'exists:fiscal_years,id'],
             'reason' => ['nullable', 'string', 'max:255'],
             'lines' => ['required', 'array', 'min:1'],
-            'lines.*.item_id' => ['required', 'exists:items,id'],
+            'lines.*.item_id' => ['required', Rule::exists('items', 'id')->where('is_active', true)],
             // Null/omitted means the item's own base unit - see
             // SaleController::store()'s identical rule for the full
             // rationale (Purchase::post() owns the cross-item ownership

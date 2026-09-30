@@ -48,6 +48,7 @@ C3, C4, C5, C6, C10 rather than line by line.
   account) instead of forcing cash/bank.
 
 ### PUR-04 (P2) Inactive items and inactive stores accepted by the server
+- **FIXED** (2026-09-29, F06): see SAL-09. Tests: tests/Feature/Tenant/Sales/SalePostingGuardsTest.php.
 - Files: PurchaseController.php:72 vs 145 and 117; Purchase.php:294 (Item::findOrFail); PurchaseReturn::postUnlinked item
   lookup.
 - Wrong: the index comment says a retired item is rejected on post, but `lines.*.item_id` is only exists:items,id and

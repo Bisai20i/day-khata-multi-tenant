@@ -49,6 +49,7 @@ postRefund() and Receipt::post() balances by construction, and JournalVoucher::v
 ## P2
 
 ### SAL-05 (P2) Stock availability is checked against today's stock, not stock as of the sale date
+- **FIXED** (2026-09-29, F06): the stock check uses Item::lowestStockFrom(sale date), the least stock on any day from the sale date on. Tests: tests/Feature/Tenant/Sales/SalePostingGuardsTest.php.
 - File: app/Models/Sale.php:616 (`$item->currentStock($storeId)`, no `$asOf`)
 - Wrong: a backdated sale inside the open year passes the check against current on-hand while stock on that date was
   lower, leaving negative historic stock in as-of reports and valuation (C10).
@@ -56,6 +57,7 @@ postRefund() and Receipt::post() balances by construction, and JournalVoucher::v
 - Fix: also check the running balance from the sale date onward, or at least `currentStock($storeId, $date)`.
 
 ### SAL-06 (P2) commission_amount is stored even when no agent is chosen
+- **FIXED** (2026-09-29, F06): commission above 0 needs agent_id (request rule and Sale::validatedCommission). Tests: tests/Feature/Tenant/Sales/SalePostingGuardsTest.php.
 - File: app/Models/Sale.php:309-311, 336, 792
 - Wrong: validatedCommission() runs regardless of agent and the value is saved on the sale, but the voucher only posts
   commission when `$agent` is set. The sale shows a commission that exists nowhere in the ledger.
@@ -76,6 +78,7 @@ postRefund() and Receipt::post() balances by construction, and JournalVoucher::v
 - Fix: catch this in the three cancel() methods and explain, or record a clamp rule in C4.
 
 ### SAL-09 (P2) Inactive items and stores are accepted on posting
+- **FIXED** (2026-09-29, F06): item and store ids on sales and purchases, and the store on linked purchase returns, must be active. Tests: tests/Feature/Tenant/Sales/SalePostingGuardsTest.php.
 - File: app/Http/Controllers/Tenant/Sales/SaleController.php:410,422 (`exists:` only)
 - Wrong: pickers show only active items and stores, but the server accepts any id, so a stale tab or crafted request
   can sell a deactivated item or use a deactivated store.

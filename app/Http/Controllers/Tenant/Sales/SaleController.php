@@ -18,6 +18,7 @@ use App\Support\Billing\BillingException;
 use App\Support\Money\Money;
 use App\Support\NepaliCalendar;
 use Barryvdh\DomPDF\Facade\Pdf;
+use Brick\Math\BigDecimal;
 use Illuminate\Auth\Access\AuthorizationException;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Http\RedirectResponse;
@@ -408,19 +409,21 @@ class SaleController extends Controller
             'date' => ['required', 'date'],
             'payment_mode' => ['required', 'in:cash,bank,partial,credit'],
             'bank_account_id' => ['nullable', 'integer', $settlementAccount],
-            'store_id' => ['nullable', 'integer', 'exists:stores,id'],
+            // Retired stores and items cannot take new documents (flags G-13).
+            'store_id' => ['nullable', 'integer', Rule::exists('stores', 'id')->where('is_active', true)],
             'discount' => ['nullable', 'decimal:0,2', 'min:0'],
             'discount_type' => ['nullable', 'in:percentage,flat'],
             'cash_amount' => ['nullable', 'decimal:0,2', 'min:0'],
             'bank_amount' => ['nullable', 'decimal:0,2', 'min:0'],
             'tds_account_id' => ['nullable', 'integer', $settlementAccount],
             'tds_amount' => ['nullable', 'decimal:0,2', 'min:0'],
-            'agent_id' => ['nullable', 'exists:agents,id'],
+            // A commission needs someone to pay it to (flags G-15).
+            'agent_id' => ['nullable', 'exists:agents,id', Rule::requiredIf(fn (): bool => is_numeric(request()->input('commission_amount')) && BigDecimal::of((string) request()->input('commission_amount'))->isPositive())],
             'commission_amount' => ['nullable', 'decimal:0,2', 'min:0'],
             'narration' => ['nullable', 'string', 'max:255'],
             'expected_total' => ['nullable', 'decimal:0,2'],
             'lines' => ['required', 'array', 'min:1'],
-            'lines.*.item_id' => ['required', 'exists:items,id'],
+            'lines.*.item_id' => ['required', Rule::exists('items', 'id')->where('is_active', true)],
             // Null/omitted means the item's own base unit - Sale::post()
             // resolves this against the item's own ItemUnit rows (and
             // rejects a unit that belongs to a different item), so no

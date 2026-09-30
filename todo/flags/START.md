@@ -160,12 +160,12 @@ Owned: `routes/tenant-receipts.php` (coordinator adds), `ReceiptController.php`,
 ### F06 Sales posting guards (G-05, G-13, G-15)
 Owned: `Sale.php` (stock check and `validatedCommission` only), `SaleController.php` (rules only),
 `PurchaseController.php` and `PurchaseReturnController.php` (rules only, after F02), tests.
-- [ ] 1. Stock check uses stock as of the sale date AND the lowest running balance from that date to today, so
+- [x] 1. Stock check uses stock as of the sale date AND the lowest running balance from that date to today, so
   a backdated sale cannot make any later day negative (respect `allow_negative_stock`). Add an `Item` helper if
   needed (owned for this chunk). Tests: backdated sale before a purchase is refused; today's sale unchanged.
-- [ ] 2. `Rule::exists(...)->where('is_active', true)` for item and store ids on sales, purchases and linked
+- [x] 2. `Rule::exists(...)->where('is_active', true)` for item and store ids on sales, purchases and linked
   purchase returns. Tests for an inactive item and an inactive store.
-- [ ] 3. Commission above 0 with no `agent_id` is a validation error. Test.
+- [x] 3. Commission above 0 with no `agent_id` is a validation error. Test.
 
 ### F07 Journal core hardening (G-06, G-19, G-20). Task 1 needs D1.
 Owned: `JournalVoucher.php`, `JournalVoucherController.php` (rules only), tests. Serial with nothing else.
@@ -221,7 +221,7 @@ Owned: `JournalVoucher.php` (after F07) and the nine callers listed in G-22, tes
 | F03 | Capital posting | G-03, G-04, G-23 | done |
 | F04 | Capital view and print | G-01, G-11 | done |
 | F05 | Receipt print, allocation dates | G-07, G-14 | done |
-| F06 | Sales posting guards | G-05, G-13, G-15 | pending |
+| F06 | Sales posting guards | G-05, G-13, G-15 | done |
 | F07 | Journal core hardening | G-06, G-19, G-20 | done |
 | F08 | Trial balance and inputs | G-08, G-21 | pending |
 | F09 | Stored numbers, payment list | G-17, G-18 | pending |

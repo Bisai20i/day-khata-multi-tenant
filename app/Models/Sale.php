@@ -12,6 +12,7 @@ use App\Support\Billing\LineTotals;
 use App\Support\Money\Money;
 use App\Support\Money\Quantity;
 use App\Support\SettlementNarration;
+use Carbon\CarbonImmutable;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
@@ -310,7 +311,7 @@ class Sale extends Model
             $agentId = $data['agent_id'] ?? null;
             $agent = $agentId ? Agent::findOrFail($agentId) : null;
 
-            static::assertStockAvailable($preparedLines, $totals, $storeId, $settings);
+            static::assertStockAvailable($preparedLines, $totals, $storeId, $settings, CarbonImmutable::parse($data['date'])->toDateString());
 
             $tdsAccountId = $data['tds_account_id'] ?? null;
 
@@ -577,7 +578,7 @@ class Sale extends Model
      *
      * @param  array<int, array<string, mixed>>  $preparedLines
      */
-    private static function assertStockAvailable(array $preparedLines, DocumentTotals $totals, int $storeId, CompanySetting $settings): void
+    private static function assertStockAvailable(array $preparedLines, DocumentTotals $totals, int $storeId, CompanySetting $settings, string $saleDate): void
     {
         if ($settings->allow_negative_stock) {
             return;
@@ -613,7 +614,10 @@ class Sale extends Model
 
         foreach ($requestedByItem as $itemId => $requested) {
             $item = $locked[$itemId];
-            $available = $item->currentStock($storeId);
+            // The least stock on any day from the sale date onwards, not
+            // today's: a back-dated sale must not drive a later day negative
+            // (flags G-05). For a sale dated today this is today's stock.
+            $available = $item->lowestStockFrom($saleDate, $storeId);
 
             if ($available->isLessThan($requested)) {
                 $shortages[] = "{$item->name} (available {$available->formatQuantity()}, requested {$requested->formatQuantity()})";
@@ -638,6 +642,12 @@ class Sale extends Model
 
         if ($commission->isNegative()) {
             throw new InvalidArgumentException('Commission amount cannot be negative.');
+        }
+
+        // A commission is owed to someone: with no agent it would sit on the
+        // sale with nobody to pay it to (flags G-15).
+        if ($commission->isPositive() && empty($data['agent_id'])) {
+            throw new InvalidArgumentException('Choose the sales agent the commission is for.');
         }
 
         if ($commission->isPositive() && $total->isPositive() && $commission->isGreaterThan($total->multipliedBy(5))) {

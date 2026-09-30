@@ -106,7 +106,8 @@ class PurchaseReturnController extends Controller
             'date' => ['required', 'date'],
             'reason' => ['nullable', 'string', 'max:255'],
             'refund_account_id' => ['nullable', 'exists:accounts,id', new AccountUnderHead('Assets')],
-            'store_id' => ['nullable', 'integer', 'exists:stores,id'],
+            // Retired stores and items cannot take new documents (flags G-13).
+            'store_id' => ['nullable', 'integer', Rule::exists('stores', 'id')->where('is_active', true)],
             'lines' => ['required', 'array', 'min:1'],
             // `distinct` plus the model's own per-line aggregation: naming the
             // same purchase line twice in one payload used to slip past the
