@@ -81,12 +81,14 @@ postRefund() and Receipt::post() balances by construction, and JournalVoucher::v
 - Fix: `Rule::exists(...)->where('is_active', true)` for items and stores.
 
 ### SAL-10 (P2) Receipt allocations are not date-checked against the sale
+- **FIXED** (2026-09-29, F05): Receipt::post and PaymentController/ReceiptController refuse an allocation to a document dated after the receipt or payment (field error on the row); receipts and payments keep a bank account only in bank mode. Tests: tests/Feature/Tenant/Sales/ReceiptPrintAndAllocationDateTest.php.
 - File: app/Models/Receipt.php:242-269 (prepareAllocations)
 - Wrong: a receipt dated before an invoice can be allocated to it (returns get this check per C6, receipts do not),
   so ageing and statements can show a payment before its invoice.
 - Fix: require `receipt.date >= sale.date` per allocation.
 
 ### SAL-11 (P2) Receipts have no print action and no C9 stamp
+- **FIXED** (2026-09-29, F05): GET receipts/{receipt}/print (pdf/receipt) with PrintLog copies, allocations, on-account remainder, amount in words and cancel details; Print on every receipt row. Tests: tests/Feature/Tenant/Sales/ReceiptPrintAndAllocationDateTest.php.
 - File: routes/tenant-receipts.php (no print route), ReceiptController.php
 - Wrong: C9 says every document print() logs a copy number and prints BS date and fiscal year. Sales, credit notes and
   capital sales comply; receipts cannot be printed at all.

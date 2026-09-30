@@ -4,15 +4,23 @@ namespace App\Http\Controllers\Tenant\Sales;
 
 use App\Http\Controllers\Controller;
 use App\Models\Account;
+use App\Models\CompanySetting;
 use App\Models\Customer;
+use App\Models\PrintLog;
 use App\Models\Receipt;
 use App\Models\Sale;
 use App\Models\SalesReturn;
+use App\Support\AmountInWords;
 use App\Support\Money\Money;
+use App\Support\NepaliCalendar;
+use Barryvdh\DomPDF\Facade\Pdf;
 use Illuminate\Auth\Access\AuthorizationException;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
+use Illuminate\Http\Response as HttpResponse;
+use Illuminate\Support\Carbon;
 use Illuminate\Validation\Rule;
+use Illuminate\Validation\ValidationException;
 use Inertia\Inertia;
 use Inertia\Response;
 use InvalidArgumentException;
@@ -84,6 +92,8 @@ class ReceiptController extends Controller
             'allocations.*.amount' => ['required_with:allocations', 'numeric', 'decimal:0,2', 'min:0.01'],
         ]);
 
+        $this->assertAllocationsNotBefore($data);
+
         try {
             Receipt::post($data, $request->user());
         } catch (InvalidArgumentException|AuthorizationException $e) {
@@ -91,6 +101,39 @@ class ReceiptController extends Controller
         }
 
         return redirect()->route('tenant.receipts.index')->with('status', 'Receipt recorded.');
+    }
+
+    /**
+     * Printable money receipt (flags G-07): number, customer, how the money
+     * came in, the invoices it settles and the amount in words. Every print is
+     * logged, so a reprint says "Copy of Original" (CONTRACTS C9). The
+     * receipt's number is its voucher number, the same one the customer's
+     * ledger shows against it.
+     */
+    public function print(Request $request, Receipt $receipt): HttpResponse
+    {
+        $receipt->load([
+            'customer', 'bankAccount', 'journalVoucher.fiscalYear', 'canceller:id,name',
+            'allocations.sale:id,invoice_number,date,total',
+        ]);
+
+        $documentDate = $receipt->date->toDateString();
+        $amount = Money::of($receipt->amount);
+        $voucherNumber = $receipt->journalVoucher?->voucher_number;
+
+        return Pdf::loadView('pdf.receipt', [
+            'receipt' => $receipt,
+            'company' => CompanySetting::current(),
+            'documentNumber' => $voucherNumber !== null ? "Receipt #{$voucherNumber}" : "#{$receipt->id}",
+            'documentDate' => $documentDate,
+            'amount' => $amount,
+            'allocated' => Money::sum($receipt->allocations->map(fn ($allocation) => Money::of($allocation->amount))),
+            'copyNumber' => PrintLog::record($receipt, $request->user()),
+            'dateAd' => $documentDate,
+            'dateBs' => NepaliCalendar::formatBs($documentDate),
+            'fiscalYearName' => $receipt->journalVoucher?->fiscalYear?->name,
+            'amountInWords' => AmountInWords::rupees($amount),
+        ])->stream("receipt-{$receipt->id}.pdf");
     }
 
     public function cancel(Request $request, Receipt $receipt): RedirectResponse
@@ -106,5 +149,41 @@ class ReceiptController extends Controller
         }
 
         return redirect()->route('tenant.receipts.index')->with('status', 'Receipt cancelled.');
+    }
+
+    /**
+     * Puts "dated after this receipt" on the allocation row itself, so the
+     * user sees which invoice is wrong (flags G-14). The model re-checks the
+     * same rule under its lock.
+     *
+     * @param  array<string, mixed>  $data
+     */
+    private function assertAllocationsNotBefore(array $data): void
+    {
+        $allocations = $data['allocations'] ?? [];
+
+        if ($allocations === []) {
+            return;
+        }
+
+        $date = Carbon::parse($data['date'])->toDateString();
+        $documentDates = Sale::query()
+            ->whereIn('id', array_column($allocations, 'sale_id'))
+            ->get(['id', 'date'])
+            ->mapWithKeys(fn (Sale $document) => [$document->id => $document->date->toDateString()]);
+
+        $errors = [];
+
+        foreach ($allocations as $index => $allocation) {
+            $documentDate = $documentDates->get((int) $allocation['sale_id']);
+
+            if ($documentDate !== null && $documentDate > $date) {
+                $errors["allocations.{$index}.sale_id"] = "This invoice is dated {$documentDate}, after this receipt ({$date}).";
+            }
+        }
+
+        if ($errors !== []) {
+            throw ValidationException::withMessages($errors);
+        }
     }
 }

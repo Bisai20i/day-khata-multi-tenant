@@ -77,6 +77,7 @@ C3, C4, C5, C6, C10 rather than line by line.
 - Fix: paginate payments; compute outstanding in SQL or restrict to the chosen supplier.
 
 ### PUR-08 (P2) Payment date not compared to bill date; cash mode stores a stray bank account
+- **FIXED** (2026-09-29, F05): payment allocations dated before the bill are refused; a cash payment stores no bank account. Tests: tests/Feature/Tenant/Sales/ReceiptPrintAndAllocationDateTest.php.
 - File: Payment.php:112-158, PaymentController.php:48.
 - Wrong: a payment allocated to a bill can be dated before that bill; for payment_mode=cash a submitted bank_account_id
   is persisted on the row although the voucher credits cash (AS1).

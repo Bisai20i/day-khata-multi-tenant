@@ -151,11 +151,11 @@ Owned: new route in `routes/tenant-purchase.php` (coordinator adds), `CapitalPur
 ### F05 Receipts: print, allocation dates; payments: allocation dates, stray bank id (G-07, G-14)
 Owned: `routes/tenant-receipts.php` (coordinator adds), `ReceiptController.php`, `Receipt.php`,
 `Payment.php`, new `resources/views/pdf/receipt.blade.php`, receipts page, tests.
-- [ ] 1. `GET receipts/{receipt}/print` with `PrintLog::record()`: receipt number, customer, mode, bank,
+- [x] 1. `GET receipts/{receipt}/print` with `PrintLog::record()`: receipt number, customer, mode, bank,
   allocations per invoice, amount in words, Cancelled marker. Print action on the receipts page. Tests.
-- [ ] 2. Reject an allocation when the receipt date is before the sale date, and a payment allocation dated
+- [x] 2. Reject an allocation when the receipt date is before the sale date, and a payment allocation dated
   before the bill date (field error on the allocation row). Tests for both.
-- [ ] 3. `Payment::post` stores `bank_account_id = null` unless the mode is bank or partial. Test.
+- [x] 3. `Payment::post` stores `bank_account_id = null` unless the mode is bank or partial. Test.
 
 ### F06 Sales posting guards (G-05, G-13, G-15)
 Owned: `Sale.php` (stock check and `validatedCommission` only), `SaleController.php` (rules only),
@@ -220,7 +220,7 @@ Owned: `JournalVoucher.php` (after F07) and the nine callers listed in G-22, tes
 | F02 | Unlinked purchase return form | G-10, G-16 | done |
 | F03 | Capital posting | G-03, G-04, G-23 | done |
 | F04 | Capital view and print | G-01, G-11 | done |
-| F05 | Receipt print, allocation dates | G-07, G-14 | pending |
+| F05 | Receipt print, allocation dates | G-07, G-14 | done |
 | F06 | Sales posting guards | G-05, G-13, G-15 | pending |
 | F07 | Journal core hardening | G-06, G-19, G-20 | pending |
 | F08 | Trial balance and inputs | G-08, G-21 | pending |

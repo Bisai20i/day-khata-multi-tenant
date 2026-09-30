@@ -94,6 +94,38 @@ const allocationErrors = computed(() =>
         .map((sale) => sale.id),
 );
 
+/**
+ * A receipt cannot settle an invoice dated after it (flags G-14). Dates are
+ * plain YYYY-MM-DD strings, so string order is date order. The server
+ * refuses the same thing; this says so on the row before the form is sent.
+ */
+function isDatedAfterReceipt(sale) {
+    return !!form.date && sale.date > form.date;
+}
+
+const datedAfterReceiptIds = computed(() =>
+    allocations.value.filter((allocation) => {
+        const sale = customerSales.value.find((candidate) => candidate.id === allocation.sale_id);
+        return sale && isDatedAfterReceipt(sale);
+    }).map((allocation) => allocation.sale_id),
+);
+
+/** Server field errors come back keyed by position in `allocations`; map them to the invoice row. */
+const serverRowErrors = computed(() => {
+    const bySaleId = {};
+
+    for (const [key, message] of Object.entries(form.errors)) {
+        const match = /^allocations\.(\d+)\./.exec(key);
+        const allocation = match ? allocations.value[Number(match[1])] : null;
+
+        if (allocation) {
+            bySaleId[allocation.sale_id] = message;
+        }
+    }
+
+    return bySaleId;
+});
+
 const totalAllocated = computed(() => {
     let total = '0.00';
 
@@ -121,6 +153,7 @@ const canSubmit = computed(
         && receiptAmount.value !== null
         && compareMoney(receiptAmount.value, '0.00') > 0
         && allocationErrors.value.length === 0
+        && datedAfterReceiptIds.value.length === 0
         && !overAllocated.value,
 );
 
@@ -226,6 +259,12 @@ function submit() {
                             placeholder="0.00"
                             @update:model-value="(v) => (allocationAmounts[sale.id] = v)"
                         />
+                        <p
+                            v-if="serverRowErrors[sale.id] || (datedAfterReceiptIds.includes(sale.id))"
+                            class="col-span-5 text-xs text-danger"
+                        >
+                            {{ serverRowErrors[sale.id] ?? 'This invoice is dated after the receipt, so this receipt cannot settle it.' }}
+                        </p>
                     </div>
                 </div>
 

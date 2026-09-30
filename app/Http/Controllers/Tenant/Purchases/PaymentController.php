@@ -11,7 +11,9 @@ use App\Rules\AccountUnderHead;
 use App\Support\Money\Money;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Carbon;
 use Illuminate\Support\Collection;
+use Illuminate\Validation\ValidationException;
 use Inertia\Inertia;
 use Inertia\Response;
 use InvalidArgumentException;
@@ -56,6 +58,8 @@ class PaymentController extends Controller
             'allocations.*.purchase_id' => ['required_with:allocations', 'distinct', 'exists:purchases,id'],
             'allocations.*.amount' => ['required_with:allocations', 'numeric', 'min:0.01', 'decimal:0,2'],
         ]);
+
+        $this->assertAllocationsNotBefore($data);
 
         try {
             Payment::post($data, $request->user());
@@ -109,5 +113,41 @@ class PaymentController extends Controller
             ])
             ->filter(fn (array $row): bool => Money::of($row['outstanding'])->isPositive())
             ->values();
+    }
+
+    /**
+     * Puts "dated after this payment" on the allocation row itself, so the
+     * user sees which invoice is wrong (flags G-14). The model re-checks the
+     * same rule under its lock.
+     *
+     * @param  array<string, mixed>  $data
+     */
+    private function assertAllocationsNotBefore(array $data): void
+    {
+        $allocations = $data['allocations'] ?? [];
+
+        if ($allocations === []) {
+            return;
+        }
+
+        $date = Carbon::parse($data['date'])->toDateString();
+        $documentDates = Purchase::query()
+            ->whereIn('id', array_column($allocations, 'purchase_id'))
+            ->get(['id', 'date'])
+            ->mapWithKeys(fn (Purchase $document) => [$document->id => $document->date->toDateString()]);
+
+        $errors = [];
+
+        foreach ($allocations as $index => $allocation) {
+            $documentDate = $documentDates->get((int) $allocation['purchase_id']);
+
+            if ($documentDate !== null && $documentDate > $date) {
+                $errors["allocations.{$index}.purchase_id"] = "This bill is dated {$documentDate}, after this payment ({$date}).";
+            }
+        }
+
+        if ($errors !== []) {
+            throw ValidationException::withMessages($errors);
+        }
     }
 }

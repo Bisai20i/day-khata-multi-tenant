@@ -7,6 +7,7 @@ use App\Enums\VoucherType;
 use App\Support\ClosedFiscalYearGuard;
 use App\Support\Money\Money;
 use App\Support\SettlementNarration;
+use Carbon\CarbonImmutable;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
@@ -161,7 +162,7 @@ class Receipt extends Model
                 throw new InvalidArgumentException("Unknown payment mode: {$paymentMode}");
             }
 
-            $preparedAllocations = static::prepareAllocations($data['allocations'] ?? [], $customer);
+            $preparedAllocations = static::prepareAllocations($data['allocations'] ?? [], $customer, CarbonImmutable::parse($data['date'])->toDateString());
             $allocatedTotal = Money::sum(array_column($preparedAllocations, 'amount'));
 
             if ($allocatedTotal->isGreaterThan($amount)) {
@@ -195,7 +196,8 @@ class Receipt extends Model
                 'date' => $data['date'],
                 'amount' => $amount,
                 'payment_mode' => $paymentMode,
-                'bank_account_id' => $data['bank_account_id'] ?? null,
+                // Only a bank receipt names a bank account (flags G-14).
+                'bank_account_id' => $data['payment_mode'] === 'bank' ? ($data['bank_account_id'] ?? null) : null,
                 'reference_number' => $data['reference_number'] ?? null,
                 'narration' => $data['narration'] ?? null,
                 'status' => 'posted',
@@ -222,7 +224,7 @@ class Receipt extends Model
      * @param  array<int, array{sale_id: int, amount: string|float}>  $allocations
      * @return list<array{sale_id: int, amount: Money}>
      */
-    private static function prepareAllocations(array $allocations, Customer $customer): array
+    private static function prepareAllocations(array $allocations, Customer $customer, string $receiptDate): array
     {
         $bySale = [];
 
@@ -259,6 +261,15 @@ class Receipt extends Model
 
             if ($sale->status === 'cancelled') {
                 throw new InvalidArgumentException('Cannot allocate a receipt to a cancelled sale.');
+            }
+
+            // Money cannot settle an invoice that did not exist yet (flags
+            // G-14): a receipt dated before the sale would age the customer's
+            // balance wrongly and put the settlement in an earlier period.
+            if ($sale->date->toDateString() > $receiptDate) {
+                throw new InvalidArgumentException(
+                    "Invoice {$sale->invoice_number} is dated {$sale->date->toDateString()}, after this receipt ({$receiptDate})."
+                );
             }
 
             $outstanding = Money::of($sale->outstandingAmount());

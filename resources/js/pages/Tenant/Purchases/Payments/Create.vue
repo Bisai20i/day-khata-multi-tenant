@@ -78,6 +78,36 @@ const validAllocations = computed(() =>
 
 const totalAllocated = computed(() => sumMoney(validAllocations.value.map((row) => row.amount)));
 
+/**
+ * A payment cannot settle a bill dated after it (flags G-14). Dates are plain
+ * YYYY-MM-DD strings, so string order is date order; the server refuses the
+ * same thing and this says so on the row first.
+ */
+const datedAfterPaymentIds = computed(() =>
+    validAllocations.value
+        .filter((allocation) => {
+            const purchase = supplierPurchases.value.find((candidate) => candidate.id === allocation.purchase_id);
+            return purchase && !!form.date && purchase.date > form.date;
+        })
+        .map((allocation) => allocation.purchase_id),
+);
+
+/** Server field errors come back keyed by position in `allocations`; map them to the bill row. */
+const serverRowErrors = computed(() => {
+    const byPurchaseId = {};
+
+    for (const [key, message] of Object.entries(form.errors)) {
+        const match = /^allocations\.(\d+)\./.exec(key);
+        const allocation = match ? validAllocations.value[Number(match[1])] : null;
+
+        if (allocation) {
+            byPurchaseId[allocation.purchase_id] = message;
+        }
+    }
+
+    return byPurchaseId;
+});
+
 const paymentAmount = computed(() => {
     const parsed = parseMoney(form.amount);
 
@@ -191,6 +221,9 @@ function submit() {
                             placeholder="0.00"
                             :aria-label="`Amount to apply to bill ${purchase.bill_number ? purchase.bill_number : `Purchase #${purchase.id}`}`"
                         />
+                        <p v-if="serverRowErrors[purchase.id] || datedAfterPaymentIds.includes(purchase.id)" class="col-span-5 text-xs text-danger">
+                            {{ serverRowErrors[purchase.id] ?? 'This bill is dated after the payment, so this payment cannot settle it.' }}
+                        </p>
                     </div>
                 </div>
 
@@ -211,7 +244,7 @@ function submit() {
                     tone="purple"
                     type="submit"
                     :loading="form.processing"
-                    :disabled="form.processing || !form.supplier_id || overAllocated"
+                    :disabled="form.processing || !form.supplier_id || overAllocated || datedAfterPaymentIds.length > 0"
                 >
                     Record payment
                 </Button>

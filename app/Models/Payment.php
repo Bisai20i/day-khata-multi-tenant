@@ -6,6 +6,7 @@ use App\Casts\Decimal;
 use App\Enums\VoucherType;
 use App\Support\Money\Money;
 use App\Support\SettlementNarration;
+use Carbon\CarbonImmutable;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
@@ -120,7 +121,7 @@ class Payment extends Model
             }
 
             $settlementAccountId = static::settlementAccountId($data);
-            $allocations = static::preparedAllocations($data['allocations'] ?? [], $supplier);
+            $allocations = static::preparedAllocations($data['allocations'] ?? [], $supplier, CarbonImmutable::parse($data['date'])->toDateString());
 
             $allocatedTotal = Money::sum(array_map(
                 static fn (array $allocation): Money => $allocation['amount'],
@@ -149,7 +150,10 @@ class Payment extends Model
                 'date' => $data['date'],
                 'amount' => $amount,
                 'payment_mode' => $data['payment_mode'],
-                'bank_account_id' => $data['bank_account_id'] ?? null,
+                // Only a bank payment names a bank account; a stray id sent
+                // with a cash payment would show a bank on a cash payment
+                // (flags G-14).
+                'bank_account_id' => $data['payment_mode'] === 'bank' ? ($data['bank_account_id'] ?? null) : null,
                 'reference_number' => $data['reference_number'] ?? null,
                 'narration' => $data['narration'] ?? null,
                 'status' => 'posted',
@@ -238,7 +242,7 @@ class Payment extends Model
      * @param  array<int, array{purchase_id: int, amount: mixed}>  $allocations
      * @return list<array{purchase_id: int, amount: Money}>
      */
-    private static function preparedAllocations(array $allocations, Supplier $supplier): array
+    private static function preparedAllocations(array $allocations, Supplier $supplier, string $paymentDate): array
     {
         /** @var array<int, Money> $byPurchase */
         $byPurchase = [];
@@ -281,6 +285,13 @@ class Payment extends Model
 
             if ($purchase->status !== 'posted') {
                 throw new InvalidArgumentException('Cannot allocate a payment to a cancelled purchase.');
+            }
+
+            // A payment cannot settle a bill received after it (flags G-14).
+            if ($purchase->date->toDateString() > $paymentDate) {
+                throw new InvalidArgumentException(
+                    "Bill #{$purchase->id} is dated {$purchase->date->toDateString()}, after this payment ({$paymentDate})."
+                );
             }
 
             $outstanding = $purchase->outstandingAmount();

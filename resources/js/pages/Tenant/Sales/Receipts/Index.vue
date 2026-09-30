@@ -1,7 +1,7 @@
 <script setup>
 import { computed, h, ref, watch } from 'vue';
 import { Link, useForm, usePage } from '@inertiajs/vue3';
-import { Plus } from '@lucide/vue';
+import { Plus, Printer } from '@lucide/vue';
 import AppLayout from '@/layouts/AppLayout.vue';
 import { useLayoutChrome } from '@/composables/useLayoutChrome';
 import Card from '@/components/ui/Card.vue';
@@ -117,18 +117,33 @@ const columns = [
         header: 'Actions',
         numeric: false,
         cell: ({ row }) =>
-            // Cancelling reverses money already collected, so the route is
-            // admin-only (C5) - do not offer a button that would 403.
-            row.original.status === 'posted' && isAdmin.value
-                ? h(Button, {
-                      variant: 'secondary',
-                      tone: 'purple',
-                      type: 'button',
-                      title: 'Cancel this receipt (posts a reversing entry)',
-                      'aria-label': `Cancel receipt from ${row.original.customer?.name ?? 'customer'}`,
-                      onClick: () => openCancel(row.original),
-                  }, () => 'Cancel receipt')
-                : '-',
+            h('div', { class: 'flex items-center gap-2' }, [
+                // Every receipt prints, live or cancelled (flags G-07).
+                h(
+                    'a',
+                    {
+                        href: `/receipts/${row.original.id}/print`,
+                        target: '_blank',
+                        rel: 'noopener',
+                        title: 'Print this receipt',
+                        class: 'flex h-[26px] w-[26px] items-center justify-center bg-bg-subtle text-text-faint transition-colors duration-150 hover:bg-primary-tint hover:text-primary',
+                        'aria-label': `Print receipt from ${row.original.customer?.name ?? 'customer'}`,
+                    },
+                    [h(Printer, { class: 'h-[13px] w-[13px]' })],
+                ),
+                // Cancelling reverses money already collected, so the route is
+                // admin-only (C5) - do not offer a button that would 403.
+                row.original.status === 'posted' && isAdmin.value
+                    ? h(Button, {
+                          variant: 'secondary',
+                          tone: 'purple',
+                          type: 'button',
+                          title: 'Cancel this receipt (posts a reversing entry)',
+                          'aria-label': `Cancel receipt from ${row.original.customer?.name ?? 'customer'}`,
+                          onClick: () => openCancel(row.original),
+                      }, () => 'Cancel receipt')
+                    : null,
+            ]),
     },
 ];
 </script>
