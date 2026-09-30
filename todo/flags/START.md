@@ -188,10 +188,10 @@ actions only), trial balance page, tests.
 ### F09 Purchase numbers and payment list performance (G-17, G-18)
 Owned: `Purchase.php`, `Payment.php` (post only, after F05), `PaymentController.php`, `PurchaseController.php`
 (print only, after F02), new migration, payments page, tests.
-- [ ] 1. Add `purchases.purchase_number` and `payments.payment_number` (plus `payments.fiscal_year_id`), filled
+- [x] 1. Add `purchases.purchase_number` and `payments.payment_number` (plus `payments.fiscal_year_id`), filled
   in `post()`, backfilled from the voucher (idempotent), unique per fiscal year. Print, list and export read the
   stored number; no `{prefix}-{id}` fallback.
-- [ ] 2. Paginate the payments index; compute outstanding purchases only for the chosen supplier (lazy prop or
+- [x] 2. Paginate the payments index; compute outstanding purchases only for the chosen supplier (lazy prop or
   a supplier filter) with one grouped query instead of `outstandingAmount()` per row. Test the query count.
 
 ### F10 Narration without bulk line updates (G-22)
@@ -224,7 +224,7 @@ Owned: `JournalVoucher.php` (after F07) and the nine callers listed in G-22, tes
 | F06 | Sales posting guards | G-05, G-13, G-15 | done |
 | F07 | Journal core hardening | G-06, G-19, G-20 | done |
 | F08 | Trial balance and inputs | G-08, G-21 | pending |
-| F09 | Stored numbers, payment list | G-17, G-18 | pending |
+| F09 | Stored numbers, payment list | G-17, G-18 | done |
 | F10 | Narration without bulk updates | G-22 | pending |
 
 When a chunk lands, also mark its flags FIXED in the matching `flags/*.md` file and update `flags/README.md`.

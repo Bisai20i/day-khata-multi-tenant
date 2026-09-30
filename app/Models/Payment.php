@@ -34,7 +34,7 @@ use InvalidArgumentException;
  */
 #[Fillable([
     'supplier_id', 'date', 'amount', 'payment_mode', 'bank_account_id',
-    'reference_number', 'narration', 'status', 'journal_voucher_id',
+    'reference_number', 'narration', 'status', 'journal_voucher_id', 'fiscal_year_id', 'payment_number',
     'created_by', 'cancelled_at', 'cancelled_by', 'cancel_reason', 'reversal_journal_voucher_id',
 ])]
 class Payment extends Model
@@ -158,6 +158,10 @@ class Payment extends Model
                 'narration' => $data['narration'] ?? null,
                 'status' => 'posted',
                 'journal_voucher_id' => $voucher->id,
+                'fiscal_year_id' => $voucher->fiscal_year_id,
+                // Stored once, in the format payments have always shown in
+                // (flags G-18).
+                'payment_number' => "PMT-{$voucher->voucher_number}",
                 'created_by' => $actor->id,
             ]);
 
@@ -171,7 +175,7 @@ class Payment extends Model
             // Every line of this voucher carries the same compact narration
             // (item 10), so the supplier's ledger reads "PMT-7 - Cash
             // Settlement" instead of a bare "Settlement"/"Amount paid".
-            $documentNumber = "PMT-{$voucher->voucher_number}";
+            $documentNumber = $payment->payment_number;
             $voucher->lines()->update([
                 'narration' => SettlementNarration::line($documentNumber, $data['payment_mode']),
             ]);

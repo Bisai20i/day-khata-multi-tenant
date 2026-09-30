@@ -297,6 +297,13 @@ const columns = [
         cell: ({ row }) => formatBsDate(row.original.date),
     },
     {
+        // Our own number for the bill, stored at posting (flags G-18).
+        id: 'purchase_number',
+        header: 'Purchase #',
+        numeric: false,
+        cell: ({ row }) => row.original.purchase_number ?? '-',
+    },
+    {
         id: 'bill_number',
         header: sortableHeader('bill_number', 'Supplier bill #'),
         numeric: false,

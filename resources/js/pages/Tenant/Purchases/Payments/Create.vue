@@ -1,6 +1,6 @@
 <script setup>
 import { computed, reactive, watch } from 'vue';
-import { useForm } from '@inertiajs/vue3';
+import { router, useForm } from '@inertiajs/vue3';
 import Card from '@/components/ui/Card.vue';
 import PageHeader from '@/components/ui/PageHeader.vue';
 import Button from '@/components/ui/Button.vue';
@@ -55,8 +55,14 @@ const allocationAmounts = reactive({});
 
 watch(
     () => form.supplier_id,
-    () => {
+    (supplierId) => {
         for (const key of Object.keys(allocationAmounts)) delete allocationAmounts[key];
+
+        // The open bills are fetched for the chosen supplier only (flags
+        // G-17); the page no longer ships every posted bill up front.
+        if (supplierId) {
+            router.reload({ only: ['outstandingPurchases'], data: { supplier_id: supplierId } });
+        }
     },
 );
 
@@ -208,7 +214,7 @@ function submit() {
                     >
                         <span class="text-sm text-text-base">{{ formatBsDate(purchase.date) }}</span>
                         <span class="text-sm text-text-base">
-                            {{ purchase.bill_number ? purchase.bill_number : `Purchase #${purchase.id}` }}
+                            {{ purchase.bill_number ? purchase.bill_number : (purchase.purchase_number ?? `Purchase #${purchase.id}`) }}
                         </span>
                         <span class="text-sm text-text-base">{{ formatMoney(purchase.total) }}</span>
                         <span class="text-sm text-text-base">{{ formatMoney(purchase.outstanding) }}</span>
@@ -219,7 +225,7 @@ function submit() {
                             :max="purchase.outstanding"
                             step="0.01"
                             placeholder="0.00"
-                            :aria-label="`Amount to apply to bill ${purchase.bill_number ? purchase.bill_number : `Purchase #${purchase.id}`}`"
+                            :aria-label="`Amount to apply to bill ${purchase.bill_number ? purchase.bill_number : (purchase.purchase_number ?? `Purchase #${purchase.id}`)}`"
                         />
                         <p v-if="serverRowErrors[purchase.id] || datedAfterPaymentIds.includes(purchase.id)" class="col-span-5 text-xs text-danger">
                             {{ serverRowErrors[purchase.id] ?? 'This bill is dated after the payment, so this payment cannot settle it.' }}

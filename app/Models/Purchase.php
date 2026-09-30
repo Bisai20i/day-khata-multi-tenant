@@ -14,6 +14,7 @@ use App\Support\SettlementNarration;
 use Brick\Math\RoundingMode;
 use Illuminate\Auth\Access\AuthorizationException;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
+use Illuminate\Database\Eloquent\Collection as EloquentCollection;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
@@ -43,7 +44,7 @@ use InvalidArgumentException;
  * (CONTRACTS C3, C10; audit P0-1, P0-4, P0-17).
  */
 #[Fillable([
-    'supplier_id', 'store_id', 'journal_voucher_id', 'fiscal_year_id', 'bill_number', 'bill_number_key', 'pan_number',
+    'supplier_id', 'store_id', 'journal_voucher_id', 'fiscal_year_id', 'purchase_number', 'bill_number', 'bill_number_key', 'pan_number',
     'chalani_number', 'date', 'payment_mode', 'bank_account_id', 'discount', 'discount_type', 'taxable_amount',
     'nontaxable_amount', 'vat_rate', 'force_non_taxable', 'vat_amount', 'total', 'cash_amount',
     'bank_amount', 'tds_account_id', 'tds_rate', 'tds_amount', 'narration', 'status',
@@ -181,26 +182,54 @@ class Purchase extends Model
      */
     public function outstandingAmount(): Money
     {
-        $outstanding = Money::of($this->total)
-            ->minus(Money::of($this->tds_amount ?? '0'))
-            ->minus($this->settledAtPosting());
+        return static::outstandingAmounts(new EloquentCollection([$this]))[$this->id];
+    }
 
-        foreach ($this->returns()->where('status', 'posted')->get() as $return) {
-            $outstanding = $outstanding->minus($return->supplierCredit());
+    /**
+     * outstandingAmount() for many bills in two queries in total, not two per
+     * bill: the payments page listed every posted purchase and asked each one
+     * separately (flags G-17). Same rule as always: the amount due after TDS,
+     * less what was paid at posting, less the supplier credit of each live
+     * return that has not been refunded in cash, less live payment
+     * allocations.
+     *
+     * @param  EloquentCollection<int, static>  $purchases
+     * @return array<int, Money>
+     */
+    public static function outstandingAmounts(EloquentCollection $purchases): array
+    {
+        $ids = $purchases->modelKeys();
 
-            if ($return->refund_journal_voucher_id !== null) {
-                $outstanding = $outstanding->plus($return->supplierCredit());
-            }
+        if ($ids === []) {
+            return [];
         }
 
-        $allocated = Money::sum(
-            $this->paymentAllocations()
-                ->whereHas('payment', fn ($query) => $query->where('status', '!=', 'cancelled'))
-                ->pluck('amount')
-                ->map(fn (string $amount): Money => Money::of($amount))
-        );
+        $returnCredits = PurchaseReturn::query()
+            ->whereIn('purchase_id', $ids)
+            ->where('status', 'posted')
+            ->whereNull('refund_journal_voucher_id')
+            ->get(['id', 'purchase_id', 'total', 'tds_amount'])
+            ->groupBy('purchase_id')
+            ->map(fn ($returns) => Money::sum($returns->map(fn (PurchaseReturn $return): Money => $return->supplierCredit())));
 
-        return $outstanding->minus($allocated);
+        $allocated = PaymentAllocation::query()
+            ->whereIn('purchase_id', $ids)
+            ->whereHas('payment', fn ($query) => $query->where('status', '!=', 'cancelled'))
+            ->get(['purchase_id', 'amount'])
+            ->groupBy('purchase_id')
+            ->map(fn ($allocations) => Money::sum($allocations->map(fn (PaymentAllocation $allocation): Money => Money::of($allocation->amount))));
+
+        $outstanding = [];
+
+        foreach ($purchases as $purchase) {
+            $outstanding[$purchase->id] = Money::of($purchase->total)
+                ->minus(Money::of($purchase->tds_amount ?? '0'))
+                ->minus($purchase->settledAtPosting())
+                ->minus($returnCredits->get($purchase->id) ?? Money::zero())
+                ->minus($allocated->get($purchase->id) ?? Money::zero());
+        }
+
+        return $outstanding;
     }
 
     /**
@@ -418,6 +447,10 @@ class Purchase extends Model
                 'store_id' => $storeId,
                 'journal_voucher_id' => $voucher->id,
                 'fiscal_year_id' => $targetFiscalYear->id,
+                // Stored once, in the format bills have always printed in, so
+                // a later prefix change never renumbers a printed bill
+                // (flags G-18).
+                'purchase_number' => "{$company->purchase_prefix}-{$voucher->voucher_number}",
                 'bill_number' => $billNumber,
                 'bill_number_key' => $billNumber,
                 'pan_number' => $data['pan_number'] ?? null,
@@ -498,7 +531,7 @@ class Purchase extends Model
             // posting - the document number is derived from this same
             // voucher's number, which does not exist before JournalVoucher::
             // post() returns.
-            $documentNumber = "{$company->purchase_prefix}-{$voucher->voucher_number}";
+            $documentNumber = $purchase->purchase_number;
             $voucher->lines()->update([
                 'narration' => SettlementNarration::line($documentNumber, $data['payment_mode']),
             ]);

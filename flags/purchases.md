@@ -57,6 +57,7 @@ C3, C4, C5, C6, C10 rather than line by line.
 - Fix: validate against active items and stores in the rule or in post().
 
 ### PUR-05 (P2) No stored, fiscal-year-qualified document number for purchases and payments
+- **FIXED** (2026-09-29, F09): purchases.purchase_number and payments.payment_number (plus payments.fiscal_year_id) stored at posting in the old printed format, backfilled by migration 2026_09_29_190000, unique per fiscal year; print, list and export read them. Tests: tests/Feature/Tenant/Purchases/StoredNumbersAndPaymentListTest.php.
 - Files: PurchaseController.php:253-255 (print derives "{prefix}-{voucher_number}" at render time, falls back to
   "{prefix}-{id}"); Payment.php:170 ("PMT-{voucher_number}" narration only, no column).
 - Wrong: C7 stores numbers at posting time for sales and returns; purchases and payments recompute from the voucher.
@@ -72,6 +73,7 @@ C3, C4, C5, C6, C10 rather than line by line.
 - Fix: require it on the HTTP path and test with `!== null` in the unlinked return.
 
 ### PUR-07 (P2) Payments index is unbounded and N+1
+- **FIXED** (2026-09-29, F09): payments index paginates (25); open bills load only for the chosen supplier (optional prop) via Purchase::outstandingAmounts() in two queries. Tests: tests/Feature/Tenant/Purchases/StoredNumbersAndPaymentListTest.php.
 - File: PaymentController.php:23-27, 93-111.
 - Wrong: ->get() of every payment ever made, and outstandingPurchases() loads every posted purchase and runs
   outstandingAmount() (several queries each) per row. Slows linearly with history.

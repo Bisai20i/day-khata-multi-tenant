@@ -20,14 +20,17 @@ use InvalidArgumentException;
 
 class PaymentController extends Controller
 {
-    public function index(): Response
+    public function index(Request $request): Response
     {
         return Inertia::render('Tenant/Purchases/Payments/Index', [
+            // Paginated like receipts (flags G-17): the whole payment history
+            // used to load on every visit.
             'payments' => Payment::query()
-                ->with(['supplier:id,name', 'allocations.purchase:id,total'])
+                ->with(['supplier:id,name', 'allocations:id,payment_id,amount'])
                 ->orderByDesc('date')
                 ->orderByDesc('id')
-                ->get(),
+                ->paginate(25)
+                ->withQueryString(),
             'suppliers' => Supplier::query()->orderBy('name')->get(['id', 'name']),
             // Money leaves through an asset account, so the bank picker only
             // offers accounts filed under Assets rather than the whole chart.
@@ -37,7 +40,10 @@ class PaymentController extends Controller
                     ->orWhereHas('subgroup.accountGroup.accountHead', fn ($q) => $q->where('name', 'Assets')))
                 ->orderBy('name')
                 ->get(['id', 'code', 'name']),
-            'outstandingPurchases' => $this->outstandingPurchases(),
+            // Only for the supplier being paid, and only when the form asks
+            // for it (a partial reload with supplier_id); it used to price
+            // every posted bill in the system on every page load.
+            'outstandingPurchases' => Inertia::optional(fn () => $this->outstandingPurchases($request->integer('supplier_id') ?: null)),
         ]);
     }
 
@@ -95,21 +101,31 @@ class PaymentController extends Controller
      *
      * @return Collection<int, array<string, mixed>>
      */
-    private function outstandingPurchases(): Collection
+    private function outstandingPurchases(?int $supplierId): Collection
     {
-        return Purchase::query()
+        if ($supplierId === null) {
+            return collect();
+        }
+
+        $purchases = Purchase::query()
             ->where('status', 'posted')
-            ->with(['returns', 'paymentAllocations.payment:id,status'])
+            ->where('supplier_id', $supplierId)
             ->orderBy('date')
             ->orderBy('id')
-            ->get()
+            ->get();
+
+        // Two queries for all of them, not two per bill (flags G-17).
+        $outstanding = Purchase::outstandingAmounts($purchases);
+
+        return $purchases
             ->map(fn (Purchase $purchase): array => [
                 'id' => $purchase->id,
                 'supplier_id' => $purchase->supplier_id,
                 'date' => $purchase->date->toDateString(),
+                'purchase_number' => $purchase->purchase_number,
                 'bill_number' => $purchase->bill_number,
                 'total' => $purchase->total,
-                'outstanding' => $purchase->outstandingAmount()->toString(),
+                'outstanding' => $outstanding[$purchase->id]->toString(),
             ])
             ->filter(fn (array $row): bool => Money::of($row['outstanding'])->isPositive())
             ->values();

@@ -38,6 +38,7 @@ class PurchaseListExport implements FromCollection, WithColumnFormatting, WithHe
             'sn' => null,
             'date' => null,
             'supplier' => 'Total',
+            'purchase_number' => null,
             'bill_number' => null,
             'payment_mode' => null,
             'total' => $this->total,
@@ -53,7 +54,7 @@ class PurchaseListExport implements FromCollection, WithColumnFormatting, WithHe
      */
     public function headings(): array
     {
-        return ['SN', 'Date (BS)', 'Date (AD)', 'Supplier', 'Bill #', 'Payment Mode', 'Total', 'Status', 'Cancelled on', 'Cancelled by', 'Reason'];
+        return ['SN', 'Date (BS)', 'Date (AD)', 'Purchase #', 'Supplier', 'Bill #', 'Payment Mode', 'Total', 'Status', 'Cancelled on', 'Cancelled by', 'Reason'];
     }
 
     /**
@@ -61,7 +62,7 @@ class PurchaseListExport implements FromCollection, WithColumnFormatting, WithHe
      */
     public function columnFormats(): array
     {
-        return ['G' => NumberFormat::FORMAT_NUMBER_00];
+        return ['H' => NumberFormat::FORMAT_NUMBER_00];
     }
 
     /**
@@ -74,6 +75,7 @@ class PurchaseListExport implements FromCollection, WithColumnFormatting, WithHe
             $row['sn'],
             $row['date'] === null ? '' : NepaliCalendar::formatBs($row['date']),
             $row['date'] ?? '',
+            $row['purchase_number'] ?? '',
             $row['supplier'] ?? '',
             $row['bill_number'] ?? '',
             $row['payment_mode'] ?? '',

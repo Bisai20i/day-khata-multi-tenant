@@ -12,6 +12,7 @@ import Tooltip from '@/components/ui/Tooltip.vue';
 import Input from '@/components/ui/Input.vue';
 import Modal from '@/components/ui/Modal.vue';
 import DataTable from '@/components/ui/DataTable.vue';
+import PaginatorNav from '@/components/ui/PaginatorNav.vue';
 import { useToast } from '@/composables/useToast';
 import { formatMoney, sumMoney } from '@/lib/money';
 import { formatBsDate } from '@/lib/format';
@@ -23,7 +24,11 @@ defineOptions({ layout: AppLayout });
 const { hasOpenFiscalYear } = useOpenFiscalYear();
 
 const props = defineProps({
-    payments: { type: Array, default: () => [] },
+    // A LengthAwarePaginator page (flags G-17).
+    payments: {
+        type: Object,
+        default: () => ({ data: [], current_page: 1, last_page: 1, total: 0, from: 0, to: 0, prev_page_url: null, next_page_url: null }),
+    },
     suppliers: { type: Array, default: () => [] },
     bankAccounts: { type: Array, default: () => [] },
     outstandingPurchases: { type: Array, default: () => [] },
@@ -84,6 +89,12 @@ const columns = [
         header: 'Date (BS)',
         numeric: false,
         cell: ({ row }) => `${formatBsDate(row.original.date)} (${String(row.original.date).slice(0, 10)})`,
+    },
+    {
+        id: 'payment_number',
+        header: 'Payment #',
+        numeric: false,
+        cell: ({ row }) => row.original.payment_number ?? '-',
     },
     {
         id: 'supplier',
@@ -158,7 +169,7 @@ const columns = [
             </PageHeader>
 
             <Card variant="panel">
-                <div v-if="payments.length === 0" class="py-10 text-center">
+                <div v-if="payments.data.length === 0" class="py-10 text-center">
                     <p class="text-sm font-semibold text-text-strong">No payments yet</p>
                     <p class="mt-1 text-sm text-text-muted">Record the first payment you made to a supplier.</p>
                     <Button v-if="hasOpenFiscalYear" class="mt-3" variant="primary" tone="purple" type="button" @click="showCreateForm = true">
@@ -166,7 +177,10 @@ const columns = [
                         New payment
                     </Button>
                 </div>
-                <DataTable v-else :columns="columns" :data="payments" :page-size="10" empty-message="No payments yet" />
+                <template v-else>
+                    <DataTable :columns="columns" :data="payments.data" :page-size="Math.max(payments.data.length, 1)" empty-message="No payments yet" />
+                    <PaginatorNav :paginator="payments" label="Payments pagination" />
+                </template>
             </Card>
         </template>
 

@@ -228,6 +228,7 @@ class PurchaseController extends Controller
         $rows = $purchases->values()->map(fn (Purchase $purchase, int $index): array => [
             'sn' => $index + 1,
             'date' => $purchase->date->toDateString(),
+            'purchase_number' => $purchase->purchase_number,
             'supplier' => $purchase->supplier?->name,
             'bill_number' => $purchase->bill_number,
             'payment_mode' => ucfirst((string) $purchase->payment_mode),
@@ -273,9 +274,9 @@ class PurchaseController extends Controller
 
         $company = CompanySetting::current();
 
-        $documentNumber = $purchase->journalVoucher
-            ? "{$company->purchase_prefix}-{$purchase->journalVoucher->voucher_number}"
-            : "{$company->purchase_prefix}-{$purchase->id}";
+        // The number stored when the bill was posted, so a later prefix change
+        // never renumbers a bill already printed (flags G-18).
+        $documentNumber = $purchase->purchase_number;
 
         return Pdf::loadView('pdf.purchase', [
             'purchase' => $purchase,
