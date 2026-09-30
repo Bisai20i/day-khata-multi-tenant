@@ -54,6 +54,8 @@ test('requesting a return posts no journal voucher and no stock movement', funct
     $tenant->run(function () {
         salesReturnWorkflowTestOpenFiscalYear();
         $admin = salesReturnWorkflowTestAdmin();
+        // No opening stock in this fixture; the stock guard is not under test.
+        CompanySetting::current()->update(['allow_negative_stock' => true]);
         $customer = Customer::factory()->create();
         $item = Item::factory()->create(['is_vatable' => true, 'is_stockable' => true]);
 
@@ -226,10 +228,15 @@ test('a pending request against the same sale blocks the sale from being cancell
     $tenant->delete();
 });
 
-function loginSalesReturnWorkflowTestUser(string $domain): void
+/**
+ * Logs out first: the login route is guest-only, so switching user without
+ * it would leave the previous user signed in.
+ */
+function loginSalesReturnWorkflowTestUser(string $domain, string $email = 'owner@example.com'): void
 {
+    test()->post("http://{$domain}/logout");
     test()->post("http://{$domain}/login", [
-        'email' => 'owner@example.com',
+        'email' => $email,
         'password' => 'password',
     ]);
 }
@@ -275,7 +282,7 @@ test('the request/approve/reject routes drive the same workflow end to end over 
         expect($pending->journal_voucher_id)->toBeNull();
     });
 
-    $this->post("http://{$domain}/login", ['email' => 'approver@example.com', 'password' => 'password']);
+    loginSalesReturnWorkflowTestUser($domain, 'approver@example.com');
 
     $this->post("http://{$domain}/sales-returns/{$returnId}/reject")
         ->assertSessionHasErrors('reason');
@@ -304,7 +311,7 @@ test('the request/approve/reject routes drive the same workflow end to end over 
         $secondReturnId = SalesReturn::where('status', 'pending')->firstOrFail()->id;
     });
 
-    $this->post("http://{$domain}/login", ['email' => 'approver@example.com', 'password' => 'password']);
+    loginSalesReturnWorkflowTestUser($domain, 'approver@example.com');
 
     $this->post("http://{$domain}/sales-returns/{$secondReturnId}/approve")
         ->assertRedirect("http://{$domain}/sales-returns");

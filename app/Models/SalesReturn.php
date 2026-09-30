@@ -1092,23 +1092,16 @@ class SalesReturn extends Model
     {
         $vatableTotals = [];
         $nonVatableTotals = [];
-        $negativeVatable = Money::zero();
-        $negativeNonVatable = Money::zero();
 
         foreach ($saleLines as $saleLine) {
             $lineTotal = Money::of($saleLine->line_total);
 
-            // A negative line (legacy parity, SAL-03) is not returnable itself
-            // and takes no share of the discount/VAT/TDS, but its value stays
-            // inside the group so the returnable lines still sum to the stored
-            // invoice totals exactly.
+            // A negative line (legacy parity, SAL-03) is not returnable itself.
+            // Its value is spread over the returnable lines like the header
+            // discount (see netOfHeaderDiscount()), so returning everything
+            // credits exactly the stored invoice total and never more than
+            // the customer paid.
             if ($lineTotal->isNegative()) {
-                if ($saleLine->vatable) {
-                    $negativeVatable = $negativeVatable->plus($lineTotal);
-                } else {
-                    $negativeNonVatable = $negativeNonVatable->plus($lineTotal);
-                }
-
                 continue;
             }
 
@@ -1119,8 +1112,8 @@ class SalesReturn extends Model
             }
         }
 
-        $net = static::netOfHeaderDiscount($vatableTotals, Money::of($sale->taxable_amount), $negativeVatable)
-            + static::netOfHeaderDiscount($nonVatableTotals, Money::of($sale->nontaxable_amount), $negativeNonVatable);
+        $net = static::netOfHeaderDiscount($vatableTotals, Money::of($sale->taxable_amount))
+            + static::netOfHeaderDiscount($nonVatableTotals, Money::of($sale->nontaxable_amount));
 
         ksort($net);
 
@@ -1153,13 +1146,16 @@ class SalesReturn extends Model
      * @param  array<int, Money>  $lineTotals
      * @return array<int, Money>
      */
-    private static function netOfHeaderDiscount(array $lineTotals, Money $groupTotalAfterDiscount, ?Money $negativeLinesTotal = null): array
+    private static function netOfHeaderDiscount(array $lineTotals, Money $groupTotalAfterDiscount): array
     {
         if ($lineTotals === []) {
             return [];
         }
 
-        $discount = Money::sum($lineTotals)->plus($negativeLinesTotal ?? Money::zero())->minus($groupTotalAfterDiscount);
+        // Includes any negative lines' value, since $lineTotals holds only the
+        // returnable (non-negative) lines but $groupTotalAfterDiscount is the
+        // stored group total with the negative lines in it.
+        $discount = Money::sum($lineTotals)->minus($groupTotalAfterDiscount);
 
         if ($discount->isZero()) {
             return $lineTotals;

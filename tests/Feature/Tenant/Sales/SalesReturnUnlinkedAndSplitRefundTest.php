@@ -239,6 +239,8 @@ test('a linked return cannot credit more bonus units than the sale line has left
     $tenant->run(function () {
         salesReturnUnlinkedTestOpenFiscalYear();
         $admin = salesReturnUnlinkedTestAdmin();
+        // No opening stock in this fixture; the stock guard is not under test.
+        CompanySetting::current()->update(['allow_negative_stock' => true]);
         $customer = Customer::factory()->create();
         $item = Item::factory()->create(['is_vatable' => false, 'is_stockable' => true]);
 
@@ -293,7 +295,9 @@ test('a linked return within the bonus cap credits paid units and restocks the b
         // credited.
         expect((string) $returnLine->quantity)->toBe('2.0000')
             ->and((string) $returnLine->bonus_quantity)->toBe('3.0000')
-            ->and((string) $return->taxable_amount)->toBe('200.00');
+            // The item is not vatable, so the 200 is non-taxable.
+            ->and((string) $return->nontaxable_amount)->toBe('200.00')
+            ->and((string) $return->taxable_amount)->toBe('0.00');
     });
 
     $tenant->delete();

@@ -48,8 +48,13 @@ function salesP1CreditSale(User $actor, Customer $customer, array $lines, string
     );
 }
 
+/**
+ * Logs out first: the login route is guest-only, so switching user without
+ * it would leave the previous user signed in.
+ */
 function salesP1Login(string $domain, string $email): void
 {
+    test()->post("http://{$domain}/logout");
     test()->post("http://{$domain}/login", ['email' => $email, 'password' => 'password']);
 }
 

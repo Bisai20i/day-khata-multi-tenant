@@ -557,6 +557,9 @@ test('cancelling a credit note over HTTP is admin only', function () {
         ]);
     });
 
+    // Log the clerk out first: the login route is guest-only, so without this
+    // the next request would still run as the clerk.
+    $this->post("http://{$domain}/logout");
     $this->post("http://{$domain}/login", ['email' => 'boss@example.com', 'password' => 'password']);
 
     $this->post("http://{$domain}/sales-returns/{$returnId}/cancel", ['reason' => 'Entered in error'])
