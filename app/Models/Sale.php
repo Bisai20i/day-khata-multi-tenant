@@ -329,6 +329,13 @@ class Sale extends Model
                 ],
                 static::voucherLines($customer, $totals, $preparedLines, $paymentMode, $cashAmount, $bankAmount, $bankAccountId, $tdsAccountId, $agent, $commissionAmount),
                 $actor,
+                // Every line of this voucher carries the same compact
+                // narration (audit section 3 "Sales", "ledger narrations"), so
+                // the customer's ledger reads "SL-42 - Cash Settlement"
+                // instead of a bare "Sale total"/"Settlement". The invoice
+                // number comes from this voucher's own number (C7), so it is
+                // resolved inside post() once that number exists.
+                lineNarration: fn (JournalVoucher $voucher): string => SettlementNarration::line(static::invoiceNumberFor($invoiceType, $voucher, $settings), $paymentMode),
             );
 
             $sale = static::create([
@@ -365,17 +372,6 @@ class Sale extends Model
             ]);
 
             static::persistLines($sale, $preparedLines, $totals, $storeId, $data['date']);
-
-            // Every line of this voucher carries the same compact narration
-            // (audit section 3 "Sales", "ledger narrations"), so the
-            // customer's ledger reads "SL-42 - Cash Settlement" instead of a
-            // bare "Sale total"/"Settlement" and tells a sale from a receipt
-            // at a glance. Applied AFTER posting because the invoice number
-            // itself is derived from this same voucher's number (C7) - there
-            // is no way to know it before JournalVoucher::post() returns.
-            $voucher->lines()->update([
-                'narration' => SettlementNarration::line($sale->invoice_number, $paymentMode),
-            ]);
 
             return $sale;
         });

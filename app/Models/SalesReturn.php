@@ -374,16 +374,6 @@ class SalesReturn extends Model
                 'created_by' => $actor->id,
             ]);
 
-            // Every line of the credit-note voucher carries the same compact
-            // narration (audit section 3 "Sales", "ledger narrations") - a
-            // credit note has no settlement leg of its own, so it always
-            // reads "{number} - Credit" (SettlementNarration::forMode(null)).
-            if ($voucher) {
-                $voucher->lines()->update([
-                    'narration' => SettlementNarration::line($salesReturn->documentNumber(), null),
-                ]);
-            }
-
             foreach ($prepared['lines'] as $line) {
                 $returnLine = $salesReturn->lines()->create([
                     'sale_line_id' => $line['sale_line']->id,
@@ -493,6 +483,7 @@ class SalesReturn extends Model
                 ],
                 $voucherLines,
                 $actor,
+                lineNarration: fn (JournalVoucher $voucher): string => SettlementNarration::line(static::creditNoteNumberFor($voucher), null),
             );
 
             $salesReturn = static::create([
@@ -516,10 +507,6 @@ class SalesReturn extends Model
                 'refund_cash_amount' => $refundCashAmount,
                 'refund_bank_amount' => $refundBankAmount,
                 'created_by' => $actor->id,
-            ]);
-
-            $voucher->lines()->update([
-                'narration' => SettlementNarration::line($salesReturn->documentNumber(), null),
             ]);
 
             foreach ($preparedLines as $index => $prepared) {
@@ -719,10 +706,6 @@ class SalesReturn extends Model
                 'fiscal_year_id' => $voucher->fiscal_year_id,
                 'credit_note_number' => static::creditNoteNumberFor($voucher),
                 'status' => 'posted',
-            ]);
-
-            $voucher->lines()->update([
-                'narration' => SettlementNarration::line($salesReturn->documentNumber(), null),
             ]);
 
             $movedStock = static::saleLinesThatMovedStock($storedLines->pluck('sale_line_id')->all());
@@ -1376,6 +1359,11 @@ class SalesReturn extends Model
             ],
             $voucherLines,
             $actor,
+            // Every line of the credit-note voucher carries the same compact
+            // narration (audit section 3 "Sales", "ledger narrations"). A
+            // credit note has no settlement leg of its own, so it always reads
+            // "{number} - Credit" (SettlementNarration::forMode(null)).
+            lineNarration: fn (JournalVoucher $voucher): string => SettlementNarration::line(static::creditNoteNumberFor($voucher), null),
         );
     }
 
@@ -1447,6 +1435,8 @@ class SalesReturn extends Model
 
         $voucherLines[] = ['account_id' => $customerAccountId, 'debit' => $cash->plus($bank)->toString(), 'credit' => '0', 'narration' => 'Refund settlement'];
 
+        $mode = $cash->isPositive() && $bank->isPositive() ? 'partial' : ($cash->isPositive() ? 'cash' : 'bank');
+
         $refundVoucher = JournalVoucher::post(
             [
                 'voucher_type' => VoucherType::Journal->value,
@@ -1455,12 +1445,10 @@ class SalesReturn extends Model
             ],
             $voucherLines,
             $actor,
+            lineNarration: fn (): string => SettlementNarration::line($salesReturn->documentNumber(), $mode),
         );
 
         $salesReturn->update(['refund_journal_voucher_id' => $refundVoucher->id]);
-
-        $mode = $cash->isPositive() && $bank->isPositive() ? 'partial' : ($cash->isPositive() ? 'cash' : 'bank');
-        $refundVoucher->lines()->update(['narration' => SettlementNarration::line($salesReturn->documentNumber(), $mode)]);
     }
 
     /**

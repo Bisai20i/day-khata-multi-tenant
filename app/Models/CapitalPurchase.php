@@ -442,6 +442,9 @@ class CapitalPurchase extends Model
                 ],
                 $voucherLines,
                 $actor,
+                // Every line carries the same compact narration (item 10),
+                // so the supplier's ledger reads "CP-7 - Cash Settlement".
+                lineNarration: fn (JournalVoucher $voucher): string => SettlementNarration::line('CP-'.$voucher->voucher_number, $paymentMode),
             );
 
             $capitalPurchase = static::create([
@@ -483,15 +486,6 @@ class CapitalPurchase extends Model
                     $capitalPurchaseLine->update(['fixed_asset_id' => $asset->id]);
                 }
             }
-
-            // Every line of this voucher carries the same compact narration
-            // (item 10), so the supplier's ledger reads "CP-3 - Bank
-            // Settlement" instead of a bare "Capital purchase from X"/
-            // "Settlement".
-            $documentNumber = 'CP-'.$voucher->voucher_number;
-            $voucher->lines()->update([
-                'narration' => SettlementNarration::line($documentNumber, $paymentMode),
-            ]);
 
             return $capitalPurchase;
         });

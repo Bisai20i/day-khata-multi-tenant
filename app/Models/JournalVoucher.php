@@ -8,6 +8,7 @@ use App\Support\ClosedFiscalYearGuard;
 use App\Support\Money\Money;
 use App\Support\ReversalNotice;
 use Carbon\CarbonImmutable;
+use Closure;
 use Illuminate\Auth\Access\AuthorizationException;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Model;
@@ -120,12 +121,21 @@ class JournalVoucher extends Model
      * logical posting, and ActivityLog has no stable order to pick the
      * right one back out by.
      *
+     * $lineNarration, when given, is called with the new voucher (numbered,
+     * before any line exists) and its result becomes every line's narration.
+     * Documents whose ledger narration quotes their own number ("SL-12 -
+     * Cash Settlement") need the voucher number first; they used to post
+     * the lines and then rewrite them with a bulk query-builder update,
+     * which only worked because a bulk update skips the model guard that
+     * keeps posted lines immutable (flags G-22).
+     *
      * @param  array{voucher_type?: string, date: string, narration: string, reason?: string, fiscal_year_id?: int}  $header
      * @param  array<int, array{account_id: int, debit?: float|string, credit?: float|string, narration?: string}>  $lines
+     * @param  (Closure(self): string)|null  $lineNarration
      */
-    public static function post(array $header, array $lines, User $actor, bool $logCorrection = true): self
+    public static function post(array $header, array $lines, User $actor, bool $logCorrection = true, ?Closure $lineNarration = null): self
     {
-        return DB::transaction(function () use ($header, $lines, $actor, $logCorrection) {
+        return DB::transaction(function () use ($header, $lines, $actor, $logCorrection, $lineNarration) {
             // Row-locked so a concurrent FiscalYear::close() (which takes the
             // same lock) either finishes first and this sees a Closed year, or
             // waits for this posting to commit (audit JE-04).
@@ -155,6 +165,7 @@ class JournalVoucher extends Model
                 $reason,
                 $actor,
                 $lines,
+                $lineNarration,
             );
 
             if ($isOverride) {
@@ -179,6 +190,7 @@ class JournalVoucher extends Model
      * user-initiated posting.
      *
      * @param  array<int, array{account_id: int, debit?: float|string, credit?: float|string, narration?: string}>  $lines
+     * @param  (Closure(self): string)|null  $lineNarration  See post().
      */
     public static function write(
         FiscalYear $fiscalYear,
@@ -188,6 +200,7 @@ class JournalVoucher extends Model
         ?string $reason,
         User $actor,
         array $lines,
+        ?Closure $lineNarration = null,
     ): self {
         $date = static::assertDateInsideFiscalYear($fiscalYear, $date);
         $lines = static::validateLines($lines);
@@ -202,6 +215,16 @@ class JournalVoucher extends Model
             'status' => 'posted',
             'created_by' => $actor->id,
         ]);
+
+        if ($lineNarration !== null) {
+            $resolved = $lineNarration($voucher);
+
+            if (mb_strlen($resolved) > self::MAX_NARRATION_LENGTH) {
+                throw new InvalidArgumentException('A line narration can be at most '.self::MAX_NARRATION_LENGTH.' characters.');
+            }
+
+            $lines = array_map(fn (array $line): array => [...$line, 'narration' => $resolved], $lines);
+        }
 
         $voucher->lines()->createMany($lines);
 

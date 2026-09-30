@@ -37,7 +37,7 @@ control is missing. P2: hardening, UX, performance. Flags about the same defect 
 | G-19 | JE-06 (reverse() accepts Reversal, ClosingEntry, RollForwardAdjustment) | P2 | P2 | open | F07 |
 | G-20 | JE-07 (no max amount, no narration cap in the model, manual journal lacks `distinct`) | P2 | P2 | open: `JournalVoucherController.php:153` no `distinct` (cash/bank at :205 has it) | F07 |
 | G-21 | JE-09 (ledger/report inputs not validated) | P2 | P2 | open: `AccountController.php:175, 179, 229` | F08 |
-| G-22 | New: nine models rewrite line narration with a query-builder `lines()->update()` after posting | new | P2 | Sale:375, Receipt:189, SalesReturn:382, Purchase:502, PurchaseReturn:350/374/584, Payment:171, CapitalPurchase:475, CapitalPurchaseSettlement:136. Works only because bulk updates skip the JE-01 model guard | F10 |
+| G-22 | New: nine models rewrite line narration with a query-builder `lines()->update()` after posting | new | P2 | FIXED (F10): lines inserted with final narration via a post() resolver; VoucherLinesWrittenOnceTest. Was: Sale:375, Receipt:189, SalesReturn:382, Purchase:502, PurchaseReturn:350/374/584, Payment:171, CapitalPurchase:475, CapitalPurchaseSettlement:136. Works only because bulk updates skip the JE-01 model guard | F10 |
 | G-23 | Follow-up: `CapitalPurchaseSettlement` not on `ActivityLogObserver` | open item | P2 | open: `AppServiceProvider.php:47-58` | F03 |
 | G-24 | Follow-up: SAL-04 decision not in CONTRACTS C5 | open item | doc | open: C5 lists only cancel routes (`todo/CONTRACTS.md:171`) | F00 |
 | G-25 | Follow-up: protected system account list inferred, not specified | open item | decision | `Account::SYSTEM_CODES` | D3 |
@@ -196,9 +196,9 @@ Owned: `Purchase.php`, `Payment.php` (post only, after F05), `PaymentController.
 
 ### F10 Narration without bulk line updates (G-22)
 Owned: `JournalVoucher.php` (after F07) and the nine callers listed in G-22, tests. Largest blast radius, last.
-- [ ] 1. Let `JournalVoucher::post()` accept a narration resolver called with the new voucher number inside
+- [x] 1. Let `JournalVoucher::post()` accept a narration resolver called with the new voucher number inside
   `write()`, so lines are created with their final narration. Replace every `$voucher->lines()->update([...])`.
-- [ ] 2. Add a test that no code path updates a `journal_voucher_lines` row after insert (for example a DB
+- [x] 2. Add a test that no code path updates a `journal_voucher_lines` row after insert (for example a DB
   listener that fails the test on `update journal_voucher_lines`) across a sale, receipt, purchase, payment and
   capital purchase post.
 
@@ -225,6 +225,6 @@ Owned: `JournalVoucher.php` (after F07) and the nine callers listed in G-22, tes
 | F07 | Journal core hardening | G-06, G-19, G-20 | done |
 | F08 | Trial balance and inputs | G-08, G-21 | done |
 | F09 | Stored numbers, payment list | G-17, G-18 | done |
-| F10 | Narration without bulk updates | G-22 | pending |
+| F10 | Narration without bulk updates | G-22 | done |
 
 When a chunk lands, also mark its flags FIXED in the matching `flags/*.md` file and update `flags/README.md`.

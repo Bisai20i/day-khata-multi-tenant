@@ -180,16 +180,13 @@ class Receipt extends Model
                     ['account_id' => $customer->account_id, 'debit' => '0', 'credit' => $amount->toString(), 'narration' => 'Settlement'],
                 ],
                 $actor,
+                // Every line of this voucher carries the same compact
+                // narration (audit section 3 "Sales", "ledger narrations"), so
+                // the customer's ledger reads "{voucher number} - Cash
+                // Settlement" and tells a receipt apart from a sale at a
+                // glance. Resolved inside post(), once the number exists.
+                lineNarration: fn (JournalVoucher $voucher): string => SettlementNarration::line($voucher->voucher_number, $paymentMode),
             );
-
-            // Every line of this voucher carries the same compact narration
-            // (audit section 3 "Sales", "ledger narrations"), so the
-            // customer's ledger reads "{voucher number} - Cash Settlement"
-            // instead of a bare "Amount received"/"Settlement" and tells a
-            // receipt apart from a sale at a glance.
-            $voucher->lines()->update([
-                'narration' => SettlementNarration::line($voucher->voucher_number, $paymentMode),
-            ]);
 
             $receipt = static::create([
                 'customer_id' => $customer->id,

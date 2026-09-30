@@ -294,6 +294,12 @@ class PurchaseReturn extends Model
                 ],
                 $voucherLines,
                 $actor,
+                // Every line of this debit-note voucher carries the same
+                // compact narration (item 10): "PR-9 - Credit" tells it apart
+                // from a cash/bank refund in the supplier's ledger. `null`
+                // mode (no cash moves here - see the refund voucher below) is
+                // what SettlementNarration::forMode() is documented to accept.
+                lineNarration: fn (JournalVoucher $voucher): string => SettlementNarration::line(static::debitNoteNumber($voucher), null),
             );
 
             $purchaseReturn = static::create([
@@ -341,16 +347,6 @@ class PurchaseReturn extends Model
                 }
             }
 
-            // Every line of this credit-note voucher carries the same
-            // compact narration (item 10): "PR-9 - Credit" tells it apart
-            // from a cash/bank refund at a glance in the supplier's ledger.
-            // `null` mode (no cash movement here - see the refund voucher
-            // below for that) is exactly what SettlementNarration::forMode()
-            // is documented to accept.
-            $voucher->lines()->update([
-                'narration' => SettlementNarration::line($purchaseReturn->debit_note_number, null),
-            ]);
-
             // Optional immediate cash/bank refund from the supplier, settling
             // exactly the amount this return moved off the supplier's own
             // account ($supplierDebit - NOT $total, since the TDS share never
@@ -367,16 +363,13 @@ class PurchaseReturn extends Model
                         ['account_id' => $purchase->supplier->account_id, 'debit' => '0', 'credit' => $supplierDebit->toString(), 'narration' => 'Refund received'],
                     ],
                     $actor,
-                );
-
-                $purchaseReturn->update(['refund_journal_voucher_id' => $refundVoucher->id]);
-
-                $refundVoucher->lines()->update([
-                    'narration' => SettlementNarration::line(
+                    lineNarration: fn (): string => SettlementNarration::line(
                         $purchaseReturn->debit_note_number,
                         static::settlementModeForAccount((int) $data['refund_account_id']),
                     ),
-                ]);
+                );
+
+                $purchaseReturn->update(['refund_journal_voucher_id' => $refundVoucher->id]);
             }
 
             return $purchaseReturn;
@@ -572,6 +565,10 @@ class PurchaseReturn extends Model
                 ],
                 $voucherLines,
                 $actor,
+                // Every line carries the same compact narration (item 10): an
+                // unlinked return settles at once, so its mode is the
+                // payment_mode it was actually refunded in.
+                lineNarration: fn (JournalVoucher $voucher): string => SettlementNarration::line(static::debitNoteNumber($voucher), $data['payment_mode'] ?? 'cash'),
             );
 
             $purchaseReturn = static::create([
@@ -621,13 +618,6 @@ class PurchaseReturn extends Model
                     $line['net'],
                 );
             }
-
-            // Every line of this voucher carries the same compact narration
-            // (item 10): an unlinked return always settles immediately, so
-            // its mode is the payment_mode it was actually refunded in.
-            $voucher->lines()->update([
-                'narration' => SettlementNarration::line($purchaseReturn->debit_note_number, $data['payment_mode'] ?? 'cash'),
-            ]);
 
             return $purchaseReturn;
         });

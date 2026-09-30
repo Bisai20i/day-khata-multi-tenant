@@ -440,6 +440,9 @@ class Purchase extends Model
                 $voucherLines,
                 $actor,
                 logCorrection: false,
+                // Every line carries the same compact narration (item 10),
+                // so the supplier's ledger reads "PU-42 - Cash Settlement".
+                lineNarration: fn (JournalVoucher $voucher): string => SettlementNarration::line("{$company->purchase_prefix}-{$voucher->voucher_number}", $data['payment_mode']),
             );
 
             $purchase = static::create([
@@ -523,18 +526,6 @@ class Purchase extends Model
                     );
                 }
             }
-
-            // Every line of this voucher carries the same compact narration
-            // (item 10), so the supplier's ledger reads "PO-42 - Cash
-            // Settlement" instead of a bare "Purchase from X"/"Settlement"
-            // and tells a purchase from a payment at a glance. Applied AFTER
-            // posting - the document number is derived from this same
-            // voucher's number, which does not exist before JournalVoucher::
-            // post() returns.
-            $documentNumber = $purchase->purchase_number;
-            $voucher->lines()->update([
-                'narration' => SettlementNarration::line($documentNumber, $data['payment_mode']),
-            ]);
 
             if ($isCorrection) {
                 ClosedFiscalYearGuard::logCorrection($targetFiscalYear, $reason, "Purchase #{$purchase->id} from {$supplier->name}");

@@ -143,6 +143,9 @@ class Payment extends Model
                     ['account_id' => $settlementAccountId, 'debit' => '0', 'credit' => $amount->toString(), 'narration' => 'Amount paid'],
                 ],
                 $actor,
+                // Every line carries the same compact narration (item 10), so
+                // the supplier's ledger reads "PMT-7 - Cash Settlement".
+                lineNarration: fn (JournalVoucher $voucher): string => SettlementNarration::line(static::paymentNumberFor($voucher), $data['payment_mode']),
             );
 
             $payment = static::create([
@@ -161,7 +164,7 @@ class Payment extends Model
                 'fiscal_year_id' => $voucher->fiscal_year_id,
                 // Stored once, in the format payments have always shown in
                 // (flags G-18).
-                'payment_number' => "PMT-{$voucher->voucher_number}",
+                'payment_number' => static::paymentNumberFor($voucher),
                 'created_by' => $actor->id,
             ]);
 
@@ -172,16 +175,16 @@ class Payment extends Model
                 ]);
             }
 
-            // Every line of this voucher carries the same compact narration
-            // (item 10), so the supplier's ledger reads "PMT-7 - Cash
-            // Settlement" instead of a bare "Settlement"/"Amount paid".
-            $documentNumber = $payment->payment_number;
-            $voucher->lines()->update([
-                'narration' => SettlementNarration::line($documentNumber, $data['payment_mode']),
-            ]);
-
             return $payment;
         });
+    }
+
+    /**
+     * The payment's number, from its own voucher's number (flags G-18).
+     */
+    private static function paymentNumberFor(JournalVoucher $voucher): string
+    {
+        return "PMT-{$voucher->voucher_number}";
     }
 
     /**

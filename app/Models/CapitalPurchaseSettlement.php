@@ -131,11 +131,8 @@ class CapitalPurchaseSettlement extends Model
                     ['account_id' => $settlementAccountId, 'debit' => '0.00', 'credit' => $amount->toString()],
                 ],
                 $actor,
+                lineNarration: fn (JournalVoucher $voucher): string => SettlementNarration::line("CPS-{$voucher->voucher_number}", $mode),
             );
-
-            $voucher->lines()->update([
-                'narration' => SettlementNarration::line("CPS-{$voucher->voucher_number}", $mode),
-            ]);
 
             return static::create([
                 'capital_purchase_id' => $locked->id,
