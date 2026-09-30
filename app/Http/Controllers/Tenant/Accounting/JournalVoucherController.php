@@ -150,14 +150,15 @@ class JournalVoucherController extends Controller
             'date' => ['required', 'date'],
             'narration' => ['required', 'string', 'max:255'],
             'lines' => ['required', 'array', 'min:2'],
-            'lines.*.account_id' => ['required', 'exists:accounts,id'],
+            // One line per account (flags G-20), like the cash/bank form below.
+            'lines.*.account_id' => ['required', 'exists:accounts,id', 'distinct'],
             // decimal:0,2 as well as numeric: an amount with a third decimal
             // used to pass this check, balance against another third-decimal
             // line, and then be rounded per line by MySQL into an unbalanced
             // voucher (audit P0-2). JournalVoucher::validateLines() refuses it
             // too; this is here so the user gets a field-level message.
-            'lines.*.debit' => ['nullable', 'numeric', 'decimal:0,2', 'min:0'],
-            'lines.*.credit' => ['nullable', 'numeric', 'decimal:0,2', 'min:0'],
+            'lines.*.debit' => ['nullable', 'numeric', 'decimal:0,2', 'min:0', 'max:'.JournalVoucher::MAX_LINE_AMOUNT],
+            'lines.*.credit' => ['nullable', 'numeric', 'decimal:0,2', 'min:0', 'max:'.JournalVoucher::MAX_LINE_AMOUNT],
             'lines.*.narration' => ['nullable', 'string', 'max:255'],
         ]);
 

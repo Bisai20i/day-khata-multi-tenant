@@ -6,6 +6,7 @@ use App\Enums\FiscalYearStatus;
 use App\Enums\VoucherType;
 use App\Support\ClosedFiscalYearGuard;
 use App\Support\Money\Money;
+use App\Support\ReversalNotice;
 use Carbon\CarbonImmutable;
 use Illuminate\Auth\Access\AuthorizationException;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
@@ -243,6 +244,17 @@ class JournalVoucher extends Model
     }
 
     /**
+     * The largest amount a line can hold: journal_voucher_lines.debit and
+     * credit are DECIMAL(20,2), so 18 digits before the point (flags G-20).
+     */
+    public const MAX_LINE_AMOUNT = '999999999999999999.99';
+
+    /**
+     * The longest narration a line can hold (a VARCHAR(255) column).
+     */
+    private const MAX_NARRATION_LENGTH = 255;
+
+    /**
      * Validates double-entry shape and balance, and returns the lines with
      * every amount normalised to an exact 2-decimal string.
      *
@@ -276,6 +288,17 @@ class JournalVoucher extends Model
 
             if ($debit->isNegative() || $credit->isNegative()) {
                 throw new InvalidArgumentException('A journal voucher line cannot carry a negative amount; put it on the other side instead.');
+            }
+
+            // Checked here as well as in the request, because every module
+            // posts through this method, not only the manual journal form
+            // (flags G-20); MySQL would otherwise refuse or truncate.
+            if ($debit->isGreaterThan(self::MAX_LINE_AMOUNT) || $credit->isGreaterThan(self::MAX_LINE_AMOUNT)) {
+                throw new InvalidArgumentException('A journal voucher line amount is larger than the ledger can hold.');
+            }
+
+            if (mb_strlen((string) ($line['narration'] ?? '')) > self::MAX_NARRATION_LENGTH) {
+                throw new InvalidArgumentException('A line narration can be at most '.self::MAX_NARRATION_LENGTH.' characters.');
             }
 
             // Also rejects a zero line (neither side positive): a line that
@@ -408,7 +431,7 @@ class JournalVoucher extends Model
      *   hole (audit P0-15). Nothing customer-facing is ever numbered by a
      *   cancellation now.
      * - The original's fiscal year must still be the open one. A reversal is
-     *   dated today, so reversing a document from a closed - and by then very
+     *   dated today (or the open year's last day, once today is past it), so reversing a document from a closed - and by then very
      *   likely filed - year would move money out of a period whose VAT return
      *   is already submitted. The locked decision is that such a document is
      *   corrected with a return or credit note in the current year instead
@@ -416,12 +439,20 @@ class JournalVoucher extends Model
      * - A document can only be reversed once, enforced by the row lock here
      *   and by the unique index on reversal_of_id underneath it.
      *
-     * @throws InvalidArgumentException When $original is already reversed, or its fiscal year is closed.
+     * @throws InvalidArgumentException When $original is already reversed, its fiscal year is closed, or it is itself a reversal, closing entry or roll-forward adjustment (unless $allowSystemVoucher).
      */
-    public static function reverse(self $original, User $actor, string $narration): self
+    public static function reverse(self $original, User $actor, string $narration, bool $allowSystemVoucher = false): self
     {
-        return DB::transaction(function () use ($original, $actor, $narration) {
+        return DB::transaction(function () use ($original, $actor, $narration, $allowSystemVoucher) {
             $locked = static::query()->whereKey($original->getKey())->lockForUpdate()->firstOrFail();
+
+            // A reversal, a year-end closing entry and a roll-forward
+            // adjustment are the books' own bookkeeping, never a document
+            // someone cancels (flags G-19). Only internal year-close or
+            // reopen code may undo one, and it has to say so.
+            if (! $allowSystemVoucher && in_array($locked->voucher_type, [VoucherType::Reversal, VoucherType::ClosingEntry, VoucherType::RollForwardAdjustment], true)) {
+                throw new InvalidArgumentException('A reversal, closing entry or roll-forward adjustment cannot be reversed.');
+            }
 
             if (static::query()->where('reversal_of_id', $locked->id)->exists()) {
                 throw new InvalidArgumentException('This document has already been reversed.');
@@ -442,10 +473,22 @@ class JournalVoucher extends Model
                 'narration' => $line->narration,
             ])->all();
 
+            // Dated today, but never after the open year's last day: between
+            // that day and the year actually being closed, "today" belongs to
+            // no open year and the reversal would fail its own date guard, so
+            // no document could be cancelled at all (flags G-06, decision D1).
+            $today = static::today();
+            $endDate = $fiscalYear->end_date->toDateString();
+            $reversalDate = min($today, $endDate);
+
+            if ($reversalDate !== $today) {
+                ReversalNotice::dated($reversalDate);
+            }
+
             $reversal = static::write(
                 $fiscalYear,
                 VoucherType::Reversal,
-                static::today(),
+                $reversalDate,
                 $narration,
                 null,
                 $actor,

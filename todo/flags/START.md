@@ -169,11 +169,11 @@ Owned: `Sale.php` (stock check and `validatedCommission` only), `SaleController.
 
 ### F07 Journal core hardening (G-06, G-19, G-20). Task 1 needs D1.
 Owned: `JournalVoucher.php`, `JournalVoucherController.php` (rules only), tests. Serial with nothing else.
-- [ ] 1. `reverse()` dates the reversal per D1. The three document `cancel()` flows then need no change; test a
+- [x] 1. `reverse()` dates the reversal per D1. The three document `cancel()` flows then need no change; test a
   sale cancel with the clock past `end_date` of a still-open year.
-- [ ] 2. `reverse()` refuses Reversal, ClosingEntry and RollForwardAdjustment targets unless an internal flag
+- [x] 2. `reverse()` refuses Reversal, ClosingEntry and RollForwardAdjustment targets unless an internal flag
   is passed (check the callers that legitimately reverse these, if any). Tests.
-- [ ] 3. `validateLines()` caps narration at 255 and amounts at the `decimal(20,2)` limit; manual journal rule
+- [x] 3. `validateLines()` caps narration at 255 and amounts at the `decimal(20,2)` limit; manual journal rule
   adds `distinct` on `lines.*.account_id` and a max on debit/credit. Tests via `JournalVoucher::post()` directly.
 
 ### F08 Reports: trial balance integrity and input validation (G-08, G-21)
@@ -222,7 +222,7 @@ Owned: `JournalVoucher.php` (after F07) and the nine callers listed in G-22, tes
 | F04 | Capital view and print | G-01, G-11 | done |
 | F05 | Receipt print, allocation dates | G-07, G-14 | done |
 | F06 | Sales posting guards | G-05, G-13, G-15 | pending |
-| F07 | Journal core hardening | G-06, G-19, G-20 | pending |
+| F07 | Journal core hardening | G-06, G-19, G-20 | done |
 | F08 | Trial balance and inputs | G-08, G-21 | pending |
 | F09 | Stored numbers, payment list | G-17, G-18 | pending |
 | F10 | Narration without bulk updates | G-22 | pending |

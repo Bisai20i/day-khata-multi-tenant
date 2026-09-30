@@ -3,6 +3,7 @@
 namespace App\Http\Middleware;
 
 use App\Models\FiscalYear;
+use App\Support\ReversalNotice;
 use Illuminate\Http\Request;
 use Inertia\Middleware;
 
@@ -56,7 +57,9 @@ class HandleInertiaRequests extends Middleware
                 ]
                 : null,
             'flash' => [
-                'status' => fn (): ?string => $request->session()->get('status'),
+                // Plus the note JournalVoucher::reverse() leaves when it had to
+                // date a cancellation on the open year's last day (flags G-06).
+                'status' => fn (): ?string => ReversalNotice::appendTo($request->session()->get('status')),
                 'importResult' => fn (): ?array => $request->session()->get('importResult'),
                 // CONTRACTS C11: a controller that just posted a document
                 // flashes ['type', 'id', 'print_url'] here, so the page can

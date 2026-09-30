@@ -54,6 +54,7 @@ Legacy day_khata has no comparable model layer (MySQL triggers), so parity notes
   Add a test that closes and posts back to back.
 
 ### JE-05 (P2) Reversal and cancellation fail once the calendar passes the open year's end date
+- **FIXED** (2026-09-29, F07): reverse() dates the reversal min(today, open year end_date) and the success message says so (App\Support\ReversalNotice). Tests: tests/Feature/Tenant/Accounting/JournalCoreHardeningTest.php.
 - File: JournalVoucher.php reverse() (uses static::today()), assertDateInsideFiscalYear().
 - Wrong: the reversal is always dated today (Kathmandu) but written into the original's open year, and write()
   requires the date to be inside that year. In the days after Asar end and before the admin closes the year,
@@ -62,6 +63,7 @@ Legacy day_khata has no comparable model layer (MySQL triggers), so parity notes
 - Fix: clamp the reversal date to min(today, year end), or accept an explicit date and validate it.
 
 ### JE-06 (P2) reverse() does not check the target type
+- **FIXED** (2026-09-29, F07): reverse() refuses Reversal, ClosingEntry and RollForwardAdjustment unless allowSystemVoucher is passed. Tests: tests/Feature/Tenant/Accounting/JournalCoreHardeningTest.php.
 - File: JournalVoucher.php reverse(); callers AccountController.php:575-594.
 - Wrong: only callers (cancel() via manuallyCancellableTypes, the opening-balance narration check) restrict
   what may be reversed. reverse() will reverse a Reversal voucher (un-cancelling with no audit link), a
@@ -70,6 +72,7 @@ Legacy day_khata has no comparable model layer (MySQL triggers), so parity notes
   explicit internal flag is passed.
 
 ### JE-07 (P2) No upper bound or per-line constraints on amounts and narration in the model
+- **FIXED** (2026-09-29, F07): validateLines() caps amounts at DECIMAL(20,2) and narration at 255; the manual journal rule adds distinct and max. Tests: tests/Feature/Tenant/Accounting/JournalCoreHardeningTest.php.
 - File: JournalVoucherController.php:54-62, JournalVoucher::validateLines().
 - Wrong: debit/credit have no max, while the column is decimal(20,2). A value over 18 integer digits gives a
   raw SQL out-of-range 500 on MySQL strict mode. validateLines() (used by every module posting) does not cap

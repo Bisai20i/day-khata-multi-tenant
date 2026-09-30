@@ -68,6 +68,7 @@ postRefund() and Receipt::post() balances by construction, and JournalVoucher::v
   whether to pro-rate or document it.
 
 ### SAL-08 (P2) Reversal is dated today, so cancelling can fail with an unhelpful error
+- **FIXED** (2026-09-29, F07): see JE-05; a cancel after the open year's end date reverses on that date.
 - File: app/Models/JournalVoucher.php:397-429 (reverse), date guard at :167
 - Wrong: reverse() requires the original year to be open but dates the reversal today. If today is past that open
   year's end_date (rollover pending), assertDateInsideFiscalYear() throws "date outside fiscal year" and the sale,
