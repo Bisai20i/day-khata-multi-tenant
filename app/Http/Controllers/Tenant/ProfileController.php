@@ -12,8 +12,8 @@ use Inertia\Response;
 /**
  * Self-service account page for the authenticated tenant user: update own
  * name/email and change own password. Distinct from
- * Tenant\Admin\UserController, which is an admin managing other employees'
- * accounts (name/email/role/status) and is gated by `role:admin` - this one
+ * Tenant\Admin\UserController, which manages other employees'
+ * accounts (name/email/role/status) and is gated by `can:users.manage` - this one
  * is open to every authenticated tenant user managing themselves, so it
  * carries no role gate (see routes/tenant-profile.php).
  */

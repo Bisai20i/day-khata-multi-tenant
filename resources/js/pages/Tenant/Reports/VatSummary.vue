@@ -11,8 +11,11 @@ import Button from '@/components/ui/Button.vue';
 import { FileSpreadsheet } from '@lucide/vue';
 import { formatMoney, compareMoney, subtractMoney } from '@/lib/money';
 import { formatBsDate } from '@/lib/format';
+import { usePermissions } from '@/composables/usePermissions';
 
 defineOptions({ layout: AppLayout });
+
+const { can } = usePermissions();
 
 const props = defineProps({
     outputVat: { type: Object, default: () => ({ gross: '0.00', capital: '0.00', fixedAssetVat: '0.00', cancelled: '0.00', returns: '0.00', net: '0.00' }) },
@@ -87,7 +90,7 @@ const reconciles = computed(
 <template>
     <div>
         <PageHeader title="VAT Summary" description="VAT Summary: output VAT on sales less input VAT on purchases, showing what you owe or can claim back for the period.">
-            <Button as="a" :href="exportUrl" variant="secondary" tone="purple">
+            <Button v-if="can('tax_reports.export')" as="a" :href="exportUrl" variant="secondary" tone="purple">
                 <FileSpreadsheet class="h-[14px] w-[14px]" aria-hidden="true" />
                 Export to Excel
             </Button>

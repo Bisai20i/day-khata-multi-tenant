@@ -10,8 +10,11 @@ import Button from '@/components/ui/Button.vue';
 import PageHeader from '@/components/ui/PageHeader.vue';
 import { formatMoney, isZeroMoney } from '@/lib/money.js';
 import { formatBsDate } from '@/lib/format.js';
+import { usePermissions } from '@/composables/usePermissions';
 
 defineOptions({ layout: AppLayout });
+
+const { can } = usePermissions();
 
 const props = defineProps({
     fiscalYears: { type: Array, default: () => [] },
@@ -122,8 +125,8 @@ function voucherLabel(voucher) {
     <div>
         <PageHeader title="Day Book" description="Every voucher posted in the period, listed by date with its debit and credit lines.">
             <template v-if="fiscalYearId !== null">
-                <a :href="printUrl()" target="_blank" rel="noopener"><Button variant="secondary" tone="purple">Print</Button></a>
-                <a :href="exportUrl()"><Button variant="secondary" tone="purple">Export</Button></a>
+                <a v-if="can('day_book.print')" :href="printUrl()" target="_blank" rel="noopener"><Button variant="secondary" tone="purple">Print</Button></a>
+                <a v-if="can('day_book.export')" :href="exportUrl()"><Button variant="secondary" tone="purple">Export</Button></a>
             </template>
         </PageHeader>
 

@@ -10,6 +10,7 @@ use App\Models\Role;
 use App\Models\Store;
 use App\Models\Tenant;
 use App\Models\User;
+use App\Support\Permissions\RoleBackfill;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Collection;
 
@@ -21,8 +22,8 @@ afterEach(function () {
 
 /**
  * Every fixture year below ends on 2026-12-31, which is still ahead of the
- * suite's clock, so each close here is an early close and needs an admin
- * plus a reason (T11 task 7).
+ * suite's clock, so each close here is an early close and needs the owner
+ * (fiscal_year.close_archive is owner-only) plus a reason (T11 task 7).
  */
 const ACCOUNTING_REPORT_CLOSE_REASON = 'Closed early by the test fixture.';
 
@@ -43,15 +44,17 @@ function loginAccountingReportTestUser(string $domain): void
 }
 
 /**
- * The financial statements and the three books are admin-only (audit P1),
- * so every fixture user in this file is an admin unless a test is
- * specifically about the gate.
+ * The tenant owner on the admin role: the financial statements and the three
+ * books need report keys the admin role holds, and the early closes these
+ * fixtures perform need the owner-only fiscal_year.close_archive, so every
+ * fixture user in this file is the owner unless a test is about the gate.
  */
 function accountingReportTestAdmin(): User
 {
     return User::factory()->create([
         'email' => 'owner@example.com',
         'role_id' => Role::where('slug', 'admin')->value('id'),
+        'is_owner' => true,
     ]);
 }
 
@@ -649,15 +652,17 @@ test('the three accounting report routes render their expected components with n
     $tenant->delete();
 });
 
-test('a non-admin cannot open the financial statements or the three books', function () {
+test('a user without the report keys cannot open the financial statements or the three books', function () {
     $domain = 'report-accounting-gate.tenant-test';
     $tenant = provisionAccountingReportTestTenant($domain);
 
     $tenant->run(function () {
         FiscalYear::create(['name' => 'FY1', 'start_date' => '2026-01-01', 'end_date' => '2026-12-31', 'status' => FiscalYearStatus::Open]);
-        // Deliberately no admin role: a counter user has no business seeing
-        // the company's capital position (audit P1, missing role gates).
-        User::factory()->create(['email' => 'owner@example.com']);
+        // A role without the report keys: a counter user has no business seeing
+        // the company's capital position (audit P1, missing role gates). A
+        // role-less user would be the owner now, so use the old Staff set.
+        $counter = userWithPermissions(RoleBackfill::STAFF_PARITY);
+        $counter->forceFill(['email' => 'owner@example.com'])->save();
     });
 
     loginAccountingReportTestUser($domain);

@@ -10,8 +10,11 @@ import DataTable from '@/components/ui/DataTable.vue';
 import NepaliDateInput from '@/components/ui/NepaliDateInput.vue';
 import Select from '@/components/ui/Select.vue';
 import { formatBsDate } from '@/lib/format.js';
+import { usePermissions } from '@/composables/usePermissions';
 
 defineOptions({ layout: AppLayout });
+
+const { can } = usePermissions();
 
 const props = defineProps({
     rows: { type: Array, default: () => [] },
@@ -110,7 +113,7 @@ const columns = [
             title="Cancelled Documents"
             description="Invoices, bills and vouchers that were cancelled, with who cancelled them and why."
         >
-            <a href="/reports/cancelled-documents/export"><Button variant="secondary" tone="purple">Export</Button></a>
+            <a v-if="can('cancelled_documents.export')" href="/reports/cancelled-documents/export"><Button variant="secondary" tone="purple">Export</Button></a>
         </PageHeader>
 
         <Card variant="panel" class="mb-4">

@@ -86,12 +86,15 @@ test('an admin user can access the admin-only user management page', function ()
     $tenant->delete();
 });
 
-test('a user with no role is blocked from the admin-only user management page', function () {
+test('a user whose role lacks users.manage is blocked from the user management page', function () {
     $domain = 'role-none.tenant-test';
     $tenant = provisionRoleTestTenant($domain);
 
+    // A role-less user is an owner now, so the "no access" case is a role
+    // that simply does not grant users.manage.
     $tenant->run(function () {
-        User::factory()->create(['email' => 'no-role@example.com']);
+        $user = userWithPermissions(['sales.view']);
+        $user->forceFill(['email' => 'no-role@example.com'])->save();
     });
 
     $this->post("http://{$domain}/login", [

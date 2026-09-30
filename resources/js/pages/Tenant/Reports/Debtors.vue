@@ -10,8 +10,11 @@ import PageHeader from '@/components/ui/PageHeader.vue';
 import DataTable from '@/components/ui/DataTable.vue';
 import { FileSpreadsheet } from '@lucide/vue';
 import { formatMoney } from '@/lib/money';
+import { usePermissions } from '@/composables/usePermissions';
 
 defineOptions({ layout: AppLayout });
+
+const { can } = usePermissions();
 
 const props = defineProps({
     rows: { type: Array, default: () => [] },
@@ -65,7 +68,7 @@ const columns = [
             title="Debtors"
             description="Customers who owe you money, with the balance each one owes. Includes migrated opening dues no invoice explains."
         >
-            <Button as="a" :href="exportUrl" variant="secondary" tone="purple">
+            <Button v-if="can('receivables_reports.export')" as="a" :href="exportUrl" variant="secondary" tone="purple">
                 <FileSpreadsheet class="h-[14px] w-[14px]" aria-hidden="true" />
                 Export to Excel
             </Button>

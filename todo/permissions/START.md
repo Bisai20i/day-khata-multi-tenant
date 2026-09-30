@@ -125,11 +125,11 @@ Rollback: every migration has a working `down()`. Until P16 the old `role` alias
 | P02 | Central entitlements storage | worker | done |
 | P03 | Tenant schema, backfill, test infra | worker | done |
 | P04 | Gate and effective permissions | worker + coordinator | done |
-| P09 | Frontend plumbing, nav, route audit | worker + coordinator | pending |
-| P05 | Sales side enforcement | coordinator + worker | pending |
-| P06 | Purchase and accounting enforcement | coordinator + worker | pending |
-| P07 | Masters and inventory enforcement | coordinator + worker | pending |
-| P08 | Reports and admin enforcement | coordinator + worker | pending |
+| P09 | Frontend plumbing, nav, route audit | worker + coordinator | done |
+| P05 | Sales side enforcement | coordinator + worker | done |
+| P06 | Purchase and accounting enforcement | coordinator + worker | done |
+| P07 | Masters and inventory enforcement | coordinator + worker | done |
+| P08 | Reports and admin enforcement | coordinator + worker | done |
 | P10 | Central modules UI | worker | pending |
 | P11 | Tenant roles UI | worker | pending |
 | P12 | Users page and ownership transfer | worker | pending |

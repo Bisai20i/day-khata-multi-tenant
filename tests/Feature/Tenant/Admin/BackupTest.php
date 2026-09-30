@@ -28,17 +28,17 @@ function provisionBackupTestTenant(string $domain): Tenant
     return $tenant;
 }
 
-function loginAsBackupAdmin(string $domain): User
+/**
+ * Backups are owner-only (backups.manage), so the actor is the tenant owner:
+ * a role-less factory user.
+ */
+function loginAsBackupOwner(string $domain): User
 {
-    $admin = null;
-
     tenancy()->initialize(Tenant::query()->whereHas('domains', fn ($q) => $q->where('domain', $domain))->firstOrFail());
 
-    $adminRole = Role::query()->where('slug', 'admin')->firstOrFail();
-    $admin = User::factory()->create([
+    $owner = User::factory()->create([
         'email' => 'boss@example.com',
         'password' => 'password',
-        'role_id' => $adminRole->id,
     ]);
 
     tenancy()->end();
@@ -48,13 +48,13 @@ function loginAsBackupAdmin(string $domain): User
         'password' => 'password',
     ]);
 
-    return $admin;
+    return $owner;
 }
 
-test('an admin can create a backup, which writes a row and a real file on the private local disk', function () {
+test('the owner can create a backup, which writes a row and a real file on the private local disk', function () {
     $domain = 'backup-create.tenant-test';
     $tenant = provisionBackupTestTenant($domain);
-    loginAsBackupAdmin($domain);
+    loginAsBackupOwner($domain);
 
     $response = test()->post("http://{$domain}/backups");
 
@@ -86,7 +86,7 @@ test('an admin can create a backup, which writes a row and a real file on the pr
 test('a backup file is never stored under the public webroot', function () {
     $domain = 'backup-not-public.tenant-test';
     $tenant = provisionBackupTestTenant($domain);
-    loginAsBackupAdmin($domain);
+    loginAsBackupOwner($domain);
 
     test()->post("http://{$domain}/backups");
 
@@ -105,7 +105,7 @@ test('a backup file is never stored under the public webroot', function () {
 test('downloading a backup streams the actual file content', function () {
     $domain = 'backup-download.tenant-test';
     $tenant = provisionBackupTestTenant($domain);
-    loginAsBackupAdmin($domain);
+    loginAsBackupOwner($domain);
 
     test()->post("http://{$domain}/backups");
 
@@ -128,7 +128,7 @@ test('downloading a backup streams the actual file content', function () {
 test('destroying a backup removes both the database row and the underlying file', function () {
     $domain = 'backup-destroy.tenant-test';
     $tenant = provisionBackupTestTenant($domain);
-    loginAsBackupAdmin($domain);
+    loginAsBackupOwner($domain);
 
     test()->post("http://{$domain}/backups");
 
@@ -166,6 +166,32 @@ test('a non-admin cannot access any backup route', function () {
 
     test()->post("http://{$domain}/login", [
         'email' => 'staffer@example.com',
+        'password' => 'password',
+    ]);
+
+    test()->get("http://{$domain}/backups")->assertForbidden();
+    test()->post("http://{$domain}/backups")->assertForbidden();
+    test()->get("http://{$domain}/backups/1/download")->assertForbidden();
+    test()->delete("http://{$domain}/backups/1")->assertForbidden();
+
+    $tenant->delete();
+});
+
+test('a non-owner admin role user gets 403 on every backup route', function () {
+    $domain = 'backup-admin-role.tenant-test';
+    $tenant = provisionBackupTestTenant($domain);
+
+    $tenant->run(function () {
+        $adminRole = Role::query()->where('slug', 'admin')->firstOrFail();
+        User::factory()->create([
+            'email' => 'adminrole@example.com',
+            'password' => 'password',
+            'role_id' => $adminRole->id,
+        ]);
+    });
+
+    test()->post("http://{$domain}/login", [
+        'email' => 'adminrole@example.com',
         'password' => 'password',
     ]);
 

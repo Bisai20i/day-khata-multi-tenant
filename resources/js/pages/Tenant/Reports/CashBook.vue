@@ -11,8 +11,11 @@ import PageHeader from '@/components/ui/PageHeader.vue';
 import DataTable from '@/components/ui/DataTable.vue';
 import { formatMoney, isZeroMoney } from '@/lib/money.js';
 import { formatBsDate } from '@/lib/format.js';
+import { usePermissions } from '@/composables/usePermissions';
 
 defineOptions({ layout: AppLayout });
+
+const { can } = usePermissions();
 
 const props = defineProps({
     fiscalYears: { type: Array, default: () => [] },
@@ -114,8 +117,8 @@ const columns = [
             :title="`Cash Book - ${account.name} (${account.code ?? '-'})`"
             description="Every cash receipt and payment in the period, with the running cash balance."
         >
-            <a :href="printUrl()" target="_blank" rel="noopener"><Button variant="secondary" tone="purple">Print</Button></a>
-            <a :href="exportUrl()"><Button variant="secondary" tone="purple">Export</Button></a>
+            <a v-if="can('cash_bank_book.print')" :href="printUrl()" target="_blank" rel="noopener"><Button variant="secondary" tone="purple">Print</Button></a>
+            <a v-if="can('cash_bank_book.export')" :href="exportUrl()"><Button variant="secondary" tone="purple">Export</Button></a>
         </PageHeader>
 
         <Card variant="panel" class="mb-4">

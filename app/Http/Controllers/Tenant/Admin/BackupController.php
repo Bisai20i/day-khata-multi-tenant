@@ -20,7 +20,7 @@ use Throwable;
 
 /**
  * Per-tenant on-demand database backup. The whole route group is already
- * gated by role:admin (see routes/tenant-backups.php) - that's the only
+ * gated by the owner-only can:backups.manage (see routes/tenant-backups.php) - that's the only
  * auth check this controller needs. The backup file always lives on the
  * private "local" disk (storage/app/private, never public/) under
  * backups/{tenant_id}/{filename}; download/destroy always rebuild that path
@@ -60,9 +60,9 @@ class BackupController extends Controller
     /**
      * Takes a raw id rather than an implicit {Backup} route binding
      * deliberately: implicit binding resolves inside the SubstituteBindings
-     * middleware, which runs before this route's own `role:admin` middleware
+     * middleware, which runs before this route's own `can:backups.manage` middleware
      * in the pipeline - a missing id would 404 before the role check ever
-     * ran, leaking route existence to non-admins instead of a clean 403.
+     * ran, leaking route existence to non-owners instead of a clean 403.
      */
     public function download(int $backup): StreamedResponse
     {

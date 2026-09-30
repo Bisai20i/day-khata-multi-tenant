@@ -12,8 +12,11 @@ import DataTable from '@/components/ui/DataTable.vue';
 import { FileSpreadsheet } from '@lucide/vue';
 import { formatMoney } from '@/lib/money';
 import { formatBsDate } from '@/lib/format';
+import { usePermissions } from '@/composables/usePermissions';
 
 defineOptions({ layout: AppLayout });
+
+const { can } = usePermissions();
 
 const props = defineProps({
     rows: { type: Array, default: () => [] },
@@ -116,7 +119,7 @@ const columns = [
 <template>
     <div>
         <PageHeader title="Purchase VAT Book" description="Purchase VAT Book: VAT paid on each purchase, formatted for the VAT return.">
-            <Button as="a" :href="exportUrl" variant="secondary" tone="purple">
+            <Button v-if="can('tax_reports.export')" as="a" :href="exportUrl" variant="secondary" tone="purple">
                 <FileSpreadsheet class="h-[14px] w-[14px]" aria-hidden="true" />
                 Export to Excel
             </Button>

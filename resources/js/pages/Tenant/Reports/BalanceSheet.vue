@@ -10,8 +10,11 @@ import PageHeader from '@/components/ui/PageHeader.vue';
 import NepaliDateInput from '@/components/ui/NepaliDateInput.vue';
 import { formatMoney, isZeroMoney } from '@/lib/money.js';
 import { formatBsDate } from '@/lib/format.js';
+import { usePermissions } from '@/composables/usePermissions';
 
 defineOptions({ layout: AppLayout });
+
+const { can } = usePermissions();
 
 const props = defineProps({
     fiscalYears: { type: Array, default: () => [] },
@@ -76,8 +79,8 @@ function exportUrl() {
             description="What the business owns (assets) against what it owes and the owners' capital, on one date."
         >
             <template v-if="fiscalYearId !== null">
-                <a :href="printUrl()" target="_blank" rel="noopener"><Button variant="secondary" tone="purple">Print</Button></a>
-                <a :href="exportUrl()"><Button variant="secondary" tone="purple">Export</Button></a>
+                <a v-if="can('financial_statements.print')" :href="printUrl()" target="_blank" rel="noopener"><Button variant="secondary" tone="purple">Print</Button></a>
+                <a v-if="can('financial_statements.export')" :href="exportUrl()"><Button variant="secondary" tone="purple">Export</Button></a>
             </template>
         </PageHeader>
 
