@@ -1,6 +1,7 @@
 import { ref } from 'vue';
 import { router, usePage } from '@inertiajs/vue3';
 import { todayInKathmandu } from '@/lib/format';
+import { usePermissions } from '@/composables/usePermissions';
 
 const PENDING_RECEIPT_KEY = 'pos-last-receipt';
 
@@ -29,6 +30,7 @@ export function usePosCheckout({
     persistCartsNow,
 }) {
     const page = usePage();
+    const { can } = usePermissions();
     const receiptOpen = ref(false);
     const receipt = ref(null);
 
@@ -116,7 +118,9 @@ export function usePosCheckout({
                 // behind.
                 resetForNextSale();
 
-                if (action === 'print' && created?.print_url) window.open(created.print_url, '_blank');
+                // The print view is GET /sales/{sale}/print (sales.print): never
+                // open a tab that would 403.
+                if (action === 'print' && created?.print_url && can('sales.print')) window.open(created.print_url, '_blank');
 
                 router.visit('/pos', { onSuccess: applyPendingReceipt });
             },

@@ -6,6 +6,7 @@ import Button from '@/components/ui/Button.vue';
 import Input from '@/components/ui/Input.vue';
 import Combobox from '@/components/ui/Combobox.vue';
 import { addMoney, formatMoney } from '@/lib/money';
+import { usePermissions } from '@/composables/usePermissions';
 
 /**
  * Payment area, bottom half of the POS right-hand side: payment grid with
@@ -45,6 +46,9 @@ const emit = defineEmits([
 ]);
 
 const showAdvanced = ref(false);
+
+// Save & Print opens GET /sales/{sale}/print (sales.print); hidden without it.
+const { can } = usePermissions();
 </script>
 
 <template>
@@ -207,6 +211,7 @@ const showAdvanced = ref(false);
                     Save
                 </Button>
                 <Button
+                    v-if="can('sales.print')"
                     variant="primary"
                     tone="purple"
                     type="button"

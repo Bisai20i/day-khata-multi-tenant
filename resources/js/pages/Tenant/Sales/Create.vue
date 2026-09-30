@@ -17,6 +17,7 @@ import { useSaleCreateCustomer } from '@/composables/useSaleCreateCustomer';
 import { percentOf } from '@/lib/money';
 import { enteredQuantity } from '@/lib/saleCreate';
 import { todayInKathmandu } from '@/lib/format';
+import { usePermissions } from '@/composables/usePermissions';
 
 /**
  * Every rupee shown on this form comes from calculateDocument(), the exact
@@ -62,6 +63,7 @@ const props = defineProps({
 const emit = defineEmits(['cancel', 'posted']);
 const { confirm } = useConfirm();
 const page = usePage();
+const { can } = usePermissions();
 
 /** Cancel straight away when nothing was entered, otherwise ask before discarding. */
 async function requestCancel() {
@@ -167,7 +169,7 @@ function submit(print = false, copies = 1) {
             // so this opens that bill's print view instead of guessing the
             // newest id out of the list it was redirected to.
             const created = page.props.flash?.created;
-            if (print && created?.print_url) {
+            if (print && created?.print_url && can('sales.print')) {
                 window.open(`${created.print_url}?copies=${copies}`, '_blank');
             }
             emit('posted');

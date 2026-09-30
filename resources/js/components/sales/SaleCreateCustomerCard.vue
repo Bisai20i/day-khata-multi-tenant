@@ -5,6 +5,7 @@ import Card from '@/components/ui/Card.vue';
 import Input from '@/components/ui/Input.vue';
 import Combobox from '@/components/ui/Combobox.vue';
 import NepaliDateInput from '@/components/ui/NepaliDateInput.vue';
+import { usePermissions } from '@/composables/usePermissions';
 
 const props = defineProps({
     form: { type: Object, required: true },
@@ -12,6 +13,10 @@ const props = defineProps({
 });
 
 defineEmits(['add-customer']);
+
+// Quick-add posts to POST /customers, gated customers.create (ROUTE-MAP shared
+// lookup item 3), so the "+" is hidden from a user who would get a 403.
+const { can } = usePermissions();
 
 const customerOptions = computed(() => props.customers.map((c) => ({ value: c.id, label: c.name })));
 </script>
@@ -28,7 +33,7 @@ const customerOptions = computed(() => props.customers.map((c) => ({ value: c.id
                     aria-describedby="sale-customer-help sale-customer-error"
                     @update:model-value="(v) => (form.customer_id = v)"
                 >
-                    <template #addon>
+                    <template v-if="can('customers.create')" #addon>
                         <button
                             type="button"
                             class="flex items-center justify-center text-text-muted hover:text-primary"

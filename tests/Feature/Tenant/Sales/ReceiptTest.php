@@ -513,9 +513,11 @@ test('cancelling a receipt is refused for a user who is not an admin', function 
 
     $receiptId = null;
     $tenant->run(function () use (&$receiptId) {
-        // No role at all: a plain tenant user may record receipts but not
-        // reverse one (CONTRACTS C5).
-        User::factory()->create(['email' => 'owner@example.com']);
+        // A role-governed user who may view and record receipts but was not
+        // granted receipts.cancel may not reverse one (CONTRACTS C5). A
+        // role-less user is now the owner (full access), so the actor needs
+        // an explicit role.
+        userWithPermissions(['receipts.view', 'receipts.create'])->update(['email' => 'owner@example.com']);
         receiptTestOpenFiscalYear();
         $admin = receiptTestAdmin();
         $customer = Customer::factory()->create();

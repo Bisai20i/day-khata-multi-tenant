@@ -133,8 +133,17 @@ class QuotationController extends Controller
         return redirect()->route('tenant.quotations.index')->with('status', 'Quotation cancelled.');
     }
 
+    /**
+     * The route is gated by quotations.edit, so switching the quotations
+     * module off closes it. Converting also posts a real sale to the ledger,
+     * so the user must be allowed to create sales too: a role that may edit
+     * quotations but not sell must not reach the books through this door
+     * (ROUTE-MAP shared lookup item 6).
+     */
     public function convertToSale(Request $request, Quotation $quotation): RedirectResponse
     {
+        abort_unless($request->user()?->can('sales.create'), 403);
+
         try {
             $sale = $quotation->convertToSale($request->user());
         } catch (InvalidArgumentException $e) {

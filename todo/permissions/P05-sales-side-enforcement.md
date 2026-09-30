@@ -14,10 +14,10 @@ Worker: the controllers and Vue pages for these modules (sales, returns, receipt
 - [x] 1. **Route wiring (coordinator, first).** In the route files above replace each `role:admin` (and add where
   currently ungated) with `can:<key>` exactly as in `ROUTE-MAP.md`; group routes sharing a key. Add the
   `owner_only` keys where they appear. Do not remove the `role` alias yet.
-- [ ] 2. **Page gating (worker, after 1).** Using `usePermissions()`, hide or disable buttons, row actions and links
+- [x] 2. **Page gating (worker, after 1).** Using `usePermissions()`, hide or disable buttons, row actions and links
   the user lacks (create, edit, cancel, print, export, delete). Do not change layout otherwise. Keep files under the JS
   size cap (extract child components instead of growing a page).
-- [ ] 3. **Tests (worker).** Update existing tests in this area that now 403 (use `userWithPermissions()`), then add
+- [x] 3. **Tests (worker).** Update existing tests in this area that now 403 (use `userWithPermissions()`), then add
   one feature test per gated route group covering: allowed with the key, 403 without it, 403 when the module is off
   even for the owner, and the owner allowed when entitled. Data-driven with a Pest dataset over the ROUTE-MAP rows for
   this chunk to keep it short.

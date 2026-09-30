@@ -1,4 +1,5 @@
 import { ref } from 'vue';
+import { usePermissions } from '@/composables/usePermissions';
 
 /**
  * POS keyboard shortcuts.
@@ -27,6 +28,7 @@ export function usePosShortcuts({
     completeSale,
     holdCarts,
 }) {
+    const { can } = usePermissions();
     const shortcutsOpen = ref(false);
 
     const shortcutList = [
@@ -70,7 +72,8 @@ export function usePosShortcuts({
 
         if (event.key === 'F8') {
             event.preventDefault();
-            if (canSubmit.value) completeSale('print');
+            // Save & print needs sales.print too, same as the hidden button.
+            if (canSubmit.value && can('sales.print')) completeSale('print');
             return;
         }
 

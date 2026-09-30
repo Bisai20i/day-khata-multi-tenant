@@ -1,5 +1,5 @@
 <script setup>
-import { computed, h, ref, watch } from 'vue';
+import { h, ref, watch } from 'vue';
 import { Link, useForm, usePage } from '@inertiajs/vue3';
 import { Plus, Printer } from '@lucide/vue';
 import AppLayout from '@/layouts/AppLayout.vue';
@@ -16,6 +16,7 @@ import { formatMoney, sumMoney } from '@/lib/money';
 import { formatBsDate } from '@/lib/format';
 import Create from './Create.vue';
 import { useOpenFiscalYear } from '@/composables/useOpenFiscalYear';
+import { usePermissions } from '@/composables/usePermissions';
 
 defineOptions({ layout: AppLayout });
 
@@ -70,7 +71,7 @@ function submitCancel() {
     });
 }
 
-const isAdmin = computed(() => page.props.auth?.user?.role?.slug === 'admin');
+const { can } = usePermissions();
 
 const columns = [
     {
@@ -118,22 +119,25 @@ const columns = [
         numeric: false,
         cell: ({ row }) =>
             h('div', { class: 'flex items-center gap-2' }, [
-                // Every receipt prints, live or cancelled (flags G-07).
-                h(
-                    'a',
-                    {
-                        href: `/receipts/${row.original.id}/print`,
-                        target: '_blank',
-                        rel: 'noopener',
-                        title: 'Print this receipt',
-                        class: 'flex h-[26px] w-[26px] items-center justify-center bg-bg-subtle text-text-faint transition-colors duration-150 hover:bg-primary-tint hover:text-primary',
-                        'aria-label': `Print receipt from ${row.original.customer?.name ?? 'customer'}`,
-                    },
-                    [h(Printer, { class: 'h-[13px] w-[13px]' })],
-                ),
-                // Cancelling reverses money already collected, so the route is
-                // admin-only (C5) - do not offer a button that would 403.
-                row.original.status === 'posted' && isAdmin.value
+                // Every receipt prints, live or cancelled (flags G-07), for a
+                // user holding receipts.print.
+                can('receipts.print')
+                    ? h(
+                          'a',
+                          {
+                              href: `/receipts/${row.original.id}/print`,
+                              target: '_blank',
+                              rel: 'noopener',
+                              title: 'Print this receipt',
+                              class: 'flex h-[26px] w-[26px] items-center justify-center bg-bg-subtle text-text-faint transition-colors duration-150 hover:bg-primary-tint hover:text-primary',
+                              'aria-label': `Print receipt from ${row.original.customer?.name ?? 'customer'}`,
+                          },
+                          [h(Printer, { class: 'h-[13px] w-[13px]' })],
+                      )
+                    : null,
+                // Cancelling reverses money already collected, so the route
+                // needs receipts.cancel (C5): do not offer a button that would 403.
+                row.original.status === 'posted' && can('receipts.cancel')
                     ? h(Button, {
                           variant: 'secondary',
                           tone: 'purple',
@@ -165,7 +169,7 @@ const columns = [
                 title="Receipts"
                 description="Money received from customers. Each receipt reduces what the customer owes you and can be matched to their unpaid bills."
             >
-                <Button v-if="hasOpenFiscalYear" variant="primary" tone="purple" @click="showCreateForm = true">
+                <Button v-if="hasOpenFiscalYear && can('receipts.create')" variant="primary" tone="purple" @click="showCreateForm = true">
                     <Plus class="size-4" aria-hidden="true" />
                     New receipt
                 </Button>
@@ -175,7 +179,7 @@ const columns = [
                 <div v-if="receipts.data.length === 0" class="flex flex-col items-center gap-3 py-10 text-center">
                     <p class="text-sm font-semibold text-text-strong">No receipts yet</p>
                     <p class="text-xs text-text-muted">Record money received from a customer and it will be listed here.</p>
-                    <Button v-if="hasOpenFiscalYear" variant="primary" tone="purple" @click="showCreateForm = true">
+                    <Button v-if="hasOpenFiscalYear && can('receipts.create')" variant="primary" tone="purple" @click="showCreateForm = true">
                         <Plus class="size-4" aria-hidden="true" />
                         New receipt
                     </Button>

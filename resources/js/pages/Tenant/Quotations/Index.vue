@@ -14,6 +14,7 @@ import NepaliDateInput from '@/components/ui/NepaliDateInput.vue';
 import Combobox from '@/components/ui/Combobox.vue';
 import { useToast } from '@/composables/useToast';
 import { useConfirm } from '@/composables/useConfirm';
+import { usePermissions } from '@/composables/usePermissions';
 import { formatMoney } from '@/lib/money';
 import { formatBsDate } from '@/lib/format';
 import Create from './Create.vue';
@@ -79,12 +80,20 @@ watch(
     { immediate: true },
 );
 
+// UI gating only (each route's can: middleware is the authority).
+// Converting needs sales.create as well as quotations.edit, because it posts
+// a sale (QuotationController::convertToSale() checks both).
+const { can } = usePermissions();
+const canConvert = computed(() => can('quotations.edit') && can('sales.create'));
+const printKeyByType = { quotation: 'quotations.print', sale: 'sales.print' };
+
 // C11: the controller flashes the document it just created, so the quotation
-// opens for that exact row instead of the page guessing the newest id.
+// opens for that exact row instead of the page guessing the newest id. The
+// print view is only opened for a user who may read it.
 watch(
     () => page.props.flash?.created,
     (created) => {
-        if (created?.print_url && (created.type === 'quotation' || created.type === 'sale')) {
+        if (created?.print_url && printKeyByType[created.type] && can(printKeyByType[created.type])) {
             window.open(created.print_url, '_blank', 'noopener');
         }
     },
@@ -195,63 +204,71 @@ const columns = [
         cell: ({ row }) => {
             const quotation = row.original;
 
-            const printBtn = h(Tooltip, { label: 'Print quotation' }, () =>
-                h(
-                    'a',
-                    {
-                        href: `/quotations/${quotation.id}/print`,
-                        target: '_blank',
-                        rel: 'noopener',
-                        class: 'flex h-[26px] w-[26px] items-center justify-center bg-bg-subtle text-text-faint transition-colors duration-150 hover:bg-primary-tint hover:text-primary',
-                        'aria-label': 'Print quotation',
-                    },
-                    [h(Printer, { class: 'h-[13px] w-[13px]' })],
-                ),
-            );
+            const printBtn = can('quotations.print')
+                ? h(Tooltip, { label: 'Print quotation' }, () =>
+                      h(
+                          'a',
+                          {
+                              href: `/quotations/${quotation.id}/print`,
+                              target: '_blank',
+                              rel: 'noopener',
+                              class: 'flex h-[26px] w-[26px] items-center justify-center bg-bg-subtle text-text-faint transition-colors duration-150 hover:bg-primary-tint hover:text-primary',
+                              'aria-label': 'Print quotation',
+                          },
+                          [h(Printer, { class: 'h-[13px] w-[13px]' })],
+                      ),
+                  )
+                : null;
 
             if (quotation.status !== 'draft') {
                 return h('div', { class: 'flex items-center gap-1' }, [printBtn]);
             }
 
-            const convertBtn = h(Tooltip, { label: 'Convert to sale (posts to ledger)' }, () =>
-                h(
-                    'button',
-                    {
-                        type: 'button',
-                        class: 'flex h-[26px] w-[26px] items-center justify-center bg-primary-tint text-primary transition-colors duration-150 disabled:cursor-not-allowed disabled:opacity-40',
-                        'aria-label': 'Convert to sale',
-                        disabled: converting.value !== null,
-                        onClick: () => convertToSale(quotation),
-                    },
-                    [h(ArrowRightCircle, { class: 'h-[13px] w-[13px]' })],
-                ),
-            );
+            const convertBtn = canConvert.value
+                ? h(Tooltip, { label: 'Convert to sale (posts to ledger)' }, () =>
+                      h(
+                          'button',
+                          {
+                              type: 'button',
+                              class: 'flex h-[26px] w-[26px] items-center justify-center bg-primary-tint text-primary transition-colors duration-150 disabled:cursor-not-allowed disabled:opacity-40',
+                              'aria-label': 'Convert to sale',
+                              disabled: converting.value !== null,
+                              onClick: () => convertToSale(quotation),
+                          },
+                          [h(ArrowRightCircle, { class: 'h-[13px] w-[13px]' })],
+                      ),
+                  )
+                : null;
 
-            const editBtn = h(Tooltip, { label: 'Edit quotation' }, () =>
-                h(
-                    'button',
-                    {
-                        type: 'button',
-                        class: 'flex h-[26px] w-[26px] items-center justify-center bg-bg-subtle text-text-faint transition-colors duration-150 hover:bg-primary-tint hover:text-primary',
-                        'aria-label': 'Edit quotation',
-                        onClick: () => edit(quotation),
-                    },
-                    [h(Pencil, { class: 'h-[13px] w-[13px]' })],
-                ),
-            );
+            const editBtn = can('quotations.edit')
+                ? h(Tooltip, { label: 'Edit quotation' }, () =>
+                      h(
+                          'button',
+                          {
+                              type: 'button',
+                              class: 'flex h-[26px] w-[26px] items-center justify-center bg-bg-subtle text-text-faint transition-colors duration-150 hover:bg-primary-tint hover:text-primary',
+                              'aria-label': 'Edit quotation',
+                              onClick: () => edit(quotation),
+                          },
+                          [h(Pencil, { class: 'h-[13px] w-[13px]' })],
+                      ),
+                  )
+                : null;
 
-            const deleteBtn = h(Tooltip, { label: 'Delete quotation' }, () =>
-                h(
-                    'button',
-                    {
-                        type: 'button',
-                        class: 'flex h-[26px] w-[26px] items-center justify-center bg-bg-subtle text-text-faint transition-colors duration-150 hover:bg-danger-bg hover:text-danger',
-                        'aria-label': 'Delete quotation',
-                        onClick: () => destroy(quotation),
-                    },
-                    [h(Trash2, { class: 'h-[13px] w-[13px]' })],
-                ),
-            );
+            const deleteBtn = can('quotations.delete')
+                ? h(Tooltip, { label: 'Delete quotation' }, () =>
+                      h(
+                          'button',
+                          {
+                              type: 'button',
+                              class: 'flex h-[26px] w-[26px] items-center justify-center bg-bg-subtle text-text-faint transition-colors duration-150 hover:bg-danger-bg hover:text-danger',
+                              'aria-label': 'Delete quotation',
+                              onClick: () => destroy(quotation),
+                          },
+                          [h(Trash2, { class: 'h-[13px] w-[13px]' })],
+                      ),
+                  )
+                : null;
 
             return h('div', { class: 'flex items-center gap-1' }, [printBtn, convertBtn, editBtn, deleteBtn]);
         },
@@ -271,7 +288,7 @@ const columns = [
 
         <template v-else>
             <PageHeader title="Quotations" description="Price offers you send to customers. Convert a draft into a sale once it is accepted.">
-                <Button variant="primary" tone="purple" @click="showCreateForm = true">
+                <Button v-if="can('quotations.create')" variant="primary" tone="purple" @click="showCreateForm = true">
                     <Plus class="size-4" />
                     New quotation
                 </Button>
@@ -314,7 +331,7 @@ const columns = [
                     <template v-else>
                         <p class="text-sm font-semibold text-text-strong">No quotations yet</p>
                         <p class="text-xs text-text-muted">Create your first quotation and it will be listed here.</p>
-                        <Button variant="primary" tone="purple" @click="showCreateForm = true">
+                        <Button v-if="can('quotations.create')" variant="primary" tone="purple" @click="showCreateForm = true">
                             <Plus class="size-4" />
                             New quotation
                         </Button>

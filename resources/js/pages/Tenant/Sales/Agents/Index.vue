@@ -14,6 +14,7 @@ import DataTable from '@/components/ui/DataTable.vue';
 import RowActions from '@/components/ui/RowActions.vue';
 import { useToast } from '@/composables/useToast';
 import { useConfirm } from '@/composables/useConfirm';
+import { usePermissions } from '@/composables/usePermissions';
 
 defineOptions({ layout: AppLayout });
 
@@ -27,6 +28,8 @@ defineProps({
 const page = usePage();
 const { toast } = useToast();
 const { confirm } = useConfirm();
+// UI gating only; each agents.* route's can: middleware is the authority.
+const { can } = usePermissions();
 useLayoutChrome('Sales Agents');
 
 // Flash status is watched (not just read on mount) because create/edit/delete
@@ -139,12 +142,16 @@ const columns = [
         header: 'Actions',
         numeric: false,
         cell: ({ row }) =>
-            h(RowActions, {
-                editLabel: `Edit ${row.original.name}`,
-                deleteLabel: `Delete ${row.original.name}`,
-                onEdit: () => openEdit(row.original),
-                onDelete: () => destroyAgent(row.original),
-            }),
+            can('agents.edit') || can('agents.delete')
+                ? h(RowActions, {
+                      canEdit: can('agents.edit'),
+                      canDelete: can('agents.delete'),
+                      editLabel: `Edit ${row.original.name}`,
+                      deleteLabel: `Delete ${row.original.name}`,
+                      onEdit: () => openEdit(row.original),
+                      onDelete: () => destroyAgent(row.original),
+                  })
+                : null,
     },
 ];
 </script>
@@ -155,7 +162,7 @@ const columns = [
             title="Sales agents"
             description="People who bring in sales and earn a commission on them. Each agent gets their own ledger account."
         >
-            <Button variant="primary" tone="purple" @click="openCreate">
+            <Button v-if="can('agents.create')" variant="primary" tone="purple" @click="openCreate">
                 <Plus class="size-4" aria-hidden="true" />
                 Add agent
             </Button>
@@ -165,7 +172,7 @@ const columns = [
             <div v-if="agents.length === 0" class="flex flex-col items-center gap-3 py-10 text-center">
                 <p class="text-sm font-semibold text-text-strong">No agents yet</p>
                 <p class="text-xs text-text-muted">Add your first sales agent to track commission on their sales.</p>
-                <Button variant="primary" tone="purple" @click="openCreate">
+                <Button v-if="can('agents.create')" variant="primary" tone="purple" @click="openCreate">
                     <Plus class="size-4" aria-hidden="true" />
                     Add agent
                 </Button>

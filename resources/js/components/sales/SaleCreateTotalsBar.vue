@@ -5,6 +5,7 @@ import Button from '@/components/ui/Button.vue';
 import DropdownMenu from '@/components/ui/DropdownMenu.vue';
 import DropdownMenuItem from '@/components/ui/DropdownMenuItem.vue';
 import { addMoney, formatMoney } from '@/lib/money';
+import { usePermissions } from '@/composables/usePermissions';
 
 defineProps({
     totals: { type: Object, default: null },
@@ -16,6 +17,10 @@ defineProps({
 });
 
 const emit = defineEmits(['update:showMoreOptions', 'cancel', 'print']);
+
+// Save & Print opens GET /sales/{sale}/print (sales.print); without the key
+// the split button is hidden rather than saving and then opening a 403.
+const { can } = usePermissions();
 
 // "Save & Print" copy count (audit section 4 polish, "Save & Print N
 // copies"): the backend already supports ?copies=N up to
@@ -82,7 +87,7 @@ function submitAndPrint(copies) {
 
             <div class="flex items-center gap-2">
                 <Button variant="secondary" tone="purple" type="button" @click="$emit('cancel')">Cancel</Button>
-                <div class="flex">
+                <div v-if="can('sales.print')" class="flex">
                     <Button
                         variant="secondary"
                         tone="purple"

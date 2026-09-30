@@ -7,6 +7,7 @@ import Input from '@/components/ui/Input.vue';
 import Combobox from '@/components/ui/Combobox.vue';
 import Tooltip from '@/components/ui/Tooltip.vue';
 import { formatMoney } from '@/lib/money';
+import { usePermissions } from '@/composables/usePermissions';
 
 /**
  * Cart column, top half of the POS right-hand side: customer picker plus the
@@ -40,6 +41,10 @@ const emit = defineEmits([
 ]);
 
 const bindCustomerWrapper = (element) => emit('customer-wrapper', element);
+
+// "+ New" posts to POST /customers (customers.create, ROUTE-MAP shared lookup
+// item 3), so it is hidden from a cashier without that key.
+const { can } = usePermissions();
 </script>
 
 <template>
@@ -54,7 +59,7 @@ const bindCustomerWrapper = (element) => emit('customer-wrapper', element);
                         @update:model-value="(v) => (form.customer_id = v)"
                     />
                 </div>
-                <Button variant="secondary" tone="purple" type="button" class="h-9 cursor-pointer" aria-label="Add a new customer" @click="emit('new-customer')">
+                <Button v-if="can('customers.create')" variant="secondary" tone="purple" type="button" class="h-9 cursor-pointer" aria-label="Add a new customer" @click="emit('new-customer')">
                     <Plus class="h-3.5 w-3.5" /> New
                 </Button>
             </div>

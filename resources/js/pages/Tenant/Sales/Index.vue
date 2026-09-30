@@ -18,6 +18,7 @@ import DropdownMenu from '@/components/ui/DropdownMenu.vue';
 import DropdownMenuItem from '@/components/ui/DropdownMenuItem.vue';
 import { useToast } from '@/composables/useToast';
 import { useOpenFiscalYear } from '@/composables/useOpenFiscalYear';
+import { usePermissions } from '@/composables/usePermissions';
 import { formatMoney } from '@/lib/money';
 import { formatBsDate } from '@/lib/format';
 import Create from './Create.vue';
@@ -224,6 +225,10 @@ watch(
 );
 
 const { hasOpenFiscalYear } = useOpenFiscalYear();
+// UI gating only (each route's can: middleware is the authority): create,
+// print, export and cancel are offered only to a user holding the key.
+const { can } = usePermissions();
+const canCreateSale = computed(() => hasOpenFiscalYear.value && can('sales.create'));
 const showCreateForm = ref(false);
 
 // Restores an in-progress New sale draft after Create.vue's inline
@@ -246,14 +251,14 @@ onMounted(() => {
     try {
         sessionStorage.removeItem(DRAFT_KEY);
         initialDraft.value = JSON.parse(raw);
-        showCreateForm.value = hasOpenFiscalYear.value;
+        showCreateForm.value = canCreateSale.value;
     } catch {
         // malformed sessionStorage payload - nothing to recover, ignore.
     }
 });
 
 function openCreateForm() {
-    if (!hasOpenFiscalYear.value) return;
+    if (!canCreateSale.value) return;
     initialDraft.value = null;
     showCreateForm.value = true;
 }
@@ -366,20 +371,23 @@ const columns = [
         numeric: false,
         cell: ({ row }) =>
             h('div', { class: 'flex items-center gap-1' }, [
-                h(Tooltip, { label: 'Print sale' }, () =>
-                    h(
-                        'a',
-                        {
-                            href: printUrl(row.original),
-                            target: '_blank',
-                            rel: 'noopener',
-                            class: 'flex h-[26px] w-[26px] items-center justify-center bg-bg-subtle text-text-faint transition-colors duration-150 hover:bg-primary-tint hover:text-primary',
-                            'aria-label': 'Print sale',
-                        },
-                        [h(Printer, { class: 'h-[13px] w-[13px]' })],
-                    ),
-                ),
-                row.original.status === 'cancelled'
+                can('sales.print')
+                    ? h(Tooltip, { label: 'Print sale' }, () =>
+                          h(
+                              'a',
+                              {
+                                  href: printUrl(row.original),
+                                  target: '_blank',
+                                  rel: 'noopener',
+                                  class: 'flex h-[26px] w-[26px] items-center justify-center bg-bg-subtle text-text-faint transition-colors duration-150 hover:bg-primary-tint hover:text-primary',
+                                  'aria-label': 'Print sale',
+                              },
+                              [h(Printer, { class: 'h-[13px] w-[13px]' })],
+                          ),
+                      )
+                    : null,
+                // Cancelling posts a reversing entry, so it needs sales.cancel (C5).
+                row.original.status === 'cancelled' || !can('sales.cancel')
                     ? null
                     : h(Tooltip, { label: 'Cancel sale (posts reversing entry)' }, () =>
                           h(
@@ -419,7 +427,7 @@ const columns = [
 
         <template v-else>
             <PageHeader title="Sales" description="All sales invoices. Filter, print or export them, and cancel a sale posted in error.">
-                <Button v-if="hasOpenFiscalYear" variant="primary" tone="purple" @click="openCreateForm">
+                <Button v-if="canCreateSale" variant="primary" tone="purple" @click="openCreateForm">
                     <Plus class="size-4" />
                     New sale
                 </Button>
@@ -483,7 +491,7 @@ const columns = [
                             <Printer class="size-4" />
                             Print
                         </Button>
-                        <DropdownMenu align="end">
+                        <DropdownMenu v-if="can('sales.export')" align="end">
                             <template #trigger>
                                 <Button variant="secondary" tone="neutral" type="button">
                                     <Download class="size-4" />
@@ -508,7 +516,7 @@ const columns = [
                     <template v-else>
                         <p class="text-sm font-semibold text-text-strong">No sales yet</p>
                         <p v-if="hasOpenFiscalYear" class="text-xs text-text-muted">Create your first sale and it will be listed here.</p>
-                        <Button v-if="hasOpenFiscalYear" variant="primary" tone="purple" @click="openCreateForm">
+                        <Button v-if="canCreateSale" variant="primary" tone="purple" @click="openCreateForm">
                             <Plus class="size-4" />
                             New sale
                         </Button>

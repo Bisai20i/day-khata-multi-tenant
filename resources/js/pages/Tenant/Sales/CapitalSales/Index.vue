@@ -17,10 +17,13 @@ import { formatMoney } from '@/lib/money';
 import { formatBsDate } from '@/lib/format';
 import Create from './Create.vue';
 import { useOpenFiscalYear } from '@/composables/useOpenFiscalYear';
+import { usePermissions } from '@/composables/usePermissions';
 
 defineOptions({ layout: AppLayout });
 
 const { hasOpenFiscalYear } = useOpenFiscalYear();
+// UI gating only; each route's can: middleware is the authority.
+const { can } = usePermissions();
 
 defineProps({
     capitalSales: { type: Array, default: () => [] },
@@ -51,7 +54,7 @@ watch(
 watch(
     () => page.props.flash?.created,
     (created) => {
-        if (created?.type === 'capital-sale' && created.print_url) {
+        if (created?.type === 'capital-sale' && created.print_url && can('capital_sales.print')) {
             window.open(created.print_url, '_blank', 'noopener');
         }
     },
@@ -147,21 +150,25 @@ const columns = [
         cell: ({ row }) => {
             const capitalSale = row.original;
 
-            const printBtn = h(Tooltip, { label: 'Print invoice' }, () =>
-                h(
-                    'a',
-                    {
-                        href: `/capital-sales/${capitalSale.id}/print`,
-                        target: '_blank',
-                        rel: 'noopener',
-                        class: 'flex h-[26px] w-[26px] items-center justify-center bg-bg-subtle text-text-faint transition-colors duration-150 hover:bg-primary-tint hover:text-primary',
-                        'aria-label': 'Print capital sale invoice',
-                    },
-                    [h(Printer, { class: 'h-[13px] w-[13px]' })],
-                ),
-            );
+            const printBtn = can('capital_sales.print')
+                ? h(Tooltip, { label: 'Print invoice' }, () =>
+                      h(
+                          'a',
+                          {
+                              href: `/capital-sales/${capitalSale.id}/print`,
+                              target: '_blank',
+                              rel: 'noopener',
+                              class: 'flex h-[26px] w-[26px] items-center justify-center bg-bg-subtle text-text-faint transition-colors duration-150 hover:bg-primary-tint hover:text-primary',
+                              'aria-label': 'Print capital sale invoice',
+                          },
+                          [h(Printer, { class: 'h-[13px] w-[13px]' })],
+                      ),
+                  )
+                : null;
 
-            if (capitalSale.status !== 'posted') {
+            // Cancelling posts a reversing voucher, so it needs
+            // capital_sales.cancel (C5): do not offer a button that would 403.
+            if (capitalSale.status !== 'posted' || !can('capital_sales.cancel')) {
                 return h('div', { class: 'flex items-center gap-1' }, [printBtn]);
             }
 
@@ -199,7 +206,7 @@ const columns = [
                 title="Capital sales"
                 description="Sales of business assets such as equipment or vehicles, not of your regular stock. The gain or loss is posted to your accounts."
             >
-                <Button v-if="hasOpenFiscalYear" variant="primary" tone="purple" @click="showCreateForm = true">
+                <Button v-if="hasOpenFiscalYear && can('capital_sales.create')" variant="primary" tone="purple" @click="showCreateForm = true">
                     <Plus class="size-4" aria-hidden="true" />
                     New capital sale
                 </Button>
@@ -209,7 +216,7 @@ const columns = [
                 <div v-if="capitalSales.length === 0" class="flex flex-col items-center gap-3 py-10 text-center">
                     <p class="text-sm font-semibold text-text-strong">No capital sales yet</p>
                     <p class="text-xs text-text-muted">Record the sale of an asset and it will be listed here.</p>
-                    <Button v-if="hasOpenFiscalYear" variant="primary" tone="purple" @click="showCreateForm = true">
+                    <Button v-if="hasOpenFiscalYear && can('capital_sales.create')" variant="primary" tone="purple" @click="showCreateForm = true">
                         <Plus class="size-4" aria-hidden="true" />
                         New capital sale
                     </Button>

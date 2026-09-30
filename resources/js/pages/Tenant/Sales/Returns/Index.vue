@@ -20,6 +20,7 @@ import { formatMoney } from '@/lib/money';
 import { formatBsDate } from '@/lib/format';
 import Create from './Create.vue';
 import { useOpenFiscalYear } from '@/composables/useOpenFiscalYear';
+import { usePermissions } from '@/composables/usePermissions';
 
 defineOptions({ layout: AppLayout });
 
@@ -88,7 +89,10 @@ const { toast } = useToast();
 const { confirm } = useConfirm();
 useLayoutChrome('Sales Returns');
 
-const isAdmin = computed(() => page.props.auth?.user?.role?.slug === 'admin');
+// UI gating only (the route's can: middleware is the authority): each
+// action below is offered only to a user holding its key, so nobody is shown
+// a button that would 403.
+const { can } = usePermissions();
 
 watch(
     () => page.props.flash?.status,
@@ -230,7 +234,7 @@ const requestColumns = [
         header: 'Actions',
         numeric: false,
         cell: ({ row }) => {
-            if (row.original.status !== 'pending') {
+            if (row.original.status !== 'pending' || !can('sales_return_requests.manage')) {
                 return null;
             }
 
@@ -325,22 +329,24 @@ const columns = [
         numeric: false,
         cell: ({ row }) =>
             h('div', { class: 'flex items-center gap-1' }, [
-                h(Tooltip, { label: 'Print' }, () =>
-                    h(
-                        'a',
-                        {
-                            href: `/sales-returns/${row.original.id}/print`,
-                            target: '_blank',
-                            rel: 'noopener',
-                            class: 'flex h-[26px] w-[26px] items-center justify-center bg-bg-subtle text-text-faint transition-colors duration-150 hover:bg-primary-tint hover:text-primary',
-                            'aria-label': 'Print return',
-                        },
-                        [h(Printer, { class: 'h-[13px] w-[13px]' })],
-                    ),
-                ),
-                // Cancelling reverses real money, so the route is admin-only
-                // (C5) - do not offer a button that would 403.
-                row.original.status === 'cancelled' || !isAdmin.value
+                can('sales_returns.print')
+                    ? h(Tooltip, { label: 'Print' }, () =>
+                          h(
+                              'a',
+                              {
+                                  href: `/sales-returns/${row.original.id}/print`,
+                                  target: '_blank',
+                                  rel: 'noopener',
+                                  class: 'flex h-[26px] w-[26px] items-center justify-center bg-bg-subtle text-text-faint transition-colors duration-150 hover:bg-primary-tint hover:text-primary',
+                                  'aria-label': 'Print return',
+                              },
+                              [h(Printer, { class: 'h-[13px] w-[13px]' })],
+                          ),
+                      )
+                    : null,
+                // Cancelling reverses real money, so the route needs
+                // sales_returns.cancel (C5): do not offer a button that would 403.
+                row.original.status === 'cancelled' || !can('sales_returns.cancel')
                     ? null
                     : h(Tooltip, { label: 'Cancel return (posts a reversing entry)' }, () =>
                           h(
@@ -384,18 +390,18 @@ const columns = [
                 description="Goods a customer sends back. A return issues a credit note, adds the stock back and reduces what the customer owes you."
             >
                 <div class="flex flex-wrap items-center gap-2">
-                    <Button variant="secondary" tone="purple" @click="createMode = 'request'">
+                    <Button v-if="can('sales_return_requests.create')" variant="secondary" tone="purple" @click="createMode = 'request'">
                         <Plus class="size-4" aria-hidden="true" />
                         Request return for approval
                     </Button>
                     <!-- Goods back with no bill this system ever issued
                          (audit section 3 "Sales") - posts immediately, so it
                          has no request/approve counterpart. -->
-                    <Button v-if="hasOpenFiscalYear" variant="secondary" tone="purple" @click="createMode = 'unlinked'">
+                    <Button v-if="hasOpenFiscalYear && can('unlinked_sales_returns.create')" variant="secondary" tone="purple" @click="createMode = 'unlinked'">
                         <Plus class="size-4" />
                         Return without a bill
                     </Button>
-                    <Button v-if="hasOpenFiscalYear" variant="primary" tone="purple" @click="createMode = 'post'">
+                    <Button v-if="hasOpenFiscalYear && can('sales_returns.create')" variant="primary" tone="purple" @click="createMode = 'post'">
                         <Plus class="size-4" />
                         New sales return
                     </Button>
@@ -449,7 +455,7 @@ const columns = [
                     <template v-else>
                         <p class="text-sm font-semibold text-text-strong">No sales returns yet</p>
                         <p class="text-xs text-text-muted">When a customer sends goods back, record a return and it will be listed here.</p>
-                        <Button v-if="hasOpenFiscalYear" variant="primary" tone="purple" @click="createMode = 'post'">
+                        <Button v-if="hasOpenFiscalYear && can('sales_returns.create')" variant="primary" tone="purple" @click="createMode = 'post'">
                             <Plus class="size-4" aria-hidden="true" />
                             New sales return
                         </Button>

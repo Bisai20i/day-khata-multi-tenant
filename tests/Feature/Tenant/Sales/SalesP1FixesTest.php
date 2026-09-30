@@ -183,7 +183,12 @@ test('SAL-04 a non-admin cannot post an unlinked return or approve or reject a r
 
     $returnId = null;
     $tenant->run(function () use (&$returnId) {
-        User::factory()->create(['email' => 'clerk@example.com']);
+        // A clerk who may view returns and raise requests, but holds neither
+        // unlinked_sales_returns.create nor sales_return_requests.manage. A
+        // role-less user is now the owner (full access), so the clerk needs
+        // an explicit role.
+        userWithPermissions(['sales_returns.view', 'sales_returns.create', 'sales_return_requests.create'])
+            ->update(['email' => 'clerk@example.com']);
         salesP1OpenFiscalYear();
         $admin = User::factory()->create();
         $customer = Customer::factory()->create();

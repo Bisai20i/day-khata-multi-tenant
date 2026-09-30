@@ -14,6 +14,7 @@ import PosShortcutsModal from '@/components/pos/PosShortcutsModal.vue';
 import { useToast } from '@/composables/useToast';
 import { useOpenFiscalYear } from '@/composables/useOpenFiscalYear';
 import { useConfirm } from '@/composables/useConfirm';
+import { usePermissions } from '@/composables/usePermissions';
 import { usePosCarts } from '@/composables/usePosCarts';
 import { usePosCheckout } from '@/composables/usePosCheckout';
 import { usePosCustomerBridge } from '@/composables/usePosCustomerBridge';
@@ -59,6 +60,8 @@ import { addQuantity, compareQuantity, stepQuantity } from '@/lib/quantity';
 defineOptions({ layout: AppLayout });
 
 const { hasOpenFiscalYear } = useOpenFiscalYear();
+// pos.view only opens the till; posting goes through POST /sales (sales.create).
+const { can } = usePermissions();
 
 const props = defineProps({
     customers: { type: Array, default: () => [] },
@@ -465,6 +468,7 @@ const { receiptOpen, receipt, completeSale, applyPendingReceipt, closeReceipt } 
 const submitBlockedReason = computed(() => {
     if (form.processing) return '';
     if (!hasOpenFiscalYear.value) return 'No open fiscal year. Set up a fiscal year before completing sales.';
+    if (!can('sales.create')) return 'Your role cannot post sales. Ask the owner for the Create sales permission.';
     if (form.lines.length === 0) return 'Add at least one item to the cart to complete the sale.';
     if (!form.customer_id) return 'Select a customer to complete the sale.';
     if (!form.date) return 'Choose a sale date in the top bar.';
@@ -478,7 +482,7 @@ const submitBlockedReason = computed(() => {
 });
 
 const canSubmit = computed(() => {
-    if (!hasOpenFiscalYear.value) return false;
+    if (!hasOpenFiscalYear.value || !can('sales.create')) return false;
     if (form.processing || !form.customer_id || !form.date || form.lines.length === 0) return false;
     if (!totals.value) return false;
 

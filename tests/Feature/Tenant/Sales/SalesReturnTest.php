@@ -522,9 +522,11 @@ test('cancelling a credit note over HTTP is admin only', function () {
 
     $returnId = null;
     $tenant->run(function () use (&$returnId) {
-        // A plain tenant user, with no role: they may record a return but not
-        // reverse a posted credit note (CONTRACTS C5).
-        User::factory()->create(['email' => 'clerk@example.com']);
+        // A role-governed clerk who may view and record returns but was not
+        // granted sales_returns.cancel may not reverse a posted credit note
+        // (CONTRACTS C5). A role-less user is now the owner (full access), so
+        // the clerk needs an explicit role.
+        userWithPermissions(['sales_returns.view', 'sales_returns.create'])->update(['email' => 'clerk@example.com']);
         salesReturnTestOpenFiscalYear();
         $admin = salesReturnTestAdmin();
         $customer = Customer::factory()->create();
