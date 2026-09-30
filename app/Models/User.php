@@ -29,7 +29,18 @@ class User extends Authenticatable
             'email_verified_at' => 'datetime',
             'password' => 'hashed',
             'is_active' => 'boolean',
+            'is_owner' => 'boolean',
         ];
+    }
+
+    /**
+     * Whether this user is the tenant owner. is_owner is deliberately not
+     * mass-assignable (see #[Fillable]): it is set only by tenant provisioning
+     * and the ownership transfer action, never from request input.
+     */
+    public function isOwner(): bool
+    {
+        return (bool) $this->is_owner;
     }
 
     /**

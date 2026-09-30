@@ -30,6 +30,10 @@ class UserFactory extends Factory
             'email_verified_at' => now(),
             'password' => static::$password ??= Hash::make('password'),
             'remember_token' => Str::random(10),
+            // Factories bypass mass-assignment guarding. A role-less user is an
+            // owner (full access, keeps legacy tests green); a user given a
+            // role_id is governed by that role's permissions.
+            'is_owner' => fn (array $attributes) => empty($attributes['role_id']),
         ];
     }
 

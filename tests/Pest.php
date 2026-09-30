@@ -1,6 +1,9 @@
 <?php
 
+use App\Models\Role;
+use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Str;
 use Tests\TestCase;
 
 /*
@@ -47,4 +50,34 @@ expect()->extend('toBeOne', function () {
 function something()
 {
     // ..
+}
+
+/**
+ * Create a role granting exactly the given permission keys. Must run inside
+ * an initialized tenant context.
+ *
+ * @param  array<int, string>  $keys
+ */
+function roleWithPermissions(array $keys, string $name = 'Test role'): Role
+{
+    return Role::create([
+        'name' => $name,
+        'slug' => Str::slug($name).'-'.Str::lower(Str::random(8)),
+        'permissions' => array_values($keys),
+    ]);
+}
+
+/**
+ * Create a non-owner user governed by a fresh role granting the given keys.
+ *
+ * @param  array<int, string>  $keys
+ */
+function userWithPermissions(array $keys): User
+{
+    $role = roleWithPermissions($keys);
+
+    return User::factory()->create([
+        'role_id' => $role->id,
+        'is_owner' => false,
+    ]);
 }

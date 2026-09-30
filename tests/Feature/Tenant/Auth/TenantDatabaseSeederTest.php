@@ -53,14 +53,14 @@ test('the seeded admin role has every seeded permission and staff has none', fun
         $admin = Role::query()->where('slug', 'admin')->firstOrFail();
         $staff = Role::query()->where('slug', 'staff')->firstOrFail();
 
-        expect($admin->permissions()->count())->toBe($totalPermissions);
-        expect($staff->permissions()->count())->toBe(0);
+        expect($admin->legacyPermissions()->count())->toBe($totalPermissions);
+        expect($staff->legacyPermissions()->count())->toBe(0);
     });
 
     $tenant->delete();
 });
 
-test('the admin role grants every seeded permission via hasPermission', function () {
+test('the admin role grants every seeded permission via the legacy relation', function () {
     $tenant = provisionSeederTestTenant('seeder-haspermission.tenant-test');
 
     $tenant->run(function () {
@@ -68,8 +68,8 @@ test('the admin role grants every seeded permission via hasPermission', function
         $staff = Role::query()->where('slug', 'staff')->firstOrFail();
 
         Permission::query()->get()->each(function (Permission $permission) use ($admin, $staff) {
-            expect($admin->hasPermission($permission->slug))->toBeTrue();
-            expect($staff->hasPermission($permission->slug))->toBeFalse();
+            expect($admin->legacyPermissions()->where('slug', $permission->slug)->exists())->toBeTrue();
+            expect($staff->legacyPermissions()->where('slug', $permission->slug)->exists())->toBeFalse();
         });
     });
 

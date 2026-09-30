@@ -12,7 +12,7 @@ Modified: `app/Models/Role.php`, `app/Models/User.php`, `database/factories/User
 
 ## Tasks
 
-- [ ] 1. **Schema migration (tenant).** `users.is_owner` boolean NOT NULL default false; `roles.permissions` JSON
+- [x] 1. **Schema migration (tenant).** `users.is_owner` boolean NOT NULL default false; `roles.permissions` JSON
   nullable; `roles.is_system` boolean NOT NULL default false. Working `down()`. Do not drop the old
   `permissions`/`permission_role` tables here (P16 does that after a release cycle).
 - [ ] 2. **Backfill.** `RoleBackfill` class with **frozen constants** (never read config, never edited after
@@ -24,7 +24,7 @@ Modified: `app/Models/Role.php`, `app/Models/User.php`, `database/factories/User
   A second data migration calls `RoleBackfill::run()`. Unit tests on seeded legacy-shaped rows: owner by
   contact email, owner fallback by lowest id, deactivated admins skipped, second run changes nothing, other
   admins keep the admin role, Staff receives exactly the frozen list, no owner-only key ever appears in a role.
-- [ ] 3. **Models, factory, helpers.** `Role`: fillable `permissions` (array cast), `is_system`. The existing
+- [x] 3. **Models, factory, helpers.** `Role`: fillable `permissions` (array cast), `is_system`. The existing
   `permissions()` belongsToMany relation clashes with the new JSON attribute of the same name, so **rename that
   relation to `legacyPermissions()` here** (and its inverse on `Permission` if it references it, plus the one seeder
   use, P13 removes it) and Grep for other callers; P16 deletes it. `User`: `is_owner` boolean cast, **not** in `#[Fillable]`,

@@ -39,7 +39,7 @@ class TenantDatabaseSeeder extends Seeder
         );
 
         $admin = Role::create(['name' => 'Admin', 'slug' => 'admin']);
-        $admin->permissions()->attach($permissions->pluck('id'));
+        $admin->legacyPermissions()->attach($permissions->pluck('id'));
 
         Role::create(['name' => 'Staff', 'slug' => 'staff']);
 
