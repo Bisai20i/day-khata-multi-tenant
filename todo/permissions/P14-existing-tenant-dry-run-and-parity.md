@@ -10,11 +10,11 @@ New: `app/Console/Commands/PermissionsOwnerDryRun.php`, `tests/Feature/Console/P
 
 ## Tasks
 
-- [ ] 1. **Dry-run command.** `permissions:owner-dry-run` iterates all tenants (tenant context per tenant) and
+- [x] 1. **Dry-run command.** `permissions:owner-dry-run` iterates all tenants (tenant context per tenant) and
   prints, **read-only**, for each: the user the backfill would pick as owner and why (contact email match or
   lowest id), other admins that will keep the Admin role, tenants with no active admin (flagged), and the
   role/user counts. It writes nothing. Exit code 1 if any tenant has no owner candidate.
-- [ ] 2. **Parity tests.** Unit test: frozen Staff parity keys contain no owner-only key and only keys present in
+- [x] 2. **Parity tests.** Unit test: frozen Staff parity keys contain no owner-only key and only keys present in
   the catalog at release time; the Admin frozen list equals all non-owner-only keys; a legacy-shaped fixture
   (admin + staff + inactive admin) backfills as documented; console test for the dry-run output and exit codes.
 - [ ] 3. **Coordinator.** Run through the START.md deployment checklist with the user on a copy of production

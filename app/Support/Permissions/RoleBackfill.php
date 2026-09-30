@@ -350,10 +350,34 @@ final class RoleBackfill
             return;
         }
 
+        $candidate = self::ownerCandidate();
+
+        if ($candidate['user_id'] === null) {
+            return;
+        }
+
+        DB::table('users')->where('id', $candidate['user_id'])->update(['is_owner' => true]);
+    }
+
+    /**
+     * Read-only owner selection shared by run() and the permissions:owner-dry-run
+     * command, so the dry run can never diverge from the real backfill. Only
+     * reads roles, users (role_id, email, is_active) and the current tenant's
+     * contact email; works before the is_owner column exists. Does not check
+     * for an existing owner (run() does that first).
+     *
+     * reason is "contact email match", "lowest-id active admin", "no admin role"
+     * or "no active admin"; user_id is null for the last two. active_admin_ids
+     * lists every active admin-role user id in ascending order.
+     *
+     * @return array{user_id: ?int, reason: string, active_admin_ids: list<int>}
+     */
+    public static function ownerCandidate(): array
+    {
         $adminRoleId = DB::table('roles')->where('slug', 'admin')->value('id');
 
         if ($adminRoleId === null) {
-            return;
+            return ['user_id' => null, 'reason' => 'no admin role', 'active_admin_ids' => []];
         }
 
         $candidates = DB::table('users')
@@ -362,8 +386,10 @@ final class RoleBackfill
             ->orderBy('id')
             ->get(['id', 'email']);
 
+        $activeAdminIds = $candidates->map(fn (object $user): int => (int) $user->id)->values()->all();
+
         if ($candidates->isEmpty()) {
-            return;
+            return ['user_id' => null, 'reason' => 'no active admin', 'active_admin_ids' => []];
         }
 
         $contactEmail = self::normalizedContactEmail();
@@ -372,9 +398,11 @@ final class RoleBackfill
             ? null
             : $candidates->first(fn (object $user): bool => mb_strtolower(trim((string) $user->email)) === $contactEmail);
 
-        $owner ??= $candidates->first();
+        if ($owner !== null) {
+            return ['user_id' => (int) $owner->id, 'reason' => 'contact email match', 'active_admin_ids' => $activeAdminIds];
+        }
 
-        DB::table('users')->where('id', $owner->id)->update(['is_owner' => true]);
+        return ['user_id' => (int) $candidates->first()->id, 'reason' => 'lowest-id active admin', 'active_admin_ids' => $activeAdminIds];
     }
 
     /**
