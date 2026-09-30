@@ -1,6 +1,5 @@
 <?php
 
-use App\Http\Middleware\EnsureUserHasRole;
 use App\Http\Middleware\HandleInertiaRequests;
 use App\Http\Middleware\SecurityHeaders;
 use App\Models\FiscalYear;
@@ -18,10 +17,6 @@ return Application::configure(basePath: dirname(__DIR__))
         health: '/up',
     )
     ->withMiddleware(function (Middleware $middleware): void {
-        $middleware->alias([
-            'role' => EnsureUserHasRole::class,
-        ]);
-
         $middleware->web(append: [
             HandleInertiaRequests::class,
             SecurityHeaders::class,

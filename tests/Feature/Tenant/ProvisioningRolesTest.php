@@ -7,8 +7,8 @@ use App\Models\User;
 use App\Support\Permissions\PermissionCatalog;
 use App\Support\Permissions\RoleTemplates;
 use Illuminate\Foundation\Testing\RefreshDatabase;
-use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Mail;
+use Illuminate\Support\Facades\Schema;
 
 uses(RefreshDatabase::class);
 
@@ -91,8 +91,8 @@ test('new tenants have no staff role and no placeholder permission rows', functi
     $tenant->run(function () {
         expect(Role::where('slug', 'staff')->exists())->toBeFalse()
             ->and(Role::pluck('slug')->sort()->values()->all())->toBe(['admin', 'cashier', 'manager'])
-            ->and(DB::table('permissions')->count())->toBe(0)
-            ->and(DB::table('permission_role')->count())->toBe(0);
+            ->and(Schema::hasTable('permissions'))->toBeFalse()
+            ->and(Schema::hasTable('permission_role'))->toBeFalse();
     });
 });
 

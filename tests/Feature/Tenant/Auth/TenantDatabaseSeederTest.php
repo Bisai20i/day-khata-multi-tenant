@@ -5,7 +5,6 @@ use App\Models\Tenant;
 use App\Support\Permissions\PermissionCatalog;
 use App\Support\Permissions\RoleTemplates;
 use Illuminate\Foundation\Testing\RefreshDatabase;
-use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
 
 uses(RefreshDatabase::class);
@@ -46,12 +45,12 @@ test('the tenant database seeder produces exactly the admin, manager and cashier
     $tenant->delete();
 });
 
-test('the seeder no longer creates placeholder permission rows or pivot attachments', function () {
+test('the legacy permissions and permission_role tables no longer exist', function () {
     $tenant = provisionSeederTestTenant('seeder-no-placeholders.tenant-test');
 
     $tenant->run(function () {
-        expect(Schema::hasTable('permissions') ? DB::table('permissions')->count() : 0)->toBe(0)
-            ->and(Schema::hasTable('permission_role') ? DB::table('permission_role')->count() : 0)->toBe(0);
+        expect(Schema::hasTable('permissions'))->toBeFalse()
+            ->and(Schema::hasTable('permission_role'))->toBeFalse();
     });
 
     $tenant->delete();

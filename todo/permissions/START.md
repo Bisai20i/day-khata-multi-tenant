@@ -136,4 +136,4 @@ Rollback: every migration has a working `down()`. Until P16 the old `role` alias
 | P13 | Provisioning and role templates | worker | done |
 | P15 | Central owner reassignment | worker | done |
 | P14 | Existing-tenant dry run and parity | worker + coordinator | done |
-| P16 | Cleanup | worker + coordinator | rules recorded; code removal waits one release cycle and user approval |
+| P16 | Cleanup | worker + coordinator | done |

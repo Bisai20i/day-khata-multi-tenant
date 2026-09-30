@@ -11,13 +11,13 @@ New: `database/migrations/tenant/2026_09_25_160000_drop_legacy_permission_tables
 
 ## Tasks
 
-- [ ] 1. **Remove the `role` middleware.** First Grep `routes/` and the route-audit test: zero remaining
+- [x] 1. **Remove the `role` middleware.** First Grep `routes/` and the route-audit test: zero remaining
   `role:` usages. Remove `EnsureUserHasRole` and the `role` alias in `bootstrap/app.php` (coordinator). Its own
   tests: **ask the user before deleting any test**, prefer converting them to assert the new `can:` gates.
-- [ ] 2. **Drop legacy tables (needs explicit user approval before the migration is written).** Tenant migration
+- [x] 2. **Drop legacy tables (needs explicit user approval before the migration is written).** Tenant migration
   dropping `permission_role` then `permissions`, with a `down()` that recreates both empty and `Schema::hasTable`
   guards. Delete the `Permission` model, `Role::legacyPermissions()` and any factory referencing the old model.
-- [ ] 3. **Durable rules and docs (coordinator).** Record with the Boost `record-rule` tool (if the laravel-boost
+- [x] 3. **Durable rules and docs (coordinator).** Record with the Boost `record-rule` tool (if the laravel-boost
   server is unavailable, ask the user to reconnect it or put the rule text in the final report): permission
   key naming, "every tenant route needs `can:` or must be in the audit allowlist", the owner-only list, "never
   read config inside a data migration", entitlement semantics. Update `mem.md` and `goal.md`.

@@ -4,7 +4,6 @@ namespace App\Models;
 
 use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Model;
-use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 
 /**
@@ -26,19 +25,6 @@ class Role extends Model
             'permissions' => 'array',
             'is_system' => 'boolean',
         ];
-    }
-
-    /**
-     * The legacy permission rows granted to this role via the permission_role
-     * pivot. Renamed from permissions() because that name now belongs to the
-     * JSON attribute. Kept only until P16 drops the legacy tables; do not use
-     * it for authorization.
-     *
-     * @return BelongsToMany<Permission, $this>
-     */
-    public function legacyPermissions(): BelongsToMany
-    {
-        return $this->belongsToMany(Permission::class);
     }
 
     /**

@@ -2687,8 +2687,9 @@ Plan: `plans/roles-permissions-entitlements.md`; chunks `todo/permissions/P01-P1
 - **Entitlements (central).** `tenants.enabled_modules` JSON, fail closed (NULL = core only). Platform
   admins edit it on the tenant page (`TenantModuleController`, activity-logged). Applies to the owner too.
 - **Tenant storage.** `roles.permissions` JSON (+ `is_system`), `users.is_owner` (not fillable, set only by
-  provisioning and `OwnershipTransfer::run/promote`). Old `permissions`/`permission_role` tables and
-  `Role::legacyPermissions()` remain until P16.
+  provisioning and `OwnershipTransfer::run/promote`). The old `permissions`/`permission_role` tables,
+  the `Permission` model, the `role` middleware alias and `EnsureUserHasRole` were removed in P16
+  (tenant migration `2026_09_25_160000`, down() recreates the tables empty).
 - **Gate.** `EffectivePermissions::for()` is the one formula (entitled AND active AND (owner OR role grant
   minus owner-only)); memoized per user, at most one role query per request. `AuthorizationServiceProvider`
   defines a Gate per key plus a `before` that only denies (inactive, module off) and never touches the
@@ -2716,7 +2717,7 @@ backfilled), `php artisan permissions:owner-dry-run` (0 flagged), `php artisan t
 keys, staff 100, owner picked by the lowest-id fallback since contact_email was empty), browser smoke as the
 owner and a cashier role (cashier 403 on purchases, reports, users, accounts; nav and dashboard trimmed).
 Production still needs backups, maintenance mode, a per-tenant review of the dry run, then
-`tenants:migrate`. P16 (drop legacy tables, remove the role alias) waits one release cycle and approval.
+`tenants:migrate`. P16 cleanup was done on 2026-09-30 at the user's request (before a release cycle).
 
 ## Open items (also see `goal.md` roadmap)
 

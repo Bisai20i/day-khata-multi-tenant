@@ -34,8 +34,9 @@ const ROUTE_AUDIT_CONTROLLER_AUTHORIZED = [
 ];
 
 /**
- * Tenant routes still using the legacy `role:` middleware. Must stay empty;
- * P16 removes the alias itself.
+ * Tenant routes still using the legacy `role:` middleware. Must stay empty:
+ * the alias and EnsureUserHasRole were removed in P16, so a `role:` entry
+ * would now fail at runtime as well.
  *
  * @var list<string>
  */
