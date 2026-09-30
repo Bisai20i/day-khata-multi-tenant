@@ -124,7 +124,7 @@ Rollback: every migration has a working `down()`. Until P16 the old `role` alias
 | P01 | Catalog and route map | worker + coordinator | done |
 | P02 | Central entitlements storage | worker | done |
 | P03 | Tenant schema, backfill, test infra | worker | done |
-| P04 | Gate and effective permissions | worker + coordinator | pending |
+| P04 | Gate and effective permissions | worker + coordinator | done |
 | P09 | Frontend plumbing, nav, route audit | worker + coordinator | pending |
 | P05 | Sales side enforcement | coordinator + worker | pending |
 | P06 | Purchase and accounting enforcement | coordinator + worker | pending |
