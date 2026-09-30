@@ -18,6 +18,7 @@ const variantClasses = {
     warning: 'bg-warning-bg text-warning-text',
     success: 'bg-success-bg text-success',
     neutral: 'bg-bg-muted text-text-muted',
+    info: 'bg-primary-tint text-primary',
 };
 </script>
 

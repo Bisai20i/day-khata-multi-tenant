@@ -152,7 +152,10 @@ function trendBarWidth(total) {
     const max = parseMoney(maxTrendTotal.value);
     const value = parseMoney(total ?? '0.00');
 
-    if (!max.ok || !value.ok || max.value === 0n) {
+    // parseMoney returns canonical strings, so a zero maximum must be caught
+    // with an exact comparison: dividing by it gave "NaN%", which the browser
+    // ignored, drawing every bar full width on a week with no sales.
+    if (!max.ok || !value.ok || compareMoney(max.value, '0.00') <= 0) {
         return '0%';
     }
 

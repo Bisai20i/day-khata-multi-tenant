@@ -1,7 +1,7 @@
 <script setup>
 import { computed, h, reactive, ref, watch } from 'vue';
 import { Link, router, usePage } from '@inertiajs/vue3';
-import { ArrowRightCircle, Pencil, Plus, Printer, Search, Trash2, X } from '@lucide/vue';
+import { ArrowRightCircle, Ban, Pencil, Plus, Printer, Search, Trash2, X } from '@lucide/vue';
 import AppLayout from '@/layouts/AppLayout.vue';
 import { useLayoutChrome } from '@/composables/useLayoutChrome';
 import Card from '@/components/ui/Card.vue';
@@ -270,7 +270,22 @@ const columns = [
                   )
                 : null;
 
-            return h('div', { class: 'flex items-center gap-1' }, [printBtn, convertBtn, editBtn, deleteBtn]);
+            const cancelBtn = can('quotations.cancel')
+                ? h(Tooltip, { label: 'Cancel quotation' }, () =>
+                      h(
+                          'button',
+                          {
+                              type: 'button',
+                              class: 'flex h-[26px] w-[26px] items-center justify-center bg-bg-subtle text-text-faint transition-colors duration-150 hover:bg-danger-bg hover:text-danger',
+                              'aria-label': 'Cancel quotation',
+                              onClick: () => cancelQuotation(quotation),
+                          },
+                          [h(Ban, { class: 'h-[13px] w-[13px]' })],
+                      ),
+                  )
+                : null;
+
+            return h('div', { class: 'flex items-center gap-1' }, [printBtn, convertBtn, editBtn, cancelBtn, deleteBtn]);
         },
     },
 ];
