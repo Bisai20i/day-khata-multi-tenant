@@ -53,8 +53,15 @@ jobs:
   # (continue-on-error) so that a pre-existing MySQL-only failure does not
   # block a pull request, while still surfacing money and locking regressions.
   mysql:
-    name: PHP Tests (MySQL 8)
+    name: PHP Tests (MySQL 8, shard ${{ matrix.shard }}/6)
     runs-on: ubuntu-latest
+    # Every test provisions a tenant database (131 tables), which is slow on
+    # MySQL: one job ran past three hours, so the suite runs in 6 shards.
+    timeout-minutes: 150
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4, 5, 6]
     # Blocking: production runs MySQL, and SQLite does not enforce FK column
     # types, 64-char index names or MySQL's FK index rules.
 
@@ -117,7 +124,7 @@ jobs:
         run: mysql -h 127.0.0.1 -uroot -proot -e "SET GLOBAL table_definition_cache = 20000; SET GLOBAL table_open_cache = 20000;"
 
       - name: Run tests against MySQL
-        run: php artisan test
+        run: vendor/bin/pest --shard=${{ matrix.shard }}/6
 
   javascript:
     name: JS Build
