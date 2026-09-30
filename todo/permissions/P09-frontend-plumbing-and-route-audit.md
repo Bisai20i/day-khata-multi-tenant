@@ -19,7 +19,7 @@ Coordinator: `resources/js/lib/nav-items.js` (add a `permission` field per item)
 - [x] 2. **Nav filtering.** Coordinator adds an optional `permission` string (or `permissions` array meaning any) to
   every tenant nav item in `nav-items.js` using the catalog keys; the layout filters items and drops groups that
   become empty. Central nav is untouched. Keep the layout file under the JS size cap.
-- [ ] 3. **Route audit (run LAST, after P05-P08).** Feature test iterating `Route::getRoutes()`: every route whose
+- [x] 3. **Route audit (run LAST, after P05-P08).** Feature test iterating `Route::getRoutes()`: every route whose
   middleware includes `auth:web` under the tenant domain must carry a `can:` middleware whose ability exists in
   `PermissionCatalog`, unless its name is in an explicit allowlist array inside the test (dashboard, profile
   routes, logout, impersonate, and only those from ROUTE-MAP's allowlist table). Also assert no tenant route
