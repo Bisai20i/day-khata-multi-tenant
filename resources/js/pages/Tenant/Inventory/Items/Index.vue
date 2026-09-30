@@ -15,6 +15,7 @@ import ItemsIndexUnitsModal from '@/components/inventory/ItemsIndexUnitsModal.vu
 import ItemsIndexBarcodeModal from '@/components/inventory/ItemsIndexBarcodeModal.vue';
 import { useToast } from '@/composables/useToast';
 import { useConfirm } from '@/composables/useConfirm';
+import { usePermissions } from '@/composables/usePermissions';
 import { formatQuantity, formatRate } from '@/lib/money.js';
 import { todayInKathmandu } from '@/lib/format.js';
 import { itemLedgerLink } from '@/lib/itemLedger.js';
@@ -172,25 +173,30 @@ function markSelectedVatable() {
     });
 }
 
+const { can } = usePermissions();
+
+// Only offered with items.edit: the bulk action posts to /items/mark-vatable.
+const selectColumn = {
+    id: 'select',
+    header: () =>
+        h('input', {
+            type: 'checkbox',
+            class: 'size-4 border-[1.5px] border-border',
+            checked: props.items.length > 0 && selectedItemIds.value.length === props.items.length,
+            onChange: toggleSelectAll,
+        }),
+    numeric: false,
+    cell: ({ row }) =>
+        h('input', {
+            type: 'checkbox',
+            class: 'size-4 border-[1.5px] border-border',
+            checked: isSelected(row.original),
+            onChange: () => toggleSelected(row.original),
+        }),
+};
+
 const columns = [
-    {
-        id: 'select',
-        header: () =>
-            h('input', {
-                type: 'checkbox',
-                class: 'size-4 border-[1.5px] border-border',
-                checked: props.items.length > 0 && selectedItemIds.value.length === props.items.length,
-                onChange: toggleSelectAll,
-            }),
-        numeric: false,
-        cell: ({ row }) =>
-            h('input', {
-                type: 'checkbox',
-                class: 'size-4 border-[1.5px] border-border',
-                checked: isSelected(row.original),
-                onChange: () => toggleSelected(row.original),
-            }),
-    },
+    ...(can('items.edit') ? [selectColumn] : []),
     {
         id: 'image',
         header: '',
@@ -295,32 +301,42 @@ const columns = [
         numeric: false,
         cell: ({ row }) =>
             h('div', { class: 'flex items-center justify-end gap-2' }, [
-                itemLedgerLink(
-                    row.original.id,
-                    'flex h-[26px] shrink-0 items-center border-[1.5px] border-border px-2 text-[11px] font-bold text-text-muted transition-colors duration-150 hover:border-primary hover:text-primary',
-                ),
-                h(
-                    'button',
-                    {
-                        type: 'button',
-                        class: 'h-[26px] shrink-0 border-[1.5px] border-border px-2 text-[11px] font-bold text-text-muted transition-colors duration-150 hover:border-primary hover:text-primary',
-                        onClick: () => openUnits(row.original),
-                    },
-                    'Units',
-                ),
-                h(
-                    'button',
-                    {
-                        type: 'button',
-                        class: 'h-[26px] shrink-0 border-[1.5px] border-border px-2 text-[11px] font-bold text-text-muted transition-colors duration-150 hover:border-primary hover:text-primary',
-                        onClick: () => openBarcodeModal(row.original),
-                    },
-                    'Print barcode',
-                ),
-                h(RowActions, {
-                    onEdit: () => openEdit(row.original),
-                    onDelete: () => destroy(row.original),
-                }),
+                can('stock_reports.view')
+                    ? itemLedgerLink(
+                          row.original.id,
+                          'flex h-[26px] shrink-0 items-center border-[1.5px] border-border px-2 text-[11px] font-bold text-text-muted transition-colors duration-150 hover:border-primary hover:text-primary',
+                      )
+                    : null,
+                can('items.edit')
+                    ? h(
+                          'button',
+                          {
+                              type: 'button',
+                              class: 'h-[26px] shrink-0 border-[1.5px] border-border px-2 text-[11px] font-bold text-text-muted transition-colors duration-150 hover:border-primary hover:text-primary',
+                              onClick: () => openUnits(row.original),
+                          },
+                          'Units',
+                      )
+                    : null,
+                can('items.print')
+                    ? h(
+                          'button',
+                          {
+                              type: 'button',
+                              class: 'h-[26px] shrink-0 border-[1.5px] border-border px-2 text-[11px] font-bold text-text-muted transition-colors duration-150 hover:border-primary hover:text-primary',
+                              onClick: () => openBarcodeModal(row.original),
+                          },
+                          'Print barcode',
+                      )
+                    : null,
+                can('items.edit') || can('items.delete')
+                    ? h(RowActions, {
+                          canEdit: can('items.edit'),
+                          canDelete: can('items.delete'),
+                          onEdit: () => openEdit(row.original),
+                          onDelete: () => destroy(row.original),
+                      })
+                    : null,
             ]),
     },
 ];
@@ -338,8 +354,8 @@ const columns = [
                 >
                     Mark {{ selectedItemIds.length }} vatable
                 </Button>
-                <Button variant="secondary" tone="purple" @click="openImport">Bulk import (CSV)</Button>
-                <Button variant="primary" tone="purple" @click="openCreate">New item</Button>
+                <Button v-if="can('items.import')" variant="secondary" tone="purple" @click="openImport">Bulk import (CSV)</Button>
+                <Button v-if="can('items.create')" variant="primary" tone="purple" @click="openCreate">New item</Button>
         </PageHeader>
 
         <Card variant="panel">

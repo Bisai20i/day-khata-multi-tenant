@@ -15,6 +15,7 @@ import RowActions from '@/components/ui/RowActions.vue';
 import { useToast } from '@/composables/useToast';
 import { formatMoney } from '@/lib/money';
 import { useConfirm } from '@/composables/useConfirm';
+import { usePermissions } from '@/composables/usePermissions';
 
 defineOptions({ layout: AppLayout });
 
@@ -32,6 +33,7 @@ const props = defineProps({
 const page = usePage();
 const { toast } = useToast();
 const { confirm } = useConfirm();
+const { can } = usePermissions();
 useLayoutChrome('Item Varieties');
 
 // Create/edit/delete all redirect back to this same route/component - Inertia
@@ -136,10 +138,12 @@ const columns = [
         header: '',
         numeric: false,
         cell: ({ row }) =>
-            h(RowActions, {
-                onEdit: () => openEdit(row.original),
-                onDelete: () => destroy(row.original),
-            }),
+            can('item_varieties.manage')
+                ? h(RowActions, {
+                      onEdit: () => openEdit(row.original),
+                      onDelete: () => destroy(row.original),
+                  })
+                : null,
     },
 ];
 </script>
@@ -147,7 +151,7 @@ const columns = [
 <template>
     <div>
         <PageHeader title="Item Varieties" description="Item varieties: sub-types of an item such as size or grade.">
-            <Button variant="primary" tone="purple" @click="openCreate">New variety</Button>
+            <Button v-if="can('item_varieties.manage')" variant="primary" tone="purple" @click="openCreate">New variety</Button>
         </PageHeader>
 
         <Card variant="panel">

@@ -13,6 +13,7 @@ import Input from '@/components/ui/Input.vue';
 import RowActions from '@/components/ui/RowActions.vue';
 import { useToast } from '@/composables/useToast';
 import { useConfirm } from '@/composables/useConfirm';
+import { usePermissions } from '@/composables/usePermissions';
 
 defineOptions({ layout: AppLayout });
 
@@ -26,6 +27,7 @@ defineProps({
 const page = usePage();
 const { toast } = useToast();
 const { confirm } = useConfirm();
+const { can } = usePermissions();
 useLayoutChrome('Brands');
 
 // Create/edit/delete all redirect back to this same route/component - Inertia
@@ -133,10 +135,12 @@ const columns = [
         header: '',
         numeric: false,
         cell: ({ row }) =>
-            h(RowActions, {
-                onEdit: () => openEdit(row.original),
-                onDelete: () => destroy(row.original),
-            }),
+            can('brands.manage')
+                ? h(RowActions, {
+                      onEdit: () => openEdit(row.original),
+                      onDelete: () => destroy(row.original),
+                  })
+                : null,
     },
 ];
 </script>
@@ -144,7 +148,7 @@ const columns = [
 <template>
     <div>
         <PageHeader title="Brands" description="Brands: manufacturers or labels your items belong to, used to group and filter items.">
-            <Button variant="primary" tone="purple" @click="openCreate">New brand</Button>
+            <Button v-if="can('brands.manage')" variant="primary" tone="purple" @click="openCreate">New brand</Button>
         </PageHeader>
 
         <Card variant="panel">

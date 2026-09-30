@@ -15,6 +15,7 @@ import DataTable from '@/components/ui/DataTable.vue';
 import RowActions from '@/components/ui/RowActions.vue';
 import { useToast } from '@/composables/useToast';
 import { useConfirm } from '@/composables/useConfirm';
+import { usePermissions } from '@/composables/usePermissions';
 import { formatMoney } from '@/lib/money';
 import { formatBsDate } from '@/lib/format';
 
@@ -43,7 +44,7 @@ const props = defineProps({
 });
 
 const page = usePage();
-const isAdmin = computed(() => page.props.auth?.user?.role?.slug === 'admin');
+const { can } = usePermissions();
 useLayoutChrome('Accounts');
 
 const { toast } = useToast();
@@ -233,8 +234,10 @@ const columns = [
                     { href: `/accounts/${row.original.id}/ledger`, class: 'text-xs font-semibold text-primary hover:underline' },
                     { default: () => 'Ledger' },
                 ),
-                isAdmin.value
+                can('accounts.edit') || can('accounts.delete')
                     ? h(RowActions, {
+                          canEdit: can('accounts.edit'),
+                          canDelete: can('accounts.delete'),
                           onEdit: () => openEdit(row.original),
                           onDelete: () => destroy(row.original),
                       })
@@ -247,8 +250,8 @@ const columns = [
 <template>
     <div>
         <PageHeader title="Accounts" description="Your chart of accounts: every ledger that money is recorded against. Open an account's Ledger to see its full history and running balance.">
-            <Button v-if="isAdmin" variant="secondary" tone="purple" @click="openImport">Import opening balances</Button>
-            <Button v-if="isAdmin" variant="primary" tone="purple" @click="openCreate">
+            <Button v-if="can('opening_balances.import')" variant="secondary" tone="purple" @click="openImport">Import opening balances</Button>
+            <Button v-if="can('accounts.create')" variant="primary" tone="purple" @click="openCreate">
                 <Plus class="size-4" />
                 New account
             </Button>
@@ -284,7 +287,7 @@ const columns = [
                         <td class="px-2 py-1.5">{{ entry.status === 'cancelled' ? 'Cleared' : 'In effect' }}</td>
                         <td class="px-2 py-1.5 text-right">
                             <button
-                                v-if="isAdmin && entry.can_clear"
+                                v-if="can('opening_balances.cancel') && entry.can_clear"
                                 type="button"
                                 class="text-[12px] font-bold text-danger hover:underline"
                                 @click="clearOpeningBalanceImport(entry)"

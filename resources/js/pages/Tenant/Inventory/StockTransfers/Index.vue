@@ -12,6 +12,7 @@ import Modal from '@/components/ui/Modal.vue';
 import DataTable from '@/components/ui/DataTable.vue';
 import Tooltip from '@/components/ui/Tooltip.vue';
 import { useToast } from '@/composables/useToast';
+import { usePermissions } from '@/composables/usePermissions';
 import { formatMoney, formatQuantity } from '@/lib/money.js';
 import { formatBsDate } from '@/lib/format.js';
 import Create from './Create.vue';
@@ -20,6 +21,7 @@ import { useOpenFiscalYear } from '@/composables/useOpenFiscalYear';
 defineOptions({ layout: AppLayout });
 
 const { hasOpenFiscalYear } = useOpenFiscalYear();
+const { can } = usePermissions();
 
 const props = defineProps({
     stockTransfers: { type: Array, default: () => [] },
@@ -139,20 +141,22 @@ const columns = [
         numeric: false,
         cell: ({ row }) =>
             h('div', { class: 'flex items-center gap-1' }, [
-                h(Tooltip, { label: 'Print transfer' }, () =>
-                    h(
-                        'a',
-                        {
-                            href: `/stock-transfers/${row.original.id}/print`,
-                            target: '_blank',
-                            rel: 'noopener',
-                            class: 'flex h-[26px] w-[26px] items-center justify-center bg-bg-subtle text-text-faint transition-colors duration-150 hover:bg-primary-tint hover:text-primary',
-                            'aria-label': 'Print transfer',
-                        },
-                        [h(Printer, { class: 'h-[13px] w-[13px]' })],
-                    ),
-                ),
-                row.original.status === 'cancelled'
+                can('stock_transfers.print')
+                    ? h(Tooltip, { label: 'Print transfer' }, () =>
+                        h(
+                            'a',
+                            {
+                                href: `/stock-transfers/${row.original.id}/print`,
+                                target: '_blank',
+                                rel: 'noopener',
+                                class: 'flex h-[26px] w-[26px] items-center justify-center bg-bg-subtle text-text-faint transition-colors duration-150 hover:bg-primary-tint hover:text-primary',
+                                'aria-label': 'Print transfer',
+                            },
+                            [h(Printer, { class: 'h-[13px] w-[13px]' })],
+                        ),
+                    )
+                    : null,
+                row.original.status === 'cancelled' || !can('stock_transfers.cancel')
                     ? null
                     : h(Tooltip, { label: 'Cancel transfer' }, () =>
                           h(
@@ -184,7 +188,7 @@ const columns = [
 
         <template v-else>
             <PageHeader title="Stock Transfers" description="Stock transfers: move stock from one store to another.">
-                <Button v-if="hasOpenFiscalYear" variant="primary" tone="purple" @click="showCreateForm = true">
+                <Button v-if="hasOpenFiscalYear && can('stock_transfers.create')" variant="primary" tone="purple" @click="showCreateForm = true">
                     <Plus class="size-4" />
                     New transfer
                 </Button>

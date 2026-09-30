@@ -14,6 +14,7 @@ import Tooltip from '@/components/ui/Tooltip.vue';
 import Combobox from '@/components/ui/Combobox.vue';
 import NepaliDateInput from '@/components/ui/NepaliDateInput.vue';
 import { useToast } from '@/composables/useToast';
+import { usePermissions } from '@/composables/usePermissions';
 import { formatMoney, formatQuantity } from '@/lib/money.js';
 import { formatBsDate, todayInKathmandu } from '@/lib/format.js';
 import Create from './Create.vue';
@@ -22,6 +23,7 @@ import { useOpenFiscalYear } from '@/composables/useOpenFiscalYear';
 defineOptions({ layout: AppLayout });
 
 const { hasOpenFiscalYear } = useOpenFiscalYear();
+const { can } = usePermissions();
 
 const props = defineProps({
     stockAdjustments: { type: Array, default: () => [] },
@@ -226,20 +228,22 @@ const columns = [
         numeric: false,
         cell: ({ row }) =>
             h('div', { class: 'flex items-center gap-1' }, [
-                h(Tooltip, { label: 'Print adjustment' }, () =>
-                    h(
-                        'a',
-                        {
-                            href: `/stock-adjustments/${row.original.id}/print`,
-                            target: '_blank',
-                            rel: 'noopener',
-                            class: 'flex h-[26px] w-[26px] items-center justify-center bg-bg-subtle text-text-faint transition-colors duration-150 hover:bg-primary-tint hover:text-primary',
-                            'aria-label': 'Print adjustment',
-                        },
-                        [h(Printer, { class: 'h-[13px] w-[13px]' })],
-                    ),
-                ),
-                row.original.status === 'cancelled'
+                can('stock_adjustments.print')
+                    ? h(Tooltip, { label: 'Print adjustment' }, () =>
+                        h(
+                            'a',
+                            {
+                                href: `/stock-adjustments/${row.original.id}/print`,
+                                target: '_blank',
+                                rel: 'noopener',
+                                class: 'flex h-[26px] w-[26px] items-center justify-center bg-bg-subtle text-text-faint transition-colors duration-150 hover:bg-primary-tint hover:text-primary',
+                                'aria-label': 'Print adjustment',
+                            },
+                            [h(Printer, { class: 'h-[13px] w-[13px]' })],
+                        ),
+                    )
+                    : null,
+                row.original.status === 'cancelled' || !can('stock_adjustments.cancel')
                     ? null
                     : h(Tooltip, { label: 'Cancel adjustment' }, () =>
                           h(
@@ -272,8 +276,8 @@ const columns = [
 
         <template v-else>
             <PageHeader title="Stock Adjustments" description="Stock adjustments: correct stock after a count, damage or loss.">
-                    <Button v-if="hasOpenFiscalYear" variant="secondary" tone="purple" @click="openImport">Import opening stock (CSV)</Button>
-                    <Button v-if="hasOpenFiscalYear" variant="primary" tone="purple" @click="showCreateForm = true">
+                    <Button v-if="hasOpenFiscalYear && can('opening_stock.import')" variant="secondary" tone="purple" @click="openImport">Import opening stock (CSV)</Button>
+                    <Button v-if="hasOpenFiscalYear && can('stock_adjustments.create')" variant="primary" tone="purple" @click="showCreateForm = true">
                         <Plus class="size-4" />
                         New adjustment
                     </Button>

@@ -14,6 +14,7 @@ import Select from '@/components/ui/Select.vue';
 import RowActions from '@/components/ui/RowActions.vue';
 import { useToast } from '@/composables/useToast';
 import { useConfirm } from '@/composables/useConfirm';
+import { usePermissions } from '@/composables/usePermissions';
 
 defineOptions({ layout: AppLayout });
 
@@ -31,6 +32,7 @@ const props = defineProps({
 const page = usePage();
 const { toast } = useToast();
 const { confirm } = useConfirm();
+const { can } = usePermissions();
 useLayoutChrome('Item Subcategories');
 
 // Create/edit/delete all redirect back to this same route/component - Inertia
@@ -119,10 +121,12 @@ const columns = [
         header: '',
         numeric: false,
         cell: ({ row }) =>
-            h(RowActions, {
-                onEdit: () => openEdit(row.original),
-                onDelete: () => destroy(row.original),
-            }),
+            can('item_categories.manage')
+                ? h(RowActions, {
+                      onEdit: () => openEdit(row.original),
+                      onDelete: () => destroy(row.original),
+                  })
+                : null,
     },
 ];
 </script>
@@ -130,7 +134,7 @@ const columns = [
 <template>
     <div>
         <PageHeader title="Item Subcategories" description="Item subcategories: finer groups inside a category, such as Soft drinks under Beverages.">
-            <Button variant="primary" tone="purple" @click="openCreate">New subcategory</Button>
+            <Button v-if="can('item_categories.manage')" variant="primary" tone="purple" @click="openCreate">New subcategory</Button>
         </PageHeader>
 
         <Card variant="panel">

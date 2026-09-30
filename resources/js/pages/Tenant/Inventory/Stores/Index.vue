@@ -13,6 +13,7 @@ import Input from '@/components/ui/Input.vue';
 import RowActions from '@/components/ui/RowActions.vue';
 import { useToast } from '@/composables/useToast';
 import { useConfirm } from '@/composables/useConfirm';
+import { usePermissions } from '@/composables/usePermissions';
 
 defineOptions({ layout: AppLayout });
 
@@ -26,6 +27,7 @@ defineProps({
 const page = usePage();
 const { toast } = useToast();
 const { confirm } = useConfirm();
+const { can } = usePermissions();
 useLayoutChrome('Stores');
 
 // Create/edit/delete all redirect back to this same route/component - Inertia
@@ -110,10 +112,12 @@ const columns = [
         header: '',
         numeric: false,
         cell: ({ row }) =>
-            h(RowActions, {
-                onEdit: () => openEdit(row.original),
-                onDelete: () => destroy(row.original),
-            }),
+            can('stores.manage')
+                ? h(RowActions, {
+                      onEdit: () => openEdit(row.original),
+                      onDelete: () => destroy(row.original),
+                  })
+                : null,
     },
 ];
 </script>
@@ -121,7 +125,7 @@ const columns = [
 <template>
     <div>
         <PageHeader title="Stores" description="Stores: the warehouses, shops or godowns where you keep stock.">
-            <Button variant="primary" tone="purple" @click="openCreate">New store</Button>
+            <Button v-if="can('stores.manage')" variant="primary" tone="purple" @click="openCreate">New store</Button>
         </PageHeader>
 
         <Card variant="panel">

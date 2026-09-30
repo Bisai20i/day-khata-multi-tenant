@@ -13,6 +13,7 @@ import DataTable from '@/components/ui/DataTable.vue';
 import RowActions from '@/components/ui/RowActions.vue';
 import { useToast } from '@/composables/useToast';
 import { useConfirm } from '@/composables/useConfirm';
+import { usePermissions } from '@/composables/usePermissions';
 
 defineOptions({ layout: AppLayout });
 
@@ -26,6 +27,7 @@ defineProps({
 const page = usePage();
 const { toast } = useToast();
 const { confirm } = useConfirm();
+const { can } = usePermissions();
 useLayoutChrome('Suppliers');
 
 // Flash status is watched (not just read on mount) because create/edit/delete
@@ -186,10 +188,14 @@ const columns = [
         header: 'Actions',
         numeric: false,
         cell: ({ row }) =>
-            h(RowActions, {
-                onEdit: () => openEdit(row.original),
-                onDelete: () => destroySupplier(row.original),
-            }),
+            can('suppliers.edit') || can('suppliers.delete')
+                ? h(RowActions, {
+                      canEdit: can('suppliers.edit'),
+                      canDelete: can('suppliers.delete'),
+                      onEdit: () => openEdit(row.original),
+                      onDelete: () => destroySupplier(row.original),
+                  })
+                : null,
     },
 ];
 </script>
@@ -197,8 +203,8 @@ const columns = [
 <template>
     <div>
         <PageHeader title="Suppliers" description="People and businesses you buy from. Each supplier gets its own ledger account, so you can track what you owe them.">
-            <Button variant="secondary" tone="purple" @click="openImport">Bulk import</Button>
-            <Button variant="primary" tone="purple" @click="openCreate">
+            <Button v-if="can('suppliers.import')" variant="secondary" tone="purple" @click="openImport">Bulk import</Button>
+            <Button v-if="can('suppliers.create')" variant="primary" tone="purple" @click="openCreate">
                 <Plus class="size-4" />
                 New supplier
             </Button>

@@ -1,6 +1,6 @@
 <script setup>
 import { computed, watch } from 'vue';
-import { useForm, usePage } from '@inertiajs/vue3';
+import { useForm } from '@inertiajs/vue3';
 import { Plus, X } from '@lucide/vue';
 import Card from '@/components/ui/Card.vue';
 import Button from '@/components/ui/Button.vue';
@@ -8,6 +8,7 @@ import Input from '@/components/ui/Input.vue';
 import Select from '@/components/ui/Select.vue';
 import Combobox from '@/components/ui/Combobox.vue';
 import NepaliDateInput from '@/components/ui/NepaliDateInput.vue';
+import { usePermissions } from '@/composables/usePermissions';
 import { formatMoney, multiplyMoney, parseQuantity, sumMoney } from '@/lib/money.js';
 import { todayInKathmandu } from '@/lib/format.js';
 
@@ -23,8 +24,7 @@ const props = defineProps({
 });
 
 const emit = defineEmits(['cancel', 'posted']);
-const page = usePage();
-const isAdmin = computed(() => page.props.auth?.user?.role?.slug === 'admin');
+const { can } = usePermissions();
 const fiscalYearOptions = computed(() =>
     props.correctionFiscalYear
         ? [{ value: props.correctionFiscalYear.id, label: `${props.correctionFiscalYear.name} (reopened for correction)` }]
@@ -238,7 +238,7 @@ function submit() {
         </p>
 
         <form class="flex flex-col gap-4" @submit.prevent="submit">
-            <div v-if="isAdmin && correctionFiscalYear">
+            <div v-if="can('fiscal_year.edit') && correctionFiscalYear">
                 <label for="adjustment-fiscal-year" class="mb-1 block text-sm font-semibold text-text-base">Fiscal year</label>
                 <Select
                     id="adjustment-fiscal-year"

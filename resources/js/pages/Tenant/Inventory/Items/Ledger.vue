@@ -9,10 +9,13 @@ import Select from '@/components/ui/Select.vue';
 import Button from '@/components/ui/Button.vue';
 import NepaliDateInput from '@/components/ui/NepaliDateInput.vue';
 import DataTable from '@/components/ui/DataTable.vue';
+import { usePermissions } from '@/composables/usePermissions';
 import { formatQuantity, formatRate } from '@/lib/money';
 import { formatBsDate } from '@/lib/format';
 
 defineOptions({ layout: AppLayout });
+
+const { can } = usePermissions();
 
 const props = defineProps({
     item: {
@@ -140,8 +143,8 @@ const columns = [
             back-href="/items"
             back-label="Back to items"
         >
-            <a :href="fileUrl('print')" target="_blank" rel="noopener"><Button variant="secondary" tone="purple">Print ledger</Button></a>
-            <a :href="fileUrl('export')"><Button variant="secondary" tone="purple">Export ledger</Button></a>
+            <a v-if="can('stock_reports.print')" :href="fileUrl('print')" target="_blank" rel="noopener"><Button variant="secondary" tone="purple">Print ledger</Button></a>
+            <a v-if="can('stock_reports.export')" :href="fileUrl('export')"><Button variant="secondary" tone="purple">Export ledger</Button></a>
         </PageHeader>
 
         <Card variant="panel" class="mb-4">

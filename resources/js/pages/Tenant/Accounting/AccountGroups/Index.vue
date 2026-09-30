@@ -14,6 +14,7 @@ import DataTable from '@/components/ui/DataTable.vue';
 import RowActions from '@/components/ui/RowActions.vue';
 import { useToast } from '@/composables/useToast';
 import { useConfirm } from '@/composables/useConfirm';
+import { usePermissions } from '@/composables/usePermissions';
 
 defineOptions({ layout: AppLayout });
 
@@ -29,7 +30,7 @@ const props = defineProps({
 });
 
 const page = usePage();
-const isAdmin = computed(() => page.props.auth?.user?.role?.slug === 'admin');
+const { can } = usePermissions();
 useLayoutChrome('Account Groups');
 
 const { toast } = useToast();
@@ -118,11 +119,13 @@ const columns = [
         id: 'actions',
         header: '',
         numeric: false,
-        // Admin-only server side (routes/tenant-business.php), so the row
+        // Gated by accounts.edit / accounts.delete server side, so the row
         // actions are hidden rather than left to fail with a 403.
         cell: ({ row }) =>
-            isAdmin.value
+            can('accounts.edit') || can('accounts.delete')
                 ? h(RowActions, {
+                      canEdit: can('accounts.edit'),
+                      canDelete: can('accounts.delete'),
                       onEdit: () => openEdit(row.original),
                       onDelete: () => destroy(row.original),
                   })
@@ -134,7 +137,7 @@ const columns = [
 <template>
     <div>
         <PageHeader title="Account Groups" description="Top-level categories that organise your chart of accounts. Each group sits under an account head and can be split into subgroups.">
-            <Button v-if="isAdmin" variant="primary" tone="purple" @click="openCreate">
+            <Button v-if="can('accounts.create')" variant="primary" tone="purple" @click="openCreate">
                 <Plus class="size-4" />
                 New group
             </Button>

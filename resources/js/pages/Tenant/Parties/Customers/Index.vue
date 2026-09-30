@@ -13,6 +13,7 @@ import DataTable from '@/components/ui/DataTable.vue';
 import RowActions from '@/components/ui/RowActions.vue';
 import { useToast } from '@/composables/useToast';
 import { useConfirm } from '@/composables/useConfirm';
+import { usePermissions } from '@/composables/usePermissions';
 
 defineOptions({ layout: AppLayout });
 
@@ -26,6 +27,7 @@ defineProps({
 const page = usePage();
 const { toast } = useToast();
 const { confirm } = useConfirm();
+const { can } = usePermissions();
 useLayoutChrome('Customers');
 
 // Flash status is watched (not just read on mount) because create/edit/delete
@@ -175,10 +177,14 @@ const columns = [
         // this server-side) has no delete action at all, rather than one
         // that always fails.
         cell: ({ row }) =>
-            h(RowActions, {
-                onEdit: () => openEdit(row.original),
-                onDelete: row.original.is_walk_in ? undefined : () => destroyCustomer(row.original),
-            }),
+            can('customers.edit') || can('customers.delete')
+                ? h(RowActions, {
+                      canEdit: can('customers.edit'),
+                      canDelete: can('customers.delete') && !row.original.is_walk_in,
+                      onEdit: () => openEdit(row.original),
+                      onDelete: () => destroyCustomer(row.original),
+                  })
+                : null,
     },
 ];
 </script>
@@ -186,8 +192,8 @@ const columns = [
 <template>
     <div>
         <PageHeader title="Customers" description="People and businesses you sell to. Each customer gets its own ledger account, so you can track what they owe you.">
-            <Button variant="secondary" tone="purple" @click="openImport">Bulk import</Button>
-            <Button variant="primary" tone="purple" @click="openCreate">
+            <Button v-if="can('customers.import')" variant="secondary" tone="purple" @click="openImport">Bulk import</Button>
+            <Button v-if="can('customers.create')" variant="primary" tone="purple" @click="openCreate">
                 <Plus class="size-4" />
                 New customer
             </Button>
