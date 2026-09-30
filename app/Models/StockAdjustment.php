@@ -116,7 +116,7 @@ class StockAdjustment extends Model
      * Three guards, all of them fixes the 2026-09-11 audit asked for:
      *
      * 1. The date must lie inside the open fiscal year (or a year reopened
-     *    for correction, with an admin and a reason) - P0-11.
+     *    for correction, with fiscal_year.edit and a reason) - P0-11.
      * 2. 'out' lines are checked **per store** and **per item after
      *    aggregating every line for that item**, so two lines of 3 against 5
      *    on hand can no longer both pass, and stock held at another store
@@ -152,8 +152,11 @@ class StockAdjustment extends Model
                 );
             }
 
-            if ($isCorrection && $actor->role?->slug !== 'admin') {
-                throw new AuthorizationException('Only an admin may post into a reopened fiscal year.');
+            // fiscal_year.edit, not the owner-only close_archive key: posting
+            // a correction is day-to-day bookkeeping a trusted accountant
+            // role may be granted, reopening the year is not.
+            if ($isCorrection && ! $actor->can('fiscal_year.edit')) {
+                throw new AuthorizationException('You do not have permission to post into a reopened fiscal year.');
             }
 
             $storeId = isset($data['store_id']) ? (int) $data['store_id'] : Store::where('is_active', true)->orderBy('id')->value('id');

@@ -449,7 +449,8 @@ test('cancelling a journal voucher from a now-closed fiscal year is rejected - c
     $tenant->run(function () {
         $fy1 = FiscalYear::create(['name' => 'FY1', 'start_date' => '2026-01-01', 'end_date' => '2026-12-31', 'status' => FiscalYearStatus::Open]);
         $fy2 = FiscalYear::create(['name' => 'FY2', 'start_date' => '2027-01-01', 'end_date' => '2027-12-31', 'status' => FiscalYearStatus::Closed]);
-        $actor = adminUser();
+        // The owner (role-less factory user): closing early is owner-only.
+        $actor = User::factory()->create();
 
         $voucher = JournalVoucher::post(
             ['date' => '2026-06-01', 'narration' => 'Cash sale'],

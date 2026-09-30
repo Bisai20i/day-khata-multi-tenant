@@ -14,6 +14,9 @@ import NepaliDateInput from '@/components/ui/NepaliDateInput.vue';
 const props = defineProps({
     form: { type: Object, required: true },
     suppliers: { type: Array, default: () => [] },
+    // POST /suppliers is gated suppliers.create (ROUTE-MAP shared lookup
+    // item 3), so the quick-add button is hidden without it.
+    canAddSupplier: { type: Boolean, default: true },
 });
 
 defineEmits(['select-supplier', 'add-supplier']);
@@ -33,7 +36,7 @@ const supplierOptions = computed(() => props.suppliers.map((s) => ({ value: s.id
                     aria-describedby="purchase-supplier-error"
                     @update:model-value="(v) => $emit('select-supplier', v)"
                 >
-                    <template #addon>
+                    <template v-if="canAddSupplier" #addon>
                         <button
                             type="button"
                             class="flex items-center justify-center text-text-muted hover:text-primary"

@@ -20,6 +20,7 @@ import { formatMoney } from '@/lib/money';
 import { formatBsDate, todayInKathmandu } from '@/lib/format';
 import Create from './Create.vue';
 import { useOpenFiscalYear } from '@/composables/useOpenFiscalYear';
+import { usePermissions } from '@/composables/usePermissions';
 
 defineOptions({ layout: AppLayout });
 
@@ -45,6 +46,16 @@ const props = defineProps({
 const page = usePage();
 const { toast } = useToast();
 useLayoutChrome('Capital Purchases');
+
+// UI mirrors of routes/tenant-purchase.php (bill cancel comes from the
+// server's canCancel prop); each route still enforces its own key.
+const { can } = usePermissions();
+const canCreateCapitalPurchase = computed(() => can('capital_purchases.create'));
+const canPrintCapitalPurchase = computed(() => can('capital_purchases.print'));
+const canExportCapitalPurchases = computed(() => can('capital_purchases.export'));
+const canSettle = computed(() => can('capital_purchase_settlements.create'));
+const canCancelSettlement = computed(() => can('capital_purchase_settlements.cancel'));
+const canPrintVoucher = computed(() => can('journal_vouchers.print'));
 
 // Store/cancel both redirect back to this same route + component, which
 // Inertia re-renders in place without an onMounted re-run - watch flash
@@ -94,7 +105,7 @@ function submitCancel() {
 }
 
 // Later settlements (audit CS-01): pay off the outstanding part of a credit
-// bill, and (admin) cancel a settlement again.
+// bill, and (with capital_purchase_settlements.cancel) cancel a settlement again.
 const settling = ref(null);
 const settleForm = useForm({
     date: todayInKathmandu(),
@@ -220,20 +231,22 @@ const columns = [
         cell: ({ row }) =>
             h('div', { class: 'flex flex-wrap items-center gap-2' }, [
                 // Every bill prints, live or cancelled (flags G-01).
-                h(Tooltip, { label: 'Print this bill' }, () =>
-                    h(
-                        'a',
-                        {
-                            href: `/capital-purchases/${row.original.id}/print`,
-                            target: '_blank',
-                            rel: 'noopener',
-                            class: 'flex h-[26px] w-[26px] items-center justify-center bg-bg-subtle text-text-faint transition-colors duration-150 hover:bg-primary-tint hover:text-primary',
-                            'aria-label': `Print capital purchase of ${formatMoney(row.original.total)}`,
-                        },
-                        [h(Printer, { class: 'h-[13px] w-[13px]' })],
-                    ),
-                ),
-                row.original.journal_voucher_id
+                canPrintCapitalPurchase.value
+                    ? h(Tooltip, { label: 'Print this bill' }, () =>
+                          h(
+                              'a',
+                              {
+                                  href: `/capital-purchases/${row.original.id}/print`,
+                                  target: '_blank',
+                                  rel: 'noopener',
+                                  class: 'flex h-[26px] w-[26px] items-center justify-center bg-bg-subtle text-text-faint transition-colors duration-150 hover:bg-primary-tint hover:text-primary',
+                                  'aria-label': `Print capital purchase of ${formatMoney(row.original.total)}`,
+                              },
+                              [h(Printer, { class: 'h-[13px] w-[13px]' })],
+                          ),
+                      )
+                    : null,
+                row.original.journal_voucher_id && canPrintVoucher.value
                     ? h(
                           'a',
                           {
@@ -249,7 +262,7 @@ const columns = [
                     ? [
                       // Only a credit bill owes anything later: "partial" is an exact
                       // cash + bank split of the whole total (CONTRACTS C3).
-                      row.original.supplier_id && row.original.payment_mode === 'credit'
+                      row.original.supplier_id && row.original.payment_mode === 'credit' && canSettle.value
                           ? h(Tooltip, { label: 'Record a payment, or review payments made, against this bill' }, () =>
                                 h(Button, {
                                     variant: 'secondary',
@@ -295,10 +308,10 @@ const columns = [
 
         <template v-else>
             <PageHeader title="Capital purchases" description="Long-term assets and services you bought, such as equipment or furniture. Cancel one that was posted in error.">
-                <a href="/capital-purchases/export">
+                <a v-if="canExportCapitalPurchases" href="/capital-purchases/export">
                     <Button variant="secondary" tone="purple" type="button">Export list</Button>
                 </a>
-                <Button v-if="hasOpenFiscalYear" variant="primary" tone="purple" @click="showCreateForm = true">
+                <Button v-if="hasOpenFiscalYear && canCreateCapitalPurchase" variant="primary" tone="purple" @click="showCreateForm = true">
                     <Plus class="size-4" aria-hidden="true" />
                     New capital purchase
                 </Button>
@@ -308,7 +321,7 @@ const columns = [
                 <div v-if="capitalPurchases.length === 0" class="py-10 text-center">
                     <p class="text-sm font-semibold text-text-strong">No capital purchases yet</p>
                     <p class="mt-1 text-sm text-text-muted">Record the first asset or service bill you received.</p>
-                    <Button v-if="hasOpenFiscalYear" class="mt-3" variant="primary" tone="purple" type="button" @click="showCreateForm = true">
+                    <Button v-if="hasOpenFiscalYear && canCreateCapitalPurchase" class="mt-3" variant="primary" tone="purple" type="button" @click="showCreateForm = true">
                         <Plus class="size-4" aria-hidden="true" />
                         New capital purchase
                     </Button>
@@ -364,7 +377,7 @@ const columns = [
                     <ul class="mt-2 flex flex-col gap-2 text-sm">
                         <li v-for="settlement in liveSettlements(settling)" :key="settlement.id" class="flex items-center justify-between gap-2">
                             <span>{{ formatBsDate(settlement.date) }} - Rs. {{ formatMoney(settlement.amount) }} ({{ settlement.payment_mode }})</span>
-                            <Button v-if="canCancel" variant="secondary" tone="purple" type="button" @click="openCancelSettlement(settlement)">Cancel</Button>
+                            <Button v-if="canCancelSettlement" variant="secondary" tone="purple" type="button" @click="openCancelSettlement(settlement)">Cancel</Button>
                         </li>
                     </ul>
                 </div>

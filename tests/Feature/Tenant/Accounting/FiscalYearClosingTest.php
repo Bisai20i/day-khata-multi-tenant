@@ -33,16 +33,18 @@ function provisionClosingTestTenant(string $domain): Tenant
 /**
  * Every fixture year here ends on 2026-12-31, which is still in the future
  * relative to the suite's clock, so every close in this file is an EARLY
- * close and needs an admin plus a written reason (T11 task 7).
+ * close and needs the owner (fiscal_year.close_archive) plus a written
+ * reason (T11 task 7).
  */
 const CLOSING_TEST_REASON = 'Closed early by the test fixture.';
 
-function closingTestAdmin(string $email = 'closer@example.com'): User
+/**
+ * A role-less factory user is the tenant owner (see UserFactory), the only
+ * actor allowed to close a year early.
+ */
+function closingTestOwner(string $email = 'closer@example.com'): User
 {
-    return User::factory()->create([
-        'email' => $email,
-        'role_id' => Role::where('slug', 'admin')->value('id'),
-    ]);
+    return User::factory()->create(['email' => $email]);
 }
 
 /**
@@ -66,7 +68,7 @@ test('closing a fiscal year that is not open is rejected', function () {
     $tenant->run(function () {
         $closed = FiscalYear::create(['name' => 'FY1', 'start_date' => '2026-01-01', 'end_date' => '2026-12-31', 'status' => FiscalYearStatus::Closed]);
         $next = FiscalYear::create(['name' => 'FY2', 'start_date' => '2027-01-01', 'end_date' => '2027-12-31', 'status' => FiscalYearStatus::Closed]);
-        $actor = closingTestAdmin();
+        $actor = closingTestOwner();
 
         expect(fn () => $closed->close($next, $actor, CLOSING_TEST_REASON))->toThrow(InvalidArgumentException::class);
     });
@@ -80,7 +82,7 @@ test('closing a fiscal year sweeps profit-and-loss accounts to zero and carries 
     $tenant->run(function () {
         $fy1 = FiscalYear::create(['name' => 'FY1', 'start_date' => '2026-01-01', 'end_date' => '2026-12-31', 'status' => FiscalYearStatus::Open]);
         $fy2 = FiscalYear::create(['name' => 'FY2', 'start_date' => '2027-01-01', 'end_date' => '2027-12-31', 'status' => FiscalYearStatus::Closed]);
-        $actor = closingTestAdmin();
+        $actor = closingTestOwner();
 
         $cash = Account::where('code', 'AS1')->firstOrFail();
         $sales = Account::where('code', 'INI20')->firstOrFail();
@@ -163,7 +165,7 @@ test('closing a year whose balances do not sum to round figures succeeds and pos
     $tenant->run(function () {
         $fy1 = FiscalYear::create(['name' => 'FY1', 'start_date' => '2026-01-01', 'end_date' => '2026-12-31', 'status' => FiscalYearStatus::Open]);
         $fy2 = FiscalYear::create(['name' => 'FY2', 'start_date' => '2027-01-01', 'end_date' => '2027-12-31', 'status' => FiscalYearStatus::Closed]);
-        $actor = closingTestAdmin();
+        $actor = closingTestOwner();
 
         $cash = Account::where('code', 'AS1')->firstOrFail();
         $purchases = Account::where('code', 'EXE8')->firstOrFail();
@@ -228,7 +230,7 @@ test('closing a year with stock on hand posts the trading pair and carries the c
     $tenant->run(function () {
         $fy1 = FiscalYear::create(['name' => 'FY1', 'start_date' => '2026-01-01', 'end_date' => '2026-12-31', 'status' => FiscalYearStatus::Open]);
         $fy2 = FiscalYear::create(['name' => 'FY2', 'start_date' => '2027-01-01', 'end_date' => '2027-12-31', 'status' => FiscalYearStatus::Closed]);
-        $actor = closingTestAdmin();
+        $actor = closingTestOwner();
 
         $cash = Account::where('code', 'AS1')->firstOrFail();
         $purchases = Account::where('code', 'EXE8')->firstOrFail();
@@ -320,7 +322,7 @@ test('a second close of the same fiscal year is rejected and posts nothing twice
     $tenant->run(function () {
         $fy1 = FiscalYear::create(['name' => 'FY1', 'start_date' => '2026-01-01', 'end_date' => '2026-12-31', 'status' => FiscalYearStatus::Open]);
         $fy2 = FiscalYear::create(['name' => 'FY2', 'start_date' => '2027-01-01', 'end_date' => '2027-12-31', 'status' => FiscalYearStatus::Closed]);
-        $actor = closingTestAdmin();
+        $actor = closingTestOwner();
 
         $cash = Account::where('code', 'AS1')->firstOrFail();
         $sales = Account::where('code', 'INI20')->firstOrFail();
@@ -360,7 +362,7 @@ test('a next fiscal year that starts on or before this one ends is rejected', fu
         // Deliberately EARLIER than FY1: an opening-balance voucher dated
         // here would restate balances inside a period FY1 still owns.
         $earlier = FiscalYear::create(['name' => 'FY0', 'start_date' => '2025-01-01', 'end_date' => '2025-12-31', 'status' => FiscalYearStatus::Closed]);
-        $actor = closingTestAdmin();
+        $actor = closingTestOwner();
 
         expect(fn () => $fy1->close($earlier, $actor, CLOSING_TEST_REASON))
             ->toThrow(InvalidArgumentException::class);
@@ -372,26 +374,32 @@ test('a next fiscal year that starts on or before this one ends is rejected', fu
     $tenant->delete();
 });
 
-test('closing a fiscal year before it has ended needs an admin and a written reason', function () {
+test('closing a fiscal year before it has ended needs the owner and a written reason', function () {
     $tenant = provisionClosingTestTenant('fy-close-early.tenant-test');
 
     $tenant->run(function () {
         $fy1 = FiscalYear::create(['name' => 'FY1', 'start_date' => '2026-01-01', 'end_date' => '2099-12-31', 'status' => FiscalYearStatus::Open]);
         $fy2 = FiscalYear::create(['name' => 'FY2', 'start_date' => '2100-01-01', 'end_date' => '2100-12-31', 'status' => FiscalYearStatus::Closed]);
-        $staff = User::factory()->create(['email' => 'staff@example.com']);
-        $admin = closingTestAdmin();
+        // A non-owner on the seeded admin role: it holds every grantable key,
+        // but fiscal_year.close_archive is owner-only.
+        $staff = User::factory()->create([
+            'email' => 'staff@example.com',
+            'role_id' => Role::where('slug', 'admin')->value('id'),
+            'is_owner' => false,
+        ]);
+        $owner = closingTestOwner();
 
         // No reason at all.
-        expect(fn () => $fy1->close($fy2, $admin))->toThrow(InvalidArgumentException::class);
-        expect(fn () => $fy1->close($fy2, $admin, '   '))->toThrow(InvalidArgumentException::class);
+        expect(fn () => $fy1->close($fy2, $owner))->toThrow(InvalidArgumentException::class);
+        expect(fn () => $fy1->close($fy2, $owner, '   '))->toThrow(InvalidArgumentException::class);
 
-        // A reason, but from someone who is not an admin.
+        // A reason, but from someone who is not the owner.
         expect(fn () => $fy1->close($fy2, $staff, CLOSING_TEST_REASON))->toThrow(AuthorizationException::class);
 
         expect($fy1->fresh()->status)->toBe(FiscalYearStatus::Open);
 
-        // Admin plus reason goes through, and the reason is kept on record.
-        $fy1->close($fy2, $admin, CLOSING_TEST_REASON);
+        // Owner plus reason goes through, and the reason is kept on record.
+        $fy1->close($fy2, $owner, CLOSING_TEST_REASON);
 
         expect($fy1->fresh()->status)->toBe(FiscalYearStatus::Closed)
             ->and($fy1->fresh()->close_reason)->toBe(CLOSING_TEST_REASON);
@@ -425,7 +433,7 @@ test('a tenant with stale is_profit_and_loss flags gets backfilled and closes co
 
         $fy1 = FiscalYear::create(['name' => 'FY1', 'start_date' => '2026-01-01', 'end_date' => '2026-12-31', 'status' => FiscalYearStatus::Open]);
         $fy2 = FiscalYear::create(['name' => 'FY2', 'start_date' => '2027-01-01', 'end_date' => '2027-12-31', 'status' => FiscalYearStatus::Closed]);
-        $actor = closingTestAdmin();
+        $actor = closingTestOwner();
 
         $cash = Account::where('code', 'AS1')->firstOrFail();
         $sales = Account::where('code', 'INI20')->firstOrFail();

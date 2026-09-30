@@ -22,6 +22,7 @@ import { formatBsDate } from '@/lib/format';
 import Create from './Create.vue';
 import CashBankCreate from './CashBankCreate.vue';
 import { useOpenFiscalYear } from '@/composables/useOpenFiscalYear';
+import { usePermissions } from '@/composables/usePermissions';
 
 // A manually posted Journal voucher and the five plain cash/bank vouchers
 // (Cash Receipt, Cash Payment, Bank Receipt, Bank Payment, Contra - T14)
@@ -59,7 +60,14 @@ const page = usePage();
 const { toast } = useToast();
 useLayoutChrome('Journal Vouchers');
 
-const isAdmin = computed(() => page.props.auth?.user?.role?.slug === 'admin');
+// UI mirrors of the route gates (routes/tenant-ledger.php); the server
+// still refuses each action on its own.
+const { can } = usePermissions();
+const canCreateJournal = computed(() => can('journal_vouchers.create'));
+const canCreateCashBank = computed(() => can('cash_bank_vouchers.create'));
+const canCancelVoucher = computed(() => can('journal_vouchers.cancel'));
+const canPrintVoucher = computed(() => can('journal_vouchers.print'));
+const canExport = computed(() => can('journal_vouchers.export'));
 
 // Flash status is watched (not just read on mount) because posting a voucher
 // redirects back to this same route + component, which Inertia re-renders
@@ -395,20 +403,22 @@ const columns = [
                         [h(Eye, { class: 'h-[13px] w-[13px]' })],
                     ),
                 ),
-                h(Tooltip, { label: 'Print voucher' }, () =>
-                    h(
-                        'a',
-                        {
-                            href: `/journal-vouchers/${row.original.id}/print`,
-                            target: '_blank',
-                            rel: 'noopener',
-                            class: 'flex h-[26px] w-[26px] items-center justify-center bg-bg-subtle text-text-faint transition-colors duration-150 hover:bg-primary-tint hover:text-primary',
-                            'aria-label': `Print ${voucherLabel(row.original)}`,
-                        },
-                        [h(Printer, { class: 'h-[13px] w-[13px]' })],
-                    ),
-                ),
-                isAdmin.value && row.original.status === 'posted' && MANUALLY_CANCELLABLE_TYPES.includes(row.original.voucher_type)
+                canPrintVoucher.value
+                    ? h(Tooltip, { label: 'Print voucher' }, () =>
+                          h(
+                              'a',
+                              {
+                                  href: `/journal-vouchers/${row.original.id}/print`,
+                                  target: '_blank',
+                                  rel: 'noopener',
+                                  class: 'flex h-[26px] w-[26px] items-center justify-center bg-bg-subtle text-text-faint transition-colors duration-150 hover:bg-primary-tint hover:text-primary',
+                                  'aria-label': `Print ${voucherLabel(row.original)}`,
+                              },
+                              [h(Printer, { class: 'h-[13px] w-[13px]' })],
+                          ),
+                      )
+                    : null,
+                canCancelVoucher.value && row.original.status === 'posted' && MANUALLY_CANCELLABLE_TYPES.includes(row.original.voucher_type)
                     ? h(Tooltip, { label: 'Cancel voucher (posts reversing entry)' }, () =>
                           h(
                               'button',
@@ -448,12 +458,12 @@ const columns = [
 
         <template v-else>
             <PageHeader title="Journal Vouchers" description="The record of every accounting entry. Post a journal voucher for general adjustments, or a cash/bank voucher for simple money in and out. Entries from sales and purchases also appear here.">
-                <template v-if="isAdmin">
-                    <Button v-if="hasOpenFiscalYear" variant="secondary" tone="purple" @click="showCashBankForm = true">
+                <template v-if="hasOpenFiscalYear">
+                    <Button v-if="canCreateCashBank" variant="secondary" tone="purple" @click="showCashBankForm = true">
                         <Plus class="size-4" />
                         New cash/bank voucher
                     </Button>
-                    <Button v-if="hasOpenFiscalYear" variant="primary" tone="purple" @click="showCreateForm = true">
+                    <Button v-if="canCreateJournal" variant="primary" tone="purple" @click="showCreateForm = true">
                         <Plus class="size-4" />
                         New journal voucher
                     </Button>
@@ -518,7 +528,7 @@ const columns = [
                             <Printer class="size-4" />
                             Print
                         </Button>
-                        <DropdownMenu align="end">
+                        <DropdownMenu v-if="canExport" align="end">
                             <template #trigger>
                                 <Button variant="secondary" tone="neutral" type="button">
                                     <Download class="size-4" />
@@ -542,8 +552,8 @@ const columns = [
                     </template>
                     <template v-else>
                         <p class="text-sm font-semibold text-text-strong">No vouchers yet</p>
-                        <p v-if="isAdmin && hasOpenFiscalYear" class="text-xs text-text-muted">Post your first entry and it will be listed here.</p>
-                        <Button v-if="isAdmin && hasOpenFiscalYear" variant="primary" tone="purple" @click="showCreateForm = true">
+                        <p v-if="canCreateJournal && hasOpenFiscalYear" class="text-xs text-text-muted">Post your first entry and it will be listed here.</p>
+                        <Button v-if="canCreateJournal && hasOpenFiscalYear" variant="primary" tone="purple" @click="showCreateForm = true">
                             <Plus class="size-4" />
                             New journal voucher
                         </Button>

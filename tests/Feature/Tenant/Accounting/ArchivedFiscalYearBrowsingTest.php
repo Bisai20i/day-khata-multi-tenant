@@ -92,7 +92,11 @@ test('an admin can browse an archived fiscal year and one of its vouchers, and b
             $admin,
         );
 
-        $fy1->close($fy2, $admin, 'Closed early by the test fixture.');
+        // Closing early is owner-only (fiscal_year.close_archive); browsing
+        // below stays with the non-owner admin, who holds
+        // fiscal_year_archive.view.
+        $owner = User::factory()->create();
+        $fy1->close($fy2, $owner, 'Closed early by the test fixture.');
 
         // Faithful stand-in for FiscalYearArchiveController::store(), which
         // is being built in parallel and may not exist on disk yet - this
@@ -160,8 +164,8 @@ test('a non-admin cannot browse a fiscal year archive or one of its vouchers', f
     $archiveId = null;
 
     $tenant->run(function () use (&$archiveId) {
-        $adminRole = Role::query()->where('slug', 'admin')->firstOrFail();
-        $admin = User::factory()->create(['role_id' => $adminRole->id]);
+        // The owner (role-less factory user): only the owner may close early.
+        $admin = User::factory()->create();
 
         $fy1 = FiscalYear::create(['name' => 'FY1', 'start_date' => '2026-01-01', 'end_date' => '2026-12-31', 'status' => FiscalYearStatus::Open]);
         $fy2 = FiscalYear::create(['name' => 'FY2', 'start_date' => '2027-01-01', 'end_date' => '2027-12-31', 'status' => FiscalYearStatus::Closed]);

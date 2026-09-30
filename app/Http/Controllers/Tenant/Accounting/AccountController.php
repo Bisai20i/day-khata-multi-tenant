@@ -13,6 +13,7 @@ use App\Models\AccountSubgroup;
 use App\Models\CapitalPurchase;
 use App\Models\CapitalSale;
 use App\Models\CompanySetting;
+use App\Models\Customer;
 use App\Models\FiscalYear;
 use App\Models\FixedAsset;
 use App\Models\FixedAssetDepreciation;
@@ -24,6 +25,7 @@ use App\Models\PurchaseReturn;
 use App\Models\Receipt;
 use App\Models\Sale;
 use App\Models\SalesReturn;
+use App\Models\Supplier;
 use App\Models\User;
 use App\Support\Money\Money;
 use App\Support\NepaliCalendar;
@@ -172,6 +174,7 @@ class AccountController extends Controller
      */
     public function ledger(Request $request, Account $account): Response
     {
+        $this->authorizeLedgerAccess($request, $account, 'view');
         $this->validateLedgerInput($request);
 
         $fiscalYearId = $request->integer('fiscal_year_id') ?: FiscalYear::query()->where('status', FiscalYearStatus::Open)->value('id');
@@ -183,6 +186,10 @@ class AccountController extends Controller
 
         return Inertia::render('Tenant/Accounting/Accounts/Ledger', array_merge([
             'account' => $account->only(['id', 'code', 'name']),
+            // Per account, so a party-ledger-only user sees Print/Export on a
+            // customer statement exactly when the routes would allow it.
+            'canPrint' => $this->mayOpenLedger($request->user(), $account, 'print'),
+            'canExport' => $this->mayOpenLedger($request->user(), $account, 'export'),
             'fiscalYears' => FiscalYear::query()->orderByDesc('start_date')->get(['id', 'name', 'status', 'start_date', 'end_date']),
             'fiscalYearId' => $fiscalYearId,
         ], $data));
@@ -190,6 +197,7 @@ class AccountController extends Controller
 
     public function ledgerPrint(Request $request, Account $account)
     {
+        $this->authorizeLedgerAccess($request, $account, 'print');
         $this->validateLedgerInput($request);
 
         $fiscalYear = $this->resolveLedgerFiscalYear($request);
@@ -217,6 +225,7 @@ class AccountController extends Controller
 
     public function ledgerExport(Request $request, Account $account)
     {
+        $this->authorizeLedgerAccess($request, $account, 'export');
         $this->validateLedgerInput($request);
 
         $fiscalYear = $this->resolveLedgerFiscalYear($request);
@@ -228,6 +237,49 @@ class AccountController extends Controller
             new AccountBookExport($data['entries'], $data['openingBalance'], $data['closingBalance']),
             "ledger-{$account->id}.xlsx",
         );
+    }
+
+    /**
+     * The three ledger routes carry no `can:` middleware (ROUTE-MAP shared
+     * lookup item 1), so this is their only gate. account_ledger.$action
+     * opens any account (accounting module). party_ledger.$action (core
+     * module, so it survives the accounting module being switched off) opens
+     * only an account that backs a customer or supplier: a statement for a
+     * party the user already deals with, never the cash, bank, capital or
+     * income accounts. Agent accounts are deliberately not party accounts
+     * (agents are their own module). Checked before validation so an
+     * unauthorized caller learns nothing from validation errors.
+     *
+     * @param  'view'|'print'|'export'  $action
+     */
+    private function authorizeLedgerAccess(Request $request, Account $account, string $action): void
+    {
+        abort_unless($this->mayOpenLedger($request->user(), $account, $action), 403);
+    }
+
+    /**
+     * @param  'view'|'print'|'export'  $action
+     */
+    private function mayOpenLedger(?User $user, Account $account, string $action): bool
+    {
+        if ($user === null) {
+            return false;
+        }
+
+        if ($user->can("account_ledger.{$action}")) {
+            return true;
+        }
+
+        return $user->can("party_ledger.{$action}") && $this->isPartyAccount($account);
+    }
+
+    /**
+     * Whether the account is the ledger account of a customer or supplier.
+     */
+    private function isPartyAccount(Account $account): bool
+    {
+        return Customer::query()->where('account_id', $account->id)->exists()
+            || Supplier::query()->where('account_id', $account->id)->exists();
     }
 
     /**

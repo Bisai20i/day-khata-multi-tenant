@@ -197,9 +197,9 @@ class FiscalYear extends Model
     }
 
     /**
-     * Reopens this closed year for correction: an admin-only, mandatory-
-     * reason action (enforced by the caller/route, see FiscalYearController
-     * ::reopen()'s role:admin middleware) that flips on the window
+     * Reopens this closed year for correction: an owner-only, mandatory-
+     * reason action (enforced by the caller/route, see the reopen route's
+     * can:fiscal_year.close_archive middleware) that flips on the window
      * ClosedFiscalYearGuard checks. Locked design decision - see
      * plans/invoicing-settings-sale-purchase-ux.md "Locked decisions" #3 and
      * Phase D's recommended option (a): the Purchase/Journal Voucher/Stock
@@ -325,9 +325,10 @@ class FiscalYear extends Model
      * than by a test.
      *
      * $closeReason is mandatory when the year has not actually finished yet,
-     * and may then only be given by an admin: closing early freezes a period
-     * that can still legitimately receive documents, so it has to be a
-     * deliberate, attributable act rather than a mis-click (T11 task 7).
+     * and may then only be given by the owner (fiscal_year.close_archive):
+     * closing early freezes a period that can still legitimately receive
+     * documents, so it has to be a deliberate, attributable act rather than
+     * a mis-click (T11 task 7).
      */
     public function close(self $next, User $actor, ?string $closeReason = null): void
     {
@@ -372,12 +373,14 @@ class FiscalYear extends Model
             if ($today->lessThanOrEqualTo(CarbonImmutable::parse($year->end_date->toDateString()))) {
                 if (trim((string) $closeReason) === '') {
                     throw new InvalidArgumentException(
-                        "\"{$year->name}\" does not end until {$year->end_date->toDateString()}. Closing it early needs an admin and a written reason."
+                        "\"{$year->name}\" does not end until {$year->end_date->toDateString()}. Closing it early needs the owner and a written reason."
                     );
                 }
 
-                if ($actor->role?->slug !== 'admin') {
-                    throw new AuthorizationException('Only an admin may close a fiscal year before it has ended.');
+                // The same owner-only key the close route requires, repeated
+                // here because close() is also reachable outside that route.
+                if (! $actor->can('fiscal_year.close_archive')) {
+                    throw new AuthorizationException('You do not have permission to close a fiscal year before it has ended.');
                 }
             }
 

@@ -1,5 +1,5 @@
 <script setup>
-import { h, ref, watch } from 'vue';
+import { computed, h, ref, watch } from 'vue';
 import { useForm, usePage } from '@inertiajs/vue3';
 import { Plus } from '@lucide/vue';
 import AppLayout from '@/layouts/AppLayout.vue';
@@ -18,6 +18,7 @@ import { formatMoney, sumMoney } from '@/lib/money';
 import { formatBsDate } from '@/lib/format';
 import Create from './Create.vue';
 import { useOpenFiscalYear } from '@/composables/useOpenFiscalYear';
+import { usePermissions } from '@/composables/usePermissions';
 
 defineOptions({ layout: AppLayout });
 
@@ -37,6 +38,11 @@ const props = defineProps({
 const page = usePage();
 const { toast } = useToast();
 useLayoutChrome('Payments');
+
+// UI mirrors of routes/tenant-payments.php; each route still enforces its key.
+const { can } = usePermissions();
+const canCreatePayment = computed(() => can('payments.create'));
+const canCancelPayment = computed(() => can('payments.cancel'));
 
 // Posting/cancelling redirects back to this same route + component, which
 // Inertia re-renders in place without an onMounted re-run - watch the flash
@@ -133,7 +139,7 @@ const columns = [
         header: 'Actions',
         numeric: false,
         cell: ({ row }) =>
-            row.original.status === 'posted'
+            row.original.status === 'posted' && canCancelPayment.value
                 ? h(Tooltip, { label: 'Cancel this payment and reverse its entries' }, () =>
                       h(Button, {
                           variant: 'secondary',
@@ -162,7 +168,7 @@ const columns = [
 
         <template v-else>
             <PageHeader title="Supplier payments" description="Money paid to suppliers against their bills. Cancel a payment entered in error.">
-                <Button v-if="hasOpenFiscalYear" variant="primary" tone="purple" @click="showCreateForm = true">
+                <Button v-if="hasOpenFiscalYear && canCreatePayment" variant="primary" tone="purple" @click="showCreateForm = true">
                     <Plus class="size-4" aria-hidden="true" />
                     New payment
                 </Button>
@@ -172,7 +178,7 @@ const columns = [
                 <div v-if="payments.data.length === 0" class="py-10 text-center">
                     <p class="text-sm font-semibold text-text-strong">No payments yet</p>
                     <p class="mt-1 text-sm text-text-muted">Record the first payment you made to a supplier.</p>
-                    <Button v-if="hasOpenFiscalYear" class="mt-3" variant="primary" tone="purple" type="button" @click="showCreateForm = true">
+                    <Button v-if="hasOpenFiscalYear && canCreatePayment" class="mt-3" variant="primary" tone="purple" type="button" @click="showCreateForm = true">
                         <Plus class="size-4" aria-hidden="true" />
                         New payment
                     </Button>

@@ -19,6 +19,7 @@ import { formatMoney, isZeroMoney } from '@/lib/money';
 import { formatBsDate } from '@/lib/format';
 import Create from './Create.vue';
 import { useOpenFiscalYear } from '@/composables/useOpenFiscalYear';
+import { usePermissions } from '@/composables/usePermissions';
 
 defineOptions({ layout: AppLayout });
 
@@ -108,6 +109,15 @@ const exportUrl = computed(() => {
 const page = usePage();
 const { toast } = useToast();
 useLayoutChrome('Purchase Returns');
+
+// UI mirrors of routes/tenant-purchase-returns.php; each route still
+// enforces its own key. Either create key opens the form (Create.vue picks
+// the mode the user may post).
+const { can, canAny } = usePermissions();
+const canCreateReturn = computed(() => canAny(['purchase_returns.create', 'unlinked_purchase_returns.create']));
+const canPrintReturn = computed(() => can('purchase_returns.print'));
+const canExportReturns = computed(() => can('purchase_returns.export'));
+const canCancelReturn = computed(() => can('purchase_returns.cancel'));
 
 watch(
     () => page.props.flash?.status,
@@ -239,22 +249,24 @@ const columns = [
         numeric: false,
         cell: ({ row }) =>
             h('div', { class: 'flex items-center gap-2' }, [
-                h(Tooltip, { label: 'Open a printable copy in a new tab' }, () =>
-                    h(
-                        Button,
-                        {
-                            as: 'a',
-                            variant: 'secondary',
-                            tone: 'purple',
-                            href: `/purchase-returns/${row.original.id}/print`,
-                            target: '_blank',
-                            rel: 'noopener',
-                            'aria-label': `Print purchase return ${row.original.debit_note_number ?? row.original.id}`,
-                        },
-                        () => 'Print',
-                    ),
-                ),
-                row.original.status === 'posted'
+                canPrintReturn.value
+                    ? h(Tooltip, { label: 'Open a printable copy in a new tab' }, () =>
+                          h(
+                              Button,
+                              {
+                                  as: 'a',
+                                  variant: 'secondary',
+                                  tone: 'purple',
+                                  href: `/purchase-returns/${row.original.id}/print`,
+                                  target: '_blank',
+                                  rel: 'noopener',
+                                  'aria-label': `Print purchase return ${row.original.debit_note_number ?? row.original.id}`,
+                              },
+                              () => 'Print',
+                          ),
+                      )
+                    : null,
+                row.original.status === 'posted' && canCancelReturn.value
                     ? h(Tooltip, { label: 'Cancel this return and reverse its entries' }, () =>
                           h(
                               Button,
@@ -293,7 +305,7 @@ const columns = [
 
         <template v-else>
             <PageHeader title="Purchase returns" description="Goods sent back to suppliers. Each return issues a debit note; cancel one entered in error.">
-                <Button v-if="hasOpenFiscalYear" variant="primary" tone="purple" @click="showCreateForm = true">
+                <Button v-if="hasOpenFiscalYear && canCreateReturn" variant="primary" tone="purple" @click="showCreateForm = true">
                     <Plus class="size-4" aria-hidden="true" />
                     New return
                 </Button>
@@ -321,7 +333,7 @@ const columns = [
                         <X class="size-4" />
                         Clear filters
                     </Button>
-                    <a :href="exportUrl">
+                    <a v-if="canExportReturns" :href="exportUrl">
                         <Button variant="secondary" tone="purple" type="button">Export filtered list</Button>
                     </a>
                 </div>
@@ -337,7 +349,7 @@ const columns = [
                     <template v-else>
                         <p class="text-sm font-semibold text-text-strong">No purchase returns yet</p>
                         <p class="mt-1 text-sm text-text-muted">Record goods you sent back to a supplier.</p>
-                        <Button v-if="hasOpenFiscalYear" class="mt-3" variant="primary" tone="purple" type="button" @click="showCreateForm = true">
+                        <Button v-if="hasOpenFiscalYear && canCreateReturn" class="mt-3" variant="primary" tone="purple" type="button" @click="showCreateForm = true">
                             <Plus class="size-4" aria-hidden="true" />
                             New return
                         </Button>

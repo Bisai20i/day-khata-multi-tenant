@@ -52,7 +52,9 @@ class CapitalPurchaseController extends Controller
             ],
             'suppliers' => Supplier::query()->orderBy('name')->get(['id', 'name', 'tpin']),
             'accounts' => Account::query()->orderBy('name')->get(['id', 'code', 'name']),
-            'canCancel' => request()->user()?->role?->slug === 'admin',
+            // Mirrors the capital_purchases.cancel route gate so the page
+            // hides Cancel instead of offering a 403.
+            'canCancel' => (bool) request()->user()?->can('capital_purchases.cancel'),
             'stores' => Store::where('is_active', true)->orderBy('name')->get(['id', 'name']),
             'defaultVatRate' => (string) (CompanySetting::current()->default_vat_rate ?? '13.00'),
             // Asset register (item 5): only accounts filed under Fixed

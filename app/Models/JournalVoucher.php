@@ -106,7 +106,7 @@ class JournalVoucher extends Model
      * gates posting into a closed year behind ClosedFiscalYearGuard (only
      * postable once a closed year has been deliberately reopened for
      * correction - see FiscalYear::isOpenForCorrection() - and even then
-     * only by an admin, with a reason), and rolls a closed-year
+     * only by a user holding fiscal_year.edit, with a reason), and rolls a closed-year
      * correction's effect forward through any already-created subsequent
      * fiscal years.
      *
@@ -149,12 +149,15 @@ class JournalVoucher extends Model
             // Only postable when $fiscalYear is the open year, or a closed
             // year that's been deliberately reopened for correction (see
             // FiscalYear::isOpenForCorrection()) - never a plain closed
-            // year, admin+reason or not. See ClosedFiscalYearGuard's
+            // year, fiscal_year.edit+reason or not. See ClosedFiscalYearGuard's
             // docblock for the locked design decision this implements.
             ClosedFiscalYearGuard::ensurePostable($fiscalYear, $reason);
 
-            if ($isOverride && $actor->role?->slug !== 'admin') {
-                throw new AuthorizationException('Only an admin may post into a reopened fiscal year.');
+            // fiscal_year.edit, not the owner-only close_archive key: posting
+            // a correction is day-to-day bookkeeping a trusted accountant
+            // role may be granted, reopening the year is not.
+            if ($isOverride && ! $actor->can('fiscal_year.edit')) {
+                throw new AuthorizationException('You do not have permission to post into a reopened fiscal year.');
             }
 
             $voucher = static::write(

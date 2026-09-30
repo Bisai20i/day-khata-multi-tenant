@@ -37,17 +37,17 @@ function provisionArchiveTestTenant(string $domain): Tenant
     return $tenant;
 }
 
-function loginAsArchiveAdmin(string $domain): User
+/**
+ * Archiving is owner-only (fiscal_year.close_archive), so the acting user is
+ * the tenant owner: a role-less factory user, see UserFactory.
+ */
+function loginAsArchiveOwner(string $domain): User
 {
-    $admin = null;
-
     tenancy()->initialize(Tenant::query()->whereHas('domains', fn ($q) => $q->where('domain', $domain))->firstOrFail());
 
-    $adminRole = Role::query()->where('slug', 'admin')->firstOrFail();
-    $admin = User::factory()->create([
+    $owner = User::factory()->create([
         'email' => 'boss@example.com',
         'password' => 'password',
-        'role_id' => $adminRole->id,
     ]);
 
     tenancy()->end();
@@ -57,7 +57,7 @@ function loginAsArchiveAdmin(string $domain): User
         'password' => 'password',
     ]);
 
-    return $admin;
+    return $owner;
 }
 
 /**
@@ -102,21 +102,21 @@ function postArchiveTestVouchers(User $actor): void
     );
 }
 
-test('an admin can archive a closed fiscal year, producing a row with correct counts', function () {
+test('the owner can archive a closed fiscal year, producing a row with correct counts', function () {
     $domain = 'fy-archive-create.tenant-test';
     $tenant = provisionArchiveTestTenant($domain);
-    $admin = loginAsArchiveAdmin($domain);
+    $owner = loginAsArchiveOwner($domain);
 
     $fiscalYearId = null;
 
-    $tenant->run(function () use ($admin, &$fiscalYearId) {
+    $tenant->run(function () use ($owner, &$fiscalYearId) {
         $fy1 = FiscalYear::create(['name' => 'FY1', 'start_date' => '2026-01-01', 'end_date' => '2026-12-31', 'status' => FiscalYearStatus::Open]);
         $fy2 = FiscalYear::create(['name' => 'FY2', 'start_date' => '2027-01-01', 'end_date' => '2027-12-31', 'status' => FiscalYearStatus::Closed]);
         $fiscalYearId = $fy1->id;
 
-        postArchiveTestVouchers($admin);
+        postArchiveTestVouchers($owner);
 
-        $fy1->close($fy2, $admin, 'Closed early by the test fixture.');
+        $fy1->close($fy2, $owner, 'Closed early by the test fixture.');
 
         // 3 manually-posted vouchers + 1 system-posted ClosingEntry
         // voucher all land inside fy1; the OpeningBalance voucher close()
@@ -128,12 +128,12 @@ test('an admin can archive a closed fiscal year, producing a row with correct co
     $response = test()->post("http://{$domain}/fiscal-years/{$fiscalYearId}/archive");
     $response->assertRedirect(route('tenant.fiscal-years.index'));
 
-    $tenant->run(function () use ($fiscalYearId, $admin) {
+    $tenant->run(function () use ($fiscalYearId, $owner) {
         $archive = FiscalYearArchive::where('fiscal_year_id', $fiscalYearId)->first();
 
         expect($archive)->not->toBeNull()
             ->and($archive->fiscal_year_id)->toBe($fiscalYearId)
-            ->and($archive->archived_by)->toBe($admin->id)
+            ->and($archive->archived_by)->toBe($owner->id)
             ->and($archive->voucher_count)->toBe(4)
             ->and($archive->line_count)->toBe(
                 JournalVoucherLine::whereHas('journalVoucher', fn ($q) => $q->where('fiscal_year_id', $fiscalYearId))->count()
@@ -146,17 +146,17 @@ test('an admin can archive a closed fiscal year, producing a row with correct co
 test('archiving round-trips the ledger exactly: aggregate sums and a per-line spot check both match the live data', function () {
     $domain = 'fy-archive-roundtrip.tenant-test';
     $tenant = provisionArchiveTestTenant($domain);
-    $admin = loginAsArchiveAdmin($domain);
+    $owner = loginAsArchiveOwner($domain);
 
     $fiscalYearId = null;
 
-    $tenant->run(function () use ($admin, &$fiscalYearId) {
+    $tenant->run(function () use ($owner, &$fiscalYearId) {
         $fy1 = FiscalYear::create(['name' => 'FY1', 'start_date' => '2026-01-01', 'end_date' => '2026-12-31', 'status' => FiscalYearStatus::Open]);
         $fy2 = FiscalYear::create(['name' => 'FY2', 'start_date' => '2027-01-01', 'end_date' => '2027-12-31', 'status' => FiscalYearStatus::Closed]);
         $fiscalYearId = $fy1->id;
 
-        postArchiveTestVouchers($admin);
-        $fy1->close($fy2, $admin, 'Closed early by the test fixture.');
+        postArchiveTestVouchers($owner);
+        $fy1->close($fy2, $owner, 'Closed early by the test fixture.');
     });
 
     test()->post("http://{$domain}/fiscal-years/{$fiscalYearId}/archive");
@@ -212,7 +212,7 @@ test('archiving round-trips the ledger exactly: aggregate sums and a per-line sp
 test('an open fiscal year cannot be archived', function () {
     $domain = 'fy-archive-open-rejected.tenant-test';
     $tenant = provisionArchiveTestTenant($domain);
-    loginAsArchiveAdmin($domain);
+    loginAsArchiveOwner($domain);
 
     $fiscalYearId = null;
 
@@ -234,17 +234,17 @@ test('an open fiscal year cannot be archived', function () {
 test('a fiscal year cannot be archived twice', function () {
     $domain = 'fy-archive-twice.tenant-test';
     $tenant = provisionArchiveTestTenant($domain);
-    $admin = loginAsArchiveAdmin($domain);
+    $owner = loginAsArchiveOwner($domain);
 
     $fiscalYearId = null;
 
-    $tenant->run(function () use ($admin, &$fiscalYearId) {
+    $tenant->run(function () use ($owner, &$fiscalYearId) {
         $fy1 = FiscalYear::create(['name' => 'FY1', 'start_date' => '2026-01-01', 'end_date' => '2026-12-31', 'status' => FiscalYearStatus::Open]);
         $fy2 = FiscalYear::create(['name' => 'FY2', 'start_date' => '2027-01-01', 'end_date' => '2027-12-31', 'status' => FiscalYearStatus::Closed]);
         $fiscalYearId = $fy1->id;
 
-        postArchiveTestVouchers($admin);
-        $fy1->close($fy2, $admin, 'Closed early by the test fixture.');
+        postArchiveTestVouchers($owner);
+        $fy1->close($fy2, $owner, 'Closed early by the test fixture.');
     });
 
     $first = test()->post("http://{$domain}/fiscal-years/{$fiscalYearId}/archive");
@@ -300,10 +300,44 @@ test('a non-admin cannot archive a fiscal year', function () {
     $tenant->delete();
 });
 
+test('a non-owner with the admin role cannot archive a fiscal year', function () {
+    $domain = 'fy-archive-admin-role.tenant-test';
+    $tenant = provisionArchiveTestTenant($domain);
+
+    $fiscalYearId = null;
+
+    $tenant->run(function () use (&$fiscalYearId) {
+        $fy1 = FiscalYear::create(['name' => 'FY1', 'start_date' => '2026-01-01', 'end_date' => '2026-12-31', 'status' => FiscalYearStatus::Closed]);
+        $fiscalYearId = $fy1->id;
+
+        // The seeded admin role holds every grantable key, but
+        // fiscal_year.close_archive is owner-only and never grantable.
+        User::factory()->create([
+            'email' => 'manager@example.com',
+            'password' => 'password',
+            'role_id' => Role::query()->where('slug', 'admin')->value('id'),
+            'is_owner' => false,
+        ]);
+    });
+
+    test()->post("http://{$domain}/login", [
+        'email' => 'manager@example.com',
+        'password' => 'password',
+    ]);
+
+    test()->post("http://{$domain}/fiscal-years/{$fiscalYearId}/archive")->assertForbidden();
+
+    $tenant->run(function () use ($fiscalYearId) {
+        expect(FiscalYearArchive::where('fiscal_year_id', $fiscalYearId)->exists())->toBeFalse();
+    });
+
+    $tenant->delete();
+});
+
 test('archiving never deletes or alters the live journal voucher data', function () {
     $domain = 'fy-archive-live-untouched.tenant-test';
     $tenant = provisionArchiveTestTenant($domain);
-    $admin = loginAsArchiveAdmin($domain);
+    $owner = loginAsArchiveOwner($domain);
 
     $fiscalYearId = null;
     $liveVoucherCountBefore = null;
@@ -311,13 +345,13 @@ test('archiving never deletes or alters the live journal voucher data', function
     $liveDebitBefore = null;
     $liveCreditBefore = null;
 
-    $tenant->run(function () use ($admin, &$fiscalYearId, &$liveVoucherCountBefore, &$liveLineCountBefore, &$liveDebitBefore, &$liveCreditBefore) {
+    $tenant->run(function () use ($owner, &$fiscalYearId, &$liveVoucherCountBefore, &$liveLineCountBefore, &$liveDebitBefore, &$liveCreditBefore) {
         $fy1 = FiscalYear::create(['name' => 'FY1', 'start_date' => '2026-01-01', 'end_date' => '2026-12-31', 'status' => FiscalYearStatus::Open]);
         $fy2 = FiscalYear::create(['name' => 'FY2', 'start_date' => '2027-01-01', 'end_date' => '2027-12-31', 'status' => FiscalYearStatus::Closed]);
         $fiscalYearId = $fy1->id;
 
-        postArchiveTestVouchers($admin);
-        $fy1->close($fy2, $admin, 'Closed early by the test fixture.');
+        postArchiveTestVouchers($owner);
+        $fy1->close($fy2, $owner, 'Closed early by the test fixture.');
 
         $liveVoucherCountBefore = JournalVoucher::where('fiscal_year_id', $fy1->id)->count();
         $liveLineCountBefore = JournalVoucherLine::whereHas('journalVoucher', fn ($q) => $q->where('fiscal_year_id', $fy1->id))->count();
@@ -345,11 +379,11 @@ test('archiving a year that contains supplier and customer postings succeeds and
     // year.
     $domain = 'fy-archive-party.tenant-test';
     $tenant = provisionArchiveTestTenant($domain);
-    $admin = loginAsArchiveAdmin($domain);
+    $owner = loginAsArchiveOwner($domain);
 
     $archiveId = null;
 
-    $tenant->run(function () use ($admin, &$archiveId) {
+    $tenant->run(function () use ($owner, &$archiveId) {
         $fy1 = FiscalYear::create(['name' => 'FY1', 'start_date' => '2026-01-01', 'end_date' => '2026-12-31', 'status' => FiscalYearStatus::Open]);
         $fy2 = FiscalYear::create(['name' => 'FY2', 'start_date' => '2027-01-01', 'end_date' => '2027-12-31', 'status' => FiscalYearStatus::Closed]);
 
@@ -368,7 +402,7 @@ test('archiving a year that contains supplier and customer postings succeeds and
                 ['account_id' => $purchases->id, 'debit' => 700, 'credit' => 0],
                 ['account_id' => $supplier->account_id, 'debit' => 0, 'credit' => 700],
             ],
-            $admin,
+            $owner,
         );
 
         JournalVoucher::post(
@@ -377,12 +411,12 @@ test('archiving a year that contains supplier and customer postings succeeds and
                 ['account_id' => $customer->account_id, 'debit' => 900, 'credit' => 0],
                 ['account_id' => $sales->id, 'debit' => 0, 'credit' => 900],
             ],
-            $admin,
+            $owner,
         );
 
-        $fy1->close($fy2, $admin, 'Closed early by the test fixture.');
+        $fy1->close($fy2, $owner, 'Closed early by the test fixture.');
 
-        $archive = FiscalYearArchiver::archive($fy1->fresh(), $admin);
+        $archive = FiscalYearArchiver::archive($fy1->fresh(), $owner);
         $archiveId = $archive->id;
 
         expect($archive->voucher_count)->toBeGreaterThan(0);

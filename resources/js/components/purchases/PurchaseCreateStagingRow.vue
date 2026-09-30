@@ -8,6 +8,7 @@ import Combobox from '@/components/ui/Combobox.vue';
 import { formatQuantity } from '@/lib/money';
 import { toggleDiscountTypeOn, unitOptionsFor } from '@/lib/saleCreate';
 import { emptyPurchaseLine } from '@/lib/purchaseCreate';
+import { usePermissions } from '@/composables/usePermissions';
 
 // --- Add item: staging panel -----------------------------------------------
 // Same step 2/step 3 split as SaleCreateStagingRow: one row of entry fields,
@@ -81,6 +82,11 @@ function stage(itemId, unitId = '') {
 // back to items.barcode (the base unit, item_unit_id: null). Only items
 // already loaded into this page are addable - a match the browser has never
 // seen (e.g. an inactive item) is reported rather than silently skipped.
+// GET /items/lookup-barcode is gated items.view (ROUTE-MAP shared lookup
+// item 2), so the scan box is hidden rather than offering a 403.
+const { can } = usePermissions();
+const canScanBarcode = computed(() => can('items.view'));
+
 const barcodeCode = ref('');
 const barcodeError = ref(null);
 const barcodeScanning = ref(false);
@@ -144,7 +150,7 @@ defineExpose({ stage });
 
 <template>
     <div>
-        <div class="mb-3 flex flex-wrap items-end gap-2">
+        <div v-if="canScanBarcode" class="mb-3 flex flex-wrap items-end gap-2">
             <div class="w-full sm:w-72">
                 <label for="purchase-barcode" class="mb-1 block text-xs font-semibold text-text-muted">Scan barcode (incl. box / pack barcodes)</label>
                 <Input

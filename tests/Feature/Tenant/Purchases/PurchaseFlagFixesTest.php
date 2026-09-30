@@ -176,11 +176,14 @@ function flagFixStockedItem(User $actor): array
     return [$item->id, $supplier->id];
 }
 
-test('a non admin cannot post an unlinked purchase return', function () {
+test('a user without unlinked_purchase_returns.create cannot post an unlinked purchase return', function () {
     $domain = 'pur-03-non-admin.tenant-test';
     $tenant = flagFixTenant($domain);
 
-    $tenant->run(fn () => User::factory()->create(['email' => 'owner@example.com']));
+    // A role-less factory user is the owner, so the actor needs a role that
+    // can post linked returns but lacks the unlinked key.
+    $tenant->run(fn () => userWithPermissions(['purchase_returns.view', 'purchase_returns.create'])
+        ->forceFill(['email' => 'owner@example.com'])->save());
 
     flagFixLogin($domain);
 

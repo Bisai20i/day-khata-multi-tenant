@@ -1,6 +1,6 @@
 <script setup>
 import { computed, ref, watch } from 'vue';
-import { useForm, usePage } from '@inertiajs/vue3';
+import { useForm } from '@inertiajs/vue3';
 import { Plus } from '@lucide/vue';
 import Card from '@/components/ui/Card.vue';
 import Button from '@/components/ui/Button.vue';
@@ -13,6 +13,7 @@ import PurchaseCreateMoreOptions from '@/components/purchases/PurchaseCreateMore
 import PurchaseCreateTotalsBar from '@/components/purchases/PurchaseCreateTotalsBar.vue';
 import PurchaseCreateModals from '@/components/purchases/PurchaseCreateModals.vue';
 import { useConfirm } from '@/composables/useConfirm';
+import { usePermissions } from '@/composables/usePermissions';
 import { usePurchaseCreatePreview } from '@/composables/usePurchaseCreatePreview';
 import { usePurchaseCreateQuickAdd } from '@/composables/usePurchaseCreateQuickAdd';
 import { emptyPurchaseLine, restorePurchaseDraft } from '@/lib/purchaseCreate';
@@ -58,8 +59,12 @@ const props = defineProps({
 
 const emit = defineEmits(['cancel', 'posted']);
 const { confirm } = useConfirm();
-const page = usePage();
-const isAdmin = computed(() => page.props.auth?.user?.role?.slug === 'admin');
+const { can } = usePermissions();
+// Posting into a reopened year needs fiscal_year.edit (the server re-checks
+// it in Purchase::post()); quick-add needs the master's own create key.
+const canPostCorrection = computed(() => can('fiscal_year.edit'));
+const canAddSupplier = computed(() => can('suppliers.create'));
+const canAddItem = computed(() => can('items.create'));
 
 function defaultFormData() {
     return {
@@ -294,7 +299,7 @@ function submit(print = false) {
     </p>
 
     <form class="flex flex-col gap-4 pb-4" @submit.prevent="submit(false)">
-        <Card v-if="isAdmin && correctionFiscalYear" variant="panel" title="Fiscal year" class="!p-4">
+        <Card v-if="canPostCorrection && correctionFiscalYear" variant="panel" title="Fiscal year" class="!p-4">
             <div class="grid grid-cols-1 gap-4 sm:grid-cols-3">
                 <div>
                     <label for="purchase-fiscal-year" class="mb-1 block text-sm font-semibold text-text-base">Post into</label>
@@ -325,7 +330,13 @@ function submit(print = false) {
             </p>
         </Card>
 
-        <PurchaseCreateSupplierCard :form="form" :suppliers="suppliers" @select-supplier="selectSupplier" @add-supplier="openSupplierModal" />
+        <PurchaseCreateSupplierCard
+            :form="form"
+            :suppliers="suppliers"
+            :can-add-supplier="canAddSupplier"
+            @select-supplier="selectSupplier"
+            @add-supplier="openSupplierModal"
+        />
 
         <!-- Items: staging row + the bill's committed lines, one section -
              same as the sale form. -->
@@ -333,7 +344,7 @@ function submit(print = false) {
             <div class="mb-3 flex items-center justify-between gap-3">
                 <div class="text-[10px] font-bold tracking-[.8px] text-text-muted uppercase">Items <span class="text-danger">*</span></div>
                 <div class="flex items-center gap-4">
-                    <button type="button" class="flex items-center gap-1 text-xs font-semibold text-primary" @click="openItemModal">
+                    <button v-if="canAddItem" type="button" class="flex items-center gap-1 text-xs font-semibold text-primary" @click="openItemModal">
                         <Plus class="h-3.5 w-3.5" /> New item
                     </button>
                     <button type="button" class="text-xs font-semibold text-primary" @click="showLineExtras = !showLineExtras">

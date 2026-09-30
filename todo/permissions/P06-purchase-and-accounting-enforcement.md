@@ -14,10 +14,10 @@ Worker: the controllers and Vue pages for these modules (purchases, capital purc
 - [x] 1. **Route wiring (coordinator, first).** In the route files above replace each `role:admin` (and add where
   currently ungated) with `can:<key>` exactly as in `ROUTE-MAP.md`; group routes sharing a key. Add the
   `owner_only` keys where they appear. Do not remove the `role` alias yet.
-- [ ] 2. **Page gating (worker, after 1).** Using `usePermissions()`, hide or disable buttons, row actions and links
+- [x] 2. **Page gating (worker, after 1).** Using `usePermissions()`, hide or disable buttons, row actions and links
   the user lacks (create, edit, cancel, print, export, delete). Do not change layout otherwise. Keep files under the JS
   size cap (extract child components instead of growing a page).
-- [ ] 3. **Tests (worker).** Update existing tests in this area that now 403 (use `userWithPermissions()`), then add
+- [x] 3. **Tests (worker).** Update existing tests in this area that now 403 (use `userWithPermissions()`), then add
   one feature test per gated route group covering: allowed with the key, 403 without it, 403 when the module is off
   even for the owner, and the owner allowed when entitled. Data-driven with a Pest dataset over the ROUTE-MAP rows for
   this chunk to keep it short.
@@ -29,3 +29,12 @@ Every route in the listed files is gated by a catalog key, pages hide unavailabl
 ## Notes
 
 Modules: purchases, accounting. Fiscal-year close and archive use the owner-only key `fiscal_year.close_archive`.
+
+## Worker checkpoint (checkboxes 2-3)
+
+- Done: server conversions (AccountController ledger gate with account_ledger.X or party_ledger.X on
+  customer/supplier accounts; fiscal_year.edit in ClosedFiscalYearGuard, JournalVoucher, Purchase,
+  StockAdjustment; early close in FiscalYear::close() uses fiscal_year.close_archive; canCancel props and
+  StoreUnlinkedPurchaseReturnRequest use catalog keys). Existing tests switched to the owner where they
+  close early or close/reopen/relock/archive; admin-role 403 tests added; AccountLedgerAuthorizationTest added.
+- Vue page gating and PurchaseAccountingPermissionsTest done after the checkpoint. Tests written, not run.

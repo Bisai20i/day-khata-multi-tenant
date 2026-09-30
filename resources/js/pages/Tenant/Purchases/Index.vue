@@ -21,6 +21,7 @@ import { formatMoney } from '@/lib/money';
 import { formatBsDate } from '@/lib/format';
 import Create from './Create.vue';
 import { useOpenFiscalYear } from '@/composables/useOpenFiscalYear';
+import { usePermissions } from '@/composables/usePermissions';
 
 defineOptions({ layout: AppLayout });
 
@@ -203,6 +204,13 @@ const page = usePage();
 const { toast } = useToast();
 useLayoutChrome('Purchases');
 
+// UI mirrors of routes/tenant-purchase.php (cancel comes from the server's
+// canCancel prop); each route still enforces its own key.
+const { can } = usePermissions();
+const canCreatePurchase = computed(() => can('purchases.create'));
+const canPrintPurchase = computed(() => can('purchases.print'));
+const canExportPurchases = computed(() => can('purchases.export'));
+
 // Store/cancel both redirect back to this same route + component, which
 // Inertia re-renders in place without an onMounted re-run - watch flash
 // status instead (same pattern as Sales/Index.vue).
@@ -237,14 +245,14 @@ onMounted(() => {
     try {
         sessionStorage.removeItem(DRAFT_KEY);
         initialDraft.value = JSON.parse(raw);
-        showCreateForm.value = hasOpenFiscalYear.value;
+        showCreateForm.value = hasOpenFiscalYear.value && canCreatePurchase.value;
     } catch {
         // malformed sessionStorage payload - nothing to recover, ignore.
     }
 });
 
 function openCreateForm() {
-    if (!hasOpenFiscalYear.value) return;
+    if (!hasOpenFiscalYear.value || !canCreatePurchase.value) return;
     initialDraft.value = null;
     showCreateForm.value = true;
 }
@@ -346,19 +354,21 @@ const columns = [
         numeric: false,
         cell: ({ row }) =>
             h('div', { class: 'flex items-center gap-1' }, [
-                h(Tooltip, { label: 'Print purchase' }, () =>
-                    h(
-                        'a',
-                        {
-                            href: `/purchases/${row.original.id}/print`,
-                            target: '_blank',
-                            rel: 'noopener',
-                            class: 'flex h-[26px] w-[26px] items-center justify-center bg-bg-subtle text-text-faint transition-colors duration-150 hover:bg-primary-tint hover:text-primary',
-                            'aria-label': `Print purchase from ${row.original.supplier?.name ?? 'supplier'}`,
-                        },
-                        [h(Printer, { class: 'h-[13px] w-[13px]' })],
-                    ),
-                ),
+                canPrintPurchase.value
+                    ? h(Tooltip, { label: 'Print purchase' }, () =>
+                          h(
+                              'a',
+                              {
+                                  href: `/purchases/${row.original.id}/print`,
+                                  target: '_blank',
+                                  rel: 'noopener',
+                                  class: 'flex h-[26px] w-[26px] items-center justify-center bg-bg-subtle text-text-faint transition-colors duration-150 hover:bg-primary-tint hover:text-primary',
+                                  'aria-label': `Print purchase from ${row.original.supplier?.name ?? 'supplier'}`,
+                              },
+                              [h(Printer, { class: 'h-[13px] w-[13px]' })],
+                          ),
+                      )
+                    : null,
                 props.canCancel && row.original.status === 'posted'
                     ? h(Tooltip, { label: 'Cancel purchase (posts reversing entry)' }, () =>
                           h(
@@ -398,7 +408,7 @@ const columns = [
 
         <template v-else>
             <PageHeader title="Purchases" description="Bills received from suppliers. Filter, print or export them, and cancel a purchase posted in error.">
-                <Button v-if="hasOpenFiscalYear" variant="primary" tone="purple" @click="openCreateForm">
+                <Button v-if="hasOpenFiscalYear && canCreatePurchase" variant="primary" tone="purple" @click="openCreateForm">
                     <Plus class="size-4" aria-hidden="true" />
                     New purchase
                 </Button>
@@ -462,7 +472,7 @@ const columns = [
                             <Printer class="size-4" />
                             Print
                         </Button>
-                        <DropdownMenu align="end">
+                        <DropdownMenu v-if="canExportPurchases" align="end">
                             <template #trigger>
                                 <Button variant="secondary" tone="neutral" type="button">
                                     <Download class="size-4" />
@@ -486,8 +496,8 @@ const columns = [
                     </template>
                     <template v-else>
                         <p class="text-sm font-semibold text-text-strong">No purchases yet</p>
-                        <p v-if="hasOpenFiscalYear" class="text-xs text-text-muted">Record the first bill you received from a supplier and it will be listed here.</p>
-                        <Button v-if="hasOpenFiscalYear" variant="primary" tone="purple" @click="openCreateForm">
+                        <p v-if="hasOpenFiscalYear && canCreatePurchase" class="text-xs text-text-muted">Record the first bill you received from a supplier and it will be listed here.</p>
+                        <Button v-if="hasOpenFiscalYear && canCreatePurchase" variant="primary" tone="purple" @click="openCreateForm">
                             <Plus class="size-4" aria-hidden="true" />
                             New purchase
                         </Button>

@@ -19,6 +19,7 @@ import { formatMoney } from '@/lib/money.js';
 import { todayInKathmandu } from '@/lib/format.js';
 import Create from './Create.vue';
 import { useOpenFiscalYear } from '@/composables/useOpenFiscalYear';
+import { usePermissions } from '@/composables/usePermissions';
 
 defineOptions({ layout: AppLayout });
 
@@ -36,7 +37,11 @@ const { toast } = useToast();
 const { confirm } = useConfirm();
 useLayoutChrome('Fixed Assets');
 
-const isAdmin = computed(() => page.props.auth?.user?.role?.slug === 'admin');
+// UI mirrors of routes/tenant-fixed-assets.php: fixed_assets.create adds
+// assets, fixed_assets.manage disposes and runs depreciation.
+const { can } = usePermissions();
+const canCreateAsset = computed(() => can('fixed_assets.create'));
+const canManageAssets = computed(() => can('fixed_assets.manage'));
 
 // Store/dispose/post-depreciation all redirect back to this same route +
 // component, which Inertia re-renders in place without an onMounted re-run
@@ -158,7 +163,7 @@ const columns = [
         header: 'Actions',
         numeric: false,
         cell: ({ row }) =>
-            row.original.status === 'active'
+            row.original.status === 'active' && canManageAssets.value
                 ? h(Button, {
                       variant: 'secondary',
                       tone: 'purple',
@@ -179,16 +184,16 @@ const columns = [
 
         <template v-else>
             <PageHeader title="Fixed Assets" description="Long-lived assets and their depreciation.">
-                <Button v-if="isAdmin && hasOpenFiscalYear" variant="secondary" tone="purple" @click="postDepreciation">
+                <Button v-if="canManageAssets && hasOpenFiscalYear" variant="secondary" tone="purple" @click="postDepreciation">
                     Post depreciation
                 </Button>
-                <Button v-if="hasOpenFiscalYear" variant="primary" tone="purple" @click="showCreateForm = true">New asset</Button>
+                <Button v-if="canCreateAsset && hasOpenFiscalYear" variant="primary" tone="purple" @click="showCreateForm = true">New asset</Button>
             </PageHeader>
 
             <Card v-if="fixedAssets.length === 0" variant="panel">
                 <div class="px-1 py-8 text-center">
                     <p class="text-sm text-text-muted">No fixed assets yet. Add equipment, vehicles or property to track their value and depreciation.</p>
-                    <Button v-if="hasOpenFiscalYear" class="mt-3" variant="primary" tone="purple" @click="showCreateForm = true">Add your first asset</Button>
+                    <Button v-if="canCreateAsset && hasOpenFiscalYear" class="mt-3" variant="primary" tone="purple" @click="showCreateForm = true">Add your first asset</Button>
                 </div>
             </Card>
             <Card v-else variant="panel">

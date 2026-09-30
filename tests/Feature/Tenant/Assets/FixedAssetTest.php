@@ -275,8 +275,9 @@ test('FiscalYear::close() posts each active asset\'s depreciation before sweepin
 
     $tenant->run(function () {
         // FY1 has not reached its end date yet on the suite's clock, so the
-        // close is an early one: it needs an admin and a written reason.
-        $actor = User::factory()->create(['role_id' => Role::where('slug', 'admin')->value('id')]);
+        // close is an early one: it needs the owner (a role-less factory
+        // user) and a written reason.
+        $actor = User::factory()->create();
         $fy1 = FiscalYear::create(['name' => 'FY1', 'start_date' => '2026-01-01', 'end_date' => '2026-12-31', 'status' => FiscalYearStatus::Open]);
         $fy2 = FiscalYear::create(['name' => 'FY2', 'start_date' => '2027-01-01', 'end_date' => '2027-12-31', 'status' => FiscalYearStatus::Closed]);
 

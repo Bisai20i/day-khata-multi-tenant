@@ -16,6 +16,7 @@ import Tooltip from '@/components/ui/Tooltip.vue';
 import { useToast } from '@/composables/useToast';
 import { useConfirm } from '@/composables/useConfirm';
 import { formatBsDate, todayInKathmandu } from '@/lib/format.js';
+import { usePermissions } from '@/composables/usePermissions';
 
 defineOptions({ layout: AppLayout });
 
@@ -37,7 +38,13 @@ const { toast } = useToast();
 const { confirm } = useConfirm();
 useLayoutChrome('Fiscal Years');
 
-const isAdmin = computed(() => page.props.auth?.user?.role?.slug === 'admin');
+// Close, reopen, relock and archive share the owner-only
+// fiscal_year.close_archive key (routes/tenant-ledger.php and
+// tenant-fiscal-year-archive.php); the server enforces each route itself.
+const { can } = usePermissions();
+const canCloseArchive = computed(() => can('fiscal_year.close_archive'));
+const canViewArchive = computed(() => can('fiscal_year_archive.view'));
+const canCreateFiscalYear = computed(() => can('fiscal_year.create'));
 
 // Flash status is watched (not just read on mount) because create/close both
 // redirect back to this same route + component, which Inertia re-renders in
@@ -261,42 +268,44 @@ const columns = [
                     },
                 );
 
-            if (fiscalYear.status === 'open') {
+            if (canCloseArchive.value && fiscalYear.status === 'open') {
                 buttons.push(actionButton('Close fiscal year', 'Close', Lock, () => openClose(fiscalYear)));
             }
 
-            if (isAdmin.value && fiscalYear.status === 'closed') {
+            if (fiscalYear.status === 'closed' && fiscalYear.archive && canViewArchive.value) {
                 buttons.push(
-                    fiscalYear.archive
-                        ? h(
-                              Tooltip,
-                              { label: 'View archived year' },
-                              {
-                                  default: () =>
-                                      h(
-                                          Link,
-                                          {
-                                              href: `/fiscal-year-archives/${fiscalYear.archive.id}`,
-                                              class: actionClass,
-                                              'aria-label': 'View archived year',
-                                          },
-                                          () => [h(Archive, { class: 'h-[13px] w-[13px]', 'aria-hidden': 'true' }), 'View archive'],
-                                      ),
-                              },
-                          )
-                        : actionButton('Archive fiscal year', 'Archive', Archive, () => archiveFiscalYear(fiscalYear)),
+                    h(
+                        Tooltip,
+                        { label: 'View archived year' },
+                        {
+                            default: () =>
+                                h(
+                                    Link,
+                                    {
+                                        href: `/fiscal-year-archives/${fiscalYear.archive.id}`,
+                                        class: actionClass,
+                                        'aria-label': 'View archived year',
+                                    },
+                                    () => [h(Archive, { class: 'h-[13px] w-[13px]', 'aria-hidden': 'true' }), 'View archive'],
+                                ),
+                        },
+                    ),
                 );
             }
 
+            if (canCloseArchive.value && fiscalYear.status === 'closed' && !fiscalYear.archive) {
+                buttons.push(actionButton('Archive fiscal year', 'Archive', Archive, () => archiveFiscalYear(fiscalYear)));
+            }
+
             // Reopen/relock - only offered for a closed, unarchived year
-            // (matches FiscalYear::reopen()'s own guards), admin-gated in
-            // the UI same as archive above; the actual authorization is
-            // enforced server-side regardless.
-            if (isAdmin.value && fiscalYear.status === 'closed' && !fiscalYear.archive && !isOpenForCorrection(fiscalYear)) {
+            // (matches FiscalYear::reopen()'s own guards), gated on
+            // fiscal_year.close_archive in the UI same as archive above; the
+            // actual authorization is enforced server-side regardless.
+            if (canCloseArchive.value && fiscalYear.status === 'closed' && !fiscalYear.archive && !isOpenForCorrection(fiscalYear)) {
                 buttons.push(actionButton('Reopen for correction', 'Reopen', Unlock, () => openReopen(fiscalYear)));
             }
 
-            if (isAdmin.value && isOpenForCorrection(fiscalYear)) {
+            if (canCloseArchive.value && isOpenForCorrection(fiscalYear)) {
                 buttons.push(actionButton('Relock fiscal year', 'Relock', Lock, () => relockFiscalYear(fiscalYear)));
             }
 
@@ -309,7 +318,7 @@ const columns = [
 <template>
     <div>
         <PageHeader title="Fiscal Years" description="Your accounting periods. Close a year when it ends to lock its books and carry balances forward; archive a closed year to keep a read-only copy of its ledger.">
-            <Button variant="primary" tone="purple" @click="openCreate">
+            <Button v-if="canCreateFiscalYear" variant="primary" tone="purple" @click="openCreate">
                 <Plus class="size-4" />
                 New fiscal year
             </Button>

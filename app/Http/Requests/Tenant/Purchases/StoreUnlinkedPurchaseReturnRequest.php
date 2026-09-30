@@ -16,10 +16,11 @@ use Throwable;
 
 /**
  * An unlinked purchase return has no bill to bound it, so it is the most
- * abusable document in the purchase flow (audit PUR-03): admin only, a reason
- * is mandatory, the total must be confirmed, and an entered rate may not
- * exceed what the goods cost (the item's weighted average cost as of the
- * return date, scaled to the chosen unit). A supplier-backed return can be
+ * abusable document in the purchase flow (audit PUR-03): it needs its own
+ * unlinked_purchase_returns.create permission, a reason is mandatory, the
+ * total must be confirmed, and an entered rate may not exceed what the goods
+ * cost (the item's weighted average cost as of the return date, scaled to
+ * the chosen unit). A supplier-backed return can be
  * credited to the supplier account (payment_mode "credit") instead of forcing
  * a cash or bank refund.
  */
@@ -27,7 +28,7 @@ class StoreUnlinkedPurchaseReturnRequest extends FormRequest
 {
     public function authorize(): bool
     {
-        return $this->user('web')?->role?->slug === 'admin';
+        return (bool) $this->user('web')?->can('unlinked_purchase_returns.create');
     }
 
     /**

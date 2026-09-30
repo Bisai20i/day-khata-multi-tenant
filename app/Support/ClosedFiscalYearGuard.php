@@ -62,11 +62,12 @@ class ClosedFiscalYearGuard
      * rule in write(), so it does not call this.
      *
      * Posting into a year that is closed but reopened for correction needs the
-     * same admin + reason pair post() requires, hence the optional $actor: the
+     * same fiscal_year.edit permission + reason pair post() requires, hence the
+     * optional $actor (a null actor is refused, exactly as before): the
      * check is skipped only when the resolved year is the open one.
      *
      * @throws InvalidArgumentException When no fiscal year covers $date, or the one that does is closed.
-     * @throws AuthorizationException When a non-admin targets a reopened closed year.
+     * @throws AuthorizationException When an actor without fiscal_year.edit targets a reopened closed year.
      */
     public static function assertDateInOpenYear(string $date, ?User $actor = null, ?string $reason = null): FiscalYear
     {
@@ -81,8 +82,8 @@ class ClosedFiscalYearGuard
 
         static::ensurePostable($fiscalYear, $reason);
 
-        if ($fiscalYear->status !== FiscalYearStatus::Open && $actor?->role?->slug !== 'admin') {
-            throw new AuthorizationException('Only an admin may post into a reopened fiscal year.');
+        if ($fiscalYear->status !== FiscalYearStatus::Open && ! $actor?->can('fiscal_year.edit')) {
+            throw new AuthorizationException('You do not have permission to post into a reopened fiscal year.');
         }
 
         return $fiscalYear;

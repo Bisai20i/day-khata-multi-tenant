@@ -1,6 +1,6 @@
 <script setup>
 import { computed } from 'vue';
-import { useForm, usePage } from '@inertiajs/vue3';
+import { useForm } from '@inertiajs/vue3';
 import Card from '@/components/ui/Card.vue';
 import Button from '@/components/ui/Button.vue';
 import Input from '@/components/ui/Input.vue';
@@ -10,6 +10,7 @@ import JournalVoucherStagingRow from '@/components/accounting/JournalVoucherStag
 import JournalVoucherLinesTable from '@/components/accounting/JournalVoucherLinesTable.vue';
 import JournalVoucherTotalsBar from '@/components/accounting/JournalVoucherTotalsBar.vue';
 import { useConfirm } from '@/composables/useConfirm';
+import { usePermissions } from '@/composables/usePermissions';
 import { isZeroMoney, moneyEquals, subtractMoney, sumMoney } from '@/lib/money';
 import { voucherAmountOf } from '@/lib/journalVoucherCreate';
 import { todayInKathmandu } from '@/lib/format';
@@ -38,8 +39,9 @@ const props = defineProps({
 const emit = defineEmits(['cancel', 'posted']);
 const { confirm } = useConfirm();
 
-const page = usePage();
-const isAdmin = computed(() => page.props.auth?.user?.role?.slug === 'admin');
+const { can } = usePermissions();
+// fiscal_year.edit is the key JournalVoucher::post() re-checks server-side.
+const canPostCorrection = computed(() => can('fiscal_year.edit'));
 
 const accountOptions = computed(() =>
     props.accounts.map((account) => ({
@@ -48,7 +50,7 @@ const accountOptions = computed(() =>
     })),
 );
 
-// Only admins see this picker at all (see isAdmin above) - for everyone
+// Only users with fiscal_year.edit see this picker at all - for everyone
 // else the voucher always posts into whichever fiscal year is currently
 // open, which the backend defaults to when fiscal_year_id is omitted. The
 // single option offered is the reopened-for-correction year itself -
@@ -177,7 +179,7 @@ function submit(print = false) {
                     <p id="jv-narration-help" class="mt-1 text-xs text-text-muted">Printed on the voucher and shown in every ledger it touches.</p>
                     <p v-if="form.errors.narration" class="mt-1 text-sm text-danger" role="alert">{{ form.errors.narration }}</p>
                 </div>
-                <div v-if="isAdmin && correctionFiscalYear">
+                <div v-if="canPostCorrection && correctionFiscalYear">
                     <label for="jv-fiscal-year" class="mb-1 block text-sm font-semibold text-text-base">Fiscal year</label>
                     <Select
                         id="jv-fiscal-year"

@@ -74,9 +74,10 @@ class PurchaseController extends Controller
             // Exact SQL sums over the whole filtered set (item 8, "totals
             // row") - never a page's worth of client-side addition.
             'totals' => $this->filteredTotals($filters),
-            // The Cancel action is admin-only at the route (CONTRACTS C5); the
-            // page hides it for everyone else rather than offering a 403.
-            'canCancel' => $request->user()?->role?->slug === 'admin',
+            // The Cancel action is gated by purchases.cancel at the route
+            // (CONTRACTS C5); the page hides it for everyone else rather
+            // than offering a 403.
+            'canCancel' => (bool) $request->user()?->can('purchases.cancel'),
             'suppliers' => Supplier::query()->orderBy('name')->get(['id', 'name', 'mobile_no', 'is_vat_registered']),
             // Inactive items are deliberately withheld: an item that has been
             // retired must not be purchasable again from the form, and showing

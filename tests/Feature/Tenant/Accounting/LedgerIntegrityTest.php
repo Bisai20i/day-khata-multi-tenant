@@ -195,7 +195,8 @@ test('JE-04 closing the year and then posting into it are serialised: the late p
 
         $year = FiscalYear::current();
         $next = FiscalYear::create(['name' => 'FY2', 'start_date' => '2027-01-01', 'end_date' => '2027-12-31', 'status' => FiscalYearStatus::Closed]);
-        $year->close($next, $admin, 'Closing early for the JE-04 test');
+        // Closing early is owner-only (fiscal_year.close_archive).
+        $year->close($next, User::factory()->create(), 'Closing early for the JE-04 test');
 
         $lines = [
             ['account_id' => Account::where('code', 'AS1')->value('id'), 'debit' => 5, 'credit' => 0],

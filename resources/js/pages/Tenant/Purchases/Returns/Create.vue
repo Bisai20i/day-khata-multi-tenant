@@ -11,6 +11,7 @@ import NepaliDateInput from '@/components/ui/NepaliDateInput.vue';
 import { formatMoney, formatQuantity, formatRate } from '@/lib/money';
 import { todayInKathmandu } from '@/lib/format';
 import PurchaseReturnUnlinkedForm from '@/components/purchases/PurchaseReturnUnlinkedForm.vue';
+import { usePermissions } from '@/composables/usePermissions';
 
 const props = defineProps({
     // A LengthAwarePaginator page of purchases, each line already carrying its
@@ -125,8 +126,15 @@ const hasReturnableLine = computed(() => form.lines.some((line) => line.quantity
  * from opening stock, or bought before go-live, that have no Purchase row to
  * point at. The two post to different endpoints and share nothing but this
  * card; the unlinked form lives in PurchaseReturnUnlinkedForm.vue.
+ *
+ * Each mode has its own key (purchase_returns.create, and the stricter
+ * unlinked_purchase_returns.create), so the switch only appears for a user
+ * holding both and the form opens on whichever one the user may post.
  */
-const mode = ref('linked');
+const { can } = usePermissions();
+const canCreateLinked = computed(() => can('purchase_returns.create'));
+const canCreateUnlinked = computed(() => can('unlinked_purchase_returns.create'));
+const mode = ref(!canCreateLinked.value && canCreateUnlinked.value ? 'unlinked' : 'linked');
 
 function submit() {
     form.transform((data) => ({
@@ -156,7 +164,7 @@ function submit() {
             <Button variant="secondary" tone="purple" type="button" @click="emit('cancel')">Cancel</Button>
         </PageHeader>
 
-        <div class="mb-4 flex flex-wrap items-center gap-2">
+        <div v-if="canCreateLinked && canCreateUnlinked" class="mb-4 flex flex-wrap items-center gap-2">
             <Button :variant="mode === 'linked' ? 'primary' : 'secondary'" tone="purple" type="button" @click="mode = 'linked'">
                 Against a purchase
             </Button>

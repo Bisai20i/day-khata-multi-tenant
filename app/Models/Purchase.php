@@ -301,8 +301,11 @@ class Purchase extends Model
 
             ClosedFiscalYearGuard::ensurePostable($targetFiscalYear, $reason);
 
-            if ($isCorrection && $actor->role?->slug !== 'admin') {
-                throw new AuthorizationException('Only an admin may post into a reopened fiscal year.');
+            // fiscal_year.edit, not the owner-only close_archive key: posting
+            // a correction is day-to-day bookkeeping a trusted accountant
+            // role may be granted, reopening the year is not.
+            if ($isCorrection && ! $actor->can('fiscal_year.edit')) {
+                throw new AuthorizationException('You do not have permission to post into a reopened fiscal year.');
             }
 
             // The supplier row is held for the rest of the transaction so two

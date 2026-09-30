@@ -47,6 +47,17 @@ const props = defineProps({
         type: Array,
         default: () => [],
     },
+    // Computed per account by AccountController::ledger() (account_ledger.X,
+    // or party_ledger.X on a customer/supplier account), the same rule the
+    // print and export routes enforce.
+    canPrint: {
+        type: Boolean,
+        default: false,
+    },
+    canExport: {
+        type: Boolean,
+        default: false,
+    },
 });
 
 useLayoutChrome(() => `Ledger - ${props.account.name}`);
@@ -194,8 +205,8 @@ const columns = [
             back-label="Back to accounts"
         >
             <template v-if="fiscalYearId !== null">
-                <a :href="printUrl()" target="_blank" rel="noopener"><Button variant="secondary" tone="purple">Print ledger</Button></a>
-                <a :href="exportUrl()"><Button variant="secondary" tone="purple">Export ledger</Button></a>
+                <a v-if="canPrint" :href="printUrl()" target="_blank" rel="noopener"><Button variant="secondary" tone="purple">Print ledger</Button></a>
+                <a v-if="canExport" :href="exportUrl()"><Button variant="secondary" tone="purple">Export ledger</Button></a>
             </template>
         </PageHeader>
 
