@@ -12,17 +12,17 @@ Coordinator: new `routes/tenant-roles.php` (required in `routes/tenant.php`), na
 
 ## Tasks
 
-- [ ] 1. **Backend.** Routes (all `can:roles.manage`, an owner-only key): index, create/store, edit/update,
+- [x] 1. **Backend.** Routes (all `can:roles.manage`, an owner-only key): index, create/store, edit/update,
   duplicate, destroy. Validation: name unique, `permissions` array of catalog keys only, **each key must belong to
   an entitled module and not be owner-only** (422 otherwise, never silently dropped). Update runs in a transaction
   and compares `updated_at` sent by the form to reject a stale overwrite (409 with a message). Destroy is refused
   while any user holds the role and always for `is_system` roles. Slug generated and unique, never user-supplied.
   Log role create/update/delete in the tenant activity log (locate the mechanism by Grep).
-- [ ] 2. **UI.** Index lists roles with user counts. Edit shows a permission matrix grouped by module then group,
+- [x] 2. **UI.** Index lists roles with user counts. Edit shows a permission matrix grouped by module then group,
   only entitled modules, select-all per group and per module, changes highlighted, unsaved-changes warning.
   Duplicate role action. System roles show a badge, name locked for `admin`. Keep files under the JS size cap by
   extracting the matrix into its own component.
-- [ ] 3. **Tests.** Non-owner gets 403 even when `roles.manage` is placed in their role JSON (owner-only key);
+- [x] 3. **Tests.** Non-owner gets 403 even when `roles.manage` is placed in their role JSON (owner-only key);
   granting a non-entitled or owner-only permission is rejected with 422; a stale update is rejected; delete is
   blocked while the role is in use and for system roles; duplicate copies the permission set; the edit page only
   lists entitled modules.
@@ -30,3 +30,11 @@ Coordinator: new `routes/tenant-roles.php` (required in `routes/tenant.php`), na
 ## Done when
 
 Owner can fully manage roles, guarded, audited and tested.
+
+## Checkpoint (P11 worker)
+
+- Done: routes/tenant-roles.php (7 routes, tenant.admin.roles.*), RoleController, Store/UpdateRoleRequest. Dormant
+  grants (non-entitled modules) preserved on update; stale save = ValidationException status 409 (JSON 409,
+  Inertia redirect back with errors.updated_at); activity rows written directly to activity_logs.
+- UI done (roleMatrix.js + node test, Index.vue, Edit.vue, PermissionMatrix.vue).
+- Tests written (not run): tests/Feature/Tenant/Admin/RoleManagementTest.php, tests/js/roleMatrix.test.mjs.

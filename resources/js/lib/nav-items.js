@@ -232,7 +232,10 @@ export function navGroups() {
             categories: [
                 {
                     label: 'Users & Access',
-                    items: [{ label: 'Manage users', href: '/admin/users', icon: UserCog, permission: 'users.manage' }],
+                    items: [
+                        { label: 'Manage users', href: '/admin/users', icon: UserCog, permission: 'users.manage' },
+                        { label: 'Roles & permissions', href: '/admin/roles', icon: ShieldCheck, permission: 'roles.manage' },
+                    ],
                 },
                 {
                     label: 'System',

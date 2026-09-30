@@ -131,7 +131,7 @@ Rollback: every migration has a working `down()`. Until P16 the old `role` alias
 | P07 | Masters and inventory enforcement | coordinator + worker | done |
 | P08 | Reports and admin enforcement | coordinator + worker | done |
 | P10 | Central modules UI | worker | done |
-| P11 | Tenant roles UI | worker | pending |
+| P11 | Tenant roles UI | worker | done |
 | P12 | Users page and ownership transfer | worker | pending |
 | P13 | Provisioning and role templates | worker | pending |
 | P15 | Central owner reassignment | worker | pending |

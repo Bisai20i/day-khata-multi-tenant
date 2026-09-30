@@ -14,6 +14,7 @@ use App\Models\Purchase;
 use App\Models\PurchaseReturn;
 use App\Models\Quotation;
 use App\Models\Receipt;
+use App\Models\Role;
 use App\Models\Sale;
 use App\Models\SalesReturn;
 use App\Models\StockAdjustment;
@@ -54,6 +55,7 @@ class ActivityLogController extends Controller
             CapitalPurchase::class,
             User::class,
             FiscalYear::class,
+            Role::class,
         ];
 
         return collect($models)
