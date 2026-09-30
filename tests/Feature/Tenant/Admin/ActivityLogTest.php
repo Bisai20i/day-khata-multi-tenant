@@ -148,7 +148,7 @@ test('the activity log page is admin-only', function () {
 
     $staff = null;
     $tenant->run(function () use (&$staff) {
-        $staffRole = Role::query()->where('slug', 'staff')->firstOrFail();
+        $staffRole = Role::query()->where('slug', 'cashier')->firstOrFail();
         $staff = User::factory()->create(['email' => 'staffer@example.com', 'role_id' => $staffRole->id]);
     });
 

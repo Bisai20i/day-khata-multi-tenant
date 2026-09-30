@@ -11,7 +11,7 @@ reference the old `staff` slug or the old placeholder permissions.
 
 ## Tasks
 
-- [ ] 1. **Templates and seeder.** `RoleTemplates` holds frozen key lists for Manager and Cashier (defined below).
+- [x] 1. **Templates and seeder.** `RoleTemplates` holds frozen key lists for Manager and Cashier (defined below).
   The seeder stops creating the 4 placeholder permissions and the `permission_role` attach; it seeds `admin`
   (system, all grantable keys), `manager` and `cashier`, each filtered at seed time to keys of
   `tenant()->entitledModules()` (the seeder runs inside tenant context). Stop referencing the old `Permission`
@@ -19,9 +19,9 @@ reference the old `staff` slug or the old placeholder permissions.
   Cashier: view/create/print sales, POS use, create receipts, view and create customers, view items, no
   cancels, no reports, no purchases. Manager: all operational create/edit/cancel/print/export and all report keys
   in the entitled modules, no `users.manage`, no `activity_log`, no owner-only keys.
-- [ ] 2. **First admin.** `CreateTenantFirstAdmin` creates the user with `is_owner = true` and the `admin` role
+- [x] 2. **First admin.** `CreateTenantFirstAdmin` creates the user with `is_owner = true` and the `admin` role
   (kept for the transition), via explicit attribute assignment since `is_owner` is not fillable.
-- [ ] 3. **Tests.** Provisioning a tenant with a module subset seeds roles without grants from missing modules;
+- [x] 3. **Tests.** Provisioning a tenant with a module subset seeds roles without grants from missing modules;
   the first admin is the only owner; the `staff` slug no longer exists for new tenants, so update existing tests
   that used it to `cashier` or `roleWithPermissions()`; no test references the removed placeholder permissions.
 

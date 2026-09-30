@@ -58,7 +58,7 @@ function seedPurchaseCancelInfo(): array
         'name' => 'Asha Admin',
         'role_id' => Role::where('slug', 'admin')->value('id'),
     ]);
-    User::factory()->create(['email' => 'staff@example.com', 'role_id' => Role::where('slug', 'staff')->value('id')]);
+    User::factory()->create(['email' => 'staff@example.com', 'role_id' => roleWithPermissions(['purchases.view', 'capital_purchases.view'])->id]);
     $supplier = Supplier::factory()->create();
     $item = Item::factory()->create(['is_vatable' => false, 'is_stockable' => false]);
     $account = Account::factory()->create();

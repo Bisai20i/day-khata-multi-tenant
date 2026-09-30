@@ -56,7 +56,10 @@ class CreateTenantFirstAdmin implements ShouldQueue
             $tenant->run(function () use ($pendingAdmin): void {
                 $role = Role::where('slug', 'admin')->firstOrFail();
 
-                User::create([
+                // is_owner is deliberately not fillable, so the first admin is
+                // made the owner by explicit assignment. The admin role is kept
+                // alongside it during the transition to owner-based control.
+                $user = new User([
                     'name' => $pendingAdmin['name'],
                     'email' => $pendingAdmin['email'],
                     // Already hashed by TenantController::store() before being stashed;
@@ -65,6 +68,7 @@ class CreateTenantFirstAdmin implements ShouldQueue
                     'password' => $pendingAdmin['password'],
                     'role_id' => $role->id,
                 ]);
+                $user->forceFill(['is_owner' => true])->save();
             });
 
             $this->sendWelcomeMail($tenant, $pendingAdmin);

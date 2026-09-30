@@ -4,11 +4,10 @@ namespace Database\Seeders\Tenant;
 
 use App\Models\AccountSubgroup;
 use App\Models\Customer;
-use App\Models\Permission;
 use App\Models\Role;
 use App\Models\Store;
 use App\Support\Permissions\PermissionCatalog;
-use App\Support\Permissions\RoleBackfill;
+use App\Support\Permissions\RoleTemplates;
 use Illuminate\Database\Console\Seeds\WithoutModelEvents;
 use Illuminate\Database\Seeder;
 
@@ -17,45 +16,36 @@ class TenantDatabaseSeeder extends Seeder
     use WithoutModelEvents;
 
     /**
-     * Starter permission set for a freshly provisioned tenant.
-     *
-     * This is a small, sane MVP baseline, not a full port of any legacy
-     * privilege-key list. That is separate future work.
-     *
-     * @var array<int, array{name: string, slug: string}>
-     */
-    protected array $permissions = [
-        ['name' => 'Manage Users', 'slug' => 'manage-users'],
-        ['name' => 'Manage Roles', 'slug' => 'manage-roles'],
-        ['name' => 'View Reports', 'slug' => 'view-reports'],
-        ['name' => 'Manage Settings', 'slug' => 'manage-settings'],
-    ];
-
-    /**
      * Run the database seeds.
      */
     public function run(): void
     {
-        $permissions = collect($this->permissions)->map(
-            fn (array $permission) => Permission::create($permission),
-        );
+        // Admin keeps EVERY grantable key, not just the entitled ones: a
+        // module the platform switches on later must light up for the admin
+        // with no data change (its keys were dormant, the entitlement gate
+        // hides them meanwhile). Manager and Cashier are frozen templates
+        // (RoleTemplates) narrowed to the modules this tenant has today; the
+        // owner widens them in the role editor once a module is enabled.
+        $entitled = tenant()?->entitledModules()
+            ?? PermissionCatalog::resolveModules((array) config('permissions.default_modules', []));
 
-        // A new tenant's admin role gets the live grantable catalog (unlike
-        // RoleBackfill, which must stay frozen for already-migrated tenants);
-        // Staff mirrors the backfilled parity list until the Manager/Cashier
-        // templates replace it.
-        $admin = Role::create([
+        Role::create([
             'name' => 'Admin',
             'slug' => 'admin',
             'permissions' => PermissionCatalog::grantable(),
             'is_system' => true,
         ]);
-        $admin->legacyPermissions()->attach($permissions->pluck('id'));
 
         Role::create([
-            'name' => 'Staff',
-            'slug' => 'staff',
-            'permissions' => RoleBackfill::STAFF_PARITY,
+            'name' => 'Manager',
+            'slug' => 'manager',
+            'permissions' => RoleTemplates::forModules(RoleTemplates::MANAGER, $entitled),
+        ]);
+
+        Role::create([
+            'name' => 'Cashier',
+            'slug' => 'cashier',
+            'permissions' => RoleTemplates::forModules(RoleTemplates::CASHIER, $entitled),
         ]);
 
         Store::create(['name' => 'Main Store', 'is_active' => true]);

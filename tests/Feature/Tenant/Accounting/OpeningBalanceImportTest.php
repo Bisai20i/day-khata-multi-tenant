@@ -10,6 +10,7 @@ use App\Models\Role;
 use App\Models\Tenant;
 use App\Models\User;
 use App\Support\Money\Money;
+use App\Support\Permissions\RoleBackfill;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\UploadedFile;
 
@@ -347,7 +348,8 @@ test('a staff user gets a 403 on the opening balance import and clear routes', f
 
     $importId = null;
     $tenant->run(function () use (&$importId) {
-        User::factory()->create(['email' => 'owner@example.com', 'role_id' => Role::where('slug', 'staff')->value('id')]);
+        // The pre-rollout Staff grant set: may download the template, may not import or reverse.
+        User::factory()->create(['email' => 'owner@example.com', 'role_id' => roleWithPermissions(RoleBackfill::STAFF_PARITY, 'Staff')->id]);
         FiscalYear::create(['name' => 'FY1', 'start_date' => '2026-01-01', 'end_date' => '2026-12-31', 'status' => FiscalYearStatus::Open]);
 
         $admin = User::factory()->create(['role_id' => Role::where('slug', 'admin')->value('id')]);

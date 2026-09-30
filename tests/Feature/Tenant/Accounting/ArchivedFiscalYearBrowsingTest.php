@@ -187,7 +187,7 @@ test('a non-admin cannot browse a fiscal year archive or one of its vouchers', f
         $archive = FiscalYearArchiver::archive($fy1->fresh(), $admin);
         $archiveId = $archive->id;
 
-        $staffRole = Role::query()->where('slug', 'staff')->firstOrFail();
+        $staffRole = Role::query()->where('slug', 'cashier')->firstOrFail();
         User::factory()->create([
             'email' => 'staffer@example.com',
             'password' => 'password',

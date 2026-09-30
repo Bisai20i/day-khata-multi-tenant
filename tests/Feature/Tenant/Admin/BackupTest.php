@@ -156,7 +156,7 @@ test('a non-admin cannot access any backup route', function () {
     $tenant = provisionBackupTestTenant($domain);
 
     $tenant->run(function () {
-        $staffRole = Role::query()->where('slug', 'staff')->firstOrFail();
+        $staffRole = Role::query()->where('slug', 'cashier')->firstOrFail();
         User::factory()->create([
             'email' => 'staffer@example.com',
             'password' => 'password',

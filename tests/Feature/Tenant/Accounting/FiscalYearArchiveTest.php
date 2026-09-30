@@ -277,7 +277,7 @@ test('a non-admin cannot archive a fiscal year', function () {
         $fy1 = FiscalYear::create(['name' => 'FY1', 'start_date' => '2026-01-01', 'end_date' => '2026-12-31', 'status' => FiscalYearStatus::Closed]);
         $fiscalYearId = $fy1->id;
 
-        $staffRole = Role::query()->where('slug', 'staff')->firstOrFail();
+        $staffRole = Role::query()->where('slug', 'cashier')->firstOrFail();
         User::factory()->create([
             'email' => 'staffer@example.com',
             'password' => 'password',

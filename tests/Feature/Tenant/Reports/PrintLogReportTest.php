@@ -290,7 +290,7 @@ test('a non-admin cannot open the print log report', function () {
         User::factory()->create([
             'email' => 'clerk@example.com',
             'password' => 'password',
-            'role_id' => Role::query()->where('slug', 'staff')->value('id'),
+            'role_id' => Role::query()->where('slug', 'cashier')->value('id'),
         ]);
     });
 

@@ -37,7 +37,7 @@ function loginAsStaffMember(string $domain): User
 
     tenancy()->initialize(Tenant::query()->whereHas('domains', fn ($q) => $q->where('domain', $domain))->firstOrFail());
 
-    $staffRole = Role::query()->where('slug', 'staff')->firstOrFail();
+    $staffRole = Role::query()->where('slug', 'cashier')->firstOrFail();
     $staff = User::factory()->create([
         'email' => 'staffer@example.com',
         'password' => 'password',
@@ -107,7 +107,7 @@ test('updating the profile requires a name and a unique email', function () {
     $staff = loginAsStaffMember($domain);
 
     $tenant->run(function () {
-        $staffRole = Role::query()->where('slug', 'staff')->firstOrFail();
+        $staffRole = Role::query()->where('slug', 'cashier')->firstOrFail();
         User::factory()->create(['email' => 'taken@example.com', 'role_id' => $staffRole->id]);
     });
 

@@ -56,7 +56,7 @@ function loginAsNoticeStaff(string $domain): User
 
     tenancy()->initialize(Tenant::query()->whereHas('domains', fn ($q) => $q->where('domain', $domain))->firstOrFail());
 
-    $staffRole = Role::query()->where('slug', 'staff')->firstOrFail();
+    $staffRole = Role::query()->where('slug', 'cashier')->firstOrFail();
     $staff = User::factory()->create([
         'email' => 'staffer@example.com',
         'password' => 'password',

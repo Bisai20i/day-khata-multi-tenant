@@ -96,7 +96,7 @@ test('closing a fiscal year is rejected for a non-admin user', function () {
     $tenant->run(function () use (&$fiscalYearId, &$nextId) {
         User::factory()->create([
             'email' => 'owner@example.com',
-            'role_id' => Role::where('slug', 'staff')->value('id'),
+            'role_id' => Role::where('slug', 'cashier')->value('id'),
         ]);
 
         $fiscalYearId = FiscalYear::create([
@@ -194,7 +194,7 @@ test('a staff user cannot reach the journal voucher store route at all', functio
     $tenant->run(function () use (&$closedId, &$cashId, &$salesId) {
         User::factory()->create([
             'email' => 'owner@example.com',
-            'role_id' => Role::where('slug', 'staff')->value('id'),
+            'role_id' => Role::where('slug', 'cashier')->value('id'),
         ]);
         $closedId = FiscalYear::create(['name' => 'FY1', 'start_date' => '2026-01-01', 'end_date' => '2026-12-31', 'status' => FiscalYearStatus::Closed])->id;
         FiscalYear::create(['name' => 'FY2', 'start_date' => '2027-01-01', 'end_date' => '2027-12-31', 'status' => FiscalYearStatus::Open]);

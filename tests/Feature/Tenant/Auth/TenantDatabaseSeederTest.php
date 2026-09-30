@@ -1,11 +1,12 @@
 <?php
 
-use App\Models\Permission;
 use App\Models\Role;
 use App\Models\Tenant;
 use App\Support\Permissions\PermissionCatalog;
-use App\Support\Permissions\RoleBackfill;
+use App\Support\Permissions\RoleTemplates;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Schema;
 
 uses(RefreshDatabase::class);
 
@@ -34,65 +35,49 @@ function provisionSeederTestTenant(string $domain): Tenant
     return $tenant;
 }
 
-test('the tenant database seeder produces exactly the admin and staff role slugs', function () {
+test('the tenant database seeder produces exactly the admin, manager and cashier role slugs', function () {
     $tenant = provisionSeederTestTenant('seeder-roles.tenant-test');
 
     $tenant->run(function () {
         expect(Role::query()->pluck('slug')->sort()->values()->all())
-            ->toBe(['admin', 'staff']);
+            ->toBe(['admin', 'cashier', 'manager']);
     });
 
     $tenant->delete();
 });
 
-test('the seeded admin role has every seeded permission and staff has none', function () {
-    $tenant = provisionSeederTestTenant('seeder-permissions.tenant-test');
+test('the seeder no longer creates placeholder permission rows or pivot attachments', function () {
+    $tenant = provisionSeederTestTenant('seeder-no-placeholders.tenant-test');
 
     $tenant->run(function () {
-        $totalPermissions = Permission::query()->count();
-        expect($totalPermissions)->toBeGreaterThan(0);
-
-        $admin = Role::query()->where('slug', 'admin')->firstOrFail();
-        $staff = Role::query()->where('slug', 'staff')->firstOrFail();
-
-        expect($admin->legacyPermissions()->count())->toBe($totalPermissions);
-        expect($staff->legacyPermissions()->count())->toBe(0);
+        expect(Schema::hasTable('permissions') ? DB::table('permissions')->count() : 0)->toBe(0)
+            ->and(Schema::hasTable('permission_role') ? DB::table('permission_role')->count() : 0)->toBe(0);
     });
 
     $tenant->delete();
 });
 
-test('the admin role grants every seeded permission via the legacy relation', function () {
-    $tenant = provisionSeederTestTenant('seeder-haspermission.tenant-test');
-
-    $tenant->run(function () {
-        $admin = Role::query()->where('slug', 'admin')->firstOrFail();
-        $staff = Role::query()->where('slug', 'staff')->firstOrFail();
-
-        Permission::query()->get()->each(function (Permission $permission) use ($admin, $staff) {
-            expect($admin->legacyPermissions()->where('slug', $permission->slug)->exists())->toBeTrue();
-            expect($staff->legacyPermissions()->where('slug', $permission->slug)->exists())->toBeFalse();
-        });
-    });
-
-    $tenant->delete();
-});
-
-test('the seeded admin role is a system role granting the live grantable catalog and staff gets the parity list', function () {
+test('the seeded admin role is a system role granting the live grantable catalog, manager and cashier get their templates', function () {
     $tenant = provisionSeederTestTenant('seeder-json-permissions.tenant-test');
 
     $tenant->run(function () {
         $admin = Role::query()->where('slug', 'admin')->firstOrFail();
-        $staff = Role::query()->where('slug', 'staff')->firstOrFail();
+        $manager = Role::query()->where('slug', 'manager')->firstOrFail();
+        $cashier = Role::query()->where('slug', 'cashier')->firstOrFail();
 
+        // A tenant created without an explicit list is entitled to every
+        // default module, so the templates come through unfiltered.
         expect($admin->permissions)->toBe(PermissionCatalog::grantable())
             ->and($admin->is_system)->toBeTrue()
-            ->and($staff->permissions)->toBe(RoleBackfill::STAFF_PARITY)
-            ->and($staff->is_system)->toBeFalse();
+            ->and($manager->permissions)->toBe(RoleTemplates::MANAGER)
+            ->and($manager->is_system)->toBeFalse()
+            ->and($cashier->permissions)->toBe(RoleTemplates::CASHIER)
+            ->and($cashier->is_system)->toBeFalse();
 
         foreach (PermissionCatalog::ownerOnly() as $ownerOnlyKey) {
             expect($admin->permissions)->not->toContain($ownerOnlyKey)
-                ->and($staff->permissions)->not->toContain($ownerOnlyKey);
+                ->and($manager->permissions)->not->toContain($ownerOnlyKey)
+                ->and($cashier->permissions)->not->toContain($ownerOnlyKey);
         }
     });
 

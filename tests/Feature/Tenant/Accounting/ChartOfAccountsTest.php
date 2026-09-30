@@ -197,7 +197,7 @@ test('a staff user gets a 403 on every chart of accounts write route', function 
     $accountId = null;
     $headId = null;
     $tenant->run(function () use (&$groupId, &$subgroupId, &$accountId, &$headId) {
-        User::factory()->create(['email' => 'owner@example.com', 'role_id' => Role::where('slug', 'staff')->value('id')]);
+        User::factory()->create(['email' => 'owner@example.com', 'role_id' => roleWithPermissions(['accounts.view'])->id]);
         $groupId = AccountGroup::query()->where('name', 'Sales Accounts')->value('id');
         $subgroupId = AccountSubgroup::query()->where('name', 'Sundry Debtors')->value('id');
         $accountId = Account::query()->where('code', 'AS1')->value('id');

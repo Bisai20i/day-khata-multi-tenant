@@ -49,7 +49,7 @@ function seedUnlinkedQuoteStock(): array
 {
     FiscalYear::create(['name' => 'FY1', 'start_date' => '2026-01-01', 'end_date' => '2026-12-31', 'status' => FiscalYearStatus::Open]);
     $admin = User::factory()->create(['email' => 'owner@example.com', 'role_id' => Role::where('slug', 'admin')->value('id')]);
-    User::factory()->create(['email' => 'staff@example.com', 'role_id' => Role::where('slug', 'staff')->value('id')]);
+    User::factory()->create(['email' => 'staff@example.com', 'role_id' => Role::where('slug', 'cashier')->value('id')]);
     $item = Item::factory()->create(['is_vatable' => true, 'is_stockable' => true]);
     $supplier = Supplier::factory()->create();
 

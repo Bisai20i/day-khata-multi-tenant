@@ -37,7 +37,7 @@ test('a staff user is blocked from the admin-only user management page', functio
     $tenant = provisionRoleTestTenant($domain);
 
     $tenant->run(function () {
-        $staffRole = Role::query()->where('slug', 'staff')->firstOrFail();
+        $staffRole = Role::query()->where('slug', 'cashier')->firstOrFail();
 
         User::factory()->create([
             'email' => 'staffer@example.com',
@@ -80,7 +80,7 @@ test('an admin user can access the admin-only user management page', function ()
     $response->assertStatus(200);
     $response->assertInertia(fn ($page) => $page->component('Tenant/Admin/Users')
         ->has('users', 1)
-        ->has('roles', 2)
+        ->has('roles', 3)
     );
 
     $tenant->delete();

@@ -159,7 +159,7 @@ test('a staff user cannot reach the cancelled documents report', function () {
     $tenant = provisionCancelledDocumentsTestTenant($domain);
 
     $tenant->run(function () {
-        User::factory()->create(['email' => 'staff@example.com', 'role_id' => Role::where('slug', 'staff')->value('id')]);
+        User::factory()->create(['email' => 'staff@example.com', 'role_id' => Role::where('slug', 'cashier')->value('id')]);
     });
 
     $this->post("http://{$domain}/login", ['email' => 'staff@example.com', 'password' => 'password']);

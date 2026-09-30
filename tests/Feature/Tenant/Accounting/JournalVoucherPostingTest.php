@@ -15,6 +15,7 @@ use App\Models\VoucherSequence;
 use App\Support\ClosedFiscalYearGuard;
 use App\Support\Money\InvalidAmount;
 use App\Support\Money\Money;
+use App\Support\Permissions\RoleBackfill;
 use Illuminate\Auth\Access\AuthorizationException;
 use Illuminate\Database\Eloquent\ModelNotFoundException;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -50,7 +51,7 @@ function adminUser(): User
 
 function staffUser(): User
 {
-    return User::factory()->create(['role_id' => Role::where('slug', 'staff')->value('id')]);
+    return User::factory()->create(['role_id' => Role::where('slug', 'cashier')->value('id')]);
 }
 
 test('posting requires at least two lines', function () {
@@ -820,7 +821,8 @@ test('a staff user gets a 403 on the journal voucher store and cancel routes', f
 
     $voucherId = $cashId = $salesId = null;
     $tenant->run(function () use (&$voucherId, &$cashId, &$salesId) {
-        User::factory()->create(['email' => 'staff@example.com', 'role_id' => Role::where('slug', 'staff')->value('id')]);
+        // The pre-rollout Staff grant set: may read vouchers, may not post or cancel.
+        User::factory()->create(['email' => 'staff@example.com', 'role_id' => roleWithPermissions(RoleBackfill::STAFF_PARITY, 'Staff')->id]);
         FiscalYear::create(['name' => 'FY1', 'start_date' => '2026-01-01', 'end_date' => '2026-12-31', 'status' => FiscalYearStatus::Open]);
         $cashId = cashAccount()->id;
         $salesId = salesAccount()->id;

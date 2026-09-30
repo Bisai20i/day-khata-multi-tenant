@@ -284,7 +284,7 @@ test('a staff user gets a 403 on the cash/bank voucher store route', function ()
 
     $salesId = null;
     $tenant->run(function () use (&$salesId) {
-        User::factory()->create(['email' => 'staff@example.com', 'role_id' => Role::where('slug', 'staff')->value('id')]);
+        User::factory()->create(['email' => 'staff@example.com', 'role_id' => Role::where('slug', 'cashier')->value('id')]);
         FiscalYear::create(['name' => 'FY1', 'start_date' => '2026-01-01', 'end_date' => '2026-12-31', 'status' => FiscalYearStatus::Open]);
         $salesId = Account::where('code', 'INI20')->value('id');
     });

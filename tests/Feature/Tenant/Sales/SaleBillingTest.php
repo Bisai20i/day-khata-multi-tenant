@@ -50,7 +50,7 @@ function saleBillingStaff(string $email = 'staff@example.com'): User
 {
     return User::factory()->create([
         'email' => $email,
-        'role_id' => Role::where('slug', 'staff')->value('id'),
+        'role_id' => Role::where('slug', 'cashier')->value('id'),
     ]);
 }
 
