@@ -1,7 +1,7 @@
 <script setup>
 import { computed, h, ref, watch } from 'vue';
 import { useForm, usePage } from '@inertiajs/vue3';
-import { Plus } from '@lucide/vue';
+import { Plus, Printer } from '@lucide/vue';
 import AppLayout from '@/layouts/AppLayout.vue';
 import { useLayoutChrome } from '@/composables/useLayoutChrome';
 import Card from '@/components/ui/Card.vue';
@@ -218,8 +218,35 @@ const columns = [
         header: 'Actions',
         numeric: false,
         cell: ({ row }) =>
-            row.original.status === 'posted'
-                ? h('div', { class: 'flex gap-2' }, [
+            h('div', { class: 'flex flex-wrap items-center gap-2' }, [
+                // Every bill prints, live or cancelled (flags G-01).
+                h(Tooltip, { label: 'Print this bill' }, () =>
+                    h(
+                        'a',
+                        {
+                            href: `/capital-purchases/${row.original.id}/print`,
+                            target: '_blank',
+                            rel: 'noopener',
+                            class: 'flex h-[26px] w-[26px] items-center justify-center bg-bg-subtle text-text-faint transition-colors duration-150 hover:bg-primary-tint hover:text-primary',
+                            'aria-label': `Print capital purchase of ${formatMoney(row.original.total)}`,
+                        },
+                        [h(Printer, { class: 'h-[13px] w-[13px]' })],
+                    ),
+                ),
+                row.original.journal_voucher_id
+                    ? h(
+                          'a',
+                          {
+                              href: `/journal-vouchers/${row.original.journal_voucher_id}/print`,
+                              target: '_blank',
+                              rel: 'noopener',
+                              class: 'text-xs font-semibold text-primary hover:underline',
+                          },
+                          `Voucher #${row.original.journal_voucher?.voucher_number ?? row.original.journal_voucher_id}`,
+                      )
+                    : null,
+                ...(row.original.status === 'posted'
+                    ? [
                       // Only a credit bill owes anything later: "partial" is an exact
                       // cash + bank split of the whole total (CONTRACTS C3).
                       row.original.supplier_id && row.original.payment_mode === 'credit'
@@ -244,8 +271,9 @@ const columns = [
                                 }, () => 'Cancel'),
                             )
                           : null,
-                  ])
-                : null,
+                      ]
+                    : []),
+            ]),
     },
 ];
 </script>

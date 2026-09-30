@@ -91,7 +91,7 @@ C3, C4, C5, C6, C10 rather than line by line.
 - Fix: add Pest cases for each.
 
 ### PUR-10 (P2) Cancel reason, date and user are stored but never shown
-- **PARTLY FIXED** (2026-09-29, F01): list shows cancel date, user and reason under the Cancelled badge (PurchaseStatusCell.vue); export has Cancelled on/by and Reason columns. PDF print still pending (F04 covers capital only). Tests: tests/Feature/Tenant/Purchases/PurchaseListCancelInfoTest.php.
+- **FIXED** (2026-09-29, F01 + F04): list shows cancel date, user and reason under the Cancelled badge (PurchaseStatusCell.vue); export has Cancelled on/by and Reason columns; the purchase PDF prints them too. Tests: tests/Feature/Tenant/Purchases/PurchaseListCancelInfoTest.php.
 - Where: app/Models/Purchase.php:572-579 (writes cancelled_at, cancelled_by, cancel_reason); PurchaseController.php:52 (index loads no canceller), :221 (export has status only); resources/js/pages/Tenant/Purchases/Index.vue:230-240 (Status column is a badge only); resources/views/pdf/purchase.blade.php:10-12 (print shows a "Cancelled" badge only).
 - Evidence: grep for cancel_reason, cancelled_at and canceller in resources/js/pages/Tenant/Purchases, the purchase PDF and PurchaseListExport finds nothing. The reason survives only inside the reversal voucher narration.
 - Impact: a user reviewing or printing a cancelled bill cannot see why, when or by whom it was cancelled. Legacy: day_khata InventoryStockController::getcanceledpurchaserecordforprint and resources/views/instock/listcanceledinstock.blade.php now show all three.

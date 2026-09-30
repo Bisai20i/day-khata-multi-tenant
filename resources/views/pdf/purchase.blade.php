@@ -9,6 +9,18 @@
     @endif
     @if($purchase->status === 'cancelled')
         <div style="margin-top: 4px;"><span class="status-badge">Cancelled</span></div>
+        {{-- Who cancelled it, when and why, on the face of the bill (flags G-11). --}}
+        <div>
+            @if($purchase->cancelled_at)
+                {{ $purchase->cancelled_at->toDateString() }}
+            @endif
+            @if($purchase->canceller)
+                by {{ $purchase->canceller->name }}
+            @endif
+        </div>
+        @if($purchase->cancel_reason)
+            <div><strong>Reason:</strong> {{ $purchase->cancel_reason }}</div>
+        @endif
     @endif
 @endsection
 

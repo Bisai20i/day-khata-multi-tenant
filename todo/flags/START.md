@@ -141,11 +141,11 @@ capital purchase create page, `AppServiceProvider.php` (one line), tests. Needs 
 ### F04 View and print a capital or service bill (G-01, G-11 print part)
 Owned: new route in `routes/tenant-purchase.php` (coordinator adds), `CapitalPurchaseController::print`, new
 `resources/views/pdf/capital-purchase.blade.php`, `CapitalPurchases/Index.vue` (Print action, after F01), tests.
-- [ ] 1. `GET capital-purchases/{capitalPurchase}/print`, via `PrintLog::record()` (C9: copy number, BS date,
+- [x] 1. `GET capital-purchases/{capitalPurchase}/print`, via `PrintLog::record()` (C9: copy number, BS date,
   fiscal year), layout from `pdf/capital-sale.blade.php`: supplier, bill number, type, lines with account,
   narration and amount, vatable split, VAT, total, payment mode, settlements and outstanding. Cancelled bills
   print with the Cancelled marker plus reason, date and user.
-- [ ] 2. Print action on every row (live and cancelled), and a link from the row to its purchase voucher print.
+- [x] 2. Print action on every row (live and cancelled), and a link from the row to its purchase voucher print.
   Tests: prints for live and cancelled, logs a copy, shows settlements.
 
 ### F05 Receipts: print, allocation dates; payments: allocation dates, stray bank id (G-07, G-14)
@@ -219,7 +219,7 @@ Owned: `JournalVoucher.php` (after F07) and the nine callers listed in G-22, tes
 | F01 | Purchase lists | G-02, G-11, G-12 | done |
 | F02 | Unlinked purchase return form | G-10, G-16 | done |
 | F03 | Capital posting | G-03, G-04, G-23 | done |
-| F04 | Capital view and print | G-01, G-11 | pending |
+| F04 | Capital view and print | G-01, G-11 | done |
 | F05 | Receipt print, allocation dates | G-07, G-14 | pending |
 | F06 | Sales posting guards | G-05, G-13, G-15 | pending |
 | F07 | Journal core hardening | G-06, G-19, G-20 | pending |

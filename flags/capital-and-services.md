@@ -43,13 +43,14 @@ Files: app/Models/CapitalPurchase.php, app/Http/Controllers/Tenant/Purchases/Cap
 - No settlement tests (CS-01).
 
 ## CS-08 (P0) No view or print of a capital or service purchase, live or cancelled
+- FIXED (2026-09-29, F04): GET capital-purchases/{capitalPurchase}/print with PrintLog copies, lines, VAT, payment, settlements and outstanding; Print and Voucher links on every row. Tests: tests/Feature/Tenant/Purchases/CapitalPurchasePrintTest.php.
 - Where: routes/tenant-purchase.php:36-48 (index, store, export, cancel and settlement routes only; no show or print); resources/views/pdf has capital-sale.blade.php but no capital purchase layout; resources/js/pages/Tenant/Purchases/CapitalPurchases/Index.vue:156-157 and :185-190 (the Accounts column lists account names only).
 - Evidence: line amounts, line narrations, the vatable split and VAT are sent to the page (CapitalPurchaseController.php:32 loads lines) but never displayed or printable. Legacy: day_khata resources/views/instock/listCapitalServices.blade.php:196,201 offers Print (printJournalCapitalRecord) for capital and service journals.
 - Impact: a user cannot review or print what a capital or service bill contained, and after cancelling cannot see the lines that were reversed. The only workaround is finding the purchase voucher in Journal Vouchers and printing it (routes/tenant-ledger.php:51), which the capital page does not link to. No ledger effect.
 - Fix: add a print route and PDF (lines, VAT, totals, payment mode, settlements) usable for cancelled bills too, with a Print action on every row.
 
 ## CS-09 (P2) Cancel reason, date and user are stored but never shown
-- PARTLY FIXED (2026-09-29, F01): list and export show cancel date, user and reason. Print part is F04. Tests: tests/Feature/Tenant/Purchases/PurchaseListCancelInfoTest.php.
+- FIXED (2026-09-29, F01 + F04): list, export and print show cancel date, user and reason. Tests: tests/Feature/Tenant/Purchases/PurchaseListCancelInfoTest.php.
 - Where: app/Models/CapitalPurchase.php:633-640 (writes cancelled_at, cancelled_by, cancel_reason); CapitalPurchaseController.php:32 (index loads no canceller), :144 (export has status only); CapitalPurchases/Index.vue:211-219 (Status column is a badge only).
 - Evidence: grep for cancel_reason, cancelled_at and canceller in resources/js/pages/Tenant/Purchases and CapitalPurchaseListExport finds nothing.
 - Impact: no one can see why, when or by whom a capital purchase was cancelled. Legacy: day_khata InventoryStockController::cancelJournalRecord now writes purchasecancelrecords so the cancelled list shows it.

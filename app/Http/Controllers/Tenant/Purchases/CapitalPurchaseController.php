@@ -9,14 +9,19 @@ use App\Http\Controllers\Controller;
 use App\Models\Account;
 use App\Models\CapitalPurchase;
 use App\Models\CompanySetting;
+use App\Models\PrintLog;
 use App\Models\Store;
 use App\Models\Supplier;
+use App\Support\AmountInWords;
 use App\Support\Billing\BillingException;
 use App\Support\Money\Money;
+use App\Support\NepaliCalendar;
+use Barryvdh\DomPDF\Facade\Pdf;
 use Closure;
 use Illuminate\Auth\Access\AuthorizationException;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
+use Illuminate\Http\Response as HttpResponse;
 use Illuminate\Validation\Rule;
 use Illuminate\Validation\ValidationException;
 use Inertia\Inertia;
@@ -162,6 +167,47 @@ class CapitalPurchaseController extends Controller
             ->map(fn (CapitalPurchase $capitalPurchase): Money => Money::of($capitalPurchase->total)))->toString();
 
         return Excel::download(new CapitalPurchaseListExport($rows, $total), 'capital-purchases.xlsx');
+    }
+
+    /**
+     * Printable capital or service bill (flags G-01): lines, VAT split,
+     * payment, the payments made against it and what is still owed. Every
+     * print is logged, so a reprint says "Copy of Original" (CONTRACTS C9).
+     * A cancelled bill still prints, marked with who cancelled it, when and
+     * why.
+     */
+    public function print(Request $request, CapitalPurchase $capitalPurchase): HttpResponse
+    {
+        $capitalPurchase->load([
+            'supplier', 'bankAccount', 'lines.account', 'journalVoucher.fiscalYear', 'canceller:id,name',
+            'settlements' => fn ($query) => $query->with('bankAccount')->orderBy('date')->orderBy('id'),
+        ]);
+
+        $documentDate = $capitalPurchase->date->toDateString();
+        $total = Money::of($capitalPurchase->total);
+        $voucherNumber = $capitalPurchase->journalVoucher?->voucher_number;
+
+        return Pdf::loadView('pdf.capital-purchase', [
+            'capitalPurchase' => $capitalPurchase,
+            'company' => CompanySetting::current(),
+            'documentNumber' => $capitalPurchase->bill_number ?? ($voucherNumber !== null ? "Voucher #{$voucherNumber}" : "#{$capitalPurchase->id}"),
+            'documentDate' => $documentDate,
+            'paymentModeLabel' => match ($capitalPurchase->payment_mode) {
+                'partial' => 'Cash + bank',
+                default => ucfirst($capitalPurchase->payment_mode),
+            },
+            'taxable' => Money::of($capitalPurchase->taxable_amount),
+            'nontaxable' => Money::of($capitalPurchase->nontaxable_amount),
+            'vat' => Money::of($capitalPurchase->vat_amount),
+            'total' => $total,
+            'outstanding' => $capitalPurchase->outstandingAmount(),
+            'settlements' => $capitalPurchase->settlements,
+            'copyNumber' => PrintLog::record($capitalPurchase, $request->user()),
+            'dateAd' => $documentDate,
+            'dateBs' => NepaliCalendar::formatBs($documentDate),
+            'fiscalYearName' => $capitalPurchase->journalVoucher?->fiscalYear?->name,
+            'amountInWords' => AmountInWords::rupees($total),
+        ])->stream("capital-purchase-{$capitalPurchase->id}.pdf");
     }
 
     public function cancel(Request $request, CapitalPurchase $capitalPurchase): RedirectResponse

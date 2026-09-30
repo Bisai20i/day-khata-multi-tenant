@@ -37,6 +37,7 @@ Route::name('tenant.')->group(function () {
         Route::get('/', [CapitalPurchaseController::class, 'index'])->name('index');
         Route::post('/', [CapitalPurchaseController::class, 'store'])->name('store');
         Route::get('/export', [CapitalPurchaseController::class, 'export'])->name('export');
+        Route::get('/{capitalPurchase}/print', [CapitalPurchaseController::class, 'print'])->name('print');
         Route::post('/{capitalPurchase}/cancel', [CapitalPurchaseController::class, 'cancel'])
             ->middleware('role:admin')
             ->name('cancel');

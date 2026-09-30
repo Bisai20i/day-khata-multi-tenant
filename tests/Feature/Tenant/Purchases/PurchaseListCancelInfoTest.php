@@ -12,6 +12,7 @@ use App\Models\Role;
 use App\Models\Supplier;
 use App\Models\Tenant;
 use App\Models\User;
+use Barryvdh\DomPDF\Facade\Pdf;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Maatwebsite\Excel\Facades\Excel;
 
@@ -194,6 +195,39 @@ test('only admins are offered the Cancel button, and the cancel routes still ref
 
     $this->post("http://{$domain}/purchases/{$livePurchaseId}/cancel", ['reason' => 'Nope'])->assertForbidden();
     $this->post("http://{$domain}/capital-purchases/{$liveCapitalId}/cancel", ['reason' => 'Nope'])->assertForbidden();
+
+    $tenant->delete();
+});
+
+test('a cancelled purchase prints who cancelled it, when and why', function () {
+    $domain = 'purchase-cancel-print.tenant-test';
+    $tenant = provisionPurchaseCancelInfoTenant($domain);
+
+    $ids = null;
+    $tenant->run(function () use (&$ids) {
+        $ids = seedPurchaseCancelInfo();
+    });
+
+    loginPurchaseCancelInfoUser($domain);
+
+    $captured = null;
+    $fakePdf = Mockery::mock(Barryvdh\DomPDF\PDF::class);
+    $fakePdf->shouldReceive('stream')->once()->andReturn(response('pdf', 200, ['Content-Type' => 'application/pdf']));
+    Pdf::shouldReceive('loadView')
+        ->once()
+        ->withArgs(function (string $view, array $data) use (&$captured) {
+            $captured = [$view, $data];
+
+            return $view === 'pdf.purchase';
+        })
+        ->andReturn($fakePdf);
+
+    $this->get("http://{$domain}/purchases/{$ids['purchaseId']}/print")->assertOk();
+
+    expect(view($captured[0], $captured[1])->render())
+        ->toContain('Cancelled')
+        ->toContain('by Asha Admin')
+        ->toContain('Duplicate bill');
 
     $tenant->delete();
 });

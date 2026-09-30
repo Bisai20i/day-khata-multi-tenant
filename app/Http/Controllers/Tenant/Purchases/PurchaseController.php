@@ -268,7 +268,7 @@ class PurchaseController extends Controller
      */
     public function print(Request $request, Purchase $purchase): HttpResponse
     {
-        $purchase->load(['supplier', 'bankAccount', 'lines.item', 'lines.itemUnit', 'journalVoucher.fiscalYear']);
+        $purchase->load(['supplier', 'bankAccount', 'lines.item', 'lines.itemUnit', 'journalVoucher.fiscalYear', 'canceller:id,name']);
 
         $company = CompanySetting::current();
 

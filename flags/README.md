@@ -5,9 +5,9 @@ Audited 2026-09-21 by read-only agents. Severities were assigned by each agent w
 | File | Flags | P0/P1 status | P2 status |
 |---|---|---|---|
 | sales.md | SAL-01..12 | SAL-01..04 FIXED | SAL-05..12 open |
-| purchases.md | PUR-01..12 | PUR-01..03 FIXED | PUR-06, PUR-11, PUR-12 FIXED; PUR-10 partly (print left); PUR-04, PUR-05, PUR-07..09 open |
+| purchases.md | PUR-01..12 | PUR-01..03 FIXED | PUR-06, PUR-10..12 FIXED; PUR-04, PUR-05, PUR-07..09 open |
 | journal-entries.md | JE-01..11 | JE-01..04 FIXED | JE-05..11 open |
-| capital-and-services.md | CS-01..11 | CS-01..03 FIXED (CS-05 also); CS-08 (P0) open | CS-04, CS-06, CS-10, CS-11 FIXED; CS-09 partly (print is F04); CS-07 open |
+| capital-and-services.md | CS-01..11 | CS-01..03 FIXED (CS-05 also); CS-08 (P0) FIXED | CS-04, CS-06, CS-09..11 FIXED; CS-07 open |
 
 "FIXED" means the code was changed and tests were written. It does not mean verified by a test run.
 
