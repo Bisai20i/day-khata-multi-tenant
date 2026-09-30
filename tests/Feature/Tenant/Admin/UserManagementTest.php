@@ -54,9 +54,12 @@ test('an admin can create a new employee', function () {
     $tenant = provisionUserManagementTestTenant($domain);
     loginAsAdmin($domain);
 
+    // A role narrower than admin, so the escalation guard allows it. Built
+    // with the helper rather than looked up by the old `staff` slug, which
+    // new tenants no longer get (P13).
     $staffRole = null;
     $tenant->run(function () use (&$staffRole) {
-        $staffRole = Role::query()->where('slug', 'staff')->firstOrFail();
+        $staffRole = roleWithPermissions(['sales.view', 'sales.create'], 'Counter');
     });
 
     $response = test()->post("http://{$domain}/admin/users", [
@@ -87,7 +90,7 @@ test('an admin can edit and deactivate an employee', function () {
     $employee = null;
     $staffRoleId = null;
     $tenant->run(function () use (&$employee, &$staffRoleId) {
-        $staffRoleId = Role::query()->where('slug', 'staff')->firstOrFail()->id;
+        $staffRoleId = roleWithPermissions(['sales.view'], 'Counter')->id;
         $employee = User::factory()->create(['email' => 'staffer@example.com', 'role_id' => $staffRoleId]);
     });
 
@@ -109,13 +112,13 @@ test('an admin can edit and deactivate an employee', function () {
     $tenant->delete();
 });
 
-test('a staff user cannot create, edit, or view employees', function () {
+test('a user without users.manage cannot create, edit, or view employees', function () {
     $domain = 'user-mgmt-staff.tenant-test';
     $tenant = provisionUserManagementTestTenant($domain);
 
     $staff = null;
     $tenant->run(function () use (&$staff) {
-        $staffRole = Role::query()->where('slug', 'staff')->firstOrFail();
+        $staffRole = roleWithPermissions(['sales.view', 'sales.create'], 'Counter');
         $staff = User::factory()->create(['email' => 'staffer@example.com', 'role_id' => $staffRole->id]);
     });
 
@@ -128,7 +131,12 @@ test('a staff user cannot create, edit, or view employees', function () {
     $tenant->delete();
 });
 
-test('deactivating the sole remaining active admin is rejected', function () {
+/**
+ * Replaces the old "last active admin" guard (P12): the owner is the account
+ * that can never be locked out now, and a non-owner, admin role or not, can
+ * never deactivate themselves.
+ */
+test('a non-owner admin cannot deactivate their own account', function () {
     $domain = 'user-mgmt-last-admin.tenant-test';
     $tenant = provisionUserManagementTestTenant($domain);
     $admin = loginAsAdmin($domain);
@@ -145,7 +153,7 @@ test('deactivating the sole remaining active admin is rejected', function () {
         'is_active' => false,
     ]);
 
-    $response->assertSessionHasErrors();
+    $response->assertSessionHasErrors('is_active');
 
     $tenant->run(function () use ($admin) {
         expect($admin->fresh()->is_active)->toBeTrue();
@@ -154,14 +162,14 @@ test('deactivating the sole remaining active admin is rejected', function () {
     $tenant->delete();
 });
 
-test('reassigning the sole admin away from the admin role is rejected', function () {
+test('a non-owner admin cannot change their own role', function () {
     $domain = 'user-mgmt-last-admin-role.tenant-test';
     $tenant = provisionUserManagementTestTenant($domain);
     $admin = loginAsAdmin($domain);
 
     $staffRoleId = null;
     $tenant->run(function () use (&$staffRoleId) {
-        $staffRoleId = Role::query()->where('slug', 'staff')->firstOrFail()->id;
+        $staffRoleId = roleWithPermissions(['sales.view'], 'Counter')->id;
     });
 
     $response = test()->put("http://{$domain}/admin/users/{$admin->id}", [
@@ -171,7 +179,7 @@ test('reassigning the sole admin away from the admin role is rejected', function
         'is_active' => true,
     ]);
 
-    $response->assertSessionHasErrors();
+    $response->assertSessionHasErrors('role_id');
 
     $tenant->run(function () use ($admin) {
         expect($admin->fresh()->role->slug)->toBe('admin');
@@ -185,7 +193,7 @@ test('an inactive employee cannot log in', function () {
     $tenant = provisionUserManagementTestTenant($domain);
 
     $tenant->run(function () {
-        $staffRole = Role::query()->where('slug', 'staff')->firstOrFail();
+        $staffRole = roleWithPermissions(['sales.view'], 'Counter');
         User::factory()->create([
             'email' => 'inactive@example.com',
             'password' => 'password',

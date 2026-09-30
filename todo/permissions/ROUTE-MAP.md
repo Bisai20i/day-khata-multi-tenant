@@ -344,6 +344,7 @@ vat-summary 2, stock-movement-register 1, sales-with-note 1, damage-lost-stock 1
 | tenant.admin.users | GET /admin/users | UserController@index | admin | users.manage |
 | tenant.admin.users.store | POST /admin/users | UserController@store | admin | users.manage |
 | tenant.admin.users.update | PUT /admin/users/{user} | UserController@update | admin | users.manage |
+| tenant.admin.users.transfer-ownership | POST /admin/users/{user}/transfer-ownership | UserController@transferOwnership | (new, P12) | ownership.transfer |
 
 ### routes/tenant-profile.php (3)
 

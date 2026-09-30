@@ -11,9 +11,9 @@ use Illuminate\Support\Facades\DB;
 uses(RefreshDatabase::class);
 
 /**
- * RoleBackfill against a real tenant database. Provisioning seeds admin and
- * staff with permissions already set, so each test first rewinds the roles
- * to the pre-rollout shape (permissions NULL, is_system false) and seeds
+ * RoleBackfill against a real tenant database. Provisioning seeds roles with
+ * permissions already set, so each test first rewinds the roles to the
+ * pre-rollout shape (admin and staff, permissions NULL, is_system false) and seeds
  * legacy users (is_owner false, which the factory gives any user created
  * with a role_id). See TenantDatabaseSeederTest for why tenancy is ended
  * after every test.
@@ -32,6 +32,10 @@ function provisionRoleBackfillTenant(string $domain, ?string $contactEmail = nul
 
 function rewindRolesToLegacyShape(): void
 {
+    // Provisioning now seeds admin, manager and cashier (P13). A pre-rollout
+    // tenant had exactly admin and staff, so rebuild that shape here.
+    DB::table('roles')->whereNotIn('slug', ['admin'])->delete();
+    DB::table('roles')->insert(['name' => 'Staff', 'slug' => 'staff', 'created_at' => now(), 'updated_at' => now()]);
     DB::table('roles')->update(['permissions' => null, 'is_system' => false]);
 }
 
