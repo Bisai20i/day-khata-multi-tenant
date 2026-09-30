@@ -241,7 +241,11 @@ class TenantController extends Controller
                 ->first()
             : null;
 
+        [$owner, $ownerCandidates] = $this->ownerAndCandidates($tenant);
+
         return Inertia::render('Central/Tenants/Show', [
+            'owner' => $owner,
+            'ownerCandidates' => $ownerCandidates,
             'tenant' => [
                 'id' => $tenant->id,
                 'company_name' => $tenant->company_name,
@@ -273,6 +277,48 @@ class TenantController extends Controller
             ],
             'moduleCatalog' => self::moduleCatalog(),
         ]);
+    }
+
+    /**
+     * The tenant's current owner and the active users that could become the
+     * owner, read inside the tenant database for the "Owner" section. A
+     * tenant whose database does not exist (failed or pending provisioning)
+     * has neither, and any read failure degrades to the same empty result so
+     * the Show page itself never 500s.
+     *
+     * @return array{0: array{id: int, name: string, email: string}|null, 1: list<array{id: int, name: string, email: string, role: string|null}>}
+     */
+    private function ownerAndCandidates(Tenant $tenant): array
+    {
+        if (! $tenant->databaseExists()) {
+            return [null, []];
+        }
+
+        try {
+            return $tenant->run(function (): array {
+                $owner = User::query()->where('is_owner', true)->orderBy('id')->first();
+
+                $candidates = User::query()
+                    ->with('role:id,name')
+                    ->where('is_active', true)
+                    ->orderBy('name')
+                    ->get()
+                    ->map(fn (User $user): array => [
+                        'id' => $user->id,
+                        'name' => (string) $user->name,
+                        'email' => (string) $user->email,
+                        'role' => $user->role?->name,
+                    ])
+                    ->all();
+
+                return [
+                    $owner === null ? null : ['id' => $owner->id, 'name' => (string) $owner->name, 'email' => (string) $owner->email],
+                    $candidates,
+                ];
+            });
+        } catch (Throwable) {
+            return [null, []];
+        }
     }
 
     /**

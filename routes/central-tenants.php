@@ -3,6 +3,7 @@
 use App\Http\Controllers\Central\Tenants\TenantController;
 use App\Http\Controllers\Central\Tenants\TenantDomainController;
 use App\Http\Controllers\Central\Tenants\TenantModuleController;
+use App\Http\Controllers\Central\Tenants\TenantOwnerController;
 use Illuminate\Support\Facades\Route;
 
 /*
@@ -50,6 +51,12 @@ Route::middleware('auth:platform')->prefix('tenants')->name('central.tenants.')-
     Route::put('/{tenant}/trial', [TenantController::class, 'updateTrial'])
         ->middleware('can:platform-owner')
         ->name('update-trial');
+
+    // Owner-only: recovering a tenant whose owner has left hands the whole
+    // company over to another user, so it is not routine support work.
+    Route::post('/{tenant}/owner', [TenantOwnerController::class, 'update'])
+        ->middleware('can:platform-owner')
+        ->name('owner.update');
 
     // Owner-only: deleting a tenant is a real DROP DATABASE, not a "support"-level action.
     Route::delete('/{tenant}', [TenantController::class, 'destroy'])

@@ -28,6 +28,7 @@ import PageHeader from '@/components/ui/PageHeader.vue';
 import { useToast } from '@/composables/useToast';
 import { useConfirm } from '@/composables/useConfirm';
 import ModuleSelector from './ModuleSelector.vue';
+import OwnerSection from './OwnerSection.vue';
 
 defineOptions({ layout: AppLayout });
 
@@ -37,6 +38,14 @@ const props = defineProps({
         required: true,
     },
     moduleCatalog: {
+        type: Array,
+        default: () => [],
+    },
+    owner: {
+        type: Object,
+        default: null,
+    },
+    ownerCandidates: {
         type: Array,
         default: () => [],
     },
@@ -327,7 +336,7 @@ function removeDomain(domain) {
                 <Card variant="panel" title="Modules">
                     <p class="mb-3 text-sm text-text-muted">
                         Features this tenant may use. Turning a module off hides its pages and blocks its URLs for
-                        everyone, the owner included. Staff role grants are kept and come back when it is turned on again.
+                        everyone, the owner included. Role grants are kept and come back when it is turned on again.
                     </p>
                     <form class="flex flex-col gap-3" @submit.prevent="updateModules">
                         <ModuleSelector v-model="modulesForm.enabled_modules" :catalog="moduleCatalog" id-prefix="show-module" :error="modulesError" />
@@ -393,6 +402,8 @@ function removeDomain(domain) {
                         </Button>
                     </div>
                 </Card>
+
+                <OwnerSection v-if="isOwner && tenant.status !== 'provisioning' && !tenant.database_missing" :tenant-id="tenant.id" :owner="owner" :candidates="ownerCandidates" />
 
                 <Card v-if="isOwner" variant="panel" title="Trial end date">
                     <form class="flex items-start gap-2" @submit.prevent="updateTrial">
