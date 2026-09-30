@@ -11,7 +11,7 @@ Coordinator writes `config/permissions.php` (config is coordinator-only).
 
 ## Tasks
 
-- [ ] 1. **Route map (worker, read-only on routes).** Read every `routes/tenant*.php` with Grep/Read (do not
+- [x] 1. **Route map (worker, read-only on routes).** Read every `routes/tenant*.php` with Grep/Read (do not
   boot Laravel, no `route:list`). Write `todo/permissions/ROUTE-MAP.md`: one row per route with columns
   `route name | method + URI | controller@method | gated today (admin / any authenticated) | proposed permission key`.
   Key convention `<resource>.<action>`, actions from: `view, create, edit, delete, cancel, print, export,
@@ -22,10 +22,10 @@ Coordinator writes `config/permissions.php` (config is coordinator-only).
   Add a second table listing every key whose routes are **all** "any authenticated" today (these are the
   Staff parity keys P03 freezes). Routes that must stay authenticated-only (dashboard, profile, logout,
   impersonate) go in an "allowlist" table, they get no permission.
-- [ ] 2. **Config (coordinator).** From the reviewed ROUTE-MAP write `config/permissions.php` with `modules`
+- [x] 2. **Config (coordinator).** From the reviewed ROUTE-MAP write `config/permissions.php` with `modules`
   (`label`, `always_on`, `requires`), `permissions` (`module`, `group`, `label`, `owner_only`, `legacy`
   optional) and `default_modules` (all non-core module keys). Order permissions by group for the role editor.
-- [ ] 3. **Accessor and tests (worker).** `PermissionCatalog` (static, memoized per process, no DB): `modules()`,
+- [x] 3. **Accessor and tests (worker).** `PermissionCatalog` (static, memoized per process, no DB): `modules()`,
   `permissions()`, `has($key)`, `moduleOf($key)`, `isOwnerOnly($key)`, `keysForModules(array $modules)`,
   `resolveModules(array $enabled)` (adds `always_on` and transitive `requires`, drops unknown keys),
   `grantable()` (all non-owner-only keys), `grouped()` (for the UI). Pest unit tests: every permission

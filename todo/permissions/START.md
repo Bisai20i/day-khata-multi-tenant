@@ -121,8 +121,8 @@ Rollback: every migration has a working `down()`. Until P16 the old `role` alias
 
 | Chunk | Title | Executor | Status |
 |---|---|---|---|
-| P01 | Catalog and route map | worker + coordinator | pending |
-| P02 | Central entitlements storage | worker | pending |
+| P01 | Catalog and route map | worker + coordinator | done |
+| P02 | Central entitlements storage | worker | done |
 | P03 | Tenant schema, backfill, test infra | worker | pending |
 | P04 | Gate and effective permissions | worker + coordinator | pending |
 | P09 | Frontend plumbing, nav, route audit | worker + coordinator | pending |
