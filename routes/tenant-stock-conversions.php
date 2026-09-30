@@ -21,14 +21,14 @@ use Illuminate\Support\Facades\Route;
 
 Route::name('tenant.')->group(function () {
     Route::prefix('stock-conversions')->name('stock-conversions.')->group(function () {
-        Route::get('/', [StockConversionController::class, 'index'])->name('index');
-        Route::post('/', [StockConversionController::class, 'store'])->name('store');
+        Route::get('/', [StockConversionController::class, 'index'])->middleware('can:stock_conversions.view')->name('index');
+        Route::post('/', [StockConversionController::class, 'store'])->middleware('can:stock_conversions.create')->name('store');
         // Cancelling puts the consumed inputs back and removes the produced
-        // outputs, so it is an admin action everywhere in this app
+        // outputs, so it has its own key, stock_conversions.cancel
         // (CONTRACTS C5).
         Route::post('/{stock_conversion}/cancel', [StockConversionController::class, 'cancel'])
-            ->middleware('role:admin')
+            ->middleware('can:stock_conversions.cancel')
             ->name('cancel');
-        Route::get('/{stock_conversion}/print', [StockConversionController::class, 'print'])->name('print');
+        Route::get('/{stock_conversion}/print', [StockConversionController::class, 'print'])->middleware('can:stock_conversions.print')->name('print');
     });
 });

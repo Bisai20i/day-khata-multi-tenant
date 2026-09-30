@@ -20,31 +20,32 @@ use Illuminate\Support\Facades\Route;
 
 Route::name('tenant.')->group(function () {
     Route::prefix('purchases')->name('purchases.')->group(function () {
-        Route::get('/', [PurchaseController::class, 'index'])->name('index');
-        Route::post('/', [PurchaseController::class, 'store'])->name('store');
+        Route::get('/', [PurchaseController::class, 'index'])->middleware('can:purchases.view')->name('index');
+        Route::post('/', [PurchaseController::class, 'store'])->middleware('can:purchases.create')->name('store');
         // Excel export (item 8) - ahead of {purchase}/print in the file only
         // for readability, the two never collide (different segment counts).
-        Route::get('/export', [PurchaseController::class, 'export'])->name('export');
+        Route::get('/export', [PurchaseController::class, 'export'])->middleware('can:purchases.export')->name('export');
         // Cancelling reverses a posted voucher and takes stock back out, so
-        // it is an admin action everywhere in this app (CONTRACTS C5).
+        // it has its own key, purchases.cancel (CONTRACTS C5).
         Route::post('/{purchase}/cancel', [PurchaseController::class, 'cancel'])
-            ->middleware('role:admin')
+            ->middleware('can:purchases.cancel')
             ->name('cancel');
-        Route::get('/{purchase}/print', [PurchaseController::class, 'print'])->name('print');
+        Route::get('/{purchase}/print', [PurchaseController::class, 'print'])->middleware('can:purchases.print')->name('print');
     });
 
     Route::prefix('capital-purchases')->name('capital-purchases.')->group(function () {
-        Route::get('/', [CapitalPurchaseController::class, 'index'])->name('index');
-        Route::post('/', [CapitalPurchaseController::class, 'store'])->name('store');
-        Route::get('/export', [CapitalPurchaseController::class, 'export'])->name('export');
-        Route::get('/{capitalPurchase}/print', [CapitalPurchaseController::class, 'print'])->name('print');
+        Route::get('/', [CapitalPurchaseController::class, 'index'])->middleware('can:capital_purchases.view')->name('index');
+        Route::post('/', [CapitalPurchaseController::class, 'store'])->middleware('can:capital_purchases.create')->name('store');
+        Route::get('/export', [CapitalPurchaseController::class, 'export'])->middleware('can:capital_purchases.export')->name('export');
+        Route::get('/{capitalPurchase}/print', [CapitalPurchaseController::class, 'print'])->middleware('can:capital_purchases.print')->name('print');
         Route::post('/{capitalPurchase}/cancel', [CapitalPurchaseController::class, 'cancel'])
-            ->middleware('role:admin')
+            ->middleware('can:capital_purchases.cancel')
             ->name('cancel');
         Route::post('/{capitalPurchase}/settlements', [CapitalPurchaseSettlementController::class, 'store'])
+            ->middleware('can:capital_purchase_settlements.create')
             ->name('settlements.store');
         Route::post('/settlements/{settlement}/cancel', [CapitalPurchaseSettlementController::class, 'cancel'])
-            ->middleware('role:admin')
+            ->middleware('can:capital_purchase_settlements.cancel')
             ->name('settlements.cancel');
     });
 });

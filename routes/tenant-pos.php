@@ -15,10 +15,11 @@ use Illuminate\Support\Facades\Route;
 | convention (see mem.md gotcha #5). Frontend-only feature - actual sale
 | submission goes through the existing POST /sales route
 | (App\Http\Controllers\Tenant\Sales\SaleController::store()), not a
-| separate endpoint.
+| separate endpoint. So pos.view only opens the till; posting the sale
+| needs sales.create on that route.
 |
 */
 
 Route::name('tenant.')->group(function () {
-    Route::get('/pos', [PosController::class, 'index'])->name('pos.index');
+    Route::get('/pos', [PosController::class, 'index'])->middleware('can:pos.view')->name('pos.index');
 });

@@ -15,9 +15,9 @@ use Illuminate\Support\Facades\Route;
 | parallel-work split-file convention). Backs contract C9's print log: who
 | reprinted which document, when, and as which copy.
 |
-| Admin-only: this is an audit trail over other users' reprints, not a
-| working report, so it sits behind the same `role:admin` gate as the
-| activity log.
+| Gated by print_log.view (admin module): this is an audit trail over other
+| users' reprints, not a working report, so it sits in the same class as
+| the activity log (activity_log.view).
 |
 | NOTE for whoever wires this in: this file itself is not yet required by
 | routes/tenant.php - add:
@@ -26,6 +26,6 @@ use Illuminate\Support\Facades\Route;
 |
 */
 
-Route::name('tenant.reports.')->prefix('reports')->middleware('role:admin')->group(function () {
+Route::name('tenant.reports.')->prefix('reports')->middleware('can:print_log.view')->group(function () {
     Route::get('/print-log', [PrintLogReportController::class, 'index'])->name('print-log');
 });

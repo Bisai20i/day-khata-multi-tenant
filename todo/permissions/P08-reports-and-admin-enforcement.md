@@ -11,7 +11,7 @@ Worker: the controllers and Vue pages for these modules (reports, activity log, 
 
 ## Tasks
 
-- [ ] 1. **Route wiring (coordinator, first).** In the route files above replace each `role:admin` (and add where
+- [x] 1. **Route wiring (coordinator, first).** In the route files above replace each `role:admin` (and add where
   currently ungated) with `can:<key>` exactly as in `ROUTE-MAP.md`; group routes sharing a key. Add the
   `owner_only` keys where they appear. Do not remove the `role` alias yet.
 - [ ] 2. **Page gating (worker, after 1).** Using `usePermissions()`, hide or disable buttons, row actions and links

@@ -16,6 +16,6 @@ use Illuminate\Support\Facades\Route;
 |
 */
 
-Route::name('tenant.')->middleware('role:admin')->group(function () {
+Route::name('tenant.')->middleware('can:activity_log.view')->group(function () {
     Route::get('/activity-log', [ActivityLogController::class, 'index'])->name('activity-log.index');
 });

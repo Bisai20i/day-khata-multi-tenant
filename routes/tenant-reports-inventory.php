@@ -18,5 +18,5 @@ use Illuminate\Support\Facades\Route;
 */
 
 Route::name('tenant.reports.')->prefix('reports')->group(function () {
-    Route::get('/stock-summary', [InventoryReportController::class, 'stockSummary'])->name('stock-summary');
+    Route::get('/stock-summary', [InventoryReportController::class, 'stockSummary'])->middleware('can:stock_reports.view')->name('stock-summary');
 });

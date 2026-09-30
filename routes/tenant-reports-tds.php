@@ -18,5 +18,5 @@ use Illuminate\Support\Facades\Route;
 */
 
 Route::name('tenant.reports.')->prefix('reports')->group(function () {
-    Route::get('/tds', [TdsReportController::class, 'index'])->name('tds');
+    Route::get('/tds', [TdsReportController::class, 'index'])->middleware('can:tax_reports.view')->name('tds');
 });

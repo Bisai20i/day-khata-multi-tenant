@@ -18,13 +18,13 @@ use Illuminate\Support\Facades\Route;
 
 Route::name('tenant.')->group(function () {
     Route::prefix('stock-transfers')->name('stock-transfers.')->group(function () {
-        Route::get('/', [StockTransferController::class, 'index'])->name('index');
-        Route::post('/', [StockTransferController::class, 'store'])->name('store');
-        // Cancelling reverses both halves of the movement, so it is an admin
-        // action everywhere in this app (CONTRACTS C5).
+        Route::get('/', [StockTransferController::class, 'index'])->middleware('can:stock_transfers.view')->name('index');
+        Route::post('/', [StockTransferController::class, 'store'])->middleware('can:stock_transfers.create')->name('store');
+        // Cancelling reverses both halves of the movement, so it has its own
+        // key, stock_transfers.cancel (CONTRACTS C5).
         Route::post('/{stock_transfer}/cancel', [StockTransferController::class, 'cancel'])
-            ->middleware('role:admin')
+            ->middleware('can:stock_transfers.cancel')
             ->name('cancel');
-        Route::get('/{stock_transfer}/print', [StockTransferController::class, 'print'])->name('print');
+        Route::get('/{stock_transfer}/print', [StockTransferController::class, 'print'])->middleware('can:stock_transfers.print')->name('print');
     });
 });

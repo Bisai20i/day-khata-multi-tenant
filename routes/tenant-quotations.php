@@ -18,12 +18,15 @@ use Illuminate\Support\Facades\Route;
 
 Route::name('tenant.')->group(function () {
     Route::prefix('quotations')->name('quotations.')->group(function () {
-        Route::get('/', [QuotationController::class, 'index'])->name('index');
-        Route::post('/', [QuotationController::class, 'store'])->name('store');
-        Route::put('/{quotation}', [QuotationController::class, 'update'])->name('update');
-        Route::delete('/{quotation}', [QuotationController::class, 'destroy'])->name('destroy');
-        Route::get('/{quotation}/print', [QuotationController::class, 'print'])->name('print');
-        Route::post('/{quotation}/cancel', [QuotationController::class, 'cancel'])->name('cancel');
-        Route::post('/{quotation}/convert-to-sale', [QuotationController::class, 'convertToSale'])->name('convert-to-sale');
+        Route::get('/', [QuotationController::class, 'index'])->middleware('can:quotations.view')->name('index');
+        Route::post('/', [QuotationController::class, 'store'])->middleware('can:quotations.create')->name('store');
+        Route::put('/{quotation}', [QuotationController::class, 'update'])->middleware('can:quotations.edit')->name('update');
+        Route::delete('/{quotation}', [QuotationController::class, 'destroy'])->middleware('can:quotations.delete')->name('destroy');
+        Route::get('/{quotation}/print', [QuotationController::class, 'print'])->middleware('can:quotations.print')->name('print');
+        Route::post('/{quotation}/cancel', [QuotationController::class, 'cancel'])->middleware('can:quotations.cancel')->name('cancel');
+        // Gated by a quotations-module key so disabling the module closes it;
+        // the action creates a sale, so QuotationController::convertToSale()
+        // must also check sales.create (P05; ROUTE-MAP shared lookup item 6).
+        Route::post('/{quotation}/convert-to-sale', [QuotationController::class, 'convertToSale'])->middleware('can:quotations.edit')->name('convert-to-sale');
     });
 });

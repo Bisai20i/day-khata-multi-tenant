@@ -11,10 +11,11 @@ use Illuminate\Support\Facades\Route;
 | Tenant: Fiscal Year Archive
 |--------------------------------------------------------------------------
 |
-| Required from routes/tenant.php inside its auth:web group. Admin-only
-| throughout (mirrors routes/tenant-backups.php's gating) - archiving and
-| browsing a closed year's cold-storage ledger is a financial-history
-| concern, same sensitivity class as backups.
+| Required from routes/tenant.php inside its auth:web group. Gated per
+| route: archiving uses the owner-only fiscal_year.close_archive key (same
+| as close/reopen/relock), browsing uses fiscal_year_archive.view - a
+| closed year's cold-storage ledger is a financial-history concern, same
+| sensitivity class as backups.
 |
 | FiscalYearArchiveController (POST .../archive) triggers
 | App\Support\FiscalYear\FiscalYearArchiver::archive() - a synchronous copy
@@ -29,14 +30,16 @@ use Illuminate\Support\Facades\Route;
 |
 */
 
-Route::name('tenant.')->middleware('role:admin')->group(function () {
+Route::name('tenant.')->group(function () {
     Route::post('/fiscal-years/{fiscalYear}/archive', [FiscalYearArchiveController::class, 'store'])
+        ->middleware('can:fiscal_year.close_archive')
         ->name('fiscal-years.archive');
 
     Route::prefix('fiscal-year-archives')->name('fiscal-year-archives.')->group(function () {
-        Route::get('/{fiscalYearArchive}', [ArchivedFiscalYearController::class, 'show'])->name('show');
+        Route::get('/{fiscalYearArchive}', [ArchivedFiscalYearController::class, 'show'])->middleware('can:fiscal_year_archive.view')->name('show');
         Route::get('/{fiscalYearArchive}/vouchers/{voucherId}', [ArchivedFiscalYearController::class, 'voucher'])
             ->whereNumber('voucherId')
+            ->middleware('can:fiscal_year_archive.view')
             ->name('voucher');
     });
 });

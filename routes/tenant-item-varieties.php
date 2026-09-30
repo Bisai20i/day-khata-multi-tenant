@@ -19,9 +19,9 @@ use Illuminate\Support\Facades\Route;
 
 Route::name('tenant.')->group(function () {
     Route::prefix('item-varieties')->name('item-varieties.')->group(function () {
-        Route::get('/', [ItemVarietyController::class, 'index'])->name('index');
-        Route::post('/', [ItemVarietyController::class, 'store'])->name('store');
-        Route::put('/{itemVariety}', [ItemVarietyController::class, 'update'])->name('update');
-        Route::delete('/{itemVariety}', [ItemVarietyController::class, 'destroy'])->name('destroy');
+        Route::get('/', [ItemVarietyController::class, 'index'])->middleware('can:item_varieties.view')->name('index');
+        Route::post('/', [ItemVarietyController::class, 'store'])->middleware('can:item_varieties.manage')->name('store');
+        Route::put('/{itemVariety}', [ItemVarietyController::class, 'update'])->middleware('can:item_varieties.manage')->name('update');
+        Route::delete('/{itemVariety}', [ItemVarietyController::class, 'destroy'])->middleware('can:item_varieties.manage')->name('destroy');
     });
 });

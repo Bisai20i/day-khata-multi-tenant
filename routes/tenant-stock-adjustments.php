@@ -18,16 +18,16 @@ use Illuminate\Support\Facades\Route;
 
 Route::name('tenant.')->group(function () {
     Route::prefix('stock-adjustments')->name('stock-adjustments.')->group(function () {
-        Route::get('/', [StockAdjustmentController::class, 'index'])->name('index');
-        Route::post('/', [StockAdjustmentController::class, 'store'])->name('store');
+        Route::get('/', [StockAdjustmentController::class, 'index'])->middleware('can:stock_adjustments.view')->name('index');
+        Route::post('/', [StockAdjustmentController::class, 'store'])->middleware('can:stock_adjustments.create')->name('store');
         // Cancelling takes posted quantities back out of stock, and for an
-        // opening-stock batch it reverses a ledger voucher too, so it is an
-        // admin action everywhere in this app (CONTRACTS C5).
+        // opening-stock batch it reverses a ledger voucher too, so it has its
+        // own key, stock_adjustments.cancel (CONTRACTS C5).
         Route::post('/{stock_adjustment}/cancel', [StockAdjustmentController::class, 'cancel'])
-            ->middleware('role:admin')
+            ->middleware('can:stock_adjustments.cancel')
             ->name('cancel');
-        Route::get('/{stock_adjustment}/print', [StockAdjustmentController::class, 'print'])->name('print');
-        Route::get('/opening-stock/template', [StockAdjustmentController::class, 'openingStockTemplate'])->name('opening-stock.template');
-        Route::post('/opening-stock/import', [StockAdjustmentController::class, 'importOpeningStock'])->name('opening-stock.import');
+        Route::get('/{stock_adjustment}/print', [StockAdjustmentController::class, 'print'])->middleware('can:stock_adjustments.print')->name('print');
+        Route::get('/opening-stock/template', [StockAdjustmentController::class, 'openingStockTemplate'])->middleware('can:opening_stock.import')->name('opening-stock.template');
+        Route::post('/opening-stock/import', [StockAdjustmentController::class, 'importOpeningStock'])->middleware('can:opening_stock.import')->name('opening-stock.import');
     });
 });

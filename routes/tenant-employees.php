@@ -16,7 +16,7 @@ use Illuminate\Support\Facades\Route;
 | created_by FK in this app is restrictOnDelete().
 */
 
-Route::middleware('role:admin')->group(function () {
+Route::middleware('can:users.manage')->group(function () {
     Route::get('/admin/users', [UserController::class, 'index'])->name('tenant.admin.users');
     Route::post('/admin/users', [UserController::class, 'store'])->name('tenant.admin.users.store');
     Route::put('/admin/users/{user}', [UserController::class, 'update'])->name('tenant.admin.users.update');

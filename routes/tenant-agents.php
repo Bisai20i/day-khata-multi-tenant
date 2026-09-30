@@ -19,9 +19,9 @@ use Illuminate\Support\Facades\Route;
 
 Route::name('tenant.')->group(function () {
     Route::prefix('agents')->name('agents.')->group(function () {
-        Route::get('/', [AgentController::class, 'index'])->name('index');
-        Route::post('/', [AgentController::class, 'store'])->name('store');
-        Route::put('/{agent}', [AgentController::class, 'update'])->name('update');
-        Route::delete('/{agent}', [AgentController::class, 'destroy'])->name('destroy');
+        Route::get('/', [AgentController::class, 'index'])->middleware('can:agents.view')->name('index');
+        Route::post('/', [AgentController::class, 'store'])->middleware('can:agents.create')->name('store');
+        Route::put('/{agent}', [AgentController::class, 'update'])->middleware('can:agents.edit')->name('update');
+        Route::delete('/{agent}', [AgentController::class, 'destroy'])->middleware('can:agents.delete')->name('destroy');
     });
 });

@@ -19,9 +19,9 @@ use Illuminate\Support\Facades\Route;
 
 Route::name('tenant.')->group(function () {
     Route::prefix('stores')->name('stores.')->group(function () {
-        Route::get('/', [StoreController::class, 'index'])->name('index');
-        Route::post('/', [StoreController::class, 'store'])->name('store');
-        Route::put('/{store}', [StoreController::class, 'update'])->name('update');
-        Route::delete('/{store}', [StoreController::class, 'destroy'])->name('destroy');
+        Route::get('/', [StoreController::class, 'index'])->middleware('can:stores.view')->name('index');
+        Route::post('/', [StoreController::class, 'store'])->middleware('can:stores.manage')->name('store');
+        Route::put('/{store}', [StoreController::class, 'update'])->middleware('can:stores.manage')->name('update');
+        Route::delete('/{store}', [StoreController::class, 'destroy'])->middleware('can:stores.manage')->name('destroy');
     });
 });

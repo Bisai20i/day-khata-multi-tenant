@@ -15,7 +15,9 @@ use Illuminate\Support\Facades\Route;
 | its own file per the parallel-work convention (see mem.md gotcha #5) -
 | owned entirely by the Sales build pass, do not add Purchase routes here.
 |
-| Cancellation is admin-only on both series (CONTRACTS C5): a cancellation
+| Every route carries a `can:<permission>` gate from config/permissions.php
+| (see todo/permissions/ROUTE-MAP.md). Cancellation has its own key on both
+| series (sales.cancel, capital_sales.cancel; CONTRACTS C5): a cancellation
 | posts a reversing voucher into the live books and voids an issued tax
 | invoice, which the audit found any signed-in user could do.
 |
@@ -23,23 +25,24 @@ use Illuminate\Support\Facades\Route;
 
 Route::name('tenant.')->group(function () {
     Route::prefix('sales')->name('sales.')->group(function () {
-        Route::get('/', [SaleController::class, 'index'])->name('index');
-        Route::get('/export', [SaleController::class, 'export'])->name('export');
-        Route::post('/', [SaleController::class, 'store'])->name('store');
-        Route::post('/{sale}/cancel', [SaleController::class, 'cancel'])->middleware('role:admin')->name('cancel');
-        Route::get('/{sale}/print', [SaleController::class, 'print'])->name('print');
+        Route::get('/', [SaleController::class, 'index'])->middleware('can:sales.view')->name('index');
+        Route::get('/export', [SaleController::class, 'export'])->middleware('can:sales.export')->name('export');
+        Route::post('/', [SaleController::class, 'store'])->middleware('can:sales.create')->name('store');
+        Route::post('/{sale}/cancel', [SaleController::class, 'cancel'])->middleware('can:sales.cancel')->name('cancel');
+        Route::get('/{sale}/print', [SaleController::class, 'print'])->middleware('can:sales.print')->name('print');
         // Sale::create()'s saved-note picker (audit section 4 polish, "note
-        // templates") - a simple, admin-free CRUD kept inside the Sales
-        // module rather than under Settings, per the task's own "or a
-        // simple page under Sales" option.
-        Route::post('/note-templates', [SaleController::class, 'storeNoteTemplate'])->name('note-templates.store');
-        Route::delete('/note-templates/{saleNoteTemplate}', [SaleController::class, 'destroyNoteTemplate'])->name('note-templates.destroy');
+        // templates") - a simple CRUD kept inside the Sales module rather
+        // than under Settings, per the task's own "or a simple page under
+        // Sales" option. Gated by sales.create: anyone who can create a sale
+        // manages the picker (ROUTE-MAP shared lookup item 4).
+        Route::post('/note-templates', [SaleController::class, 'storeNoteTemplate'])->middleware('can:sales.create')->name('note-templates.store');
+        Route::delete('/note-templates/{saleNoteTemplate}', [SaleController::class, 'destroyNoteTemplate'])->middleware('can:sales.create')->name('note-templates.destroy');
     });
 
     Route::prefix('capital-sales')->name('capital-sales.')->group(function () {
-        Route::get('/', [CapitalSaleController::class, 'index'])->name('index');
-        Route::post('/', [CapitalSaleController::class, 'store'])->name('store');
-        Route::post('/{capitalSale}/cancel', [CapitalSaleController::class, 'cancel'])->middleware('role:admin')->name('cancel');
-        Route::get('/{capitalSale}/print', [CapitalSaleController::class, 'print'])->name('print');
+        Route::get('/', [CapitalSaleController::class, 'index'])->middleware('can:capital_sales.view')->name('index');
+        Route::post('/', [CapitalSaleController::class, 'store'])->middleware('can:capital_sales.create')->name('store');
+        Route::post('/{capitalSale}/cancel', [CapitalSaleController::class, 'cancel'])->middleware('can:capital_sales.cancel')->name('cancel');
+        Route::get('/{capitalSale}/print', [CapitalSaleController::class, 'print'])->middleware('can:capital_sales.print')->name('print');
     });
 });

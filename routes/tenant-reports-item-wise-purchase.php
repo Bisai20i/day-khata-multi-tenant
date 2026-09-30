@@ -18,5 +18,5 @@ use Illuminate\Support\Facades\Route;
 */
 
 Route::name('tenant.reports.')->prefix('reports')->group(function () {
-    Route::get('/item-wise-purchase', [ItemWisePurchaseReportController::class, 'index'])->name('item-wise-purchase');
+    Route::get('/item-wise-purchase', [ItemWisePurchaseReportController::class, 'index'])->middleware('can:purchase_reports.view')->name('item-wise-purchase');
 });

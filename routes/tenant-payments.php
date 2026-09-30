@@ -19,12 +19,12 @@ use Illuminate\Support\Facades\Route;
 
 Route::name('tenant.')->group(function () {
     Route::prefix('payments')->name('payments.')->group(function () {
-        Route::get('/', [PaymentController::class, 'index'])->name('index');
-        Route::post('/', [PaymentController::class, 'store'])->name('store');
-        // Admin only: cancelling a payment reverses money already paid out
-        // (CONTRACTS C5).
+        Route::get('/', [PaymentController::class, 'index'])->middleware('can:payments.view')->name('index');
+        Route::post('/', [PaymentController::class, 'store'])->middleware('can:payments.create')->name('store');
+        // Own key (payments.cancel): cancelling a payment reverses money
+        // already paid out (CONTRACTS C5).
         Route::post('/{payment}/cancel', [PaymentController::class, 'cancel'])
-            ->middleware('role:admin')
+            ->middleware('can:payments.cancel')
             ->name('cancel');
     });
 });

@@ -19,22 +19,22 @@ use Illuminate\Support\Facades\Route;
 
 Route::name('tenant.')->group(function () {
     Route::prefix('purchase-returns')->name('purchase-returns.')->group(function () {
-        Route::get('/', [PurchaseReturnController::class, 'index'])->name('index');
-        Route::post('/', [PurchaseReturnController::class, 'store'])->name('store');
+        Route::get('/', [PurchaseReturnController::class, 'index'])->middleware('can:purchase_returns.view')->name('index');
+        Route::post('/', [PurchaseReturnController::class, 'store'])->middleware('can:purchase_returns.create')->name('store');
         Route::post('/unlinked', [PurchaseReturnController::class, 'storeUnlinked'])
-            ->middleware('role:admin')
+            ->middleware('can:unlinked_purchase_returns.create')
             ->name('store-unlinked');
         // Read-only price check for the unlinked form (flags G-16); same
-        // admin gate as the post it previews.
+        // key as the post it previews (unlinked_purchase_returns.create).
         Route::get('/unlinked/quote', [PurchaseReturnController::class, 'quoteUnlinked'])
-            ->middleware('role:admin')
+            ->middleware('can:unlinked_purchase_returns.create')
             ->name('quote-unlinked');
-        Route::get('/export', [PurchaseReturnController::class, 'export'])->name('export');
-        // Admin only: cancelling a debit note reverses its voucher and puts
-        // the returned stock back (CONTRACTS C5).
+        Route::get('/export', [PurchaseReturnController::class, 'export'])->middleware('can:purchase_returns.export')->name('export');
+        // Own key (purchase_returns.cancel): cancelling a debit note reverses
+        // its voucher and puts the returned stock back (CONTRACTS C5).
         Route::post('/{purchaseReturn}/cancel', [PurchaseReturnController::class, 'cancel'])
-            ->middleware('role:admin')
+            ->middleware('can:purchase_returns.cancel')
             ->name('cancel');
-        Route::get('/{purchaseReturn}/print', [PurchaseReturnController::class, 'print'])->name('print');
+        Route::get('/{purchaseReturn}/print', [PurchaseReturnController::class, 'print'])->middleware('can:purchase_returns.print')->name('print');
     });
 });
