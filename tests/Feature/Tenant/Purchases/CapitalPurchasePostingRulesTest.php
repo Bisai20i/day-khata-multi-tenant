@@ -11,6 +11,7 @@ use App\Models\Role;
 use App\Models\Supplier;
 use App\Models\Tenant;
 use App\Models\User;
+use App\Support\Billing\BillingException;
 use App\Support\Money\Money;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 
@@ -133,6 +134,19 @@ test('a capital purchase settlement is written to the activity log', function ()
             ->where('subject_id', $settlement->id)
             ->where('action', 'created')
             ->exists())->toBeTrue();
+    });
+
+    $tenant->delete();
+});
+
+test('a capital line amount with more than two decimals is refused rather than rounded', function () {
+    $tenant = provisionCapitalRulesTenant('capital-amount-decimals.tenant-test');
+
+    $tenant->run(function () {
+        $actor = capitalRulesSetup();
+
+        expect(fn () => capitalRulesPost($actor, ['vat_rate' => '0'], '100.005'))
+            ->toThrow(BillingException::class, 'Line 1 amount');
     });
 
     $tenant->delete();

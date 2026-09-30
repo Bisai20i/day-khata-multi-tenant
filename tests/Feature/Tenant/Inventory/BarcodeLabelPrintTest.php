@@ -122,7 +122,10 @@ test('the rendered label sheet contains each requested copy of the exact item ba
 
     $html = view('pdf.barcode-labels', ['labels' => $labels])->render();
 
-    expect(substr_count($html, '8901234567890'))->toBe(3)
+    // The number also appears as each image's alt text, so count the printed
+    // number under the bars rather than every occurrence.
+    expect(substr_count($html, '<div class="label-barcode-text">8901234567890</div>'))->toBe(3)
+        ->and(substr_count($html, 'class="label-barcode-img"'))->toBe(3)
         ->and(substr_count($html, 'Bottled Water 1L'))->toBe(3)
         ->and(substr_count($html, 'Rs. 25.50'))->toBe(3)
         ->and($html)->toContain('data:image/png;base64,'.$barcodeImage)
@@ -139,5 +142,6 @@ test('an item with no barcode set renders its label with name/price but no barco
     expect($html)
         ->toContain('Unbarcoded Item')
         ->toContain('No barcode assigned')
-        ->not->toContain('label-barcode-img');
+        // The class name is also in the stylesheet; check for the element.
+        ->not->toContain('class="label-barcode-img"');
 });

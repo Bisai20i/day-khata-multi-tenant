@@ -117,11 +117,11 @@ test('an admin can browse an archived fiscal year and one of its vouchers, and b
         ->where('archive.lineCount', $expectedLineCount)
         ->has('vouchers', $expectedVoucherCount)
         ->where('vouchers.0.narration', 'Archive test sale one')
-        ->where('vouchers.0.totalDebit', 1000)
-        ->where('vouchers.0.totalCredit', 1000)
+        ->where('vouchers.0.totalDebit', '1000.00')
+        ->where('vouchers.0.totalCredit', '1000.00')
         ->where('vouchers.1.narration', 'Archive test sale two')
-        ->where('vouchers.1.totalDebit', 750)
-        ->where('vouchers.1.totalCredit', 750)
+        ->where('vouchers.1.totalDebit', '750.00')
+        ->where('vouchers.1.totalCredit', '750.00')
     );
 
     $voucherResponse = test()->get("http://{$domain}/fiscal-year-archives/{$archiveId}/vouchers/{$saleVoucherId}");
@@ -131,11 +131,11 @@ test('an admin can browse an archived fiscal year and one of its vouchers, and b
         ->where('voucher.narration', 'Archive test sale one')
         ->has('lines', 2)
         ->where('lines.0.accountCode', 'AS1')
-        ->where('lines.0.debit', 1000)
-        ->where('lines.0.credit', 0)
+        ->where('lines.0.debit', '1000.00')
+        ->where('lines.0.credit', '0.00')
         ->where('lines.1.accountCode', 'INI20')
-        ->where('lines.1.debit', 0)
-        ->where('lines.1.credit', 1000)
+        ->where('lines.1.debit', '0.00')
+        ->where('lines.1.credit', '1000.00')
     );
 
     test()->get("http://{$domain}/fiscal-year-archives/{$archiveId}/vouchers/999999")->assertNotFound();

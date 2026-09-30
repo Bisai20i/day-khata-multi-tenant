@@ -7,6 +7,7 @@ use App\Enums\VoucherType;
 use App\Support\Billing\BillingException;
 use App\Support\Billing\DocumentCalculator;
 use App\Support\Billing\DocumentTotals;
+use App\Support\Money\InvalidAmount;
 use App\Support\Money\Money;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Model;
@@ -55,7 +56,7 @@ class CapitalSale extends Model
     protected function casts(): array
     {
         return [
-            'date' => 'date',
+            'date' => 'date:Y-m-d',
             'cancelled_at' => 'datetime',
             'cash_amount' => Decimal::class.':2',
             'bank_amount' => Decimal::class.':2',
@@ -342,6 +343,17 @@ class CapitalSale extends Model
      */
     public static function calculateTotals(array $data, array $lines): DocumentTotals
     {
+        // The amount goes in as a rate, which allows 4 decimals; a rupee
+        // amount allows 2, so 100.005 is refused here rather than rounded
+        // (CONTRACTS C1).
+        foreach (array_values($lines) as $index => $line) {
+            try {
+                Money::of($line['amount']);
+            } catch (InvalidAmount $e) {
+                throw BillingException::fromInvalidAmount($e, 'Line '.($index + 1).' amount');
+            }
+        }
+
         return DocumentCalculator::calculate(
             array_map(static fn (array $line): array => [
                 'quantity' => '1',

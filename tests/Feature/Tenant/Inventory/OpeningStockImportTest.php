@@ -161,6 +161,7 @@ test('bulk import skips invalid or unresolvable rows and reports why without imp
         User::factory()->create(['email' => 'owner@example.com']);
         Item::factory()->create(['name' => 'Good Item', 'is_stockable' => true]);
         Item::factory()->create(['name' => 'Non Stockable Item', 'is_stockable' => false]);
+        Item::factory()->create(['name' => 'Zero Item', 'is_stockable' => true]);
     });
 
     loginAsOpeningStockImportOwner($domain);
@@ -172,8 +173,8 @@ test('bulk import skips invalid or unresolvable rows and reports why without imp
         ."No Such Item,10,,\n"
         // not stockable.
         ."Non Stockable Item,10,,\n"
-        // zero quantity.
-        ."Good Item,0,,\n"
+        // zero quantity (its own item, so it is not caught as a repeat first).
+        ."Zero Item,0,,\n"
         // repeated item.
         ."Good Item,15,,\n";
     $file = UploadedFile::fake()->createWithContent('opening-stock.csv', $csv);
@@ -185,11 +186,10 @@ test('bulk import skips invalid or unresolvable rows and reports why without imp
 
     $response->assertRedirect("http://{$domain}/stock-adjustments");
     $response->assertSessionHas('importResult', function (array $result) {
-        return $result['imported'] === 1 && count($result['skipped']) === 3;
+        return $result['imported'] === 1 && count($result['skipped']) === 4;
     });
 
     $tenant->run(function () {
-        openingStockImportTestOpenFiscalYear();
         $item = Item::query()->where('name', 'Good Item')->firstOrFail();
         expect($item->currentStock()->toString())->toBe('25.0000');
 

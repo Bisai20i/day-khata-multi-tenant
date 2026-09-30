@@ -440,8 +440,15 @@ class AccountController extends Controller
             return back()->withErrors(['file' => 'That file could not be read. Make sure it matches the downloaded template and has "debit"/"credit" columns.'])->withInput();
         }
 
-        $accountsByCode = Account::query()->whereNotNull('code')->get(['id', 'code'])->keyBy(fn (Account $account) => strtolower($account->code));
-        $accountsByName = Account::all(['id', 'name'])->groupBy(fn (Account $account) => strtolower($account->name));
+        // The checks below read each account's name and, through its group,
+        // whether it is a profit-and-loss account; loading only id and code
+        // left both blank, so a P&L account slipped through as an opening
+        // balance and the stock-account message named no account.
+        $accounts = Account::query()
+            ->with(['group.accountHead', 'subgroup.accountGroup.accountHead'])
+            ->get(['id', 'code', 'name', 'account_group_id', 'account_subgroup_id']);
+        $accountsByCode = $accounts->filter(fn (Account $account) => $account->code !== null)->keyBy(fn (Account $account) => strtolower($account->code));
+        $accountsByName = $accounts->groupBy(fn (Account $account) => strtolower($account->name));
 
         $seenAccounts = [];
         $skipped = [];

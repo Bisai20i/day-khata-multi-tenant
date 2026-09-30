@@ -1,10 +1,12 @@
 <?php
 
 use App\Enums\FiscalYearStatus;
+use App\Enums\StockMovementType;
 use App\Models\FiscalYear;
 use App\Models\Item;
 use App\Models\PrintLog;
 use App\Models\StockAdjustment;
+use App\Models\Store;
 use App\Models\Tenant;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -58,6 +60,8 @@ test('the stock adjustment print route returns a streamed PDF for an authenticat
         stockAdjustmentPrintTestOpenFiscalYear();
         $admin = User::factory()->create(['email' => 'owner@example.com']);
         $item = Item::factory()->create(['is_stockable' => true]);
+        // Something on hand to adjust out; an out adjustment below zero is refused.
+        $item->recordStockMovement(StockMovementType::Opening, 10, '2026-05-01', Store::where('is_active', true)->orderBy('id')->value('id'));
 
         $adjustmentId = StockAdjustment::post(
             ['date' => '2026-06-01', 'note' => 'Damaged in storage'],
@@ -90,6 +94,8 @@ test('printing a stock adjustment records a PrintLog row', function () {
         stockAdjustmentPrintTestOpenFiscalYear();
         $admin = User::factory()->create(['email' => 'owner@example.com']);
         $item = Item::factory()->create(['is_stockable' => true]);
+        // Something on hand to adjust out; an out adjustment below zero is refused.
+        $item->recordStockMovement(StockMovementType::Opening, 10, '2026-05-01', Store::where('is_active', true)->orderBy('id')->value('id'));
 
         $adjustmentId = StockAdjustment::post(
             ['date' => '2026-06-01', 'note' => 'Damaged in storage'],
@@ -121,6 +127,8 @@ test('the stock adjustment print route is rejected for an unauthenticated reques
         stockAdjustmentPrintTestOpenFiscalYear();
         $admin = User::factory()->create(['email' => 'owner@example.com']);
         $item = Item::factory()->create(['is_stockable' => true]);
+        // Something on hand to adjust out; an out adjustment below zero is refused.
+        $item->recordStockMovement(StockMovementType::Opening, 10, '2026-05-01', Store::where('is_active', true)->orderBy('id')->value('id'));
 
         $adjustmentId = StockAdjustment::post(
             ['date' => '2026-06-01'],

@@ -79,8 +79,9 @@ test('production consumes raw materials and produces a finished good with correc
 
         expect($conversion->type->value)->toBe('production')
             ->and($conversion->store_id)->toBe($store->id)
-            ->and($rawA->fresh()->currentStock($store->id)->toString())->toBe('10.0000')
-            ->and($rawB->fresh()->currentStock($store->id)->toString())->toBe('3.0000')
+            // All 10 of Raw A and all 3 of Raw B were consumed.
+            ->and($rawA->fresh()->currentStock($store->id)->toString())->toBe('0.0000')
+            ->and($rawB->fresh()->currentStock($store->id)->toString())->toBe('0.0000')
             ->and($finished->fresh()->currentStock($store->id)->toString())->toBe('5.0000');
 
         $movements = ItemStockMovement::query()

@@ -436,11 +436,13 @@ test('depreciation never takes an asset below its salvage value', function () {
         $actor = User::factory()->create();
         $fy1 = FiscalYear::create(['name' => 'FY1', 'start_date' => '2026-01-01', 'end_date' => '2026-12-31', 'status' => FiscalYearStatus::Open]);
 
-        // Depreciable base = 500 (1000 cost - 500 salvage) but the rate
-        // would charge 900, so the charge is capped at 500.
+        // WDV charges the rate on the opening value: 90% of 1000 = 900, but
+        // only 500 lies above the 500 salvage value, so the charge is capped
+        // at 500. (Straight line charges on cost minus salvage, 90% of 500 =
+        // 450, which never reaches the floor in one year.)
         $asset = FixedAsset::post([
             'asset_name' => 'Salvage Guard', 'category' => 'Pool C', 'purchase_date' => '2026-01-01',
-            'cost' => 1000, 'salvage_value' => 500, 'depreciation_method' => 'slm',
+            'cost' => 1000, 'salvage_value' => 500, 'depreciation_method' => 'wdv',
             'depreciation_rate' => 90, 'payment_mode' => 'cash',
         ], $actor);
 
