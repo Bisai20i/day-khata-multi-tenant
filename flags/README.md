@@ -24,7 +24,7 @@ PUR-10..12 and CS-08..11 came from checking the legacy cancelled-purchase fixes 
 
 - ~~Vue unlinked purchase-return form needs the reason field and a "credit to supplier" option~~ Done 2026-09-29 (F02).
 - ~~CapitalPurchaseSettlement is not registered with ActivityLogObserver~~ Done 2026-09-29 (F03).
-- SAL-04 decision (role:admin on unlinked returns and approve/reject, no self-approval) is not recorded in todo/CONTRACTS.md C5.
+- ~~SAL-04 decision not recorded in CONTRACTS C5~~ Recorded 2026-09-29 (F00).
 - Tests assume seeded account codes AS1, EXE8, LIA21, a non-admin role in seeded roles, and factory heads not marked profit-and-loss.
 - JE-04 lock (lockForUpdate) is only verified by review, since SQLite ignores it.
 - Query-builder bulk deletes skip model guards; only the FK protects vouchers.
