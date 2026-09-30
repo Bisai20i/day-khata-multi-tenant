@@ -37,9 +37,16 @@ return new class extends Migration
 
     public function down(): void
     {
+        // MySQL let the unique index back the supplier_id foreign key, so the
+        // key is dropped around the index and put back afterwards.
         Schema::table('purchases', function (Blueprint $table) {
+            $table->dropForeign(['supplier_id']);
             $table->dropUnique('purchases_supplier_bill_number_unique');
             $table->dropColumn('bill_number_key');
+        });
+
+        Schema::table('purchases', function (Blueprint $table) {
+            $table->foreign('supplier_id')->references('id')->on('suppliers')->restrictOnDelete();
         });
     }
 

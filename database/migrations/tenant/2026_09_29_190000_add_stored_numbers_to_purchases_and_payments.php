@@ -46,15 +46,24 @@ return new class extends Migration
 
     public function down(): void
     {
+        // MySQL lets the unique index back the fiscal_year_id foreign key and
+        // drops the key's own index, so the key must go before the index.
         Schema::table('payments', function (Blueprint $table) {
+            $table->dropForeign(['fiscal_year_id']);
             $table->dropUnique('payments_year_number_unique');
-            $table->dropConstrainedForeignId('fiscal_year_id');
-            $table->dropColumn('payment_number');
+            $table->dropColumn(['fiscal_year_id', 'payment_number']);
+        });
+
+        // purchases.fiscal_year_id predates this migration, so its key is
+        // dropped and put back once the index that was backing it is gone.
+        Schema::table('purchases', function (Blueprint $table) {
+            $table->dropForeign(['fiscal_year_id']);
+            $table->dropUnique('purchases_year_number_unique');
+            $table->dropColumn('purchase_number');
         });
 
         Schema::table('purchases', function (Blueprint $table) {
-            $table->dropUnique('purchases_year_number_unique');
-            $table->dropColumn('purchase_number');
+            $table->foreign('fiscal_year_id')->references('id')->on('fiscal_years')->nullOnDelete();
         });
     }
 

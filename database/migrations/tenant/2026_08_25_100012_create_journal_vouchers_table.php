@@ -22,7 +22,7 @@ return new class extends Migration
             $table->foreignId('created_by')->constrained('users')->restrictOnDelete();
             $table->timestamps();
 
-            $table->unique(['fiscal_year_id', 'voucher_type', 'voucher_number']);
+            $table->unique(['fiscal_year_id', 'voucher_type', 'voucher_number'], 'journal_vouchers_fy_type_number_unique');
         });
     }
 

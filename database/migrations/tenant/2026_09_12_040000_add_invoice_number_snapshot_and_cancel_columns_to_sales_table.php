@@ -188,10 +188,13 @@ return new class extends Migration
     public function down(): void
     {
         Schema::table('sales', function (Blueprint $table) {
+            // MySQL drops a foreign key's own index when a unique index can back it,
+            // so the key goes first.
+            $table->dropForeign(['fiscal_year_id']);
             $table->dropUnique('sales_fiscal_year_invoice_number_unique');
             $table->dropConstrainedForeignId('reversal_journal_voucher_id');
             $table->dropConstrainedForeignId('cancelled_by');
-            $table->dropConstrainedForeignId('fiscal_year_id');
+            $table->dropColumn('fiscal_year_id');
             $table->dropColumn([
                 'invoice_number',
                 'discount_amount',

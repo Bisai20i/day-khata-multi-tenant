@@ -2,9 +2,9 @@ name: CI
 
 on:
   push:
-    branches: [main]
+    branches: [main, development]
   pull_request:
-    branches: [main]
+    branches: [main, development]
 
 jobs:
   php:
@@ -55,7 +55,8 @@ jobs:
   mysql:
     name: PHP Tests (MySQL 8)
     runs-on: ubuntu-latest
-    continue-on-error: true
+    # Blocking: production runs MySQL, and SQLite does not enforce FK column
+    # types, 64-char index names or MySQL's FK index rules.
 
     services:
       mysql:

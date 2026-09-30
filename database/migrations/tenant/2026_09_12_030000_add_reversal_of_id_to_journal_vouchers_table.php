@@ -38,8 +38,11 @@ return new class extends Migration
     public function down(): void
     {
         Schema::table('journal_vouchers', function (Blueprint $table) {
+            // MySQL drops a foreign key's own index when a unique index can back it,
+            // so the key goes first.
+            $table->dropForeign(['reversal_of_id']);
             $table->dropUnique(['reversal_of_id']);
-            $table->dropConstrainedForeignId('reversal_of_id');
+            $table->dropColumn('reversal_of_id');
         });
     }
 };

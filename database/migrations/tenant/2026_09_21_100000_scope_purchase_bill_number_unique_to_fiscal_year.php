@@ -60,8 +60,11 @@ return new class extends Migration
         });
 
         Schema::table('purchases', function (Blueprint $table) {
+            // MySQL drops a foreign key's own index when a unique index can back it,
+            // so the key goes first.
+            $table->dropForeign(['fiscal_year_id']);
             $table->dropUnique('purchases_supplier_year_bill_number_unique');
-            $table->dropConstrainedForeignId('fiscal_year_id');
+            $table->dropColumn('fiscal_year_id');
         });
     }
 

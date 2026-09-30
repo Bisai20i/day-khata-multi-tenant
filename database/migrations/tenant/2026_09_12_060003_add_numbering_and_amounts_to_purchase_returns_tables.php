@@ -48,8 +48,11 @@ return new class extends Migration
     public function down(): void
     {
         Schema::table('purchase_returns', function (Blueprint $table) {
+            // MySQL drops a foreign key's own index when a unique index can back it,
+            // so the key goes first.
+            $table->dropForeign(['fiscal_year_id']);
             $table->dropUnique('purchase_returns_debit_note_number_unique');
-            $table->dropConstrainedForeignId('fiscal_year_id');
+            $table->dropColumn('fiscal_year_id');
             $table->dropColumn(['debit_note_number', 'tds_amount']);
         });
 

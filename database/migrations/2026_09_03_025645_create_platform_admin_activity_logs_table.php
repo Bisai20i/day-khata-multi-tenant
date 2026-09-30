@@ -14,7 +14,8 @@ return new class extends Migration
         Schema::create('platform_admin_activity_logs', function (Blueprint $table) {
             $table->id();
             $table->foreignId('platform_admin_id')->constrained()->restrictOnDelete();
-            $table->foreignId('tenant_id')->nullable()->constrained()->nullOnDelete();
+            $table->string('tenant_id')->nullable();
+            $table->foreign('tenant_id')->references('id')->on('tenants')->nullOnDelete();
             $table->string('action');
             $table->json('metadata')->nullable();
             $table->timestamp('created_at')->useCurrent();

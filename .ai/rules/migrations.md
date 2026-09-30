@@ -10,3 +10,6 @@ Never edit an already-applied migration - add a new one. Every migration needs a
 
 ## Data migrations never read config or live catalogs
 Backfills freeze their lists as literal constants (see RoleBackfill::GRANTABLE_AT_ROLLOUT / STAFF_PARITY and the enabled_modules backfill). Reading config/permissions.php or PermissionCatalog inside a migration makes its result depend on when it runs, so already-migrated and newly-migrated tenants would diverge.
+
+## MySQL traps SQLite tests do not catch
+Tests run on SQLite, which ignores these; production MySQL fails on them. (1) FK column type must match the parent: tenants.id is a string, so use string('tenant_id') + foreign(), never foreignId('tenant_id'). (2) Index names max 64 chars: pass an explicit short name to multi-column unique()/index(). (3) A unique index leading with an FK column replaces the FK's own index, so in down() drop the foreign key BEFORE dropUnique (then dropColumn, or re-add the FK if the column stays). Check with a fresh migrate + full rollback on MySQL/MariaDB before shipping.
