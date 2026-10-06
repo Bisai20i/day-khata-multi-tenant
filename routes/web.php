@@ -15,6 +15,21 @@ use Illuminate\Support\Facades\Route;
 |
 */
 
-foreach (config('tenancy.central_domains') as $domain) {
+// Route names must be unique for `route:cache`, so only the first central
+// domain keeps the names; routes registered for the remaining domains are
+// matched by URI only.
+foreach (array_values(config('tenancy.central_domains')) as $index => $domain) {
+    $registeredBefore = count(Route::getRoutes()->getRoutes());
+
     Route::domain($domain)->group(base_path('routes/central.php'));
+
+    if ($index === 0) {
+        continue;
+    }
+
+    foreach (array_slice(Route::getRoutes()->getRoutes(), $registeredBefore) as $route) {
+        $route->setAction(array_diff_key($route->getAction(), ['as' => true]));
+    }
+
+    Route::getRoutes()->refreshNameLookups();
 }
