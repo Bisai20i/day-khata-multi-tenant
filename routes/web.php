@@ -19,7 +19,7 @@ use Illuminate\Support\Facades\Route;
 // domain keeps the names; routes registered for the remaining domains are
 // matched by URI only.
 foreach (array_values(config('tenancy.central_domains')) as $index => $domain) {
-    $registeredBefore = count(Route::getRoutes()->getRoutes());
+    $registeredBefore = array_map('spl_object_id', Route::getRoutes()->getRoutes());
 
     Route::domain($domain)->group(base_path('routes/central.php'));
 
@@ -27,7 +27,11 @@ foreach (array_values(config('tenancy.central_domains')) as $index => $domain) {
         continue;
     }
 
-    foreach (array_slice(Route::getRoutes()->getRoutes(), $registeredBefore) as $route) {
+    foreach (Route::getRoutes()->getRoutes() as $route) {
+        if (in_array(spl_object_id($route), $registeredBefore, true)) {
+            continue;
+        }
+
         $route->setAction(array_diff_key($route->getAction(), ['as' => true]));
     }
 
