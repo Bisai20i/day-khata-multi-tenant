@@ -40,33 +40,45 @@ function onToggle(module, checked) {
 </script>
 
 <template>
-    <div class="flex flex-col gap-3">
+    <div class="flex flex-col gap-5">
         <fieldset v-if="alwaysOn.length > 0">
-            <legend class="mb-1 text-xs font-semibold text-text-muted">Always on</legend>
-            <label v-for="module in alwaysOn" :key="module.key" :for="`${idPrefix}-${module.key}`" class="flex items-center gap-2 py-1 text-sm text-text-muted">
-                <input :id="`${idPrefix}-${module.key}`" type="checkbox" class="size-4 border-[1.5px] border-border" checked disabled />
-                {{ module.label }}
-            </label>
+            <legend class="mb-2 text-[11px] font-bold tracking-[.6px] text-text-muted uppercase">Always on</legend>
+            <div class="flex flex-wrap gap-2">
+                <label
+                    v-for="module in alwaysOn"
+                    :key="module.key"
+                    :for="`${idPrefix}-${module.key}`"
+                    class="inline-flex items-center gap-2 border-[1.5px] border-border bg-bg-muted px-3 py-1.5 text-[13px] text-text-muted"
+                >
+                    <input :id="`${idPrefix}-${module.key}`" type="checkbox" class="size-4 accent-primary" checked disabled />
+                    {{ module.label }}
+                </label>
+            </div>
         </fieldset>
 
         <fieldset>
-            <legend class="mb-1 text-xs font-semibold text-text-muted">Optional modules</legend>
-            <label
-                v-for="module in optional"
-                :key="module.key"
-                :for="`${idPrefix}-${module.key}`"
-                class="flex cursor-pointer items-center gap-2 py-1 text-sm text-text-base"
-            >
-                <input
-                    :id="`${idPrefix}-${module.key}`"
-                    type="checkbox"
-                    class="size-4 border-[1.5px] border-border"
-                    :checked="selected.includes(module.key)"
-                    @change="onToggle(module, $event.target.checked)"
-                />
-                <span>{{ module.label }}</span>
-                <span v-if="module.requires.length > 0" class="text-xs text-text-muted">(needs {{ requirementLabels(catalog, module.key).join(', ') }})</span>
-            </label>
+            <legend class="mb-2 text-[11px] font-bold tracking-[.6px] text-text-muted uppercase">Optional modules</legend>
+            <div class="grid grid-cols-1 gap-2 sm:grid-cols-2 xl:grid-cols-3">
+                <label
+                    v-for="module in optional"
+                    :key="module.key"
+                    :for="`${idPrefix}-${module.key}`"
+                    class="flex min-h-11 cursor-pointer items-start gap-2.5 border-[1.5px] px-3 py-2.5 transition-colors duration-150 has-[:focus-visible]:outline-2 has-[:focus-visible]:outline-primary"
+                    :class="selected.includes(module.key) ? 'border-primary bg-primary-tint-strong' : 'border-border bg-bg-surface hover:border-text-faint'"
+                >
+                    <input
+                        :id="`${idPrefix}-${module.key}`"
+                        type="checkbox"
+                        class="mt-0.5 size-4 shrink-0 cursor-pointer accent-primary"
+                        :checked="selected.includes(module.key)"
+                        @change="onToggle(module, $event.target.checked)"
+                    />
+                    <span class="flex min-w-0 flex-col">
+                        <span class="text-[13px] font-semibold text-text-strong">{{ module.label }}</span>
+                        <span v-if="module.requires.length > 0" class="text-xs text-text-muted">Needs {{ requirementLabels(catalog, module.key).join(', ') }}</span>
+                    </span>
+                </label>
+            </div>
         </fieldset>
 
         <p v-if="warning" class="flex items-start gap-1.5 border-[1.5px] border-warning-text bg-warning-bg px-3 py-2 text-sm text-warning-text" role="status">

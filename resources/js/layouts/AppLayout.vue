@@ -1,7 +1,7 @@
 <script setup>
 import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue';
 import { Head, Link, router, usePage } from '@inertiajs/vue3';
-import { ChevronDown, ChevronRight, FileSignature, Package, PackageSearch, Plus, ScanBarcode, Search, ShoppingCart, Users } from '@lucide/vue';
+import { ChevronDown, ChevronRight, FileSignature, Menu, Package, PackageSearch, Plus, ScanBarcode, Search, ShoppingCart, Users, X } from '@lucide/vue';
 import { PopoverAnchor, PopoverContent, PopoverPortal, PopoverRoot } from 'reka-ui';
 import DropdownMenu from '@/components/ui/DropdownMenu.vue';
 import DropdownMenuItem from '@/components/ui/DropdownMenuItem.vue';
@@ -151,7 +151,25 @@ const sectionPrefix = computed(() => {
 
 const searchInput = ref(null);
 
+/**
+ * Below `lg` the sidebar is an off-canvas drawer toggled from the header;
+ * from `lg` up it is always shown and this flag is ignored. Any navigation
+ * closes it so the new page is not left hidden behind the drawer.
+ */
+const sidebarOpen = ref(false);
+
+watch(
+    () => page.url,
+    () => {
+        sidebarOpen.value = false;
+    },
+);
+
 function onGlobalKeydown(event) {
+    if (event.key === 'Escape' && sidebarOpen.value) {
+        sidebarOpen.value = false;
+        return;
+    }
     if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'k' && page.props.auth?.user) {
         event.preventDefault();
         searchInput.value?.focus();
@@ -277,20 +295,43 @@ function selectActiveCommand() {
 <template>
     <Head :title="chrome.title" />
 
-    <div class="flex h-screen overflow-hidden bg-bg-page">
-        <aside v-if="!chrome.fullscreen" class="flex w-[264px] shrink-0 flex-col border-r border-border bg-bg-surface">
-            <div class="flex h-[72px] shrink-0 items-center gap-2.5 border-b border-border px-5">
+    <div class="flex h-dvh overflow-hidden bg-bg-page">
+        <div
+            v-if="!chrome.fullscreen && sidebarOpen"
+            class="fixed inset-0 z-30 bg-overlay lg:hidden"
+            aria-hidden="true"
+            @click="sidebarOpen = false"
+        ></div>
+
+        <aside
+            v-if="!chrome.fullscreen"
+            id="app-sidebar"
+            class="fixed inset-y-0 left-0 z-40 flex w-[264px] shrink-0 flex-col border-r border-border bg-bg-surface transition-[transform,visibility] duration-200 ease-out lg:static lg:visible lg:translate-x-0 lg:transition-none motion-reduce:transition-none"
+            :class="sidebarOpen ? 'visible translate-x-0 shadow-[0_8px_24px_rgba(0,0,0,.12)] lg:shadow-none' : 'invisible -translate-x-full'"
+        >
+            <div class="flex h-16 shrink-0 items-center gap-2.5 border-b border-border px-5 lg:h-[72px]">
                 <img :src="logoMark" alt="Day Khata" class="size-[30px] shrink-0 object-contain" />
                 <div class="min-w-0 leading-tight">
                     <p class="text-sm font-bold text-text-strong">Day Khata</p>
+                    <!-- Central pages such as the tenant detail page also receive a
+                         `tenant` prop; that is the record being viewed, not the
+                         workspace, so platform admins always see "Platform Admin". -->
                     <p
-                        v-if="page.props.tenant?.company_name"
+                        v-if="!isPlatformAdmin && page.props.tenant?.company_name"
                         class="truncate text-[10px] font-bold tracking-wide text-text-faint uppercase"
                     >
                         {{ page.props.tenant.company_name }}
                     </p>
                     <p v-else-if="isPlatformAdmin" class="text-[10px] font-bold tracking-wide text-text-faint uppercase">Platform Admin</p>
                 </div>
+                <button
+                    type="button"
+                    class="ml-auto flex size-9 cursor-pointer items-center justify-center text-text-muted hover:bg-bg-subtle hover:text-text-strong focus-visible:outline-2 focus-visible:outline-primary lg:hidden"
+                    aria-label="Close menu"
+                    @click="sidebarOpen = false"
+                >
+                    <X class="size-5" />
+                </button>
             </div>
 
             <nav class="flex min-h-0 flex-1 flex-col gap-[18px] overflow-y-auto px-3 py-4">
@@ -380,20 +421,32 @@ function selectActiveCommand() {
         </aside>
 
         <div class="flex min-h-0 min-w-0 flex-1 flex-col">
-            <header v-if="!chrome.fullscreen" class="flex h-16 shrink-0 items-center justify-between border-b border-border bg-bg-surface px-6">
-                <h1 class="text-sm font-bold text-text-strong">
-                    <template v-if="isPlatformAdmin">
-                        <span class="font-semibold text-text-muted">Platform Admin</span>
-                        <span class="px-1.5 text-text-faint" aria-hidden="true">/</span>
-                    </template>
-                    <template v-if="sectionPrefix && sectionPrefix !== chrome.title">
-                        <span class="font-semibold text-text-muted">{{ sectionPrefix }}</span>
-                        <span class="px-1.5 text-text-faint" aria-hidden="true">/</span>
-                    </template>
-                    {{ chrome.title }}
-                </h1>
+            <header v-if="!chrome.fullscreen" class="flex h-16 shrink-0 items-center justify-between gap-3 border-b border-border bg-bg-surface px-4 sm:px-6">
+                <div class="flex min-w-0 items-center gap-2">
+                    <button
+                        type="button"
+                        class="-ml-2 flex size-10 shrink-0 cursor-pointer items-center justify-center text-text-muted hover:bg-bg-subtle hover:text-text-strong focus-visible:outline-2 focus-visible:outline-primary lg:hidden"
+                        aria-label="Open menu"
+                        aria-controls="app-sidebar"
+                        :aria-expanded="sidebarOpen"
+                        @click="sidebarOpen = true"
+                    >
+                        <Menu class="size-5" />
+                    </button>
+                    <h1 class="min-w-0 truncate text-sm font-bold text-text-strong">
+                        <template v-if="isPlatformAdmin">
+                            <span class="hidden font-semibold text-text-muted sm:inline">Platform Admin</span>
+                            <span class="hidden px-1.5 text-text-faint sm:inline" aria-hidden="true">/</span>
+                        </template>
+                        <template v-if="sectionPrefix && sectionPrefix !== chrome.title">
+                            <span class="hidden font-semibold text-text-muted sm:inline">{{ sectionPrefix }}</span>
+                            <span class="hidden px-1.5 text-text-faint sm:inline" aria-hidden="true">/</span>
+                        </template>
+                        {{ chrome.title }}
+                    </h1>
+                </div>
 
-                <div v-if="page.props.auth?.user" class="mx-auto flex max-w-[340px] flex-1 items-center">
+                <div v-if="page.props.auth?.user" class="mx-auto hidden max-w-[340px] flex-1 items-center md:flex">
                     <PopoverRoot v-model:open="searchOpen">
                         <PopoverAnchor as-child>
                             <div class="relative w-full">
@@ -462,9 +515,9 @@ function selectActiveCommand() {
                         </PopoverPortal>
                     </PopoverRoot>
                 </div>
-                <div v-else class="mx-auto flex max-w-[340px] flex-1 items-center"></div>
+                <div v-else class="mx-auto hidden max-w-[340px] flex-1 items-center md:flex"></div>
 
-                <div class="flex items-center gap-4">
+                <div class="flex shrink-0 items-center gap-3 sm:gap-4">
                     <DropdownMenu v-if="page.props.auth?.user && quickActions.length > 0" align="end">
                         <template #trigger>
                             <button type="button" title="Quick Create" aria-label="Quick Create" class="flex cursor-pointer items-center justify-center text-text-muted focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary">
@@ -485,7 +538,7 @@ function selectActiveCommand() {
 
                     <!-- Notifications bell intentionally omitted until a notifications feature exists. -->
 
-                    <div class="h-[22px] w-px bg-border"></div>
+                    <div class="hidden h-[22px] w-px bg-border sm:block"></div>
 
                     <DropdownMenu align="end">
                         <template #trigger>
@@ -493,11 +546,11 @@ function selectActiveCommand() {
                                 <div class="flex size-8 shrink-0 items-center justify-center rounded-full bg-primary-tint text-sm font-bold text-primary">
                                     {{ currentPrincipal?.name?.charAt(0)?.toUpperCase() }}
                                 </div>
-                                <span class="text-left leading-tight">
+                                <span class="hidden text-left leading-tight sm:block">
                                     <span class="block text-sm font-semibold text-text-strong">{{ currentPrincipal?.name }}</span>
                                     <span v-if="isPlatformAdmin" class="block text-[10px] font-bold tracking-wide text-text-faint uppercase">Platform Admin</span>
                                 </span>
-                                <ChevronDown class="size-4 text-text-muted" />
+                                <ChevronDown class="hidden size-4 text-text-muted sm:block" />
                             </button>
                         </template>
 
@@ -512,7 +565,7 @@ function selectActiveCommand() {
                 </div>
             </header>
 
-            <main :class="['min-h-0 flex-1 overflow-y-auto bg-bg-page', !chrome.padded ? 'p-0' : chrome.fullscreen ? 'p-4' : 'p-6']">
+            <main :class="['min-h-0 flex-1 overflow-y-auto bg-bg-page', !chrome.padded ? 'p-0' : chrome.fullscreen ? 'p-4' : 'p-4 sm:p-6']">
                 <div
                     v-if="showFiscalYearBanner"
                     class="mb-4 flex flex-wrap items-center justify-between gap-3 border-[1.5px] border-warning-text bg-warning-bg px-3 py-3 text-sm text-warning-text"
@@ -521,7 +574,13 @@ function selectActiveCommand() {
                     <p><span class="font-semibold">No open fiscal year.</span> Set up a fiscal year before you can post sales, purchases or other entries.</p>
                     <Link href="/fiscal-years" class="font-semibold underline hover:no-underline focus-visible:outline-2 focus-visible:outline-primary">Set up fiscal year</Link>
                 </div>
-                <slot />
+                <!-- Central pages are read-and-form screens, not wide data grids, so
+                     they get a centred max width instead of stretching edge to edge
+                     on large monitors. Tenant pages (POS, ledgers) keep full width. -->
+                <div v-if="isPlatformAdmin" class="mx-auto w-full max-w-7xl">
+                    <slot />
+                </div>
+                <slot v-else />
             </main>
         </div>
     </div>

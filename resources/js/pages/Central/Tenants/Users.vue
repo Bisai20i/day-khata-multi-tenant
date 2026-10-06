@@ -53,7 +53,7 @@ const columns = [
             :back-label="`Back to ${tenant.company_name}`"
         />
 
-        <Card variant="panel">
+        <Card variant="panel" class="bg-bg-surface p-4 sm:p-5">
             <DataTable
                 :columns="columns"
                 :data="users"

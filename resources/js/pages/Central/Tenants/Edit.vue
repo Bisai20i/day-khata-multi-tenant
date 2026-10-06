@@ -3,10 +3,12 @@ import { useForm, Link } from '@inertiajs/vue3';
 import { Check } from '@lucide/vue';
 import AppLayout from '@/layouts/AppLayout.vue';
 import { useLayoutChrome } from '@/composables/useLayoutChrome';
-import Card from '@/components/ui/Card.vue';
 import Input from '@/components/ui/Input.vue';
 import Button from '@/components/ui/Button.vue';
 import PageHeader from '@/components/ui/PageHeader.vue';
+import FormSection from '@/components/ui/FormSection.vue';
+import FormField from '@/components/ui/FormField.vue';
+import FormActions from '@/components/ui/FormActions.vue';
 
 defineOptions({ layout: AppLayout });
 
@@ -38,31 +40,31 @@ function submit() {
             :back-label="`Back to ${tenant.company_name}`"
         />
 
-        <form class="max-w-lg" @submit.prevent="submit">
-            <Card variant="panel" title="Company">
-                <div class="flex flex-col gap-4">
-                    <div>
-                        <label for="company_name" class="mb-1 block text-sm font-semibold text-text-base">Company name <span class="text-danger">*</span></label>
-                        <Input id="company_name" v-model="form.company_name" type="text" placeholder="e.g. Acme Traders" required :aria-describedby="form.errors.company_name ? 'company_name-error' : undefined" />
-                        <p v-if="form.errors.company_name" id="company_name-error" class="mt-1 text-sm text-danger">{{ form.errors.company_name }}</p>
-                    </div>
-
-                    <div>
-                        <label for="contact_email" class="mb-1 block text-sm font-semibold text-text-base">Contact email</label>
-                        <Input id="contact_email" v-model="form.contact_email" type="email" placeholder="you@example.com" :aria-describedby="form.errors.contact_email ? 'contact_email-error' : 'contact_email-help'" />
-                        <p v-if="form.errors.contact_email" id="contact_email-error" class="mt-1 text-sm text-danger">{{ form.errors.contact_email }}</p>
-                        <p v-else id="contact_email-help" class="mt-1 text-xs text-text-muted">Optional. Used to reach the company about their account.</p>
-                    </div>
-
-                    <div class="flex gap-2">
-                        <Button type="submit" variant="primary" tone="purple" :loading="form.processing">
-                            <Check class="size-4" />
-                            Save changes
-                        </Button>
-                        <Button :as="Link" :href="`/tenants/${tenant.id}`" variant="secondary" tone="purple">Cancel</Button>
-                    </div>
+        <form class="flex flex-col gap-8" @submit.prevent="submit">
+            <FormSection title="Company" description="The business name shown on the tenant's screens and invoices, and how to reach them about their account.">
+                <div class="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                    <FormField v-slot="{ describedBy }" label="Company name" for="company_name" required :error="form.errors.company_name">
+                        <Input id="company_name" v-model="form.company_name" type="text" placeholder="e.g. Acme Traders" autocomplete="organization" required :aria-describedby="describedBy" />
+                    </FormField>
+                    <FormField
+                        v-slot="{ describedBy }"
+                        label="Contact email"
+                        for="contact_email"
+                        help="Optional. Used to reach the company about their account."
+                        :error="form.errors.contact_email"
+                    >
+                        <Input id="contact_email" v-model="form.contact_email" type="email" placeholder="billing@acme.com" autocomplete="email" :aria-describedby="describedBy" />
+                    </FormField>
                 </div>
-            </Card>
+            </FormSection>
+
+            <FormActions :status="form.isDirty ? 'Unsaved changes' : 'No changes yet'" :emphasize="form.isDirty">
+                <Button :as="Link" :href="`/tenants/${tenant.id}`" variant="secondary" tone="neutral">Cancel</Button>
+                <Button type="submit" variant="primary" tone="purple" :loading="form.processing" :disabled="!form.isDirty">
+                    <Check class="size-4" />
+                    Save changes
+                </Button>
+            </FormActions>
         </form>
     </div>
 </template>

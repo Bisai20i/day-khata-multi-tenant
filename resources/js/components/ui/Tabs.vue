@@ -17,12 +17,12 @@ function onModelValueChange(value) {
 
 <template>
     <TabsRoot :model-value="modelValue" :class="cn(props.class)" @update:model-value="onModelValueChange">
-        <TabsList class="flex items-center gap-1 border-b-[1.5px] border-border">
+        <TabsList class="flex items-center gap-1 overflow-x-auto border-b-[1.5px] border-border">
             <TabsTrigger
                 v-for="tab in tabs"
                 :key="tab.value"
                 :value="tab.value"
-                class="border-b-2 border-transparent px-3 py-2 text-[12.5px] font-bold text-text-muted outline-none transition-colors duration-150 hover:text-text-base data-[state=active]:border-primary data-[state=active]:text-primary"
+                class="shrink-0 border-b-2 border-transparent px-3 py-2 whitespace-nowrap text-[12.5px] font-bold text-text-muted outline-none transition-colors duration-150 hover:text-text-base data-[state=active]:border-primary data-[state=active]:text-primary"
             >
                 {{ tab.label }}
             </TabsTrigger>

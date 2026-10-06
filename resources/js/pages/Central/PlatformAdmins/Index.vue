@@ -88,7 +88,7 @@ const columns = computed(() => {
             </Button>
         </PageHeader>
 
-        <Card variant="panel">
+        <Card variant="panel" class="bg-bg-surface p-4 sm:p-5">
             <DataTable :columns="columns" :data="admins" :page-size="10" empty-message="No platform admins yet." />
         </Card>
     </div>

@@ -58,7 +58,7 @@ async function reassign() {
 </script>
 
 <template>
-    <Card variant="panel" title="Owner">
+    <Card variant="panel" title="Owner" class="bg-bg-surface p-4 sm:p-5">
         <div v-if="owner" class="mb-3 text-sm">
             <p class="text-text-muted">Current owner</p>
             <p class="font-semibold text-text-strong">{{ owner.name }}</p>

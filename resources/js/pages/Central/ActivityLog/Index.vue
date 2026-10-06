@@ -1,7 +1,7 @@
 <script setup>
 import { computed, h, ref } from 'vue';
 import { Link, router } from '@inertiajs/vue3';
-import { Filter, X } from '@lucide/vue';
+import { ChevronLeft, ChevronRight, Filter, X } from '@lucide/vue';
 import AppLayout from '@/layouts/AppLayout.vue';
 import { useLayoutChrome } from '@/composables/useLayoutChrome';
 import Card from '@/components/ui/Card.vue';
@@ -68,6 +68,9 @@ function humanizeAction(value) {
 
 const humanActionOptions = computed(() => props.actionOptions.map((o) => ({ ...o, label: humanizeAction(o.label ?? o.value) })));
 
+const pageLinkClass =
+    'inline-flex h-9 items-center gap-1 border-[1.5px] border-border bg-bg-surface px-3 text-[13px] font-semibold text-text-muted transition-colors duration-150 ease-out hover:border-primary hover:text-primary';
+
 const hasFilters = computed(() => !!(tenantId.value || action.value || platformAdminId.value));
 
 const columns = [
@@ -102,71 +105,65 @@ const columns = [
     <div>
         <PageHeader title="Activity log" description="A read-only record of actions platform admins have taken on tenants and admin accounts. Newest first." />
 
-        <Card variant="panel" class="mb-4">
-            <div class="flex flex-wrap items-end gap-3">
-                <div class="min-w-[180px]">
-                    <label for="filter-tenant" class="mb-1 block text-xs font-semibold text-text-muted">Tenant</label>
-                    <Select id="filter-tenant" v-model="tenantId" :options="tenantOptions" placeholder="All tenants" />
+        <Card variant="panel" class="bg-bg-surface p-0">
+            <div class="flex flex-col gap-3 border-b border-border p-4 lg:flex-row lg:items-end">
+                <div class="grid flex-1 grid-cols-1 gap-3 sm:grid-cols-3">
+                    <div class="min-w-0">
+                        <label for="filter-tenant" class="mb-1.5 block text-xs font-semibold text-text-muted">Tenant</label>
+                        <Select id="filter-tenant" v-model="tenantId" :options="tenantOptions" placeholder="All tenants" />
+                    </div>
+                    <div class="min-w-0">
+                        <label for="filter-action" class="mb-1.5 block text-xs font-semibold text-text-muted">Action</label>
+                        <Select id="filter-action" v-model="action" :options="humanActionOptions" placeholder="All actions" />
+                    </div>
+                    <div class="min-w-0">
+                        <label for="filter-platform-admin" class="mb-1.5 block text-xs font-semibold text-text-muted">Platform admin</label>
+                        <Select id="filter-platform-admin" v-model="platformAdminId" :options="platformAdminOptions" placeholder="All admins" />
+                    </div>
                 </div>
-                <div class="min-w-[180px]">
-                    <label for="filter-action" class="mb-1 block text-xs font-semibold text-text-muted">Action</label>
-                    <Select id="filter-action" v-model="action" :options="humanActionOptions" placeholder="All actions" />
+                <div class="flex gap-2 [&>*]:flex-1 lg:[&>*]:flex-none">
+                    <Button variant="primary" tone="purple" :loading="filtering" @click="applyFilter">
+                        <Filter class="size-4" />
+                        Apply filters
+                    </Button>
+                    <Button v-if="hasFilters" variant="secondary" tone="neutral" @click="clearFilter">
+                        <X class="size-4" />
+                        Clear
+                    </Button>
                 </div>
-                <div class="min-w-[180px]">
-                    <label for="filter-platform-admin" class="mb-1 block text-xs font-semibold text-text-muted">Platform admin</label>
-                    <Select id="filter-platform-admin" v-model="platformAdminId" :options="platformAdminOptions" placeholder="All admins" />
-                </div>
-                <Button variant="primary" tone="purple" :loading="filtering" @click="applyFilter">
-                    <Filter class="size-4" />
-                    Apply filters
-                </Button>
-                <Button v-if="hasFilters" variant="secondary" tone="purple" @click="clearFilter">
-                    <X class="size-4" />
-                    Clear filters
-                </Button>
             </div>
-        </Card>
 
-        <Card variant="panel">
-            <DataTable :columns="columns" :data="logs.data" :page-size="Math.max(logs.data.length, 1)" :empty-message="hasFilters ? 'No activity matches these filters. Try clearing them.' : 'No activity has been recorded yet.'" />
+            <div class="p-4">
+                <DataTable
+                    :columns="columns"
+                    :data="logs.data"
+                    :page-size="Math.max(logs.data.length, 1)"
+                    hide-pagination
+                    :empty-message="hasFilters ? 'No activity matches these filters. Try clearing them.' : 'No activity has been recorded yet.'"
+                />
 
-            <div v-if="logs.data.length > 0" class="mt-3 flex flex-wrap items-center justify-between gap-3">
-                <p class="text-xs text-text-muted">Showing {{ logs.from }}–{{ logs.to }} of {{ logs.total }}</p>
-                <nav class="flex items-center gap-2" aria-label="Pagination">
-                    <Link
-                        v-if="logs.prev_page_url"
-                        :href="logs.prev_page_url"
-                        aria-label="Previous page"
-                        preserve-state
-                        preserve-scroll
-                        class="inline-flex items-center border-[1.5px] border-border bg-white px-3 py-1.5 text-xs font-semibold text-text-muted transition-colors duration-150 ease-out hover:border-primary hover:text-primary"
-                    >
-                        Previous
-                    </Link>
-                    <span
-                        v-else
-                        class="inline-flex cursor-not-allowed items-center border-[1.5px] border-border bg-white px-3 py-1.5 text-xs font-semibold text-text-faint opacity-40"
-                    >
-                        Previous
-                    </span>
-                    <span class="text-xs text-text-muted">Page {{ logs.current_page }} of {{ logs.last_page }}</span>
-                    <Link
-                        v-if="logs.next_page_url"
-                        :href="logs.next_page_url"
-                        aria-label="Next page"
-                        preserve-state
-                        preserve-scroll
-                        class="inline-flex items-center border-[1.5px] border-border bg-white px-3 py-1.5 text-xs font-semibold text-text-muted transition-colors duration-150 ease-out hover:border-primary hover:text-primary"
-                    >
-                        Next
-                    </Link>
-                    <span
-                        v-else
-                        class="inline-flex cursor-not-allowed items-center border-[1.5px] border-border bg-white px-3 py-1.5 text-xs font-semibold text-text-faint opacity-40"
-                    >
-                        Next
-                    </span>
-                </nav>
+                <div v-if="logs.data.length > 0" class="mt-4 flex flex-col gap-3 border-t border-border-soft pt-4 sm:flex-row sm:items-center sm:justify-between">
+                    <p class="text-xs text-text-muted">Showing {{ logs.from }}–{{ logs.to }} of {{ logs.total }}</p>
+                    <nav class="flex items-center justify-between gap-2 sm:justify-end" aria-label="Pagination">
+                        <Link v-if="logs.prev_page_url" :href="logs.prev_page_url" aria-label="Previous page" preserve-state preserve-scroll :class="pageLinkClass">
+                            <ChevronLeft class="size-4" aria-hidden="true" />
+                            Previous
+                        </Link>
+                        <span v-else aria-disabled="true" :class="[pageLinkClass, 'pointer-events-none opacity-40']">
+                            <ChevronLeft class="size-4" aria-hidden="true" />
+                            Previous
+                        </span>
+                        <span class="text-xs whitespace-nowrap text-text-muted">Page {{ logs.current_page }} of {{ logs.last_page }}</span>
+                        <Link v-if="logs.next_page_url" :href="logs.next_page_url" aria-label="Next page" preserve-state preserve-scroll :class="pageLinkClass">
+                            Next
+                            <ChevronRight class="size-4" aria-hidden="true" />
+                        </Link>
+                        <span v-else aria-disabled="true" :class="[pageLinkClass, 'pointer-events-none opacity-40']">
+                            Next
+                            <ChevronRight class="size-4" aria-hidden="true" />
+                        </span>
+                    </nav>
+                </div>
             </div>
         </Card>
     </div>

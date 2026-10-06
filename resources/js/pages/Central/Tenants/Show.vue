@@ -11,6 +11,7 @@ import {
     Pencil,
     Plus,
     RotateCw,
+    ShieldAlert,
     Settings,
     Trash2,
     Users,
@@ -79,6 +80,19 @@ const statusBadgeVariant = {
     provisioning: 'warning',
     suspended: 'danger',
 };
+
+const statusLabel = computed(() => {
+    const status = String(props.tenant.status ?? '');
+
+    return status ? status.charAt(0).toUpperCase() + status.slice(1) : 'Unknown';
+});
+
+const summaryTiles = computed(() => [
+    { label: 'Status', value: statusLabel.value },
+    { label: 'Primary domain', value: props.tenant.domain || 'Not set' },
+    { label: 'Trial ends', value: props.tenant.trial_ends_at || 'No expiry' },
+    { label: 'Created', value: props.tenant.created_at || 'Unknown' },
+]);
 
 // Each action tracks its own in-flight flag so its own button (and only its
 // own button) shows a loading spinner - two actions on this page can never
@@ -238,42 +252,46 @@ function removeDomain(domain) {
 
 <template>
     <div>
-        <PageHeader
-            :title="tenant.company_name"
-            :description="tenant.domain || 'No domain set'"
-            back-href="/tenants"
-            back-label="All tenants"
-        >
-            <Badge :variant="statusBadgeVariant[tenant.status] ?? 'neutral'" pill>{{ tenant.status }}</Badge>
+        <PageHeader :title="tenant.company_name" back-href="/tenants" back-label="All tenants">
+            <template #meta>
+                <Badge :variant="statusBadgeVariant[tenant.status] ?? 'neutral'" pill>{{ statusLabel }}</Badge>
+                <Badge v-if="tenant.past_grace_period" variant="danger" pill>Past grace period</Badge>
+                <Badge v-else-if="tenant.trial_expired" variant="warning" pill>Trial expired</Badge>
+            </template>
+
+            <Button v-if="tenant.status === 'active'" variant="secondary" tone="blue" :loading="impersonating" @click="impersonate">
+                <LogIn class="size-4" />
+                Impersonate
+            </Button>
+            <Button :as="Link" :href="`/tenants/${tenant.id}/users`" variant="secondary" tone="neutral">
+                <Users class="size-4" />
+                Users
+            </Button>
+            <Button :as="Link" :href="`/tenants/${tenant.id}/edit`" variant="secondary" tone="neutral">
+                <Pencil class="size-4" />
+                Edit
+            </Button>
             <Button :as="Link" :href="`/tenants/${tenant.id}/settings`" variant="primary" tone="purple">
                 <Settings class="size-4" />
-                Open tenant settings
-            </Button>
-            <Button :as="Link" :href="`/tenants/${tenant.id}/users`" variant="secondary" tone="blue">
-                <Users class="size-4" />
-                Manage users
-            </Button>
-            <Button :as="Link" :href="`/tenants/${tenant.id}/edit`" variant="secondary" tone="blue">
-                <Pencil class="size-4" />
-                Edit details
+                Tenant settings
             </Button>
         </PageHeader>
 
-        <div v-if="tenant.status === 'provisioning' && tenant.provisioning_error" class="mb-4 border-[1.5px] border-danger bg-danger-bg p-3" role="alert">
+        <div v-if="tenant.status === 'provisioning' && tenant.provisioning_error" class="mb-5 border-[1.5px] border-danger bg-danger-bg p-4" role="alert">
             <p class="text-sm font-semibold text-danger">Provisioning failed</p>
-            <p class="mt-1 text-sm text-danger">{{ tenant.provisioning_error }}</p>
+            <p class="mt-1 text-sm break-words text-danger">{{ tenant.provisioning_error }}</p>
             <Button class="mt-3" variant="secondary" tone="purple" :loading="retrying" @click="retryProvisioning">
                 <RotateCw class="size-4" />
                 Retry provisioning
             </Button>
         </div>
 
-        <div v-else-if="tenant.database_missing" class="mb-4 border-[1.5px] border-danger bg-danger-bg p-3" role="alert">
+        <div v-else-if="tenant.database_missing" class="mb-5 border-[1.5px] border-danger bg-danger-bg p-4" role="alert">
             <p class="text-sm font-semibold text-danger">Database missing</p>
             <p class="mt-1 text-sm text-danger">
                 This tenant is marked "{{ tenant.status }}" but its database doesn't actually exist - an
                 earlier provisioning run likely never finished. Users can't log in, and actions like
-                "Manage users" or "Impersonate admin" will fail until this is re-provisioned.
+                "Users" or "Impersonate" will fail until this is re-provisioned.
             </p>
             <Button class="mt-3" variant="secondary" tone="purple" :loading="retrying" @click="retryProvisioning">
                 <RotateCw class="size-4" />
@@ -281,10 +299,22 @@ function removeDomain(domain) {
             </Button>
         </div>
 
-        <div class="grid grid-cols-1 gap-4 lg:grid-cols-[2fr_1fr]">
-            <div class="flex flex-col gap-4">
-                <Card variant="panel" title="Status and plan">
-                    <p class="mb-3 text-sm text-text-muted">
+        <dl class="mb-5 grid grid-cols-2 border-[1.5px] border-border bg-bg-surface shadow-xs lg:grid-cols-4">
+            <div
+                v-for="(tile, index) in summaryTiles"
+                :key="tile.label"
+                class="min-w-0 border-border px-4 py-3"
+                :class="[index % 2 === 1 ? 'border-l' : '', index >= 2 ? 'border-t lg:border-t-0' : '', index === 2 ? 'lg:border-l' : '']"
+            >
+                <dt class="text-[11px] font-bold tracking-[.6px] text-text-muted uppercase">{{ tile.label }}</dt>
+                <dd class="mt-1 truncate text-sm font-semibold text-text-strong" :title="tile.value">{{ tile.value }}</dd>
+            </div>
+        </dl>
+
+        <div class="grid grid-cols-1 gap-5 lg:grid-cols-[minmax(0,2fr)_minmax(0,1fr)]">
+            <div class="flex min-w-0 flex-col gap-5">
+                <Card variant="panel" title="Status and plan" class="bg-bg-surface p-4 sm:p-5">
+                    <p class="text-sm leading-relaxed text-text-base">
                         <template v-if="tenant.status === 'active'">This tenant is live and its users can sign in.</template>
                         <template v-else-if="tenant.status === 'suspended'">This tenant is suspended. Its users cannot sign in, but no data has been deleted. Resume it to restore access.</template>
                         <template v-else-if="tenant.status === 'provisioning'">This tenant is still being set up (creating its database and first admin user) and is not usable yet.</template>
@@ -292,101 +322,38 @@ function removeDomain(domain) {
                         <template v-if="tenant.trial_expired"> The free trial has ended.</template>
                         <template v-if="tenant.past_grace_period"> The grace period after the trial has also ended, so access is restricted until the trial end date is extended.</template>
                     </p>
-                    <dl class="text-sm">
-                        <div class="flex items-center justify-between gap-3 border-b border-border-soft py-2">
-                            <dt class="text-text-muted">Status</dt>
-                            <dd class="flex items-center gap-1.5">
-                                <Badge :variant="statusBadgeVariant[tenant.status] ?? 'neutral'" pill>{{ tenant.status }}</Badge>
-                                <Badge v-if="tenant.past_grace_period" variant="danger" pill>Past grace period</Badge>
-                                <Badge v-if="tenant.trial_expired" variant="warning" pill>Trial expired</Badge>
-                            </dd>
-                        </div>
-                        <div v-if="tenant.suspended_at" class="flex items-center justify-between gap-3 border-b border-border-soft py-2">
+                    <dl class="mt-3 text-sm">
+                        <div v-if="tenant.suspended_at" class="flex items-center justify-between gap-3 border-t border-border-soft py-2.5">
                             <dt class="text-text-muted">Suspended on</dt>
-                            <dd class="text-text-strong">{{ tenant.suspended_at }}</dd>
+                            <dd class="text-right text-text-strong">{{ tenant.suspended_at }}</dd>
                         </div>
-                        <div class="flex items-center justify-between gap-3 py-2">
-                            <dt class="text-text-muted">Trial ends</dt>
-                            <dd class="text-text-strong">{{ tenant.trial_ends_at || 'Not set' }}</dd>
-                        </div>
-                    </dl>
-                </Card>
-
-                <Card variant="panel" title="Company details">
-                    <dl class="text-sm">
-                        <div class="flex items-center justify-between gap-3 border-b border-border-soft py-2">
-                            <dt class="text-text-muted">Company name</dt>
-                            <dd class="text-text-strong">{{ tenant.company_name }}</dd>
-                        </div>
-                        <div class="flex items-center justify-between gap-3 border-b border-border-soft py-2">
-                            <dt class="text-text-muted">Primary domain</dt>
-                            <dd class="text-text-strong">{{ tenant.domain || 'Not set' }}</dd>
-                        </div>
-                        <div class="flex items-center justify-between gap-3 border-b border-border-soft py-2">
-                            <dt class="text-text-muted">Contact email</dt>
-                            <dd class="text-text-strong">{{ tenant.contact_email || 'Not set' }}</dd>
-                        </div>
-                        <div class="flex items-center justify-between gap-3 py-2">
-                            <dt class="text-text-muted">Created</dt>
-                            <dd class="text-text-strong">{{ tenant.created_at || 'Not set' }}</dd>
+                        <div class="flex items-center justify-between gap-3 border-t border-border-soft py-2.5">
+                            <dt class="shrink-0 text-text-muted">Contact email</dt>
+                            <dd class="min-w-0 text-right break-all text-text-strong">{{ tenant.contact_email || 'Not set' }}</dd>
                         </div>
                     </dl>
                 </Card>
 
-                <Card variant="panel" title="Modules">
-                    <p class="mb-3 text-sm text-text-muted">
+                <Card variant="panel" title="Modules" class="bg-bg-surface p-4 sm:p-5">
+                    <p class="mb-4 text-sm text-text-muted">
                         Features this tenant may use. Turning a module off hides its pages and blocks its URLs for
                         everyone, the owner included. Role grants are kept and come back when it is turned on again.
                     </p>
-                    <form class="flex flex-col gap-3" @submit.prevent="updateModules">
+                    <form class="flex flex-col gap-4" @submit.prevent="updateModules">
                         <ModuleSelector v-model="modulesForm.enabled_modules" :catalog="moduleCatalog" id-prefix="show-module" :error="modulesError" />
-                        <div>
-                            <Button type="submit" variant="secondary" tone="blue" :loading="modulesForm.processing" :disabled="!modulesForm.isDirty">
+                        <div class="flex flex-col gap-2 border-t border-border-soft pt-4 sm:flex-row sm:items-center sm:justify-between">
+                            <p class="text-xs text-text-muted">{{ modulesForm.isDirty ? 'You have unsaved module changes.' : 'Modules are up to date.' }}</p>
+                            <Button type="submit" variant="primary" tone="purple" :loading="modulesForm.processing" :disabled="!modulesForm.isDirty">
                                 <Check class="size-4" />
                                 Save modules
                             </Button>
                         </div>
                     </form>
                 </Card>
-
-                <Card variant="panel" title="Support and account actions">
-                    <div v-if="tenant.status === 'active'" class="mb-4">
-                        <p class="mb-2 text-sm text-text-muted">Sign in to this tenant as its first admin, for support or troubleshooting.</p>
-                        <Button variant="secondary" tone="blue" :loading="impersonating" @click="impersonate">
-                            <LogIn class="size-4" />
-                            Impersonate admin
-                        </Button>
-                    </div>
-
-                    <div class="border-[1.5px] border-danger p-3">
-                        <p class="text-sm font-semibold text-danger">Danger zone</p>
-                        <div v-if="tenant.status === 'active'" class="mt-2">
-                            <p class="mb-2 text-sm text-text-muted">Suspending blocks all of this tenant's users from signing in. Data is kept.</p>
-                            <Button variant="secondary" tone="danger" :loading="suspending" @click="suspend">
-                                <CirclePause class="size-4" />
-                                Suspend tenant
-                            </Button>
-                        </div>
-                        <div v-else-if="tenant.status === 'suspended'" class="mt-2">
-                            <p class="mb-2 text-sm text-text-muted">Resuming restores sign-in access for this tenant's users.</p>
-                            <Button variant="secondary" tone="success" :loading="resuming" @click="resume">
-                                <CirclePlay class="size-4" />
-                                Resume tenant
-                            </Button>
-                        </div>
-                        <div class="mt-3">
-                            <p class="mb-2 text-sm text-text-muted">Permanently deletes this tenant and its database. This cannot be undone.</p>
-                            <Button variant="secondary" tone="danger" @click="openDeleteModal('delete')">
-                                <Trash2 class="size-4" />
-                                Delete tenant
-                            </Button>
-                        </div>
-                    </div>
-                </Card>
             </div>
 
-            <div class="flex flex-col gap-4">
-                <Card v-if="tenant.status === 'provisioning' && isOwner" variant="panel" title="Provisioning controls">
+            <div class="flex min-w-0 flex-col gap-5">
+                <Card v-if="tenant.status === 'provisioning' && isOwner" variant="panel" title="Provisioning controls" class="bg-bg-surface p-4 sm:p-5">
                     <p class="mb-3 text-sm text-text-muted">
                         Manual overrides for a tenant stuck at Provisioning. Only use "Mark active" once you've
                         confirmed its database and admin user actually exist.
@@ -405,34 +372,34 @@ function removeDomain(domain) {
 
                 <OwnerSection v-if="isOwner && tenant.status !== 'provisioning' && !tenant.database_missing" :tenant-id="tenant.id" :owner="owner" :candidates="ownerCandidates" />
 
-                <Card v-if="isOwner" variant="panel" title="Trial end date">
-                    <form class="flex items-start gap-2" @submit.prevent="updateTrial">
-                        <div class="flex-1">
-                            <label for="trial_ends_at" class="mb-1 block text-sm font-semibold text-text-base">Trial end date</label>
+                <Card v-if="isOwner" variant="panel" title="Trial end date" class="bg-bg-surface p-4 sm:p-5">
+                    <form @submit.prevent="updateTrial">
+                        <label for="trial_ends_at" class="mb-1.5 block text-[13px] font-semibold text-text-base">Trial ends on</label>
+                        <div class="flex flex-col gap-2 sm:flex-row lg:flex-col xl:flex-row">
                             <Input
                                 id="trial_ends_at"
                                 v-model="trialForm.trial_ends_at"
                                 type="date"
                                 :aria-describedby="trialForm.errors.trial_ends_at ? 'trial_ends_at-error' : 'trial_ends_at-help'"
                             />
-                            <p v-if="trialForm.errors.trial_ends_at" id="trial_ends_at-error" class="mt-1 text-sm text-danger">{{ trialForm.errors.trial_ends_at }}</p>
-                            <p id="trial_ends_at-help" class="mt-1 text-xs text-text-muted">Leave blank to remove the trial expiry.</p>
+                            <Button type="submit" class="shrink-0" variant="secondary" tone="blue" :loading="trialForm.processing">
+                                <Check class="size-4" />
+                                Save date
+                            </Button>
                         </div>
-                        <Button type="submit" class="mt-6" variant="secondary" tone="blue" :loading="trialForm.processing">
-                            <Check class="size-4" />
-                            Save date
-                        </Button>
+                        <p v-if="trialForm.errors.trial_ends_at" id="trial_ends_at-error" class="mt-1.5 text-sm text-danger" role="alert">{{ trialForm.errors.trial_ends_at }}</p>
+                        <p v-else id="trial_ends_at-help" class="mt-1.5 text-xs text-text-muted">Leave blank to remove the trial expiry.</p>
                     </form>
                 </Card>
 
-                <Card variant="panel" title="Domains">
+                <Card variant="panel" title="Domains" class="bg-bg-surface p-4 sm:p-5">
                     <p class="mb-3 text-sm text-text-muted">Addresses this tenant can be reached at. At least one is required.</p>
-                    <ul class="mb-4 divide-y divide-border-soft text-sm">
-                        <li v-for="domain in tenant.domains" :key="domain.id" class="flex items-center justify-between py-2">
-                            <span class="text-text-strong">{{ domain.domain }}</span>
+                    <ul class="mb-4 divide-y divide-border-soft border-y border-border-soft text-sm">
+                        <li v-for="domain in tenant.domains" :key="domain.id" class="flex items-center justify-between gap-3 py-2">
+                            <span class="min-w-0 break-all text-text-strong">{{ domain.domain }}</span>
                             <button
                                 type="button"
-                                class="cursor-pointer text-text-muted transition-colors duration-150 hover:text-danger disabled:cursor-not-allowed disabled:opacity-40"
+                                class="flex size-9 shrink-0 cursor-pointer items-center justify-center text-text-muted transition-colors duration-150 hover:bg-danger-bg hover:text-danger focus-visible:outline-2 focus-visible:outline-primary disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent disabled:hover:text-text-muted"
                                 :disabled="tenant.domains.length <= 1 || removingDomainId === domain.id"
                                 :title="tenant.domains.length <= 1 ? 'A tenant must have at least one domain' : 'Remove domain'"
                                 :aria-label="`Remove domain ${domain.domain}`"
@@ -444,26 +411,67 @@ function removeDomain(domain) {
                         </li>
                     </ul>
 
-                    <form class="flex items-start gap-2" @submit.prevent="addDomain">
-                        <div class="flex-1">
-                            <label for="new_domain" class="mb-1 block text-sm font-semibold text-text-base">Add another domain</label>
+                    <form @submit.prevent="addDomain">
+                        <label for="new_domain" class="mb-1.5 block text-[13px] font-semibold text-text-base">Add another domain</label>
+                        <div class="flex flex-col gap-2 sm:flex-row lg:flex-col xl:flex-row">
                             <Input
                                 id="new_domain"
                                 v-model="domainForm.domain"
                                 type="text"
-                                placeholder="extra.localhost"
+                                placeholder="shop.example.com"
+                                autocapitalize="none"
+                                spellcheck="false"
                                 :aria-describedby="domainForm.errors.domain ? 'new_domain-error' : undefined"
                             />
-                            <p v-if="domainForm.errors.domain" id="new_domain-error" class="mt-1 text-sm text-danger">{{ domainForm.errors.domain }}</p>
+                            <Button type="submit" class="shrink-0" variant="secondary" tone="blue" :loading="domainForm.processing">
+                                <Plus class="size-4" />
+                                Add domain
+                            </Button>
                         </div>
-                        <Button type="submit" class="mt-6" variant="secondary" tone="blue" :loading="domainForm.processing">
-                            <Plus class="size-4" />
-                            Add domain
-                        </Button>
+                        <p v-if="domainForm.errors.domain" id="new_domain-error" class="mt-1.5 text-sm text-danger" role="alert">{{ domainForm.errors.domain }}</p>
                     </form>
                 </Card>
             </div>
         </div>
+
+        <section class="mt-8 border-[1.5px] border-danger/40 bg-bg-surface" aria-labelledby="danger-zone-heading">
+            <div class="flex items-center gap-2 border-b border-danger/20 bg-danger-bg/40 px-4 py-3 sm:px-5">
+                <ShieldAlert class="size-4 text-danger" aria-hidden="true" />
+                <h3 id="danger-zone-heading" class="text-sm font-bold text-danger">Danger zone</h3>
+            </div>
+            <div class="divide-y divide-border-soft">
+                <div v-if="tenant.status === 'active'" class="flex flex-col gap-3 px-4 py-4 sm:flex-row sm:items-center sm:justify-between sm:px-5">
+                    <div>
+                        <p class="text-sm font-semibold text-text-strong">Suspend tenant</p>
+                        <p class="text-sm text-text-muted">Blocks all of this tenant's users from signing in. Data is kept.</p>
+                    </div>
+                    <Button class="shrink-0" variant="secondary" tone="danger" :loading="suspending" @click="suspend">
+                        <CirclePause class="size-4" />
+                        Suspend tenant
+                    </Button>
+                </div>
+                <div v-else-if="tenant.status === 'suspended'" class="flex flex-col gap-3 px-4 py-4 sm:flex-row sm:items-center sm:justify-between sm:px-5">
+                    <div>
+                        <p class="text-sm font-semibold text-text-strong">Resume tenant</p>
+                        <p class="text-sm text-text-muted">Restores sign-in access for this tenant's users.</p>
+                    </div>
+                    <Button class="shrink-0" variant="secondary" tone="success" :loading="resuming" @click="resume">
+                        <CirclePlay class="size-4" />
+                        Resume tenant
+                    </Button>
+                </div>
+                <div class="flex flex-col gap-3 px-4 py-4 sm:flex-row sm:items-center sm:justify-between sm:px-5">
+                    <div>
+                        <p class="text-sm font-semibold text-text-strong">Delete tenant</p>
+                        <p class="text-sm text-text-muted">Permanently deletes this tenant and its database. This cannot be undone.</p>
+                    </div>
+                    <Button class="shrink-0" variant="primary" tone="danger" @click="openDeleteModal('delete')">
+                        <Trash2 class="size-4" />
+                        Delete tenant
+                    </Button>
+                </div>
+            </div>
+        </section>
 
         <Modal v-model:open="showDeleteModal" :title="deleteIntent === 'cancel' ? 'Cancel provisioning' : 'Delete tenant'" size="compact">
             <div class="flex items-start gap-2">
@@ -478,7 +486,7 @@ function removeDomain(domain) {
             <Input v-model="deleteConfirmName" type="text" class="mt-3" :placeholder="tenant.company_name" aria-label="Type the company name to confirm" />
 
             <template #footer>
-                <Button variant="secondary" tone="purple" @click="showDeleteModal = false">Keep tenant</Button>
+                <Button variant="secondary" tone="neutral" @click="showDeleteModal = false">Keep tenant</Button>
                 <Button variant="primary" tone="danger" :disabled="!canConfirmDelete" :loading="deleting" @click="confirmDelete">
                     {{ deleteIntent === 'cancel' ? 'Cancel provisioning' : 'Delete tenant' }}
                 </Button>

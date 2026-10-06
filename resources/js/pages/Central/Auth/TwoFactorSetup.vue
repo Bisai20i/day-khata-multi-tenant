@@ -7,6 +7,7 @@ import Card from '@/components/ui/Card.vue';
 import Input from '@/components/ui/Input.vue';
 import Button from '@/components/ui/Button.vue';
 import Badge from '@/components/ui/Badge.vue';
+import PageHeader from '@/components/ui/PageHeader.vue';
 import { useToast } from '@/composables/useToast';
 
 defineOptions({ layout: AppLayout });
@@ -73,7 +74,13 @@ function downloadRecoveryCodes() {
 </script>
 
 <template>
-    <Card variant="panel" title="Two-Factor Authentication" class="max-w-lg">
+    <div>
+        <PageHeader
+            title="Two-factor authentication"
+            description="Protect your platform admin account with a one-time code from an authenticator app at every sign-in."
+        />
+
+        <Card variant="panel" class="max-w-2xl bg-bg-surface p-4 sm:p-6">
             <!-- Just confirmed: show the one-time recovery codes. -->
             <template v-if="recoveryCodes && !acknowledgedRecoveryCodes">
                 <p class="mb-1 text-xs font-bold uppercase text-text-muted">Step 3 of 3 - Save your recovery codes</p>
@@ -85,7 +92,7 @@ function downloadRecoveryCodes() {
                     one can be used once if you lose access to your authenticator app, and they will not
                     be shown again.
                 </p>
-                <ul class="mb-4 grid grid-cols-2 gap-1.5 border border-border-soft bg-bg-subtle p-3 font-mono text-[12.5px] text-text-strong">
+                <ul class="mb-4 grid grid-cols-1 gap-1.5 min-[380px]:grid-cols-2 border border-border-soft bg-bg-subtle p-3 font-mono text-[12.5px] text-text-strong">
                     <li v-for="code in recoveryCodes" :key="code">{{ code }}</li>
                 </ul>
                 <div class="mb-4 flex flex-wrap gap-2">
@@ -133,9 +140,9 @@ function downloadRecoveryCodes() {
                     Open an authenticator app (Google Authenticator, 1Password, etc.) and scan this code, or enter the secret key manually.
                 </p>
 
-                <img :src="qrCodeDataUri" alt="Two-factor authentication QR code" class="mb-3 size-[240px] border border-border-soft" />
+                <img :src="qrCodeDataUri" alt="Two-factor authentication QR code" class="mb-3 size-[200px] border border-border-soft sm:size-[240px]" />
 
-                <p class="mb-4 font-mono text-[12.5px] text-text-muted">Secret key: {{ pendingSecret }}</p>
+                <p class="mb-4 font-mono text-[12.5px] break-all text-text-muted">Secret key: {{ pendingSecret }}</p>
                 <p class="mb-2 text-xs font-bold uppercase text-text-muted">Step 2 of 3 - Enter the code</p>
 
                 <form class="flex max-w-xs flex-col gap-3" @submit.prevent="confirm">
@@ -171,4 +178,5 @@ function downloadRecoveryCodes() {
                 </Button>
             </template>
         </Card>
+    </div>
 </template>
