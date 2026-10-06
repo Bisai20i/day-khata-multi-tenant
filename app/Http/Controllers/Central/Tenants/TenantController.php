@@ -89,8 +89,26 @@ class TenantController extends Controller
     {
         return Inertia::render('Central/Tenants/Create', [
             'moduleCatalog' => self::moduleCatalog(),
+            'tenantBaseDomain' => self::tenantBaseDomain(),
             'defaultModules' => UpdateTenantModulesRequest::canonicalModules(config('permissions.default_modules', [])),
         ]);
+    }
+
+    /**
+     * The parent domain tenant subdomains are created under (config
+     * `tenancy.tenant_base_domain`), shown as the subdomain field's suffix.
+     */
+    private static function tenantBaseDomain(): string
+    {
+        return (string) config('tenancy.tenant_base_domain', 'localhost');
+    }
+
+    /**
+     * The full domain a new tenant with this subdomain is reached at.
+     */
+    private static function tenantDomain(string $subdomain): string
+    {
+        return strtolower($subdomain).'.'.self::tenantBaseDomain();
     }
 
     /**
@@ -131,7 +149,7 @@ class TenantController extends Controller
             'subdomain' => [
                 'required', 'string', 'max:63', 'regex:/^[a-z0-9-]+$/i',
                 function (string $attribute, mixed $value, \Closure $fail): void {
-                    if (Domain::where('domain', "{$value}.localhost")->exists()) {
+                    if (Domain::where('domain', self::tenantDomain($value))->exists()) {
                         $fail('This subdomain is already taken.');
                     }
                 },
@@ -186,13 +204,13 @@ class TenantController extends Controller
                 'name' => $validated['admin_name'],
                 'email' => $validated['admin_email'],
                 'password' => Hash::make($validated['admin_password']),
-                'domain' => "{$validated['subdomain']}.localhost",
+                'domain' => self::tenantDomain($validated['subdomain']),
             ];
 
             $tenant->save();
 
             $tenant->domains()->create([
-                'domain' => "{$validated['subdomain']}.localhost",
+                'domain' => self::tenantDomain($validated['subdomain']),
             ]);
 
             $connection->commit();

@@ -28,6 +28,12 @@ return [
     )),
 
     /**
+     * The parent domain new tenants get a subdomain under: a tenant created
+     * with subdomain "acme" is reached at "acme.{tenant_base_domain}".
+     */
+    'tenant_base_domain' => trim((string) env('TENANT_BASE_DOMAIN', 'localhost'), " .\t\n\r\0\x0B"),
+
+    /**
      * Tenancy bootstrappers are executed when tenancy is initialized.
      * Their responsibility is making Laravel features tenant-aware.
      *
