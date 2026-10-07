@@ -41,6 +41,9 @@ const props = defineProps({
     data: { type: Array, default: () => [] },
     pageSize: { type: Number, default: 10 },
     emptyMessage: { type: String, default: 'No records found' },
+    // For server-paginated lists that render their own Previous/Next: hides
+    // this table's client-side pager so the page shows only one.
+    hidePagination: { type: Boolean, default: false },
     class: { type: [String, Array, Object], default: '' },
 });
 
@@ -180,7 +183,7 @@ function onHeaderKeydown(event, column) {
                 </table>
             </div>
 
-            <div class="mt-3 flex flex-wrap items-center justify-between gap-3">
+            <div v-if="!hidePagination" class="mt-3 flex flex-wrap items-center justify-between gap-3">
                 <p class="text-xs text-text-muted">
                     Page {{ table.atoms.pagination.get().pageIndex + 1 }} of {{ table.getPageCount() }}
                 </p>

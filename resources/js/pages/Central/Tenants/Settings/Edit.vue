@@ -9,6 +9,7 @@ import Button from '@/components/ui/Button.vue';
 import Input from '@/components/ui/Input.vue';
 import Select from '@/components/ui/Select.vue';
 import Tabs from '@/components/ui/Tabs.vue';
+import FormActions from '@/components/ui/FormActions.vue';
 import PageHeader from '@/components/ui/PageHeader.vue';
 import { useToast } from '@/composables/useToast';
 
@@ -177,9 +178,9 @@ function submitLogo() {
         <Tabs v-model="activeTab" :tabs="settingsTabs">
             <template #company>
                 <div class="flex flex-col gap-4">
-                    <Card variant="panel" title="Company info">
+                    <Card variant="panel" title="Company info" class="bg-bg-surface p-4 sm:p-5">
                         <div class="flex flex-col gap-4">
-                            <div class="grid grid-cols-2 gap-4">
+                            <div class="grid grid-cols-1 gap-4 sm:grid-cols-2">
                                 <div>
                                     <label for="company_name" class="mb-1 block text-sm font-semibold text-text-base">Company name <span class="text-danger">*</span></label>
                                     <Input id="company_name" v-model="form.company_name" type="text" placeholder="e.g. Sharma Traders Pvt. Ltd." required />
@@ -192,7 +193,7 @@ function submitLogo() {
                                     <p v-if="form.errors.pan_vat_number" class="mt-1 text-sm text-danger">{{ form.errors.pan_vat_number }}</p>
                                 </div>
 
-                                <div class="col-span-2">
+                                <div class="sm:col-span-2">
                                     <label for="address" class="mb-1 block text-sm font-semibold text-text-base">Address</label>
                                     <Input id="address" v-model="form.address" type="text" placeholder="e.g. Kathmandu-10" />
                                     <p v-if="form.errors.address" class="mt-1 text-sm text-danger">{{ form.errors.address }}</p>
@@ -215,14 +216,14 @@ function submitLogo() {
                         <div class="mt-4 border-t border-border pt-4">
                             <label for="logo" class="mb-1 block text-sm font-semibold text-text-base">Company logo</label>
                             <p class="mb-2 text-xs text-text-muted">Shown on printed invoices. Uploading saves the logo immediately.</p>
-                            <div class="flex items-end gap-4">
+                            <div class="flex flex-col gap-3 sm:flex-row sm:items-end sm:gap-4">
                                 <img
                                     v-if="logoPreviewUrl"
                                     :src="logoPreviewUrl"
                                     alt="Company logo preview"
                                     class="h-16 w-16 shrink-0 border-[1.5px] border-border bg-white object-contain"
                                 />
-                                <div class="flex-1">
+                                <div class="min-w-0 flex-1">
                                     <input
                                         id="logo"
                                         type="file"
@@ -249,9 +250,9 @@ function submitLogo() {
 
             <template #invoice>
                 <div class="flex flex-col gap-4">
-                    <Card variant="panel" title="Invoicing">
+                    <Card variant="panel" title="Invoicing" class="bg-bg-surface p-4 sm:p-5">
                         <div class="flex flex-col gap-4">
-                            <div class="grid grid-cols-2 gap-4">
+                            <div class="grid grid-cols-1 gap-4 sm:grid-cols-2">
                                 <div>
                                     <label class="mb-1 block text-sm font-semibold text-text-base">Print paper size</label>
                                     <p class="mb-1 text-xs text-text-muted">Paper format used when printing invoices.</p>
@@ -276,7 +277,7 @@ function submitLogo() {
                                     business that regularly bills above that.
                                 </p>
                                 <p v-if="form.errors.active_invoice_type" class="mb-3 text-sm text-danger">{{ form.errors.active_invoice_type }}</p>
-                                <div class="grid grid-cols-3 gap-4">
+                                <div class="grid grid-cols-1 gap-3 md:grid-cols-3 md:gap-4">
                                     <label
                                         v-for="option in invoiceTypeOptions"
                                         :key="option.value"
@@ -306,7 +307,7 @@ function submitLogo() {
                                     Every series needs its own prefix. Two series sharing one print the same number on two
                                     different documents.
                                 </p>
-                                <div class="grid grid-cols-3 gap-4">
+                                <div class="grid grid-cols-1 gap-3 md:grid-cols-3 md:gap-4">
                                     <div>
                                         <label for="purchase_prefix" class="mb-1 block text-sm font-semibold text-text-base">Purchase prefix</label>
                                         <Input id="purchase_prefix" v-model="form.purchase_prefix" type="text" placeholder="PU" />
@@ -350,7 +351,7 @@ function submitLogo() {
 
             <template #numbering>
                 <div class="flex flex-col gap-4">
-                    <Card variant="panel" title="Invoice numbering">
+                    <Card variant="panel" title="Invoice numbering" class="bg-bg-surface p-4 sm:p-5">
                         <p class="mb-3 text-sm text-text-muted">
                             The number the next document of each series will be issued under in
                             <template v-if="invoiceNumbering[0]?.fiscal_year">{{ invoiceNumbering[0].fiscal_year }}</template>
@@ -362,61 +363,63 @@ function submitLogo() {
                         <p v-if="startingNumberForm.errors.next_number" class="mb-3 border-[1.5px] border-danger bg-danger-bg px-3 py-2 text-sm text-danger">
                             {{ startingNumberForm.errors.next_number }}
                         </p>
-                        <table class="w-full text-left text-[13px]">
-                            <thead class="bg-bg-subtle">
-                                <tr>
-                                    <th class="px-2 py-1.5">Series</th>
-                                    <th class="px-2 py-1.5">Prefix</th>
-                                    <th class="px-2 py-1.5">Next number</th>
-                                    <th class="px-2 py-1.5"></th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                <tr v-for="row in invoiceNumbering" :key="row.voucher_type" class="border-t border-border">
-                                    <td class="px-2 py-2">{{ row.label }}</td>
-                                    <td class="px-2 py-2">{{ row.prefix }}</td>
-                                    <td class="px-2 py-2 [font-variant-numeric:tabular-nums]">{{ row.prefix }}-{{ row.next_number }}</td>
-                                    <td class="px-2 py-2 text-right">
-                                        <div v-if="editingSeries === row.voucher_type" class="flex items-center justify-end gap-2">
-                                            <div class="w-32">
-                                                <Input
-                                                    v-model="startingNumberForm.next_number"
-                                                    type="number"
-                                                    min="1"
-                                                    step="1"
-                                                    inputmode="numeric"
-                                                />
+                        <div class="overflow-x-auto">
+                            <table class="w-full min-w-[560px] text-left text-[13px]">
+                                <thead class="bg-bg-subtle">
+                                    <tr>
+                                        <th class="px-2 py-1.5">Series</th>
+                                        <th class="px-2 py-1.5">Prefix</th>
+                                        <th class="px-2 py-1.5">Next number</th>
+                                        <th class="px-2 py-1.5"></th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    <tr v-for="row in invoiceNumbering" :key="row.voucher_type" class="border-t border-border">
+                                        <td class="px-2 py-2">{{ row.label }}</td>
+                                        <td class="px-2 py-2">{{ row.prefix }}</td>
+                                        <td class="px-2 py-2 [font-variant-numeric:tabular-nums]">{{ row.prefix }}-{{ row.next_number }}</td>
+                                        <td class="px-2 py-2 text-right">
+                                            <div v-if="editingSeries === row.voucher_type" class="flex items-center justify-end gap-2">
+                                                <div class="w-32">
+                                                    <Input
+                                                        v-model="startingNumberForm.next_number"
+                                                        type="number"
+                                                        min="1"
+                                                        step="1"
+                                                        inputmode="numeric"
+                                                    />
+                                                </div>
+                                                <Button
+                                                    variant="primary"
+                                                    tone="purple"
+                                                    type="button"
+                                                    :disabled="startingNumberForm.processing"
+                                                    @click="submitStartingNumber"
+                                                >
+                                                    Save
+                                                </Button>
+                                                <Button variant="secondary" tone="purple" type="button" @click="editingSeries = null">Cancel</Button>
                                             </div>
-                                            <Button
-                                                variant="primary"
-                                                tone="purple"
-                                                type="button"
-                                                :disabled="startingNumberForm.processing"
-                                                @click="submitStartingNumber"
-                                            >
-                                                Save
-                                            </Button>
-                                            <Button variant="secondary" tone="purple" type="button" @click="editingSeries = null">Cancel</Button>
-                                        </div>
-                                        <template v-else>
-                                            <Button v-if="row.can_set" variant="secondary" tone="purple" type="button" @click="openStartingNumber(row)">
-                                                Set starting number
-                                            </Button>
-                                            <span v-else class="text-text-muted">Locked - already in use</span>
-                                        </template>
-                                    </td>
-                                </tr>
-                            </tbody>
-                        </table>
+                                            <template v-else>
+                                                <Button v-if="row.can_set" variant="secondary" tone="purple" type="button" @click="openStartingNumber(row)">
+                                                    Set starting number
+                                                </Button>
+                                                <span v-else class="text-text-muted">Locked - already in use</span>
+                                            </template>
+                                        </td>
+                                    </tr>
+                                </tbody>
+                            </table>
+                        </div>
                     </Card>
                 </div>
             </template>
 
             <template #stock>
                 <div class="flex flex-col gap-4">
-                    <Card variant="panel" title="Stock & discount policy">
+                    <Card variant="panel" title="Stock & discount policy" class="bg-bg-surface p-4 sm:p-5">
                         <div class="flex flex-col gap-4">
-                            <div class="grid grid-cols-2 gap-4">
+                            <div class="grid grid-cols-1 gap-4 sm:grid-cols-2">
                                 <div>
                                     <div class="flex items-center gap-2">
                                         <input id="allow_negative_stock" v-model="form.allow_negative_stock" type="checkbox" class="size-4 border-[1.5px] border-border" />
@@ -441,17 +444,12 @@ function submitLogo() {
             </template>
         </Tabs>
 
-        <div class="sticky bottom-0 z-10 mt-4 flex items-center justify-between gap-3 border-t border-border bg-white px-4 py-3">
-            <span class="text-sm" :class="form.isDirty ? 'font-semibold text-text-strong' : 'text-text-muted'">
-                {{ form.isDirty ? 'Unsaved changes' : 'All changes saved' }}
-            </span>
-            <div class="flex items-center gap-2">
-                <Button variant="secondary" tone="purple" type="button" :disabled="!form.isDirty || form.processing" @click="discard">Discard</Button>
-                <Button variant="primary" tone="purple" type="button" :loading="form.processing" :disabled="!form.isDirty" @click="submit">
-                    <Check class="size-4" />
-                    Save changes
-                </Button>
-            </div>
-        </div>
+        <FormActions class="mt-6" :status="form.isDirty ? 'Unsaved changes' : 'All changes saved'" :emphasize="form.isDirty">
+            <Button variant="secondary" tone="neutral" type="button" :disabled="!form.isDirty || form.processing" @click="discard">Discard</Button>
+            <Button variant="primary" tone="purple" type="button" :loading="form.processing" :disabled="!form.isDirty" @click="submit">
+                <Check class="size-4" />
+                Save changes
+            </Button>
+        </FormActions>
     </div>
 </template>

@@ -1,13 +1,15 @@
 <script setup>
-import { computed } from 'vue';
+import { computed, ref } from 'vue';
 import { useForm, Link } from '@inertiajs/vue3';
-import { Plus } from '@lucide/vue';
+import { Eye, EyeOff, Plus } from '@lucide/vue';
 import AppLayout from '@/layouts/AppLayout.vue';
 import { useLayoutChrome } from '@/composables/useLayoutChrome';
-import Card from '@/components/ui/Card.vue';
 import Input from '@/components/ui/Input.vue';
 import Button from '@/components/ui/Button.vue';
 import PageHeader from '@/components/ui/PageHeader.vue';
+import FormSection from '@/components/ui/FormSection.vue';
+import FormField from '@/components/ui/FormField.vue';
+import FormActions from '@/components/ui/FormActions.vue';
 import ModuleSelector from './ModuleSelector.vue';
 
 defineOptions({ layout: AppLayout });
@@ -16,6 +18,7 @@ useLayoutChrome('New Tenant');
 const props = defineProps({
     moduleCatalog: { type: Array, default: () => [] },
     defaultModules: { type: Array, default: () => [] },
+    tenantBaseDomain: { type: String, default: 'localhost' },
 });
 
 const form = useForm({
@@ -29,10 +32,14 @@ const form = useForm({
     enabled_modules: [...props.defaultModules],
 });
 
+const showPassword = ref(false);
+
 // Per-item errors (enabled_modules.2) are folded into one line under the list.
 const modulesError = computed(
     () => form.errors.enabled_modules ?? Object.entries(form.errors).find(([key]) => key.startsWith('enabled_modules.'))?.[1] ?? '',
 );
+
+const previewAddress = computed(() => `${(form.subdomain || 'acme').toLowerCase()}.${props.tenantBaseDomain}`);
 
 function submit() {
     form.post('/tenants');
@@ -43,79 +50,116 @@ function submit() {
     <div>
         <PageHeader
             title="New tenant"
-            description="Create a company workspace with its own domain and first admin user. Fields marked * are required."
+            description="Create a company workspace with its own web address and first admin user. Fields marked * are required."
             back-href="/tenants"
             back-label="All tenants"
         />
 
-        <form class="flex max-w-lg flex-col gap-4" @submit.prevent="submit">
-            <Card variant="panel" title="Company">
-                <div class="flex flex-col gap-4">
-                    <div>
-                        <label for="company_name" class="mb-1 block text-sm font-semibold text-text-base">Company name <span class="text-danger">*</span></label>
-                        <Input id="company_name" v-model="form.company_name" type="text" placeholder="e.g. Acme Traders" required :aria-describedby="form.errors.company_name ? 'company_name-error' : undefined" />
-                        <p v-if="form.errors.company_name" id="company_name-error" class="mt-1 text-sm text-danger">{{ form.errors.company_name }}</p>
-                    </div>
-
-                    <div>
-                        <label for="contact_email" class="mb-1 block text-sm font-semibold text-text-base">Contact email</label>
-                        <Input id="contact_email" v-model="form.contact_email" type="email" placeholder="you@example.com" :aria-describedby="form.errors.contact_email ? 'contact_email-error' : 'contact_email-help'" />
-                        <p v-if="form.errors.contact_email" id="contact_email-error" class="mt-1 text-sm text-danger">{{ form.errors.contact_email }}</p>
-                        <p v-else id="contact_email-help" class="mt-1 text-xs text-text-muted">Optional. Used to reach the company about their account.</p>
-                    </div>
+        <form class="flex flex-col gap-8" @submit.prevent="submit">
+            <FormSection title="Company" description="The business this workspace is for. The name appears on the tenant's screens and invoices.">
+                <div class="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                    <FormField v-slot="{ describedBy }" label="Company name" for="company_name" required :error="form.errors.company_name">
+                        <Input id="company_name" v-model="form.company_name" type="text" placeholder="e.g. Acme Traders" autocomplete="organization" required :aria-describedby="describedBy" />
+                    </FormField>
+                    <FormField
+                        v-slot="{ describedBy }"
+                        label="Contact email"
+                        for="contact_email"
+                        help="Optional. Used to reach the company about their account."
+                        :error="form.errors.contact_email"
+                    >
+                        <Input id="contact_email" v-model="form.contact_email" type="email" placeholder="billing@acme.com" autocomplete="email" :aria-describedby="describedBy" />
+                    </FormField>
                 </div>
-            </Card>
+            </FormSection>
 
-            <Card variant="panel" title="Domain">
-                <div>
-                    <label for="subdomain" class="mb-1 block text-sm font-semibold text-text-base">Subdomain <span class="text-danger">*</span></label>
-                    <div class="flex items-center gap-1.5">
-                        <Input id="subdomain" v-model="form.subdomain" type="text" placeholder="acme" required class="flex-1" :aria-describedby="form.errors.subdomain ? 'subdomain-error' : 'subdomain-help'" />
-                        <span class="text-sm text-text-muted">.localhost</span>
-                    </div>
-                    <p v-if="form.errors.subdomain" id="subdomain-error" class="mt-1 text-sm text-danger">{{ form.errors.subdomain }}</p>
-                    <p v-else id="subdomain-help" class="mt-1 text-xs text-text-muted">
-                        The tenant's address becomes <span class="font-semibold">{{ form.subdomain || 'acme' }}.localhost</span>. It must be unique.
-                    </p>
+            <FormSection title="Web address" description="Where the tenant's staff sign in. It must be unique. You can add or remove domains later from the tenant page.">
+                <FormField label="Subdomain" for="subdomain" required :error="form.errors.subdomain">
+                    <template #default>
+                        <Input
+                            id="subdomain"
+                            v-model="form.subdomain"
+                            type="text"
+                            placeholder="acme"
+                            autocomplete="off"
+                            autocapitalize="none"
+                            spellcheck="false"
+                            required
+                            :aria-describedby="form.errors.subdomain ? 'subdomain-error' : 'subdomain-help'"
+                        >
+                            <template #addon>
+                                <span class="max-w-[50vw] truncate bg-bg-muted px-3 text-[13px] text-text-muted sm:max-w-none">.{{ tenantBaseDomain }}</span>
+                            </template>
+                        </Input>
+                        <p v-if="!form.errors.subdomain" id="subdomain-help" class="mt-1.5 text-xs text-text-muted">
+                            Letters, numbers and hyphens only. The address will be
+                            <span class="font-semibold break-all text-text-strong">{{ previewAddress }}</span>
+                        </p>
+                    </template>
+                </FormField>
+            </FormSection>
+
+            <FormSection title="First admin user" description="This person becomes the company owner and can invite the rest of their staff.">
+                <div class="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                    <FormField v-slot="{ describedBy }" label="Full name" for="admin_name" required :error="form.errors.admin_name">
+                        <Input id="admin_name" v-model="form.admin_name" type="text" placeholder="e.g. Jane Doe" autocomplete="off" required :aria-describedby="describedBy" />
+                    </FormField>
+                    <FormField
+                        v-slot="{ describedBy }"
+                        label="Email"
+                        for="admin_email"
+                        required
+                        help="Their login email."
+                        :error="form.errors.admin_email"
+                    >
+                        <Input id="admin_email" v-model="form.admin_email" type="email" placeholder="jane@acme.com" autocomplete="off" required :aria-describedby="describedBy" />
+                    </FormField>
+                    <FormField
+                        v-slot="{ describedBy }"
+                        label="Password"
+                        for="admin_password"
+                        required
+                        help="Share it securely. They can change it after signing in."
+                        :error="form.errors.admin_password"
+                        class="sm:col-span-2 lg:col-span-1"
+                    >
+                        <Input
+                            id="admin_password"
+                            v-model="form.admin_password"
+                            :type="showPassword ? 'text' : 'password'"
+                            placeholder="At least 8 characters"
+                            autocomplete="new-password"
+                            required
+                            :aria-describedby="describedBy"
+                        >
+                            <template #addon>
+                                <button
+                                    type="button"
+                                    class="flex h-full w-10 cursor-pointer items-center justify-center text-text-muted hover:text-text-strong focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-primary"
+                                    :aria-label="showPassword ? 'Hide password' : 'Show password'"
+                                    :aria-pressed="showPassword"
+                                    @click="showPassword = !showPassword"
+                                >
+                                    <EyeOff v-if="showPassword" class="size-4" />
+                                    <Eye v-else class="size-4" />
+                                </button>
+                            </template>
+                        </Input>
+                    </FormField>
                 </div>
-            </Card>
+            </FormSection>
 
-            <Card variant="panel" title="First admin user">
-                <div class="flex flex-col gap-4">
-                    <div>
-                        <label for="admin_name" class="mb-1 block text-sm font-semibold text-text-base">Full name <span class="text-danger">*</span></label>
-                        <Input id="admin_name" v-model="form.admin_name" type="text" placeholder="e.g. Jane Doe" required :aria-describedby="form.errors.admin_name ? 'admin_name-error' : undefined" />
-                        <p v-if="form.errors.admin_name" id="admin_name-error" class="mt-1 text-sm text-danger">{{ form.errors.admin_name }}</p>
-                    </div>
-
-                    <div>
-                        <label for="admin_email" class="mb-1 block text-sm font-semibold text-text-base">Email <span class="text-danger">*</span></label>
-                        <Input id="admin_email" v-model="form.admin_email" type="email" placeholder="you@example.com" required :aria-describedby="form.errors.admin_email ? 'admin_email-error' : 'admin_email-help'" />
-                        <p v-if="form.errors.admin_email" id="admin_email-error" class="mt-1 text-sm text-danger">{{ form.errors.admin_email }}</p>
-                        <p v-else id="admin_email-help" class="mt-1 text-xs text-text-muted">This is the login email for the tenant's first admin.</p>
-                    </div>
-
-                    <div>
-                        <label for="admin_password" class="mb-1 block text-sm font-semibold text-text-base">Password <span class="text-danger">*</span></label>
-                        <Input id="admin_password" v-model="form.admin_password" type="password" placeholder="Enter a password" required :aria-describedby="form.errors.admin_password ? 'admin_password-error' : 'admin_password-help'" />
-                        <p v-if="form.errors.admin_password" id="admin_password-error" class="mt-1 text-sm text-danger">{{ form.errors.admin_password }}</p>
-                        <p v-else id="admin_password-help" class="mt-1 text-xs text-text-muted">Use a strong password. Share it with the admin securely; they can change it after signing in.</p>
-                    </div>
-                </div>
-            </Card>
-
-            <Card variant="panel" title="Modules">
-                <p class="mb-3 text-sm text-text-muted">Features this company may use. Its owner can only give staff access to ticked modules. You can change this later.</p>
+            <FormSection title="Modules" description="Features this company may use. Its owner can only give staff access to ticked modules. You can change this later.">
                 <ModuleSelector v-model="form.enabled_modules" :catalog="moduleCatalog" id-prefix="create-module" :error="modulesError" />
-            </Card>
+            </FormSection>
 
-            <div class="flex gap-2">
+            <FormActions status="The workspace is set up in the background; it shows as Provisioning until ready.">
+                <Button :as="Link" href="/tenants" variant="secondary" tone="neutral">Cancel</Button>
                 <Button type="submit" variant="primary" tone="purple" :loading="form.processing">
                     <Plus class="size-4" />
                     Create tenant
                 </Button>
-                <Button :as="Link" href="/tenants" variant="secondary" tone="purple">Cancel</Button>
-            </div>
+            </FormActions>
         </form>
     </div>
 </template>

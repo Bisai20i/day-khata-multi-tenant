@@ -229,95 +229,157 @@ const columns = [
             </Button>
         </PageHeader>
 
-        <Card variant="panel" class="mb-4">
-            <div class="flex flex-wrap items-end gap-3">
-                <div class="min-w-[240px]">
-                    <label for="tenant-search" class="mb-1 block text-xs font-semibold text-text-muted">Search</label>
+        <Card variant="panel" class="bg-bg-surface p-0">
+            <div class="flex flex-col gap-3 border-b border-border p-4 md:flex-row md:items-end">
+                <div class="min-w-0 md:flex-1">
+                    <label for="tenant-search" class="mb-1.5 block text-xs font-semibold text-text-muted">Search</label>
                     <Input
                         id="tenant-search"
                         v-model="search"
+                        type="search"
                         :icon="Search"
                         placeholder="Company name, domain, or email"
                         @keyup.enter="applyFilters"
                     />
                 </div>
-                <div class="min-w-[180px]">
-                    <label class="mb-1 block text-xs font-semibold text-text-muted">Status</label>
+                <div class="md:w-52">
+                    <label class="mb-1.5 block text-xs font-semibold text-text-muted">Status</label>
                     <Select v-model="status" :options="statusOptions" placeholder="All statuses" />
                 </div>
-                <Button variant="primary" tone="purple" :loading="searching" @click="applyFilters">
-                    <Search class="size-4" />
-                    Search
-                </Button>
-                <Button v-if="hasFilters" variant="secondary" tone="purple" @click="clearFilters">
-                    <X class="size-4" />
-                    Clear filters
-                </Button>
-            </div>
-        </Card>
-
-        <Card variant="panel">
-            <div v-if="tenants.data.length === 0" class="flex flex-col items-center gap-3 py-10 text-center">
-                <p class="text-sm font-bold text-text-strong">
-                    {{ hasFilters ? 'No tenants match your filters' : 'No tenants yet' }}
-                </p>
-                <p class="text-sm text-text-muted">
-                    {{ hasFilters ? 'Try a different search or status.' : 'Create your first tenant to get started.' }}
-                </p>
-                <Button v-if="hasFilters" variant="secondary" tone="purple" @click="clearFilters">
-                    <X class="size-4" />
-                    Clear filters
-                </Button>
-                <Button v-else :as="Link" href="/tenants/create" variant="primary" tone="purple">
-                    <Plus class="size-4" />
-                    New tenant
-                </Button>
+                <div class="flex gap-2 [&>*]:flex-1 md:[&>*]:flex-none">
+                    <Button variant="primary" tone="purple" :loading="searching" @click="applyFilters">
+                        <Search class="size-4" />
+                        Search
+                    </Button>
+                    <Button v-if="hasFilters" variant="secondary" tone="neutral" @click="clearFilters">
+                        <X class="size-4" />
+                        Clear
+                    </Button>
+                </div>
             </div>
 
-            <template v-else>
-                <DataTable :columns="columns" :data="tenants.data" :page-size="Math.max(tenants.data.length, 1)" />
+            <div class="p-4">
+                <div v-if="tenants.data.length === 0" class="flex flex-col items-center gap-3 py-10 text-center">
+                    <p class="text-sm font-bold text-text-strong">
+                        {{ hasFilters ? 'No tenants match your filters' : 'No tenants yet' }}
+                    </p>
+                    <p class="text-sm text-text-muted">
+                        {{ hasFilters ? 'Try a different search or status.' : 'Create your first tenant to get started.' }}
+                    </p>
+                    <Button v-if="hasFilters" variant="secondary" tone="purple" @click="clearFilters">
+                        <X class="size-4" />
+                        Clear filters
+                    </Button>
+                    <Button v-else :as="Link" href="/tenants/create" variant="primary" tone="purple">
+                        <Plus class="size-4" />
+                        New tenant
+                    </Button>
+                </div>
 
-                <nav class="mt-3 flex flex-wrap items-center justify-between gap-3" aria-label="Tenants pagination">
-                    <p class="text-xs text-text-muted">Showing {{ tenants.from }}–{{ tenants.to }} of {{ tenants.total }}</p>
-                    <div class="flex items-center gap-2">
-                        <Button
-                            v-if="tenants.prev_page_url"
-                            :as="Link"
-                            :href="tenants.prev_page_url"
-                            preserve-state
-                            preserve-scroll
-                            variant="secondary"
-                            tone="purple"
-                            aria-label="Previous page"
-                        >
-                            <ChevronLeft class="size-4" aria-hidden="true" />
-                            Previous
-                        </Button>
-                        <Button v-else variant="secondary" tone="purple" disabled aria-label="Previous page">
-                            <ChevronLeft class="size-4" aria-hidden="true" />
-                            Previous
-                        </Button>
-                        <span class="text-xs text-text-muted">Page {{ tenants.current_page }} of {{ tenants.last_page }}</span>
-                        <Button
-                            v-if="tenants.next_page_url"
-                            :as="Link"
-                            :href="tenants.next_page_url"
-                            preserve-state
-                            preserve-scroll
-                            variant="secondary"
-                            tone="purple"
-                            aria-label="Next page"
-                        >
-                            Next
-                            <ChevronRight class="size-4" aria-hidden="true" />
-                        </Button>
-                        <Button v-else variant="secondary" tone="purple" disabled aria-label="Next page">
-                            Next
-                            <ChevronRight class="size-4" aria-hidden="true" />
-                        </Button>
+                <template v-else>
+                    <div class="hidden md:block">
+                        <DataTable :columns="columns" :data="tenants.data" :page-size="Math.max(tenants.data.length, 1)" hide-pagination />
                     </div>
-                </nav>
-            </template>
+
+                    <!-- Phones: one card per tenant instead of a sideways-scrolling table. -->
+                    <ul class="-mx-4 -mt-4 divide-y divide-border-soft md:hidden">
+                        <li v-for="tenant in tenants.data" :key="tenant.id" class="flex flex-col gap-2.5 px-4 py-4">
+                            <div class="flex items-start justify-between gap-3">
+                                <div class="min-w-0">
+                                    <Link :href="`/tenants/${tenant.id}`" class="text-sm font-bold break-words text-text-strong hover:text-primary">{{ tenant.company_name }}</Link>
+                                    <p class="text-xs break-all text-text-muted">{{ tenant.domain }}</p>
+                                </div>
+                                <span class="shrink-0 text-xs text-text-faint tabular-nums">{{ tenant.created_at }}</span>
+                            </div>
+                            <div class="flex flex-wrap gap-1.5">
+                                <Badge :variant="statusBadgeVariant[tenant.status] ?? 'neutral'" pill>{{ statusLabel[tenant.status] ?? tenant.status }}</Badge>
+                                <Badge v-if="tenant.past_grace_period" variant="danger" pill>Past grace period</Badge>
+                                <Badge v-if="tenant.trial_expired" variant="warning" pill>Trial expired</Badge>
+                            </div>
+                            <div class="flex gap-2 [&>*]:min-w-0 [&>*]:flex-1 [&>*]:px-2">
+                                <Button :as="Link" :href="`/tenants/${tenant.id}`" variant="secondary" tone="neutral" :aria-label="`View ${tenant.company_name}`">
+                                    <Eye class="hidden size-4 shrink-0 min-[400px]:block" aria-hidden="true" />
+                                    View
+                                </Button>
+                                <Button
+                                    v-if="tenant.status === 'active'"
+                                    variant="secondary"
+                                    tone="purple"
+                                    :loading="isRowActionLoading(tenant.id, 'impersonate')"
+                                    :aria-label="`Impersonate admin of ${tenant.company_name}`"
+                                    @click="impersonateRow(tenant)"
+                                >
+                                    <LogIn class="hidden size-4 shrink-0 min-[400px]:block" aria-hidden="true" />
+                                    Impersonate
+                                </Button>
+                                <Button
+                                    v-if="tenant.status === 'active'"
+                                    variant="secondary"
+                                    tone="danger"
+                                    :loading="isRowActionLoading(tenant.id, 'suspend')"
+                                    :aria-label="`Suspend ${tenant.company_name}`"
+                                    @click="suspendRow(tenant)"
+                                >
+                                    <CirclePause class="hidden size-4 shrink-0 min-[400px]:block" aria-hidden="true" />
+                                    Suspend
+                                </Button>
+                                <Button
+                                    v-else-if="tenant.status === 'suspended'"
+                                    variant="secondary"
+                                    tone="success"
+                                    :loading="isRowActionLoading(tenant.id, 'resume')"
+                                    :aria-label="`Resume ${tenant.company_name}`"
+                                    @click="resumeRow(tenant)"
+                                >
+                                    <CirclePlay class="hidden size-4 shrink-0 min-[400px]:block" aria-hidden="true" />
+                                    Resume
+                                </Button>
+                            </div>
+                        </li>
+                    </ul>
+
+                    <nav class="mt-4 flex flex-col gap-3 border-t border-border-soft pt-4 sm:flex-row sm:items-center sm:justify-between" aria-label="Tenants pagination">
+                        <p class="text-xs text-text-muted">Showing {{ tenants.from }}–{{ tenants.to }} of {{ tenants.total }}</p>
+                        <div class="flex items-center justify-between gap-2 sm:justify-end">
+                            <Button
+                                v-if="tenants.prev_page_url"
+                                :as="Link"
+                                :href="tenants.prev_page_url"
+                                preserve-state
+                                preserve-scroll
+                                variant="secondary"
+                                tone="purple"
+                                aria-label="Previous page"
+                            >
+                                <ChevronLeft class="size-4" aria-hidden="true" />
+                                Previous
+                            </Button>
+                            <Button v-else variant="secondary" tone="purple" disabled aria-label="Previous page">
+                                <ChevronLeft class="size-4" aria-hidden="true" />
+                                Previous
+                            </Button>
+                            <span class="text-xs whitespace-nowrap text-text-muted">Page {{ tenants.current_page }} of {{ tenants.last_page }}</span>
+                            <Button
+                                v-if="tenants.next_page_url"
+                                :as="Link"
+                                :href="tenants.next_page_url"
+                                preserve-state
+                                preserve-scroll
+                                variant="secondary"
+                                tone="purple"
+                                aria-label="Next page"
+                            >
+                                Next
+                                <ChevronRight class="size-4" aria-hidden="true" />
+                            </Button>
+                            <Button v-else variant="secondary" tone="purple" disabled aria-label="Next page">
+                                Next
+                                <ChevronRight class="size-4" aria-hidden="true" />
+                            </Button>
+                        </div>
+                    </nav>
+                </template>
+            </div>
         </Card>
     </div>
 </template>

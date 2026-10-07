@@ -133,3 +133,34 @@ test('the subdomain must be unique across tenants', function () {
 
     expect(Tenant::count())->toBe(1);
 });
+
+test('new tenant domains are created under the configured tenant base domain', function () {
+    Mail::fake();
+    config(['tenancy.tenant_base_domain' => 'daykhata.example']);
+
+    $admin = PlatformAdmin::factory()->create();
+
+    $this->actingAs($admin, 'platform')->post(route('central.tenants.store'), [
+        'company_name' => 'Base Co',
+        'subdomain' => 'BaseCo',
+        'admin_name' => 'Base Admin',
+        'admin_email' => 'admin@base.test',
+        'admin_password' => 'password123',
+    ])->assertSessionHasNoErrors();
+
+    $tenant = Tenant::where('company_name', 'Base Co')->firstOrFail();
+
+    expect($tenant->domains()->pluck('domain')->all())->toBe(['baseco.daykhata.example']);
+});
+
+test('the create tenant page shares the tenant base domain for the subdomain field', function () {
+    config(['tenancy.tenant_base_domain' => 'daykhata.example']);
+
+    $admin = PlatformAdmin::factory()->create();
+
+    $this->actingAs($admin, 'platform')
+        ->get(route('central.tenants.create'))
+        ->assertInertia(fn ($page) => $page
+            ->component('Central/Tenants/Create')
+            ->where('tenantBaseDomain', 'daykhata.example'));
+});
