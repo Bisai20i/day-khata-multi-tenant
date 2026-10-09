@@ -1,6 +1,7 @@
 <script setup>
 import { h, ref, watch } from 'vue';
 import { router, useForm, usePage } from '@inertiajs/vue3';
+import { Plus } from '@lucide/vue';
 import AppLayout from '@/layouts/AppLayout.vue';
 import { useLayoutChrome } from '@/composables/useLayoutChrome';
 import PageHeader from '@/components/ui/PageHeader.vue';
@@ -10,6 +11,7 @@ import Badge from '@/components/ui/Badge.vue';
 import DataTable from '@/components/ui/DataTable.vue';
 import Modal from '@/components/ui/Modal.vue';
 import Input from '@/components/ui/Input.vue';
+import InfoTip from '@/components/ui/InfoTip.vue';
 import RowActions from '@/components/ui/RowActions.vue';
 import { useToast } from '@/composables/useToast';
 import { useConfirm } from '@/composables/useConfirm';
@@ -148,7 +150,10 @@ const columns = [
 <template>
     <div>
         <PageHeader title="Brands" description="Brands: manufacturers or labels your items belong to, used to group and filter items.">
-            <Button v-if="can('brands.manage')" variant="primary" tone="purple" @click="openCreate">New brand</Button>
+            <Button v-if="can('brands.manage')" variant="primary" tone="purple" @click="openCreate">
+                <Plus class="size-4" />
+                New brand
+            </Button>
         </PageHeader>
 
         <Card variant="panel">
@@ -169,7 +174,10 @@ const columns = [
                 </div>
 
                 <div>
-                    <label for="logo" class="mb-1 block text-sm font-semibold text-text-base">Logo</label>
+                    <div class="mb-1 flex items-center gap-1">
+                        <label for="logo" class="block text-sm font-semibold text-text-base">Logo</label>
+                        <InfoTip text="JPEG, PNG, or WebP up to 2MB." />
+                    </div>
                     <div class="flex items-center gap-3">
                         <img
                             v-if="logoPreviewUrl"
@@ -185,14 +193,13 @@ const columns = [
                             @change="onLogoChange"
                         />
                     </div>
-                    <p class="mt-1 text-xs text-text-faint">JPEG, PNG, or WebP up to 2MB.</p>
                     <p v-if="form.errors.logo" class="mt-1 text-sm text-danger">{{ form.errors.logo }}</p>
                 </div>
 
                 <div class="flex items-center gap-2">
                     <input id="is_active" v-model="form.is_active" type="checkbox" class="size-4 border-[1.5px] border-border" />
                     <label for="is_active" class="text-sm font-semibold text-text-base">Active</label>
-                    <span class="text-xs text-text-faint">(inactive brands are hidden from item forms)</span>
+                    <InfoTip text="Inactive brands are hidden from item forms." />
                 </div>
             </form>
 

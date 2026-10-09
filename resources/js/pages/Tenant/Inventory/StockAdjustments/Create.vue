@@ -6,6 +6,7 @@ import Card from '@/components/ui/Card.vue';
 import Button from '@/components/ui/Button.vue';
 import Input from '@/components/ui/Input.vue';
 import Select from '@/components/ui/Select.vue';
+import InfoTip from '@/components/ui/InfoTip.vue';
 import Combobox from '@/components/ui/Combobox.vue';
 import NepaliDateInput from '@/components/ui/NepaliDateInput.vue';
 import { usePermissions } from '@/composables/usePermissions';
@@ -280,14 +281,16 @@ function submit() {
                     <p v-if="form.errors.note" class="mt-1 text-sm text-danger">{{ form.errors.note }}</p>
                 </div>
                 <div>
-                    <label class="mb-1 block text-sm font-semibold text-text-base">Store</label>
+                    <div class="mb-1 flex items-center gap-1">
+                        <label class="block text-sm font-semibold text-text-base">Store</label>
+                        <InfoTip text="The store whose stock is adjusted. Blank uses your default store." />
+                    </div>
                     <Combobox
                         :model-value="form.store_id"
                         :options="storeOptions"
                         placeholder="Default store"
                         @update:model-value="(v) => (form.store_id = v)"
                     />
-                    <p class="mt-1 text-xs text-text-faint">The store whose stock is adjusted. Blank uses your default store.</p>
                     <p v-if="form.errors.store_id" class="mt-1 text-sm text-danger">{{ form.errors.store_id }}</p>
                 </div>
             </div>
@@ -297,9 +300,15 @@ function submit() {
                     <span>Item <span class="text-danger">*</span></span>
                     <span>Unit</span>
                     <span>Direction</span>
-                    <span>Reason <span class="text-danger">*</span></span>
+                    <span class="flex items-center gap-1">
+                        <span>Reason <span class="text-danger">*</span></span>
+                        <InfoTip text="Reason explains why stock changed. Damage and Lost lines carry no value; Opening stock is always added." />
+                    </span>
                     <span>Quantity <span class="text-danger">*</span></span>
-                    <span>Unit cost</span>
+                    <span class="flex items-center gap-1">
+                        Unit cost
+                        <InfoTip text="Unit cost is the cost per unit, used to value added stock (optional)." />
+                    </span>
                     <span>Remarks</span>
                     <span></span>
                 </div>
@@ -365,10 +374,6 @@ function submit() {
                     </button>
                 </div>
 
-                <p class="mb-2 text-xs text-text-faint">
-                    Reason explains why stock changed. Damage and Lost lines carry no value; Opening stock is always added.
-                    Unit cost is the cost per unit, used to value added stock (optional).
-                </p>
                 <Button variant="secondary" tone="purple" type="button" class="mt-1" @click="addLine">
                     <Plus class="h-3.5 w-3.5" /> Add line
                 </Button>

@@ -2,7 +2,7 @@
 <html>
 <head>
 <meta charset="utf-8">
-<title>Receipt {{ $documentNumber }}</title>
+<title>{{ ($isEstimate ?? false) ? 'Estimate' : 'Receipt '.$documentNumber }}</title>
 <style>
     {{--
         Lightweight narrow single-column thermal layout - deliberately does
@@ -142,6 +142,9 @@
     $buyerPan = $sale->buyer_pan ?? $sale->customer->tpin;
 
     $printCopyNumber = max(1, (int) ($copyNumber ?? 1));
+    // An unposted cart from SaleController::estimate(): same roll, but titled
+    // and stamped so it cannot pass for an issued invoice.
+    $isEstimate = $isEstimate ?? false;
     $printDateBs = $dateBs ?? \App\Support\NepaliCalendar::formatBs($documentDate);
 @endphp
     <div class="center">
@@ -158,10 +161,10 @@
         {{-- A thermal roll is still a legal document: a full tax invoice has
              to say so on its face, not just be titled "Receipt". --}}
         <div class="doc-title">
-            {{ $isAbbreviated ? 'Abbreviated Tax Invoice' : ($isPan ? 'PAN Invoice' : 'Tax Invoice') }}
+            {{ $isEstimate ? 'Estimate' : ($isAbbreviated ? 'Abbreviated Tax Invoice' : ($isPan ? 'PAN Invoice' : 'Tax Invoice')) }}
         </div>
         <div class="copy-stamp">
-            {{ $printCopyNumber > 1 ? 'Copy of Original - '.($printCopyNumber - 1) : 'Original' }}
+            {{ $isEstimate ? 'Not a Tax Invoice' : ($printCopyNumber > 1 ? 'Copy of Original - '.($printCopyNumber - 1) : 'Original') }}
         </div>
     </div>
 

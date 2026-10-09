@@ -172,7 +172,7 @@ function onHeaderKeydown(event, column) {
                                 v-for="cell in row.getAllCells()"
                                 :key="cell.id"
                                 :class="cn(
-                                    'border-y-[1.5px] border-border bg-white px-[9px] py-2 align-middle transition-colors duration-150 ease-out first:border-l-[1.5px] last:border-r-[1.5px] group-hover:border-[#C4B5FD] group-hover:shadow-[0_4px_16px_rgba(102,0,255,.15)]',
+                                    'border-y-[1.5px] border-border bg-white px-[9px] py-2 align-middle transition-colors duration-150 ease-out first:border-l-[1.5px] last:border-r-[1.5px] group-hover:border-[#C4B5FD] group-hover:shadow-[0_2px_6px_rgba(102,0,255,.07)]',
                                     isNumeric(cell.column.id) ? 'text-right [font-variant-numeric:tabular-nums]' : 'text-left',
                                 )"
                             >

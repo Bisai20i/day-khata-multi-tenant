@@ -5,6 +5,7 @@ import { Plus, X } from '@lucide/vue';
 import Button from '@/components/ui/Button.vue';
 import Input from '@/components/ui/Input.vue';
 import Combobox from '@/components/ui/Combobox.vue';
+import InfoTip from '@/components/ui/InfoTip.vue';
 import Select from '@/components/ui/Select.vue';
 import NepaliDateInput from '@/components/ui/NepaliDateInput.vue';
 import { addMoney, formatMoney, formatQuantity, moneyEquals, parseMoney } from '@/lib/money';
@@ -294,7 +295,12 @@ function submit() {
         </div>
 
         <div>
-            <h4 class="mb-2 border-b-[1.5px] border-border pb-1 text-sm font-bold text-text-strong">Items to return <span class="text-danger">*</span></h4>
+            <div class="mb-2 flex items-center gap-1 border-b-[1.5px] border-border pb-1">
+                <h4 class="text-sm font-bold text-text-strong">Items to return <span class="text-danger">*</span></h4>
+                <InfoTip
+                    text="Leave the rate blank to value a line at the item's weighted average cost on the return date. Quantities are in the unit picked on that line."
+                />
+            </div>
             <div class="mb-2 grid grid-cols-[1fr_180px_120px_140px_120px_40px] gap-2 text-[10px] font-bold tracking-[.8px] text-text-muted uppercase">
                 <span>Item</span>
                 <span>Unit</span>
@@ -339,18 +345,16 @@ function submit() {
                 <Plus class="size-4" aria-hidden="true" />
                 Add another item
             </Button>
-
-            <p class="mt-2 text-xs text-text-muted">
-                Leave the rate blank to value a line at the item's weighted average cost on the return date. Quantities are in the unit picked on that line.
-            </p>
         </div>
 
         <h4 class="border-b-[1.5px] border-border pb-1 text-sm font-bold text-text-strong">Refund</h4>
         <div class="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
             <div>
-                <label class="mb-1 block text-sm font-semibold text-text-base">Refund received as <span class="text-danger">*</span></label>
+                <div class="mb-1 flex items-center gap-1">
+                    <label class="block text-sm font-semibold text-text-base">Refund received as <span class="text-danger">*</span></label>
+                    <InfoTip v-if="form.payment_mode === 'credit'" text="Reduces what you owe this supplier. No money changes hands now." />
+                </div>
                 <Select :model-value="form.payment_mode" :options="refundModeOptions" @update:model-value="(v) => (form.payment_mode = v)" />
-                <p v-if="form.payment_mode === 'credit'" class="mt-1 text-xs text-text-muted">Reduces what you owe this supplier. No money changes hands now.</p>
                 <p v-if="form.errors.payment_mode" class="mt-1 text-sm text-danger">{{ form.errors.payment_mode }}</p>
             </div>
             <div v-if="needsBank">

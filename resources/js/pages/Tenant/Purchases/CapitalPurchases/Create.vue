@@ -8,6 +8,7 @@ import Button from '@/components/ui/Button.vue';
 import Input from '@/components/ui/Input.vue';
 import Select from '@/components/ui/Select.vue';
 import Combobox from '@/components/ui/Combobox.vue';
+import InfoTip from '@/components/ui/InfoTip.vue';
 import NepaliDateInput from '@/components/ui/NepaliDateInput.vue';
 import { addMoney, calculateDocument, formatMoney, moneyEquals, parseMoney } from '@/lib/money';
 import { todayInKathmandu } from '@/lib/format';
@@ -212,9 +213,11 @@ function submit() {
             <h4 class="border-b-[1.5px] border-border pb-1 text-sm font-bold text-text-strong">Supplier &amp; date</h4>
             <div class="grid grid-cols-1 gap-4 sm:grid-cols-3">
                 <div>
-                    <label class="mb-1 block text-sm font-semibold text-text-base">Purchase date (BS) <span class="text-danger">*</span></label>
+                    <div class="mb-1 flex items-center gap-1">
+                        <label class="block text-sm font-semibold text-text-base">Purchase date (BS) <span class="text-danger">*</span></label>
+                        <InfoTip text="Bikram Sambat date on the supplier's bill." />
+                    </div>
                     <NepaliDateInput v-model="form.date" required />
-                    <p class="mt-1 text-xs text-text-faint">Bikram Sambat date on the supplier's bill.</p>
                     <p v-if="form.errors.date" class="mt-1 text-sm text-danger">{{ form.errors.date }}</p>
                 </div>
                 <div>
@@ -222,16 +225,18 @@ function submit() {
                     <Select :model-value="form.type" :options="typeOptions" @update:model-value="(v) => (form.type = v)" />
                 </div>
                 <div>
-                    <label class="mb-1 block text-sm font-semibold text-text-base">
-                        Supplier <span v-if="supplierRequired" class="text-danger">*</span>
-                    </label>
+                    <div class="mb-1 flex items-center gap-1">
+                        <label class="block text-sm font-semibold text-text-base">
+                            Supplier <span v-if="supplierRequired" class="text-danger">*</span>
+                        </label>
+                        <InfoTip text="Required when you pay on credit or part-pay." />
+                    </div>
                     <Combobox
                         :model-value="form.supplier_id"
                         :options="supplierOptions"
                         placeholder="Optional unless credit/partial"
                         @update:model-value="(v) => (form.supplier_id = v)"
                     />
-                    <p class="mt-1 text-xs text-text-faint">Required when you pay on credit or part-pay.</p>
                     <p v-if="form.errors.supplier_id" class="mt-1 text-sm text-danger">{{ form.errors.supplier_id }}</p>
                 </div>
                 <div>
@@ -336,10 +341,13 @@ function submit() {
                     <!-- Asset register (item 5): a "capital" line may optionally create its
                          own tracked, depreciating FixedAsset using this line's cost and date. -->
                     <div v-if="form.type === 'capital'" class="mt-1.5 pl-1">
-                        <label class="flex items-center gap-1.5 text-xs text-text-muted">
-                            <input v-model="line.create_asset" type="checkbox" class="size-4 border-[1.5px] border-border" />
-                            Register as a fixed asset
-                        </label>
+                        <div class="flex items-center gap-1">
+                            <label class="flex items-center gap-1.5 text-xs text-text-muted">
+                                <input v-model="line.create_asset" type="checkbox" class="size-4 border-[1.5px] border-border" />
+                                Register as a fixed asset
+                            </label>
+                            <InfoTip text="The account for this line must be filed under &quot;Fixed Assets&quot;." />
+                        </div>
 
                         <div v-if="line.create_asset" class="mt-2 grid grid-cols-4 gap-2">
                             <div>
@@ -376,9 +384,6 @@ function submit() {
                                 <Input v-model="line.salvage_value" type="number" min="0" step="0.01" inputmode="decimal" placeholder="0.00" />
                             </div>
                         </div>
-                        <p class="mt-1 text-[11px] text-text-muted">
-                            The account for this line must be filed under "Fixed Assets".
-                        </p>
                     </div>
                 </div>
 
@@ -390,9 +395,11 @@ function submit() {
             <h4 class="border-b-[1.5px] border-border pb-1 text-sm font-bold text-text-strong">Charges &amp; notes</h4>
             <div class="grid grid-cols-1 gap-4 sm:grid-cols-3">
                 <div>
-                    <label class="mb-1 block text-sm font-semibold text-text-base">VAT rate (%) <span class="text-danger">*</span></label>
+                    <div class="mb-1 flex items-center gap-1">
+                        <label class="block text-sm font-semibold text-text-base">VAT rate (%) <span class="text-danger">*</span></label>
+                        <InfoTip text="Charged only on rows ticked Taxable." />
+                    </div>
                     <Select :model-value="form.vat_rate" :options="vatRateOptions" @update:model-value="(v) => (form.vat_rate = v)" />
-                    <p class="mt-1 text-xs text-text-faint">Charged only on rows ticked Taxable.</p>
                     <p v-if="form.errors.vat_rate" class="mt-1 text-sm text-danger">{{ form.errors.vat_rate }}</p>
                 </div>
                 <div class="sm:col-span-2">

@@ -51,7 +51,7 @@ function onInput(event) {
                 'h-9 w-full px-3 text-[13px] text-text-base outline-none placeholder:text-text-faint',
                 $slots.addon
                     ? 'border-0 bg-transparent'
-                    : 'border-[1.5px] border-border bg-bg-subtle transition-colors duration-150 focus:border-primary focus:bg-white focus:[box-shadow:0_0_0_3px_var(--color-primary-focus-ring)] disabled:cursor-not-allowed disabled:opacity-50',
+                    : 'border-[1.5px] border-border bg-bg-subtle transition-colors duration-150 focus:border-primary focus:bg-white focus:[box-shadow:0_0_0_3px_var(--color-primary-focus-ring)] disabled:cursor-not-allowed disabled:opacity-50 aria-invalid:border-danger',
                 icon ? 'pl-[28px]' : '',
                 props.class,
             )"

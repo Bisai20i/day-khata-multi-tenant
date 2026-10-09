@@ -7,6 +7,7 @@ import PageHeader from '@/components/ui/PageHeader.vue';
 import Card from '@/components/ui/Card.vue';
 import Select from '@/components/ui/Select.vue';
 import Button from '@/components/ui/Button.vue';
+import InfoTip from '@/components/ui/InfoTip.vue';
 import NepaliDateInput from '@/components/ui/NepaliDateInput.vue';
 import DataTable from '@/components/ui/DataTable.vue';
 import { usePermissions } from '@/composables/usePermissions';
@@ -150,7 +151,10 @@ const columns = [
         <Card variant="panel" class="mb-4">
             <div class="flex flex-wrap items-end gap-3">
                 <div>
-                    <label class="mb-1 block text-xs font-semibold text-text-muted">From date</label>
+                    <div class="mb-1 flex items-center gap-1">
+                        <label class="block text-xs font-semibold text-text-muted">From date</label>
+                        <InfoTip text="With no dates the current fiscal year is shown. The opening balance is the stock on hand the day before your From date." />
+                    </div>
                     <NepaliDateInput v-model="from" />
                 </div>
                 <div>
@@ -164,7 +168,6 @@ const columns = [
                 <Button variant="primary" tone="purple" @click="applyFilters">Apply filters</Button>
                 <Button v-if="hasExplicitFilters" variant="secondary" tone="purple" @click="clearFilters">Clear filters</Button>
             </div>
-            <p class="mt-2 text-xs text-text-muted">With no dates the current fiscal year is shown. The opening balance is the stock on hand the day before your From date.</p>
         </Card>
 
         <Card variant="panel" class="mb-4">

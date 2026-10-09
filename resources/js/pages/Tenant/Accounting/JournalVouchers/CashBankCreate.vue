@@ -8,6 +8,7 @@ import Input from '@/components/ui/Input.vue';
 import Combobox from '@/components/ui/Combobox.vue';
 import Select from '@/components/ui/Select.vue';
 import NepaliDateInput from '@/components/ui/NepaliDateInput.vue';
+import InfoTip from '@/components/ui/InfoTip.vue';
 import JournalVoucherTotalsBar from '@/components/accounting/JournalVoucherTotalsBar.vue';
 import { useConfirm } from '@/composables/useConfirm';
 import { isZeroMoney, parseMoney, sumMoney } from '@/lib/money';
@@ -187,17 +188,19 @@ function submit(print = false) {
         <Card variant="panel" title="Voucher details" class="!p-4">
             <div class="grid grid-cols-1 gap-4 sm:grid-cols-3">
                 <div>
-                    <label class="mb-1 block text-sm font-semibold text-text-base">Voucher type <span class="text-danger" aria-hidden="true">*</span></label>
+                    <div class="mb-1 flex items-center gap-1">
+                        <label class="block text-sm font-semibold text-text-base">Voucher type <span class="text-danger" aria-hidden="true">*</span></label>
+                        <InfoTip
+                            :text="
+                                isContra
+                                    ? 'Moves money from one cash/bank account to another.'
+                                    : isReceipt
+                                      ? 'Money coming in, to ' + (isBank ? 'a bank account.' : 'cash in hand.')
+                                      : 'Money going out, from ' + (isBank ? 'a bank account.' : 'cash in hand.')
+                            "
+                        />
+                    </div>
                     <Select v-model="form.voucher_type" :options="voucherTypeOptions" />
-                    <p class="mt-1 text-xs text-text-muted">
-                        {{
-                            isContra
-                                ? 'Moves money from one cash/bank account to another.'
-                                : isReceipt
-                                  ? 'Money coming in, to ' + (isBank ? 'a bank account.' : 'cash in hand.')
-                                  : 'Money going out, from ' + (isBank ? 'a bank account.' : 'cash in hand.')
-                        }}
-                    </p>
                 </div>
                 <div>
                     <label class="mb-1 block text-sm font-semibold text-text-base">Date (BS) <span class="text-danger" aria-hidden="true">*</span></label>
@@ -205,9 +208,11 @@ function submit(print = false) {
                     <p v-if="form.errors.date" class="mt-1 text-sm text-danger" role="alert">{{ form.errors.date }}</p>
                 </div>
                 <div>
-                    <label class="mb-1 block text-sm font-semibold text-text-base">Narration <span class="text-danger" aria-hidden="true">*</span></label>
+                    <div class="mb-1 flex items-center gap-1">
+                        <label class="block text-sm font-semibold text-text-base">Narration <span class="text-danger" aria-hidden="true">*</span></label>
+                        <InfoTip text="What this voucher is for, shown in the ledger." />
+                    </div>
                     <Input v-model="form.narration" type="text" placeholder="Describe this transaction" required />
-                    <p class="mt-1 text-xs text-text-muted">What this voucher is for, shown in the ledger.</p>
                     <p v-if="form.errors.narration" class="mt-1 text-sm text-danger" role="alert">{{ form.errors.narration }}</p>
                 </div>
             </div>

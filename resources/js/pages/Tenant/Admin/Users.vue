@@ -1,7 +1,7 @@
 <script setup>
 import { computed, h, ref, watch } from 'vue';
 import { useForm, usePage } from '@inertiajs/vue3';
-import { Crown, Pencil } from '@lucide/vue';
+import { Crown, Pencil, Plus } from '@lucide/vue';
 import AppLayout from '@/layouts/AppLayout.vue';
 import { useLayoutChrome } from '@/composables/useLayoutChrome';
 import Card from '@/components/ui/Card.vue';
@@ -12,6 +12,7 @@ import Modal from '@/components/ui/Modal.vue';
 import DataTable from '@/components/ui/DataTable.vue';
 import Badge from '@/components/ui/Badge.vue';
 import Tooltip from '@/components/ui/Tooltip.vue';
+import InfoTip from '@/components/ui/InfoTip.vue';
 import PageHeader from '@/components/ui/PageHeader.vue';
 import { useToast } from '@/composables/useToast';
 import { useConfirm } from '@/composables/useConfirm';
@@ -270,7 +271,10 @@ const columns = [
 <template>
     <div>
         <PageHeader title="Employees" description="People who can sign in to your company. Each employee's role controls what they can see and do.">
-            <Button variant="primary" tone="purple" @click="openCreate">New employee</Button>
+            <Button variant="primary" tone="purple" @click="openCreate">
+                <Plus class="size-4" />
+                New employee
+            </Button>
         </PageHeader>
 
         <Card variant="panel">
@@ -292,25 +296,35 @@ const columns = [
                 </div>
 
                 <div>
-                    <label for="role_id" class="mb-1 block text-sm font-semibold text-text-base">Role <span class="text-danger">*</span></label>
+                    <div class="mb-1 flex items-center gap-1">
+                        <label for="role_id" class="block text-sm font-semibold text-text-base">Role <span class="text-danger">*</span></label>
+                        <InfoTip
+                            v-if="!roleAndStatusLocked"
+                            text="The role decides which screens and actions this employee can use. You can only give roles whose permissions you hold yourself."
+                        />
+                    </div>
                     <Select id="role_id" v-model="form.role_id" :options="roleOptions" placeholder="Select role" :disabled="roleAndStatusLocked" />
                     <p v-if="roleAndStatusLocked" class="mt-1 text-xs text-text-faint">{{ roleLockReason }}</p>
-                    <p v-else class="mt-1 text-xs text-text-faint">The role decides which screens and actions this employee can use. You can only give roles whose permissions you hold yourself.</p>
                     <p v-if="form.errors.role_id" class="mt-1 text-sm text-danger">{{ form.errors.role_id }}</p>
                 </div>
 
                 <div v-if="editing">
-                    <label for="is_active" class="mb-1 block text-sm font-semibold text-text-base">Status <span class="text-danger">*</span></label>
+                    <div class="mb-1 flex items-center gap-1">
+                        <label for="is_active" class="block text-sm font-semibold text-text-base">Status <span class="text-danger">*</span></label>
+                        <InfoTip text="Inactive employees cannot sign in." />
+                    </div>
                     <Select id="is_active" v-model="isActiveOption" :options="statusOptions" :disabled="roleAndStatusLocked" />
-                    <p class="mt-1 text-xs text-text-faint">Inactive employees cannot sign in.</p>
                     <p v-if="form.errors.is_active" class="mt-1 text-sm text-danger">{{ form.errors.is_active }}</p>
                 </div>
 
                 <div>
-                    <label for="password" class="mb-1 block text-sm font-semibold text-text-base">
-                        {{ editing ? 'New password (leave blank to keep current)' : 'Password' }}
-                        <span v-if="!editing" class="text-danger">*</span>
-                    </label>
+                    <div class="mb-1 flex items-center gap-1">
+                        <label for="password" class="block text-sm font-semibold text-text-base">
+                            {{ editing ? 'New password (leave blank to keep current)' : 'Password' }}
+                            <span v-if="!editing" class="text-danger">*</span>
+                        </label>
+                        <InfoTip text="At least 8 characters." />
+                    </div>
                     <Input
                         id="password"
                         v-model="form.password"
@@ -318,7 +332,6 @@ const columns = [
                         :placeholder="editing ? 'Leave blank to keep current' : 'Enter a password'"
                         :required="!editing"
                     />
-                    <p class="mt-1 text-xs text-text-faint">At least 8 characters.</p>
                     <p v-if="form.errors.password" class="mt-1 text-sm text-danger">{{ form.errors.password }}</p>
                 </div>
 

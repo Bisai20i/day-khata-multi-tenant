@@ -26,6 +26,7 @@ import Button from '@/components/ui/Button.vue';
 import Input from '@/components/ui/Input.vue';
 import Modal from '@/components/ui/Modal.vue';
 import PageHeader from '@/components/ui/PageHeader.vue';
+import InfoTip from '@/components/ui/InfoTip.vue';
 import { useToast } from '@/composables/useToast';
 import { useConfirm } from '@/composables/useConfirm';
 import EditDomainModal from './EditDomainModal.vue';
@@ -383,7 +384,10 @@ function removeDomain(domain) {
 
                 <Card v-if="isOwner" variant="panel" title="Trial end date" class="bg-bg-surface p-4 sm:p-5">
                     <form @submit.prevent="updateTrial">
-                        <label for="trial_ends_at" class="mb-1.5 block text-[13px] font-semibold text-text-base">Trial ends on</label>
+                        <div class="mb-1.5 flex items-center gap-1">
+                            <label for="trial_ends_at" class="block text-[13px] font-semibold text-text-base">Trial ends on</label>
+                            <InfoTip text="Leave blank to remove the trial expiry." />
+                        </div>
                         <div class="flex flex-col gap-2 sm:flex-row lg:flex-col xl:flex-row">
                             <Input
                                 id="trial_ends_at"
@@ -397,7 +401,7 @@ function removeDomain(domain) {
                             </Button>
                         </div>
                         <p v-if="trialForm.errors.trial_ends_at" id="trial_ends_at-error" class="mt-1.5 text-sm text-danger" role="alert">{{ trialForm.errors.trial_ends_at }}</p>
-                        <p v-else id="trial_ends_at-help" class="mt-1.5 text-xs text-text-muted">Leave blank to remove the trial expiry.</p>
+                        <p v-else id="trial_ends_at-help" class="sr-only">Leave blank to remove the trial expiry.</p>
                     </form>
                 </Card>
 

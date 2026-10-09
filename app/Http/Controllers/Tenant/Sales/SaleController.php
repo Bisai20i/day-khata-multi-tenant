@@ -2,12 +2,14 @@
 
 namespace App\Http\Controllers\Tenant\Sales;
 
+use App\Enums\FiscalYearStatus;
 use App\Exports\SalesExport;
 use App\Http\Controllers\Controller;
 use App\Models\Account;
 use App\Models\Agent;
 use App\Models\CompanySetting;
 use App\Models\Customer;
+use App\Models\FiscalYear;
 use App\Models\Item;
 use App\Models\PrintLog;
 use App\Models\Sale;
@@ -18,6 +20,7 @@ use App\Support\Billing\BillingException;
 use App\Support\Money\Money;
 use App\Support\NepaliCalendar;
 use Barryvdh\DomPDF\Facade\Pdf;
+use Barryvdh\DomPDF\PDF as DomPdf;
 use Brick\Math\BigDecimal;
 use Illuminate\Auth\Access\AuthorizationException;
 use Illuminate\Database\Eloquent\Builder;
@@ -492,13 +495,6 @@ class SaleController extends Controller
         $company = CompanySetting::current();
         $copies = min(max($request->integer('copies', 1), 1), self::MAX_PRINT_COPIES);
 
-        // Thermal paper sizes get a lightweight narrow-column receipt layout
-        // instead of the full A4/A5 letterhead invoice - dompdf has no
-        // built-in 58mm/80mm paper preset, so the width is passed as an
-        // explicit [x1, y1, x2, y2] point box (1mm ~ 2.83pt) with a generous
-        // unbounded height for a continuous thermal roll.
-        $isThermal = in_array($company->print_paper_size, ['58mm', '80mm'], true);
-
         $viewData = [
             'sale' => $sale,
             'company' => $company,
@@ -514,19 +510,90 @@ class SaleController extends Controller
 
         for ($copy = 0; $copy < $copies; $copy++) {
             $rendered[] = view(
-                $isThermal ? 'pdf.sale-receipt' : 'pdf.sale',
+                $this->saleView($company),
                 $viewData + ['copyNumber' => PrintLog::record($sale, $request->user())],
             )->render();
         }
 
+        return $this->salePdf($rendered, $company)->stream("sale-{$sale->id}.pdf");
+    }
+
+    /**
+     * The POS "Estimate" preview: the bill this cart would become, rendered
+     * through the very same views as print() above but from an unsaved
+     * Sale::estimate(), so the customer sees the layout and the figures the
+     * invoice will carry.
+     *
+     * It is not an invoice and must not pass for one: nothing is posted, no
+     * invoice number exists yet (the series stays gapless), no print-log row
+     * is written, and the views swap the title and the Original/Copy stamp
+     * for an "Estimate" marking via `isEstimate`.
+     */
+    public function estimate(Request $request): HttpResponse
+    {
+        $data = $request->validate(Arr::only($this->storeRules(), [
+            'customer_id', 'chalani_number', 'date', 'discount', 'discount_type',
+            'cash_amount', 'bank_amount', 'tds_amount', 'narration',
+            'lines', 'lines.*.item_id', 'lines.*.item_unit_id', 'lines.*.quantity', 'lines.*.rate',
+            'lines.*.discount', 'lines.*.discount_type', 'lines.*.bonus_quantity',
+        ]) + ['payment_mode' => ['nullable', 'in:cash,bank,partial,credit']]);
+
+        try {
+            $sale = Sale::estimate(Arr::except($data, ['lines']), $data['lines']);
+        } catch (InvalidArgumentException $e) {
+            throw ValidationException::withMessages(['lines' => $e->getMessage()]);
+        }
+
+        $company = CompanySetting::current();
+
+        $html = view($this->saleView($company), [
+            'sale' => $sale,
+            'company' => $company,
+            'documentNumber' => '-',
+            'documentDate' => $sale->date->format('Y-m-d'),
+            'dateAd' => $sale->date->format('Y-m-d'),
+            'dateBs' => NepaliCalendar::formatBs($sale->date),
+            // The year the bill would be posted into (JournalVoucher::post()).
+            'fiscalYearName' => FiscalYear::query()->where('status', FiscalYearStatus::Open)->value('name'),
+            'amountInWords' => AmountInWords::rupees(Money::of($sale->total)),
+            'isEstimate' => true,
+        ])->render();
+
+        return $this->salePdf([$html], $company)->stream('estimate.pdf');
+    }
+
+    /**
+     * Thermal paper sizes get a lightweight narrow-column receipt layout
+     * instead of the full A4/A5 letterhead invoice.
+     */
+    private function saleView(CompanySetting $company): string
+    {
+        return $this->isThermal($company) ? 'pdf.sale-receipt' : 'pdf.sale';
+    }
+
+    private function isThermal(CompanySetting $company): bool
+    {
+        return in_array($company->print_paper_size, ['58mm', '80mm'], true);
+    }
+
+    /**
+     * One PDF from the rendered copies. dompdf has no built-in 58mm/80mm
+     * paper preset, so the thermal width is passed as an explicit
+     * [x1, y1, x2, y2] point box (1mm ~ 2.83pt) with a generous unbounded
+     * height for a continuous thermal roll.
+     *
+     * @param  list<string>  $rendered
+     */
+    private function salePdf(array $rendered, CompanySetting $company): DomPdf
+    {
         $pdf = Pdf::loadHTML($this->stitchedCopies($rendered));
 
-        if ($isThermal) {
+        if ($this->isThermal($company)) {
             $width = $company->print_paper_size === '58mm' ? 164 : 227;
             $pdf->setPaper([0, 0, $width, 2000]);
         }
 
-        return $pdf->stream("sale-{$sale->id}.pdf");
+        return $pdf;
     }
 
     /**

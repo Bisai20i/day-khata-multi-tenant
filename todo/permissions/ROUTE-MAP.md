@@ -426,11 +426,12 @@ vat-summary 2, stock-movement-register 1, sales-with-note 1, damage-lost-stock 1
 |---|---|---|---|---|
 | tenant.activity-log.index | GET /activity-log | ActivityLogController@index | admin | activity_log.view |
 
-### routes/tenant-pos.php (1)
+### routes/tenant-pos.php (2)
 
 | route name | method + URI | controller@method | gated today | proposed key |
 |---|---|---|---|---|
 | tenant.pos.index | GET /pos | PosController@index | any auth | pos.view |
+| tenant.pos.estimate | POST /pos/estimate | SaleController@estimate | new | pos.view |
 
 ### routes/tenant-fiscal-year-archive.php (3, group `role:admin`)
 
@@ -474,7 +475,7 @@ Route definitions counted per file (explicit `Route::get/post/put/delete` calls,
 | tenant-receipts.php | 4 | tenant-payments.php | 3 |
 | tenant-item-varieties.php | 4 | tenant-backups.php | 4 |
 | tenant-notices.php | 4 | tenant-activity-log.php | 1 |
-| tenant-pos.php | 1 | tenant-fiscal-year-archive.php | 3 |
+| tenant-pos.php | 2 | tenant-fiscal-year-archive.php | 3 |
 | tenant-agents.php | 4 | | |
 
 **Grand total: 227 routes** in 39 files = 9 allowlisted + 218 gated. Gated routes today: 75 `admin`,
@@ -558,7 +559,7 @@ Legacy column omitted: `config/privileges.php` is absent from this repo.
 | receipts.create | sales | Receipts | Record receipts | no | 1 |
 | receipts.print | sales | Receipts | Print receipts | no | 1 |
 | receipts.cancel | sales | Receipts | Cancel receipts | no | 1 |
-| pos.view | pos | Point of sale | Open point of sale | no | 1 |
+| pos.view | pos | Point of sale | Open point of sale | no | 2 |
 | agents.view | agents | Sales agents | View agents | no | 1 |
 | agents.create | agents | Sales agents | Add agents | no | 1 |
 | agents.edit | agents | Sales agents | Edit agents | no | 1 |

@@ -6,6 +6,7 @@ import Card from '@/components/ui/Card.vue';
 import Button from '@/components/ui/Button.vue';
 import Input from '@/components/ui/Input.vue';
 import Select from '@/components/ui/Select.vue';
+import InfoTip from '@/components/ui/InfoTip.vue';
 import Combobox from '@/components/ui/Combobox.vue';
 import NepaliDateInput from '@/components/ui/NepaliDateInput.vue';
 import { formatMoney, multiplyMoney, sumMoney } from '@/lib/money.js';
@@ -139,14 +140,16 @@ function submit() {
                     <p v-if="form.errors.date" class="mt-1 text-sm text-danger">{{ form.errors.date }}</p>
                 </div>
                 <div>
-                    <label class="mb-1 block text-sm font-semibold text-text-base">Store</label>
+                    <div class="mb-1 flex items-center gap-1">
+                        <label class="block text-sm font-semibold text-text-base">Store</label>
+                        <InfoTip text="Where the stock is used and produced. Leave blank for your default store." />
+                    </div>
                     <Combobox
                         :model-value="form.store_id"
                         :options="storeOptions"
                         placeholder="Default store"
                         @update:model-value="(v) => (form.store_id = v)"
                     />
-                    <p class="mt-1 text-xs text-text-faint">Where the stock is used and produced. Leave blank for your default store.</p>
                     <p v-if="form.errors.store_id" class="mt-1 text-sm text-danger">{{ form.errors.store_id }}</p>
                 </div>
                 <div>

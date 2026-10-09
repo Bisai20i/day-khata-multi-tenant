@@ -7,6 +7,7 @@ import Button from '@/components/ui/Button.vue';
 import Input from '@/components/ui/Input.vue';
 import Select from '@/components/ui/Select.vue';
 import Combobox from '@/components/ui/Combobox.vue';
+import InfoTip from '@/components/ui/InfoTip.vue';
 import NepaliDateInput from '@/components/ui/NepaliDateInput.vue';
 import { compareMoney, formatMoney, parseMoney, sumMoney } from '@/lib/money';
 import { formatBsDate, todayInKathmandu } from '@/lib/format';
@@ -196,7 +197,10 @@ function submit() {
             </div>
 
             <div v-if="form.supplier_id" class="border-t-[1.5px] border-border pt-4">
-                <h4 class="mb-2 border-b-[1.5px] border-border pb-1 text-sm font-bold text-text-strong">Apply to outstanding bills (optional)</h4>
+                <div class="mb-2 flex items-center gap-1 border-b-[1.5px] border-border pb-1">
+                    <h4 class="text-sm font-bold text-text-strong">Apply to outstanding bills (optional)</h4>
+                    <InfoTip text="Any unallocated amount is recorded on account and won't reduce a specific bill's outstanding balance." />
+                </div>
                 <p v-if="supplierPurchases.length === 0" class="text-sm text-text-muted">No outstanding bills for this supplier.</p>
 
                 <div v-else class="flex flex-col gap-2">
@@ -238,8 +242,7 @@ function submit() {
                     Allocated {{ formatMoney(totalAllocated) }} is more than the payment of {{ formatMoney(paymentAmount) }}.
                 </p>
                 <p class="mt-2 text-xs text-text-muted">
-                    Allocated so far: {{ formatMoney(totalAllocated) }} of {{ formatMoney(paymentAmount) }}. Any
-                    unallocated amount is recorded on account and won't reduce a specific bill's outstanding balance.
+                    Allocated so far: {{ formatMoney(totalAllocated) }} of {{ formatMoney(paymentAmount) }}.
                 </p>
             </div>
 

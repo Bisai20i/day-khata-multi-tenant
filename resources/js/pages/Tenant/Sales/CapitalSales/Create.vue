@@ -5,6 +5,7 @@ import { Plus, X } from '@lucide/vue';
 import Card from '@/components/ui/Card.vue';
 import Button from '@/components/ui/Button.vue';
 import Input from '@/components/ui/Input.vue';
+import InfoTip from '@/components/ui/InfoTip.vue';
 import Select from '@/components/ui/Select.vue';
 import Combobox from '@/components/ui/Combobox.vue';
 import NepaliDateInput from '@/components/ui/NepaliDateInput.vue';
@@ -262,10 +263,12 @@ function submit() {
 
             <div class="grid grid-cols-3 gap-4 border-t-[1.5px] border-border pt-4">
                 <div>
-                    <label class="mb-1 block text-sm font-semibold text-text-base">VAT rate (%) <span class="text-danger">*</span></label>
+                    <div class="mb-1 flex items-center gap-1">
+                        <label class="block text-sm font-semibold text-text-base">VAT rate (%) <span class="text-danger">*</span></label>
+                        <InfoTip text="Applied to lines marked Taxable." />
+                    </div>
                     <Input v-model="form.vat_rate" type="number" min="0" max="100" step="0.01" inputmode="decimal" required />
                     <p v-if="form.errors.vat_rate" class="mt-1 text-sm text-danger" role="alert">{{ form.errors.vat_rate }}</p>
-                    <p v-else class="mt-1 text-xs text-text-muted">Applied to lines marked Taxable.</p>
                 </div>
                 <div class="col-span-2">
                     <label class="mb-1 block text-sm font-semibold text-text-base">Narration</label>

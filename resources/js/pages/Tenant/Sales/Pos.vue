@@ -10,6 +10,7 @@ import PosCustomerModal from '@/components/pos/PosCustomerModal.vue';
 import PosSplitModal from '@/components/pos/PosSplitModal.vue';
 import PosMergeModal from '@/components/pos/PosMergeModal.vue';
 import PosReceiptModal from '@/components/pos/PosReceiptModal.vue';
+import PosEstimateModal from '@/components/pos/PosEstimateModal.vue';
 import PosShortcutsModal from '@/components/pos/PosShortcutsModal.vue';
 import { useToast } from '@/composables/useToast';
 import { useOpenFiscalYear } from '@/composables/useOpenFiscalYear';
@@ -18,10 +19,11 @@ import { usePermissions } from '@/composables/usePermissions';
 import { usePosCarts } from '@/composables/usePosCarts';
 import { usePosCheckout } from '@/composables/usePosCheckout';
 import { usePosCustomerBridge } from '@/composables/usePosCustomerBridge';
+import { usePosEstimate } from '@/composables/usePosEstimate';
 import { usePosShortcuts } from '@/composables/usePosShortcuts';
 import { usePosSplit } from '@/composables/usePosSplit';
 import { usePosTotals } from '@/composables/usePosTotals';
-import { formatQuantity, rateExcludingVat } from '@/lib/money';
+import { formatQuantity } from '@/lib/money';
 import { addQuantity, compareQuantity, stepQuantity } from '@/lib/quantity';
 
 /**
@@ -277,10 +279,9 @@ function addToCart(item) {
     // freely editable, this is just a starting point.
     // `bonus_quantity` is the free-of-charge quantity handed over with the
     // line (audit section 3 "Sales"): it moves stock but is never priced, so
-    // the preview below never sees it. `mrp` is a browser-only entry aid that
-    // fills `rate` and is never submitted (see applyLineMrp()).
+    // the preview below never sees it.
     const rate = item.sale_rate != null ? String(item.sale_rate) : '';
-    form.lines.push({ item_id: item.id, quantity: '1', bonus_quantity: '', mrp: '', rate, discount: '', discountType: 'fixed', showMore: false });
+    form.lines.push({ item_id: item.id, quantity: '1', bonus_quantity: '', rate, discount: '', discountType: 'fixed' });
     warnIfOverstock(item.id);
 }
 
@@ -307,50 +308,14 @@ function decrementQty(index) {
     warnIfOverstock(line.item_id);
 }
 
-/**
- * MRP / VAT-inclusive entry (audit section 3 "Sales").
- *
- * The cashier types the sticker price and the line's rate becomes
- * `MRP / 1.13` for a vatable item at 13%, so a Rs 113 MRP bills as rate 100
- * plus 13 VAT rather than having VAT charged a second time on top of it.
- *
- * The division happens inside the money module (rateExcludingVat: scaled
- * BigInt, one HalfUp rounding to 4dp) - nothing here touches Number(),
- * parseFloat or toFixed. Only the resulting RATE is submitted; the server
- * never receives the MRP and re-derives nothing from it.
- *
- * Takes the typed value as an argument because the template binds
- * :model-value + @update:model-value rather than v-model: a plain @input
- * listener would run before the model had been written back.
- */
-function applyLineMrp(line, mrp) {
-    line.mrp = mrp;
-
-    if (mrp === '' || mrp === null || mrp === undefined) {
-        return;
-    }
-
-    // A PAN invoice carries no VAT at all, and an exempt item never did: for
-    // both, the MRP is the rate (a division by 1).
-    const vatRate = !isPanInvoice.value && itemsById.value[line.item_id]?.is_vatable ? effectiveVatRate.value : '0';
-    const result = rateExcludingVat(mrp, vatRate);
-
-    // A half-typed MRP leaves the rate alone - the cashier is still typing.
-    if (result.ok) {
-        line.rate = result.value;
-    }
-}
-
 // --- Totals: one preview, identical to the server's calculator -------------
 // See usePosTotals (calculateDocument mirrors App\Support\Billing\DocumentCalculator).
 const {
     isPanInvoice,
-    effectiveVatRate,
     preview,
     totals,
     isRateMissing,
     previewError,
-    lineTotal,
     settlementDue,
     enteredAmount,
     cashReceived,
@@ -386,11 +351,6 @@ function toggleLineDiscountType(index) {
 
     line.discount = '';
     line.discountType = 'percent';
-}
-
-/** Reveals a cart line's MRP/free-units row - collapsed by default since they're edited rarely. */
-function toggleLineMore(line) {
-    line.showMore = !line.showMore;
 }
 
 function toggleHeaderDiscountType() {
@@ -464,6 +424,15 @@ const { receiptOpen, receipt, completeSale, applyPendingReceipt, closeReceipt } 
     persistCartsNow,
 });
 
+// --- Estimate: the bill this cart would become, previewed without posting ---
+const { estimateOpen, estimateUrl, estimateLoading, openEstimate, closeEstimate } = usePosEstimate({
+    form,
+    totals,
+    previewError,
+    resolvedPaymentMode,
+    toast,
+});
+
 /** Plain-words reason Complete sale is disabled, or '' when it can proceed. */
 const submitBlockedReason = computed(() => {
     if (form.processing) return '';
@@ -496,7 +465,7 @@ const canSubmit = computed(() => {
 // --- Keyboard shortcuts ----------------------------------------------------
 // Global while this page is mounted; see usePosShortcuts for the F-key scheme.
 const { shortcutsOpen, shortcutList, attachShortcuts, detachShortcuts } = usePosShortcuts({
-    blockingModals: [customerModalOpen, receiptOpen, splitModalOpen, mergeModalOpen],
+    blockingModals: [customerModalOpen, receiptOpen, splitModalOpen, mergeModalOpen, estimateOpen],
     searchFieldWrapper,
     barcodeFieldWrapper,
     customerFieldWrapper,
@@ -603,17 +572,15 @@ onUnmounted(() => {
                     :form="form"
                     :customer-options="customerOptions"
                     :items-by-id="itemsById"
-                    :line-total="lineTotal"
                     :is-rate-missing="isRateMissing"
                     @new-customer="openCustomerModal"
+                    @estimate="openEstimate"
                     @clear-cart="clearCart"
                     @remove-line="removeLine"
                     @increment-qty="incrementQty"
                     @decrement-qty="decrementQty"
                     @warn-overstock="warnIfOverstock"
                     @toggle-discount-type="toggleLineDiscountType"
-                    @toggle-more="toggleLineMore"
-                    @apply-mrp="applyLineMrp"
                     @split-line="openSplitModal"
                     @customer-wrapper="setCustomerFieldWrapper"
                 />
@@ -668,6 +635,8 @@ onUnmounted(() => {
         />
 
         <PosReceiptModal :open="receiptOpen" :receipt="receipt" @close="closeReceipt" />
+
+        <PosEstimateModal :open="estimateOpen" :url="estimateUrl" :loading="estimateLoading" @close="closeEstimate" />
 
         <PosShortcutsModal v-model:open="shortcutsOpen" :shortcut-list="shortcutList" />
     </div>

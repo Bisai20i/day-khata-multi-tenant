@@ -1,7 +1,7 @@
 <script setup>
 import { h, watch } from 'vue';
 import { router, usePage } from '@inertiajs/vue3';
-import { Copy } from '@lucide/vue';
+import { Copy, Plus } from '@lucide/vue';
 import AppLayout from '@/layouts/AppLayout.vue';
 import { useLayoutChrome } from '@/composables/useLayoutChrome';
 import { useToast } from '@/composables/useToast';
@@ -10,8 +10,8 @@ import Card from '@/components/ui/Card.vue';
 import Button from '@/components/ui/Button.vue';
 import DataTable from '@/components/ui/DataTable.vue';
 import Badge from '@/components/ui/Badge.vue';
-import Tooltip from '@/components/ui/Tooltip.vue';
 import RowActions from '@/components/ui/RowActions.vue';
+import DropdownMenuItem from '@/components/ui/DropdownMenuItem.vue';
 import PageHeader from '@/components/ui/PageHeader.vue';
 
 defineOptions({ layout: AppLayout });
@@ -115,27 +115,25 @@ const columns = [
             // server re-checks both conditions.
             const canDelete = !role.is_system && role.users_count === 0;
 
-            return h('div', { class: 'flex items-center gap-2' }, [
-                h(RowActions, {
+            return h(
+                RowActions,
+                {
                     canDelete,
                     editLabel: `Edit ${role.name}`,
                     deleteLabel: deleteLabel(role),
+                    moreLabel: `More actions for ${role.name}`,
                     onEdit: () => openEdit(role),
                     onDelete: () => deleteRole(role),
-                }),
-                h(Tooltip, { label: `Duplicate ${role.name}` }, () =>
-                    h(
-                        'button',
-                        {
-                            type: 'button',
-                            class: 'flex h-[26px] w-[26px] items-center justify-center bg-bg-subtle text-text-muted transition-colors duration-150 ease-out hover:bg-primary-tint hover:text-primary',
-                            'aria-label': `Duplicate ${role.name}`,
-                            onClick: () => duplicateRole(role),
-                        },
-                        [h(Copy, { class: 'h-[13px] w-[13px]', 'aria-hidden': 'true' })],
-                    ),
-                ),
-            ]);
+                },
+                {
+                    more: () => [
+                        h(DropdownMenuItem, { key: 'duplicate', onSelect: () => duplicateRole(role) }, () => [
+                            h(Copy, { class: 'size-3.5', 'aria-hidden': 'true' }),
+                            'Duplicate',
+                        ]),
+                    ],
+                },
+            );
         },
     },
 ];
@@ -147,7 +145,10 @@ const columns = [
             title="Roles and permissions"
             description="A role is a set of permissions. Give each employee one role on the Employees page. Only the owner can change roles."
         >
-            <Button variant="primary" tone="purple" @click="openCreate">New role</Button>
+            <Button variant="primary" tone="purple" @click="openCreate">
+                <Plus class="size-4" />
+                New role
+            </Button>
         </PageHeader>
 
         <Card variant="panel">

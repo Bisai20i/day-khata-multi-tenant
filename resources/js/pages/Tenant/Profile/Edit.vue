@@ -8,6 +8,7 @@ import Card from '@/components/ui/Card.vue';
 import Button from '@/components/ui/Button.vue';
 import PageHeader from '@/components/ui/PageHeader.vue';
 import Input from '@/components/ui/Input.vue';
+import InfoTip from '@/components/ui/InfoTip.vue';
 import { useToast } from '@/composables/useToast';
 
 defineOptions({ layout: AppLayout });
@@ -67,8 +68,10 @@ function submitPassword() {
 
         <div class="flex flex-col gap-4">
             <Card variant="panel">
-                <h3 class="text-sm font-bold text-text-strong">Account details</h3>
-                <p class="mb-3 text-xs text-text-muted">Your name and the email you use to sign in.</p>
+                <div class="mb-3 flex items-center gap-1">
+                    <h3 class="text-sm font-bold text-text-strong">Account details</h3>
+                    <InfoTip text="Your name and the email you use to sign in." />
+                </div>
                 <form class="flex flex-col gap-4" @submit.prevent="submitProfile">
                     <div class="grid grid-cols-1 gap-4 sm:grid-cols-2">
                         <div>
@@ -97,8 +100,10 @@ function submitPassword() {
             </Card>
 
             <Card variant="panel">
-                <h3 class="text-sm font-bold text-text-strong">Change password</h3>
-                <p class="mb-3 text-xs text-text-muted">Use at least 8 characters. You will stay signed in after changing it.</p>
+                <div class="mb-3 flex items-center gap-1">
+                    <h3 class="text-sm font-bold text-text-strong">Change password</h3>
+                    <InfoTip text="Use at least 8 characters. You will stay signed in after changing it." />
+                </div>
                 <form class="flex flex-col gap-4" @submit.prevent="submitPassword">
                     <div class="grid grid-cols-1 gap-4 sm:grid-cols-2">
                         <div class="sm:col-span-2">

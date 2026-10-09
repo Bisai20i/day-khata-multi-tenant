@@ -34,6 +34,11 @@ class BrandController extends Controller
         ]);
     }
 
+    /**
+     * A `quick_add` request comes from another page's form (the "+ New brand"
+     * shortcut on the item form), so it returns there instead of landing on
+     * the brands list.
+     */
     public function store(Request $request): RedirectResponse
     {
         $data = $this->validated($request);
@@ -44,7 +49,9 @@ class BrandController extends Controller
 
         Brand::create($data);
 
-        return redirect()->route('tenant.brands.index')->with('status', 'Brand added.');
+        $redirect = $request->boolean('quick_add') ? back() : redirect()->route('tenant.brands.index');
+
+        return $redirect->with('status', 'Brand added.');
     }
 
     public function update(Request $request, Brand $brand): RedirectResponse

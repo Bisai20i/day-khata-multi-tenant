@@ -5,6 +5,7 @@ import { Plus, X } from '@lucide/vue';
 import Card from '@/components/ui/Card.vue';
 import Button from '@/components/ui/Button.vue';
 import Input from '@/components/ui/Input.vue';
+import InfoTip from '@/components/ui/InfoTip.vue';
 import Combobox from '@/components/ui/Combobox.vue';
 import NepaliDateInput from '@/components/ui/NepaliDateInput.vue';
 import { formatMoney, multiplyMoney, sumMoney } from '@/lib/money.js';
@@ -148,7 +149,10 @@ function submit() {
                 <div class="mb-2 grid grid-cols-[1fr_120px_140px_1fr_28px] gap-2 text-[10px] font-bold tracking-[.8px] text-text-muted uppercase">
                     <span>Item <span class="text-danger">*</span></span>
                     <span>Quantity <span class="text-danger">*</span></span>
-                    <span>Unit cost (optional)</span>
+                    <span class="flex items-center gap-1">
+                        Unit cost (optional)
+                        <InfoTip text="Unit cost is the cost per unit of the item; leave blank to use the item's current cost." />
+                    </span>
                     <span>Remarks</span>
                     <span></span>
                 </div>
@@ -188,7 +192,6 @@ function submit() {
                     </button>
                 </div>
 
-                <p class="mb-2 text-xs text-text-faint">Unit cost is the cost per unit of the item; leave blank to use the item's current cost.</p>
                 <Button variant="secondary" tone="purple" type="button" class="mt-1" @click="addLine">
                     <Plus class="h-3.5 w-3.5" /> Add line
                 </Button>

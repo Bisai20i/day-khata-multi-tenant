@@ -11,6 +11,7 @@ import Select from '@/components/ui/Select.vue';
 import Tabs from '@/components/ui/Tabs.vue';
 import FormActions from '@/components/ui/FormActions.vue';
 import PageHeader from '@/components/ui/PageHeader.vue';
+import InfoTip from '@/components/ui/InfoTip.vue';
 import { useToast } from '@/composables/useToast';
 
 defineOptions({ layout: AppLayout });
@@ -214,8 +215,10 @@ function submitLogo() {
                         </div>
 
                         <div class="mt-4 border-t border-border pt-4">
-                            <label for="logo" class="mb-1 block text-sm font-semibold text-text-base">Company logo</label>
-                            <p class="mb-2 text-xs text-text-muted">Shown on printed invoices. Uploading saves the logo immediately.</p>
+                            <div class="mb-2 flex items-center gap-1">
+                                <label for="logo" class="block text-sm font-semibold text-text-base">Company logo</label>
+                                <InfoTip text="Shown on printed invoices. Uploading saves the logo immediately." />
+                            </div>
                             <div class="flex flex-col gap-3 sm:flex-row sm:items-end sm:gap-4">
                                 <img
                                     v-if="logoPreviewUrl"
@@ -254,15 +257,19 @@ function submitLogo() {
                         <div class="flex flex-col gap-4">
                             <div class="grid grid-cols-1 gap-4 sm:grid-cols-2">
                                 <div>
-                                    <label class="mb-1 block text-sm font-semibold text-text-base">Print paper size</label>
-                                    <p class="mb-1 text-xs text-text-muted">Paper format used when printing invoices.</p>
+                                    <div class="mb-1 flex items-center gap-1">
+                                        <label class="block text-sm font-semibold text-text-base">Print paper size</label>
+                                        <InfoTip text="Paper format used when printing invoices." />
+                                    </div>
                                     <Select v-model="form.print_paper_size" :options="paperSizeOptions" />
                                     <p v-if="form.errors.print_paper_size" class="mt-1 text-sm text-danger">{{ form.errors.print_paper_size }}</p>
                                 </div>
 
                                 <div>
-                                    <label for="default_vat_rate" class="mb-1 block text-sm font-semibold text-text-base">Default VAT rate (%)</label>
-                                    <p class="mb-1 text-xs text-text-muted">Pre-filled on new sale lines; can still be changed per item.</p>
+                                    <div class="mb-1 flex items-center gap-1">
+                                        <label for="default_vat_rate" class="block text-sm font-semibold text-text-base">Default VAT rate (%)</label>
+                                        <InfoTip text="Pre-filled on new sale lines; can still be changed per item." />
+                                    </div>
                                     <Input id="default_vat_rate" v-model="form.default_vat_rate" type="number" min="0" max="100" step="0.01" placeholder="13.00" />
                                     <p v-if="form.errors.default_vat_rate" class="mt-1 text-sm text-danger">{{ form.errors.default_vat_rate }}</p>
                                 </div>
@@ -302,11 +309,10 @@ function submitLogo() {
                             </div>
 
                             <div class="border-t border-border pt-4">
-                                <p class="mb-3 text-[10px] font-bold tracking-[.8px] text-text-muted uppercase">Purchase and return numbering</p>
-                                <p class="mb-3 text-sm text-text-muted">
-                                    Every series needs its own prefix. Two series sharing one print the same number on two
-                                    different documents.
-                                </p>
+                                <div class="mb-3 flex items-center gap-1">
+                                    <p class="text-[10px] font-bold tracking-[.8px] text-text-muted uppercase">Purchase and return numbering</p>
+                                    <InfoTip text="Every series needs its own prefix. Two series sharing one print the same number on two different documents." />
+                                </div>
                                 <div class="grid grid-cols-1 gap-3 md:grid-cols-3 md:gap-4">
                                     <div>
                                         <label for="purchase_prefix" class="mb-1 block text-sm font-semibold text-text-base">Purchase prefix</label>
@@ -329,10 +335,12 @@ function submitLogo() {
                             </div>
 
                             <div class="border-t border-border pt-4">
-                                <label for="invoice_footer_note" class="mb-1 block text-sm font-semibold text-text-base">
-                                    Invoice footer note
-                                </label>
-                                <p class="mb-1 text-xs text-text-muted">Printed at the bottom of every invoice.</p>
+                                <div class="mb-1 flex items-center gap-1">
+                                    <label for="invoice_footer_note" class="block text-sm font-semibold text-text-base">
+                                        Invoice footer note
+                                    </label>
+                                    <InfoTip text="Printed at the bottom of every invoice." />
+                                </div>
                                 <textarea
                                     id="invoice_footer_note"
                                     v-model="form.invoice_footer_note"
@@ -424,16 +432,16 @@ function submitLogo() {
                                     <div class="flex items-center gap-2">
                                         <input id="allow_negative_stock" v-model="form.allow_negative_stock" type="checkbox" class="size-4 border-[1.5px] border-border" />
                                         <label for="allow_negative_stock" class="text-sm font-semibold text-text-base">Allow negative stock</label>
+                                        <InfoTip text="When off, a sale that would drive an item's stock below zero is rejected server-side. When on, sales are allowed to oversell." />
                                     </div>
-                                    <p class="mt-1 text-sm text-text-muted">
-                                        When off, a sale that would drive an item's stock below zero is rejected server-side. When on, sales are allowed to oversell.
-                                    </p>
                                     <p v-if="form.errors.allow_negative_stock" class="mt-1 text-sm text-danger">{{ form.errors.allow_negative_stock }}</p>
                                 </div>
 
                                 <div>
-                                    <label class="mb-1 block text-sm font-semibold text-text-base">Default store</label>
-                                    <p class="mb-1 text-xs text-text-muted">Store that sales and purchases use unless another is picked.</p>
+                                    <div class="mb-1 flex items-center gap-1">
+                                        <label class="block text-sm font-semibold text-text-base">Default store</label>
+                                        <InfoTip text="Store that sales and purchases use unless another is picked." />
+                                    </div>
                                     <Select v-model="form.default_store_id" :options="storeOptions" />
                                     <p v-if="form.errors.default_store_id" class="mt-1 text-sm text-danger">{{ form.errors.default_store_id }}</p>
                                 </div>

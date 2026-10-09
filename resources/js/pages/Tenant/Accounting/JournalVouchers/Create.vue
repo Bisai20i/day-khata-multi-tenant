@@ -6,6 +6,7 @@ import Button from '@/components/ui/Button.vue';
 import Input from '@/components/ui/Input.vue';
 import Select from '@/components/ui/Select.vue';
 import NepaliDateInput from '@/components/ui/NepaliDateInput.vue';
+import InfoTip from '@/components/ui/InfoTip.vue';
 import JournalVoucherStagingRow from '@/components/accounting/JournalVoucherStagingRow.vue';
 import JournalVoucherLinesTable from '@/components/accounting/JournalVoucherLinesTable.vue';
 import JournalVoucherTotalsBar from '@/components/accounting/JournalVoucherTotalsBar.vue';
@@ -174,20 +175,25 @@ function submit(print = false) {
                     <p v-if="form.errors.date" class="mt-1 text-sm text-danger" role="alert">{{ form.errors.date }}</p>
                 </div>
                 <div class="sm:col-span-2">
-                    <label for="jv-narration" class="mb-1 block text-sm font-semibold text-text-base">Narration <span class="text-danger" aria-hidden="true">*</span></label>
+                    <div class="mb-1 flex items-center gap-1">
+                        <label for="jv-narration" class="block text-sm font-semibold text-text-base">Narration <span class="text-danger" aria-hidden="true">*</span></label>
+                        <InfoTip text="Printed on the voucher and shown in every ledger it touches." />
+                    </div>
                     <Input id="jv-narration" v-model="form.narration" type="text" placeholder="Describe this transaction" required aria-describedby="jv-narration-help" />
-                    <p id="jv-narration-help" class="mt-1 text-xs text-text-muted">Printed on the voucher and shown in every ledger it touches.</p>
+                    <p id="jv-narration-help" class="sr-only">Printed on the voucher and shown in every ledger it touches.</p>
                     <p v-if="form.errors.narration" class="mt-1 text-sm text-danger" role="alert">{{ form.errors.narration }}</p>
                 </div>
                 <div v-if="canPostCorrection && correctionFiscalYear">
-                    <label for="jv-fiscal-year" class="mb-1 block text-sm font-semibold text-text-base">Fiscal year</label>
+                    <div class="mb-1 flex items-center gap-1">
+                        <label for="jv-fiscal-year" class="block text-sm font-semibold text-text-base">Fiscal year</label>
+                        <InfoTip text="Leave blank to post into the currently open fiscal year." />
+                    </div>
                     <Select
                         id="jv-fiscal-year"
                         v-model="form.fiscal_year_id"
                         :options="fiscalYearOptions"
                         placeholder="Currently open fiscal year"
                     />
-                    <p class="mt-1 text-xs text-text-muted">Leave blank to post into the currently open fiscal year.</p>
                     <p v-if="form.errors.fiscal_year_id" class="mt-1 text-sm text-danger">{{ form.errors.fiscal_year_id }}</p>
                 </div>
                 <div v-if="isClosedYearSelected" class="sm:col-span-2">

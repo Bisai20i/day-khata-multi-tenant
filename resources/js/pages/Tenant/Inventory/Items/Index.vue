@@ -9,6 +9,8 @@ import Button from '@/components/ui/Button.vue';
 import Badge from '@/components/ui/Badge.vue';
 import DataTable from '@/components/ui/DataTable.vue';
 import RowActions from '@/components/ui/RowActions.vue';
+import DropdownMenuItem from '@/components/ui/DropdownMenuItem.vue';
+import { Barcode, BookOpen, Plus, Ruler } from '@lucide/vue';
 import ItemsIndexFormModal from '@/components/inventory/ItemsIndexFormModal.vue';
 import ItemsIndexImportModal from '@/components/inventory/ItemsIndexImportModal.vue';
 import ItemsIndexUnitsModal from '@/components/inventory/ItemsIndexUnitsModal.vue';
@@ -18,7 +20,7 @@ import { useConfirm } from '@/composables/useConfirm';
 import { usePermissions } from '@/composables/usePermissions';
 import { formatQuantity, formatRate } from '@/lib/money.js';
 import { todayInKathmandu } from '@/lib/format.js';
-import { itemLedgerLink } from '@/lib/itemLedger.js';
+import { itemLedgerUrl } from '@/lib/itemLedger.js';
 
 defineOptions({ layout: AppLayout });
 
@@ -240,14 +242,17 @@ const columns = [
             if (!row.original.is_stockable) return '-';
             const onHand = Number(stockOnHand(row.original));
             const minimum = Number(row.original.min_stock ?? 0);
+            const isOutOfStock = onHand <= 0;
             const badge =
-                onHand <= 0
-                    ? h(Badge, { variant: 'danger', pill: true }, () => 'Out of stock')
-                    : minimum > 0 && onHand <= minimum
-                      ? h(Badge, { variant: 'warning', pill: true }, () => 'Low stock')
-                      : null;
+                !isOutOfStock && minimum > 0 && onHand <= minimum
+                    ? h(Badge, { variant: 'warning', pill: true }, () => 'Low stock')
+                    : null;
             return h('div', { class: 'flex flex-col items-end gap-1' }, [
-                h('span', formatQuantity(stockOnHand(row.original))),
+                h(
+                    'span',
+                    { class: isOutOfStock ? 'font-bold text-danger' : undefined },
+                    formatQuantity(stockOnHand(row.original)),
+                ),
                 badge,
             ]);
         },
@@ -299,47 +304,51 @@ const columns = [
         id: 'actions',
         header: '',
         numeric: false,
-        cell: ({ row }) =>
-            h('div', { class: 'flex items-center justify-end gap-2' }, [
-                can('stock_reports.view')
-                    ? itemLedgerLink(
-                          row.original.id,
-                          'flex h-[26px] shrink-0 items-center border-[1.5px] border-border px-2 text-[11px] font-bold text-text-muted transition-colors duration-150 hover:border-primary hover:text-primary',
-                      )
-                    : null,
-                can('items.edit')
-                    ? h(
-                          'button',
-                          {
-                              type: 'button',
-                              class: 'h-[26px] shrink-0 border-[1.5px] border-border px-2 text-[11px] font-bold text-text-muted transition-colors duration-150 hover:border-primary hover:text-primary',
-                              onClick: () => openUnits(row.original),
-                          },
-                          'Units',
-                      )
-                    : null,
-                can('items.print')
-                    ? h(
-                          'button',
-                          {
-                              type: 'button',
-                              class: 'h-[26px] shrink-0 border-[1.5px] border-border px-2 text-[11px] font-bold text-text-muted transition-colors duration-150 hover:border-primary hover:text-primary',
-                              onClick: () => openBarcodeModal(row.original),
-                          },
-                          'Print barcode',
-                      )
-                    : null,
-                can('items.edit') || can('items.delete')
-                    ? h(RowActions, {
-                          canEdit: can('items.edit'),
-                          canDelete: can('items.delete'),
-                          onEdit: () => openEdit(row.original),
-                          onDelete: () => destroy(row.original),
-                      })
-                    : null,
-            ]),
+        cell: ({ row }) => {
+            const moreActions = moreActionsFor(row.original);
+
+            if (!can('items.edit') && !can('items.delete') && moreActions.length === 0) {
+                return null;
+            }
+
+            return h('div', { class: 'flex items-center justify-end' }, [
+                h(
+                    RowActions,
+                    {
+                        canEdit: can('items.edit'),
+                        canDelete: can('items.delete'),
+                        onEdit: () => openEdit(row.original),
+                        onDelete: () => destroy(row.original),
+                    },
+                    moreActions.length > 0
+                        ? {
+                              more: () =>
+                                  moreActions.map((action) =>
+                                      h(DropdownMenuItem, { key: action.label, onSelect: action.run }, () => [
+                                          h(action.icon, { class: 'size-3.5', 'aria-hidden': 'true' }),
+                                          action.label,
+                                      ]),
+                                  ),
+                          }
+                        : {},
+                ),
+            ]);
+        },
     },
 ];
+
+/** The secondary row actions shown under the "More" button, filtered by permission. */
+function moreActionsFor(item) {
+    return [
+        can('stock_reports.view') && {
+            label: 'Ledger',
+            icon: BookOpen,
+            run: () => router.visit(itemLedgerUrl(item.id)),
+        },
+        can('items.edit') && { label: 'Units', icon: Ruler, run: () => openUnits(item) },
+        can('items.print') && { label: 'Print barcode', icon: Barcode, run: () => openBarcodeModal(item) },
+    ].filter(Boolean);
+}
 </script>
 
 <template>
@@ -355,7 +364,10 @@ const columns = [
                     Mark {{ selectedItemIds.length }} vatable
                 </Button>
                 <Button v-if="can('items.import')" variant="secondary" tone="purple" @click="openImport">Bulk import (CSV)</Button>
-                <Button v-if="can('items.create')" variant="primary" tone="purple" @click="openCreate">New item</Button>
+                <Button v-if="can('items.create')" variant="primary" tone="purple" @click="openCreate">
+                    <Plus class="size-4" />
+                    New item
+                </Button>
         </PageHeader>
 
         <Card variant="panel">

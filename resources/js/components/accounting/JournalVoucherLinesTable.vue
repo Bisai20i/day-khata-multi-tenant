@@ -2,6 +2,7 @@
 import { X } from '@lucide/vue';
 import Input from '@/components/ui/Input.vue';
 import Combobox from '@/components/ui/Combobox.vue';
+import InfoTip from '@/components/ui/InfoTip.vue';
 import { isZeroMoney } from '@/lib/money';
 import { voucherAmountOf } from '@/lib/journalVoucherCreate';
 
@@ -40,6 +41,7 @@ const LINE_GRID = 'grid-cols-[1fr_130px_130px_1fr_28px]';
         <div class="mb-3 flex items-center gap-1.5">
             <span class="text-[10px] font-bold tracking-[.8px] text-text-muted uppercase">On this voucher</span>
             <span class="bg-primary-tint px-2 py-0.5 text-[11px] font-bold text-primary">{{ lines.length }}</span>
+            <InfoTip text="Each line takes either a debit or a credit, not both. Debit increases assets and expenses; credit increases liabilities, income and equity." />
         </div>
 
         <p v-if="lines.length === 0" class="py-6 text-center text-sm text-text-faint">
@@ -103,7 +105,5 @@ const LINE_GRID = 'grid-cols-[1fr_130px_130px_1fr_28px]';
                 </button>
             </div>
         </div>
-
-        <p class="mt-2 text-xs text-text-muted">Each line takes either a debit or a credit, not both. Debit increases assets and expenses; credit increases liabilities, income and equity.</p>
     </div>
 </template>

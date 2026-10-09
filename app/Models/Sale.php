@@ -378,6 +378,98 @@ class Sale extends Model
     }
 
     /**
+     * The bill post() would issue for this cart, computed and never saved.
+     *
+     * Runs the same line preparation and the same DocumentCalculator call as
+     * post(), then fills an unsaved Sale (with its lines, items and customer
+     * set as relations) so the invoice views can render it exactly as they
+     * render a stored one. Nothing is written: no voucher, no invoice number,
+     * no stock movement. Stock and settlement rules are deliberately not
+     * checked - an estimate is a price, not a posting - so the payment fields
+     * are taken as the cashier has them right now.
+     *
+     * @param  array{customer_id: int, chalani_number?: string|null, date: string, payment_mode?: string|null, discount?: string|float, discount_type?: string, cash_amount?: string|float|null, bank_amount?: string|float|null, tds_amount?: string|float, narration?: string|null}  $data
+     * @param  array<int, array{item_id: int, item_unit_id?: int|null, quantity: string|float, rate: string|float, discount?: string|float, discount_type?: string, bonus_quantity?: string|float|null}>  $lines
+     */
+    public static function estimate(array $data, array $lines): self
+    {
+        $settings = CompanySetting::current();
+        $customer = Customer::findOrFail($data['customer_id']);
+        $invoiceType = $settings->active_invoice_type ?? 'full';
+
+        $items = Item::with('units')->whereIn('id', collect($lines)->pluck('item_id'))->get()->keyBy('id');
+
+        [$calculatorLines, $preparedLines] = static::prepareLines($lines, $items);
+
+        $totals = DocumentCalculator::calculate($calculatorLines, [
+            'vat_rate' => $settings->default_vat_rate,
+            'discount' => $data['discount'] ?? '0',
+            'discount_type' => $data['discount_type'] ?? 'flat',
+            'tds_amount' => $data['tds_amount'] ?? '0',
+            'force_non_taxable' => $invoiceType === 'pan',
+            'expected_total' => null,
+        ]);
+
+        static::assertAbbreviatedCeiling($invoiceType, $totals->total);
+
+        $paymentMode = $data['payment_mode'] ?? 'credit';
+
+        $sale = new static([
+            'customer_id' => $customer->id,
+            'buyer_name' => $customer->name,
+            'buyer_pan' => $customer->tpin,
+            'buyer_address' => $customer->address,
+            'invoice_type' => $invoiceType,
+            'chalani_number' => $data['chalani_number'] ?? null,
+            'date' => $data['date'],
+            'payment_mode' => $paymentMode,
+            'discount' => static::storedHeaderDiscount($data, $totals),
+            'discount_type' => $data['discount_type'] ?? 'flat',
+            'discount_amount' => $totals->headerDiscount,
+            'taxable_amount' => $totals->taxableAmount,
+            'nontaxable_amount' => $totals->nontaxableAmount,
+            'vat_rate' => $totals->vatRate,
+            'vat_amount' => $totals->vatAmount,
+            'total' => $totals->total,
+            'cash_amount' => $paymentMode === 'partial' ? Money::ofNullable($data['cash_amount'] ?? null) : null,
+            'bank_amount' => $paymentMode === 'partial' ? Money::ofNullable($data['bank_amount'] ?? null) : null,
+            'tds_amount' => $totals->tdsAmount,
+            'narration' => $data['narration'] ?? null,
+        ]);
+
+        $saleLines = [];
+
+        foreach ($preparedLines as $index => $prepared) {
+            /** @var LineTotals $line */
+            $line = $totals->lines[$index];
+            $item = $prepared['item'];
+
+            $saleLine = new SaleLine([
+                'item_id' => $item->id,
+                'item_unit_id' => $prepared['item_unit_id'],
+                'quantity' => $line->quantity,
+                'bonus_quantity' => $prepared['bonus_quantity'],
+                'unit_conversion_factor' => $line->conversionFactor,
+                'rate' => $line->rate,
+                'discount' => $line->discountValue,
+                'discount_type' => $line->discountType,
+                'discount_amount' => $line->discountAmount,
+                'vatable' => $line->vatable,
+                'line_total' => $line->lineTotal,
+            ]);
+            $saleLine->setRelation('item', $item);
+            $saleLine->setRelation('itemUnit', $prepared['item_unit_id'] ? $item->units->firstWhere('id', $prepared['item_unit_id']) : null);
+
+            $saleLines[] = $saleLine;
+        }
+
+        $sale->setRelation('customer', $customer);
+        $sale->setRelation('lines', (new SaleLine)->newCollection($saleLines));
+
+        return $sale;
+    }
+
+    /**
      * Turns the request's lines into calculator input plus the item/unit
      * context the persistence step needs afterwards.
      *

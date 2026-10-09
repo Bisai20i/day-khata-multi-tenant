@@ -391,50 +391,48 @@ const columns = [
         numeric: false,
         cell: ({ row }) =>
             h('div', { class: 'flex items-center gap-1' }, [
-                h(Tooltip, { label: 'View lines' }, () =>
-                    h(
-                        'button',
-                        {
-                            type: 'button',
-                            class: 'flex h-[26px] w-[26px] items-center justify-center bg-bg-subtle text-text-faint transition-colors duration-150 hover:bg-primary-tint hover:text-primary',
-                            'aria-label': `View lines of ${voucherLabel(row.original)}`,
-                            onClick: () => viewVoucher(row.original),
-                        },
-                        [h(Eye, { class: 'h-[13px] w-[13px]' })],
-                    ),
-                ),
-                canPrintVoucher.value
-                    ? h(Tooltip, { label: 'Print voucher' }, () =>
-                          h(
-                              'a',
-                              {
-                                  href: `/journal-vouchers/${row.original.id}/print`,
-                                  target: '_blank',
-                                  rel: 'noopener',
-                                  class: 'flex h-[26px] w-[26px] items-center justify-center bg-bg-subtle text-text-faint transition-colors duration-150 hover:bg-primary-tint hover:text-primary',
-                                  'aria-label': `Print ${voucherLabel(row.original)}`,
-                              },
-                              [h(Printer, { class: 'h-[13px] w-[13px]' })],
-                          ),
-                      )
-                    : null,
-                canCancelVoucher.value && row.original.status === 'posted' && MANUALLY_CANCELLABLE_TYPES.includes(row.original.voucher_type)
-                    ? h(Tooltip, { label: 'Cancel voucher (posts reversing entry)' }, () =>
-                          h(
-                              'button',
-                              {
-                                  type: 'button',
-                                  class: 'flex h-[26px] w-[26px] items-center justify-center bg-bg-subtle text-text-faint transition-colors duration-150 hover:bg-danger-bg hover:text-danger',
-                                  'aria-label': `Cancel ${voucherLabel(row.original)}`,
-                                  onClick: () => openCancel(row.original),
-                              },
-                              [h(Ban, { class: 'h-[13px] w-[13px]' })],
-                          ),
-                      )
-                    : null,
+                iconAction({ label: 'View lines', ariaLabel: `View lines of ${voucherLabel(row.original)}`, icon: Eye, run: () => viewVoucher(row.original) }),
+                ...secondaryActionsFor(row.original).map(iconAction),
             ]),
     },
 ];
+
+/** Print and cancel for a voucher, filtered by permission and by whether the voucher can still be cancelled. */
+function secondaryActionsFor(voucher) {
+    return [
+        canPrintVoucher.value && {
+            label: 'Print voucher',
+            ariaLabel: `Print ${voucherLabel(voucher)}`,
+            icon: Printer,
+            link: { href: `/journal-vouchers/${voucher.id}/print`, target: '_blank', rel: 'noopener' },
+        },
+        canCancelVoucher.value && voucher.status === 'posted' && MANUALLY_CANCELLABLE_TYPES.includes(voucher.voucher_type) && {
+            label: 'Cancel voucher (posts reversing entry)',
+            ariaLabel: `Cancel ${voucherLabel(voucher)}`,
+            icon: Ban,
+            danger: true,
+            run: () => openCancel(voucher),
+        },
+    ].filter(Boolean);
+}
+
+/** One row action as an inline icon button, or a real link when the action opens a file. */
+function iconAction(action) {
+    return h(Tooltip, { label: action.label }, () =>
+        h(
+            action.link ? 'a' : 'button',
+            {
+                ...(action.link ?? { type: 'button', onClick: action.run }),
+                class: [
+                    'flex h-[26px] w-[26px] items-center justify-center bg-bg-subtle text-text-faint transition-colors duration-150',
+                    action.danger ? 'hover:bg-danger-bg hover:text-danger' : 'hover:bg-primary-tint hover:text-primary',
+                ],
+                'aria-label': action.ariaLabel,
+            },
+            [h(action.icon, { class: 'h-[13px] w-[13px]' })],
+        ),
+    );
+}
 </script>
 
 <template>

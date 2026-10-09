@@ -8,6 +8,7 @@ import PageHeader from '@/components/ui/PageHeader.vue';
 import Card from '@/components/ui/Card.vue';
 import Button from '@/components/ui/Button.vue';
 import Input from '@/components/ui/Input.vue';
+import InfoTip from '@/components/ui/InfoTip.vue';
 import Modal from '@/components/ui/Modal.vue';
 import DataTable from '@/components/ui/DataTable.vue';
 import RowActions from '@/components/ui/RowActions.vue';
@@ -230,9 +231,11 @@ const columns = [
                 </div>
 
                 <div>
-                    <label for="tpin" class="mb-1 block text-sm font-semibold text-text-base">TPIN</label>
+                    <div class="mb-1 flex items-center gap-1">
+                        <label for="tpin" class="block text-sm font-semibold text-text-base">TPIN</label>
+                        <InfoTip text="Taxpayer PIN (PAN/VAT number). Needed only if the customer wants a tax invoice." />
+                    </div>
                     <Input id="tpin" v-model="form.tpin" type="text" placeholder="e.g. 123456789" />
-                    <p class="mt-1 text-xs text-text-muted">Taxpayer PIN (PAN/VAT number). Needed only if the customer wants a tax invoice.</p>
                     <p v-if="form.errors.tpin" class="mt-1 text-sm text-danger">{{ form.errors.tpin }}</p>
                 </div>
 

@@ -17,6 +17,8 @@ import { cn } from '@/lib/utils';
 
 const props = defineProps({
     modelValue: { type: [String, Number, null], default: null },
+    // Goes on the text input, so a <label for> focuses it.
+    id: { type: String, default: undefined },
     options: { type: Array, default: () => [] },
     placeholder: { type: String, default: 'Search…' },
     disabled: { type: Boolean, default: false },
@@ -60,6 +62,7 @@ function searchText(option) {
             )"
         >
             <ComboboxInput
+                :id="id"
                 :display-value="displayValue"
                 :placeholder="placeholder"
                 :disabled="disabled"

@@ -1,7 +1,7 @@
 <script setup>
 import { computed, h, onMounted, ref, watch } from 'vue';
 import { Link, router, useForm, usePage } from '@inertiajs/vue3';
-import { Plus } from '@lucide/vue';
+import { BookOpen, Plus } from '@lucide/vue';
 import AppLayout from '@/layouts/AppLayout.vue';
 import { useLayoutChrome } from '@/composables/useLayoutChrome';
 import PageHeader from '@/components/ui/PageHeader.vue';
@@ -10,9 +10,11 @@ import Button from '@/components/ui/Button.vue';
 import Input from '@/components/ui/Input.vue';
 import Select from '@/components/ui/Select.vue';
 import Modal from '@/components/ui/Modal.vue';
+import InfoTip from '@/components/ui/InfoTip.vue';
 import NepaliDateInput from '@/components/ui/NepaliDateInput.vue';
 import DataTable from '@/components/ui/DataTable.vue';
 import RowActions from '@/components/ui/RowActions.vue';
+import DropdownMenuItem from '@/components/ui/DropdownMenuItem.vue';
 import { useToast } from '@/composables/useToast';
 import { useConfirm } from '@/composables/useConfirm';
 import { usePermissions } from '@/composables/usePermissions';
@@ -227,22 +229,31 @@ const columns = [
         id: 'actions',
         header: '',
         numeric: false,
-        cell: ({ row }) =>
-            h('div', { class: 'flex items-center gap-3' }, [
-                h(
-                    Link,
-                    { href: `/accounts/${row.original.id}/ledger`, class: 'text-xs font-semibold text-primary hover:underline' },
-                    { default: () => 'Ledger' },
-                ),
-                can('accounts.edit') || can('accounts.delete')
-                    ? h(RowActions, {
-                          canEdit: can('accounts.edit'),
-                          canDelete: can('accounts.delete'),
-                          onEdit: () => openEdit(row.original),
-                          onDelete: () => destroy(row.original),
-                      })
-                    : null,
-            ]),
+        cell: ({ row }) => {
+            const ledgerUrl = `/accounts/${row.original.id}/ledger`;
+
+            if (!can('accounts.edit') && !can('accounts.delete')) {
+                return h(Link, { href: ledgerUrl, class: 'text-xs font-semibold text-primary hover:underline' }, { default: () => 'Ledger' });
+            }
+
+            return h(
+                RowActions,
+                {
+                    canEdit: can('accounts.edit'),
+                    canDelete: can('accounts.delete'),
+                    onEdit: () => openEdit(row.original),
+                    onDelete: () => destroy(row.original),
+                },
+                {
+                    more: () => [
+                        h(DropdownMenuItem, { key: 'Ledger', onSelect: () => router.visit(ledgerUrl) }, () => [
+                            h(BookOpen, { class: 'size-3.5', 'aria-hidden': 'true' }),
+                            'Ledger',
+                        ]),
+                    ],
+                },
+            );
+        },
     },
 ];
 </script>
@@ -303,9 +314,11 @@ const columns = [
         <Modal :open="showModal" :title="editing ? 'Edit Account' : 'New Account'" @update:open="onModalOpenChange">
             <form class="flex flex-col gap-4" @submit.prevent="submit">
                 <div>
-                    <label for="parent_type" class="mb-1 block text-sm font-semibold text-text-base">File under</label>
+                    <div class="mb-1 flex items-center gap-1">
+                        <label for="parent_type" class="block text-sm font-semibold text-text-base">File under</label>
+                        <InfoTip text="Choose whether this account sits directly under an account group or under a subgroup." />
+                    </div>
                     <Select id="parent_type" v-model="parentType" :options="parentTypeOptions" />
-                    <p class="mt-1 text-xs text-text-muted">Choose whether this account sits directly under an account group or under a subgroup.</p>
                 </div>
 
                 <div v-if="parentType === 'group'">
@@ -331,9 +344,11 @@ const columns = [
                 </div>
 
                 <div>
-                    <label for="code" class="mb-1 block text-sm font-semibold text-text-base">Code</label>
+                    <div class="mb-1 flex items-center gap-1">
+                        <label for="code" class="block text-sm font-semibold text-text-base">Code</label>
+                        <InfoTip text="Optional short reference number. Leave blank to auto-assign." />
+                    </div>
                     <Input id="code" v-model="form.code" type="text" placeholder="e.g. 1001" />
-                    <p class="mt-1 text-xs text-text-muted">Optional short reference number. Leave blank to auto-assign.</p>
                     <p v-if="form.errors.code" class="mt-1 text-sm text-danger">{{ form.errors.code }}</p>
                 </div>
 

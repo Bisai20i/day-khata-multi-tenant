@@ -1,6 +1,7 @@
 <script setup>
 import { computed, h, ref, watch } from 'vue';
 import { router, useForm, usePage } from '@inertiajs/vue3';
+import { Plus } from '@lucide/vue';
 import AppLayout from '@/layouts/AppLayout.vue';
 import { useLayoutChrome } from '@/composables/useLayoutChrome';
 import PageHeader from '@/components/ui/PageHeader.vue';
@@ -11,6 +12,7 @@ import DataTable from '@/components/ui/DataTable.vue';
 import Modal from '@/components/ui/Modal.vue';
 import Input from '@/components/ui/Input.vue';
 import Select from '@/components/ui/Select.vue';
+import InfoTip from '@/components/ui/InfoTip.vue';
 import RowActions from '@/components/ui/RowActions.vue';
 import { useToast } from '@/composables/useToast';
 import { formatMoney } from '@/lib/money';
@@ -151,7 +153,10 @@ const columns = [
 <template>
     <div>
         <PageHeader title="Item Varieties" description="Item varieties: sub-types of an item such as size or grade.">
-            <Button v-if="can('item_varieties.manage')" variant="primary" tone="purple" @click="openCreate">New variety</Button>
+            <Button v-if="can('item_varieties.manage')" variant="primary" tone="purple" @click="openCreate">
+                <Plus class="size-4" />
+                New variety
+            </Button>
         </PageHeader>
 
         <Card variant="panel">
@@ -178,18 +183,22 @@ const columns = [
                 </div>
 
                 <div>
-                    <label for="sku_suffix" class="mb-1 block text-sm font-semibold text-text-base">SKU Suffix</label>
+                    <div class="mb-1 flex items-center gap-1">
+                        <label for="sku_suffix" class="block text-sm font-semibold text-text-base">SKU Suffix</label>
+                        <InfoTip text="Short code appended to the item's SKU to identify this variety." />
+                    </div>
                     <Input id="sku_suffix" v-model="form.sku_suffix" type="text" placeholder="e.g. RED-L" />
-                    <p class="mt-1 text-xs text-text-faint">Short code appended to the item's SKU to identify this variety.</p>
                     <p v-if="form.errors.sku_suffix" class="mt-1 text-sm text-danger">{{ form.errors.sku_suffix }}</p>
                 </div>
 
                 <div>
-                    <label for="price_adjustment" class="mb-1 block text-sm font-semibold text-text-base">
-                        Price Adjustment
-                    </label>
+                    <div class="mb-1 flex items-center gap-1">
+                        <label for="price_adjustment" class="block text-sm font-semibold text-text-base">
+                            Price Adjustment
+                        </label>
+                        <InfoTip text="Amount added to (or, if negative, subtracted from) the item's price for this variety." />
+                    </div>
                     <Input id="price_adjustment" v-model="form.price_adjustment" type="number" step="0.01" placeholder="0.00" />
-                    <p class="mt-1 text-xs text-text-faint">Amount added to (or, if negative, subtracted from) the item's price for this variety.</p>
                     <p v-if="form.errors.price_adjustment" class="mt-1 text-sm text-danger">
                         {{ form.errors.price_adjustment }}
                     </p>
@@ -198,7 +207,7 @@ const columns = [
                 <div class="flex items-center gap-2">
                     <input id="is_active" v-model="form.is_active" type="checkbox" class="size-4 border-[1.5px] border-border" />
                     <label for="is_active" class="text-sm font-semibold text-text-base">Active</label>
-                    <span class="text-xs text-text-faint">(inactive entries are hidden from selection lists)</span>
+                    <InfoTip text="Inactive entries are hidden from selection lists." />
                 </div>
             </form>
 

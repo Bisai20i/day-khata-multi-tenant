@@ -4,6 +4,7 @@ import Card from '@/components/ui/Card.vue';
 import Input from '@/components/ui/Input.vue';
 import Select from '@/components/ui/Select.vue';
 import Combobox from '@/components/ui/Combobox.vue';
+import InfoTip from '@/components/ui/InfoTip.vue';
 
 // Payment and Notes side by side, same layout as SaleCreatePaymentNotes.
 const props = defineProps({
@@ -31,9 +32,10 @@ const bankAccountOptions = computed(() =>
     <div class="grid grid-cols-1 items-start gap-4 lg:grid-cols-2">
         <Card variant="panel" class="!p-4">
             <template #title>
-                <div class="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-0.5">
+                <div class="flex items-center gap-1">
                     <span>Payment</span>
-                    <span id="purchase-payment-help" class="text-[11px] font-normal normal-case tracking-normal text-text-muted">
+                    <InfoTip text="Credit = you pay the supplier later and the amount goes on their account." />
+                    <span id="purchase-payment-help" class="sr-only">
                         Credit = you pay the supplier later and the amount goes on their account.
                     </span>
                 </div>

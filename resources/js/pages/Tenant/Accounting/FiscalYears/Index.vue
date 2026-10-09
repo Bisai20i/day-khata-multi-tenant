@@ -13,6 +13,7 @@ import Select from '@/components/ui/Select.vue';
 import DataTable from '@/components/ui/DataTable.vue';
 import Badge from '@/components/ui/Badge.vue';
 import Tooltip from '@/components/ui/Tooltip.vue';
+import InfoTip from '@/components/ui/InfoTip.vue';
 import { useToast } from '@/composables/useToast';
 import { useConfirm } from '@/composables/useConfirm';
 import { formatBsDate, todayInKathmandu } from '@/lib/format.js';
@@ -331,20 +332,24 @@ const columns = [
         <Modal :open="createModalOpen" title="New fiscal year" @update:open="onCreateModalOpenChange">
             <form class="flex flex-col gap-4" @submit.prevent="submitCreate">
                 <div>
-                    <label for="bs_year" class="mb-1 block text-sm font-semibold text-text-base">Fiscal year (BS) <span class="text-danger">*</span></label>
+                    <div class="mb-1 flex items-center gap-1">
+                        <label for="bs_year" class="block text-sm font-semibold text-text-base">Fiscal year (BS) <span class="text-danger">*</span></label>
+                        <InfoTip text="A fiscal year always runs from Shrawan 1 to the end of Ashad." />
+                    </div>
                     <Select id="bs_year" v-model="form.bs_year" :options="fiscalYearOptions" placeholder="Select fiscal year…" />
                     <p v-if="selectedFiscalYearOption" class="mt-1 text-xs text-text-muted">
                         Runs {{ formatBsDate(selectedFiscalYearOption.start_date) }} (Shrawan 1) to
                         {{ formatBsDate(selectedFiscalYearOption.end_date) }} (end of Ashad).
                     </p>
-                    <p v-else class="mt-1 text-xs text-text-muted">A fiscal year always runs from Shrawan 1 to the end of Ashad.</p>
                     <p v-if="form.errors.bs_year" class="mt-1 text-sm text-danger">{{ form.errors.bs_year }}</p>
                 </div>
 
                 <div>
-                    <label for="name" class="mb-1 block text-sm font-semibold text-text-base">Name</label>
+                    <div class="mb-1 flex items-center gap-1">
+                        <label for="name" class="block text-sm font-semibold text-text-base">Name</label>
+                        <InfoTip text="Optional. Defaults to the BS year, e.g. 2082/83." />
+                    </div>
                     <Input id="name" v-model="form.name" type="text" :placeholder="selectedFiscalYearOption?.label ?? 'e.g. 2082/83'" />
-                    <p class="mt-1 text-xs text-text-muted">Optional. Defaults to the BS year, e.g. 2082/83.</p>
                     <p v-if="form.errors.name" class="mt-1 text-sm text-danger">{{ form.errors.name }}</p>
                 </div>
             </form>
@@ -388,9 +393,12 @@ const columns = [
                 </div>
 
                 <div v-if="closingEarly">
-                    <label for="close_reason" class="mb-1 block text-sm font-semibold text-text-base">
-                        Reason for closing early <span class="text-danger">*</span>
-                    </label>
+                    <div class="mb-1 flex items-center gap-1">
+                        <label for="close_reason" class="block text-sm font-semibold text-text-base">
+                            Reason for closing early <span class="text-danger">*</span>
+                        </label>
+                        <InfoTip text="This year has not finished yet. Closing it now freezes a period that can still receive documents, so an admin has to say why." />
+                    </div>
                     <Input
                         id="close_reason"
                         v-model="closeForm.reason"
@@ -399,10 +407,6 @@ const columns = [
                         placeholder="Why is this year being closed before it ends?"
                         required
                     />
-                    <p class="mt-1 text-xs text-text-muted">
-                        This year has not finished yet. Closing it now freezes a period that can still receive
-                        documents, so an admin has to say why.
-                    </p>
                     <p v-if="closeForm.errors.reason" class="mt-1 text-sm text-danger">{{ closeForm.errors.reason }}</p>
                 </div>
             </div>

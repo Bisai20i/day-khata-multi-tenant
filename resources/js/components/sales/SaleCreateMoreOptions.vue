@@ -1,6 +1,7 @@
 <script setup>
 import { computed } from 'vue';
 import Input from '@/components/ui/Input.vue';
+import InfoTip from '@/components/ui/InfoTip.vue';
 import Combobox from '@/components/ui/Combobox.vue';
 
 // Rare fields (Store, header discount, TDS, agent) behind progressive
@@ -35,8 +36,10 @@ const agentOptions = computed(() => props.agents.map((a) => ({ value: a.id, labe
                 <p v-if="form.errors.store_id" class="mt-1 text-sm text-danger">{{ form.errors.store_id }}</p>
             </div>
             <div>
-                <label class="mb-1 block text-sm font-semibold text-text-base">Discount on whole bill</label>
-                <p class="mb-1 text-xs text-text-muted">Applied to the subtotal. Use % or Rs with the button.</p>
+                <div class="mb-1 flex items-center gap-1">
+                    <label class="block text-sm font-semibold text-text-base">Discount on whole bill</label>
+                    <InfoTip text="Applied to the subtotal. Use % or Rs with the button." />
+                </div>
                 <Input
                     v-model="form.discount"
                     type="number"
@@ -62,8 +65,10 @@ const agentOptions = computed(() => props.agents.map((a) => ({ value: a.id, labe
 
         <div class="grid grid-cols-2 gap-4">
             <div>
-                <label class="mb-1 block text-sm font-semibold text-text-base">TDS account (optional)</label>
-                <p class="mb-1 text-xs text-text-muted">TDS = tax the customer deducts at source and pays to the government.</p>
+                <div class="mb-1 flex items-center gap-1">
+                    <label class="block text-sm font-semibold text-text-base">TDS account (optional)</label>
+                    <InfoTip text="TDS = tax the customer deducts at source and pays to the government." />
+                </div>
                 <Combobox
                     :model-value="form.tds_account_id"
                     :options="tdsAccountOptions"
@@ -81,8 +86,10 @@ const agentOptions = computed(() => props.agents.map((a) => ({ value: a.id, labe
 
         <div class="grid grid-cols-2 gap-4">
             <div>
-                <label class="mb-1 block text-sm font-semibold text-text-base">Sales agent (optional)</label>
-                <p class="mb-1 text-xs text-text-muted">Agent who brought this sale; earns the commission below.</p>
+                <div class="mb-1 flex items-center gap-1">
+                    <label class="block text-sm font-semibold text-text-base">Sales agent (optional)</label>
+                    <InfoTip text="Agent who brought this sale; earns the commission below." />
+                </div>
                 <Combobox
                     :model-value="form.agent_id"
                     :options="agentOptions"

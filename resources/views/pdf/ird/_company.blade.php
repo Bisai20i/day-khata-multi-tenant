@@ -24,7 +24,11 @@
         {{-- Only the first print is the original; every reprint has to say so
              on the face of the document (C9). --}}
         <td class="copy-note" style="width: 25%;">
-            {{ $printCopyNumber > 1 ? 'Copy of Original - '.($printCopyNumber - 1) : 'Original' }}
+            @if($isEstimate)
+                Estimate<br>Not a Tax Invoice
+            @else
+                {{ $printCopyNumber > 1 ? 'Copy of Original - '.($printCopyNumber - 1) : 'Original' }}
+            @endif
         </td>
     </tr>
 </table>

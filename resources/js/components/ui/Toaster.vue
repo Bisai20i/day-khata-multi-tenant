@@ -20,7 +20,7 @@ const variantDotClasses = {
             v-for="item in toasts"
             :key="item.id"
             role="status"
-            class="pointer-events-auto flex items-center gap-2 bg-toast-bg px-4 py-2.5 text-[12.5px] font-semibold text-white shadow-[0_10px_25px_rgba(0,0,0,.15)]"
+            class="pointer-events-auto flex cursor-pointer items-center gap-2 bg-toast-bg px-4 py-2.5 text-[12.5px] font-semibold text-white shadow-[0_10px_25px_rgba(0,0,0,.15)]"
             @click="dismiss(item.id)"
         >
             <span

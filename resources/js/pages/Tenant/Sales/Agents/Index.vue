@@ -7,6 +7,7 @@ import Card from '@/components/ui/Card.vue';
 import Button from '@/components/ui/Button.vue';
 import Badge from '@/components/ui/Badge.vue';
 import Input from '@/components/ui/Input.vue';
+import InfoTip from '@/components/ui/InfoTip.vue';
 import Modal from '@/components/ui/Modal.vue';
 import PageHeader from '@/components/ui/PageHeader.vue';
 import { Plus } from '@lucide/vue';
@@ -204,11 +205,11 @@ const columns = [
                 </div>
 
                 <div>
-                    <label for="commission_rate" class="mb-1 block text-sm font-semibold text-text-base">
-                        Default commission rate (%)
-                    </label>
+                    <div class="mb-1 flex items-center gap-1">
+                        <label for="commission_rate" class="block text-sm font-semibold text-text-base">Default commission rate (%)</label>
+                        <InfoTip text="Percentage of each sale this agent earns as commission (0 to 100). Leave blank for none." />
+                    </div>
                     <Input id="commission_rate" v-model="form.commission_rate" type="number" min="0" max="100" step="0.01" placeholder="0.00" />
-                    <p class="mt-1 text-xs text-text-muted">Percentage of each sale this agent earns as commission (0 to 100). Leave blank for none.</p>
                     <p v-if="form.errors.commission_rate" class="mt-1 text-sm text-danger" role="alert">{{ form.errors.commission_rate }}</p>
                 </div>
 

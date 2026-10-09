@@ -10,6 +10,7 @@ import Button from '@/components/ui/Button.vue';
 import Input from '@/components/ui/Input.vue';
 import Select from '@/components/ui/Select.vue';
 import Modal from '@/components/ui/Modal.vue';
+import InfoTip from '@/components/ui/InfoTip.vue';
 import DataTable from '@/components/ui/DataTable.vue';
 import RowActions from '@/components/ui/RowActions.vue';
 import { useToast } from '@/composables/useToast';
@@ -150,14 +151,16 @@ const columns = [
         <Modal :open="showModal" :title="editing ? 'Edit Account Subgroup' : 'New Account Subgroup'" @update:open="onModalOpenChange">
             <form class="flex flex-col gap-4" @submit.prevent="submit">
                 <div>
-                    <label for="account_group_id" class="mb-1 block text-sm font-semibold text-text-base">Account group <span class="text-danger">*</span></label>
+                    <div class="mb-1 flex items-center gap-1">
+                        <label for="account_group_id" class="block text-sm font-semibold text-text-base">Account group <span class="text-danger">*</span></label>
+                        <InfoTip text="The account group this subgroup sits under." />
+                    </div>
                     <Select
                         id="account_group_id"
                         v-model="form.account_group_id"
                         :options="groupOptions"
                         placeholder="Select account group"
                     />
-                    <p class="mt-1 text-xs text-text-muted">The account group this subgroup sits under.</p>
                     <p v-if="form.errors.account_group_id" class="mt-1 text-sm text-danger">{{ form.errors.account_group_id }}</p>
                 </div>
 

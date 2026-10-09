@@ -7,6 +7,7 @@ import PageHeader from '@/components/ui/PageHeader.vue';
 import Button from '@/components/ui/Button.vue';
 import Input from '@/components/ui/Input.vue';
 import Combobox from '@/components/ui/Combobox.vue';
+import InfoTip from '@/components/ui/InfoTip.vue';
 import NepaliDateInput from '@/components/ui/NepaliDateInput.vue';
 import { formatMoney, formatQuantity, formatRate } from '@/lib/money';
 import { todayInKathmandu } from '@/lib/format';
@@ -171,9 +172,7 @@ function submit() {
             <Button :variant="mode === 'unlinked' ? 'primary' : 'secondary'" tone="purple" type="button" @click="mode = 'unlinked'">
                 Without a purchase
             </Button>
-            <span class="text-xs text-text-muted">
-                Use "Without a purchase" for opening stock, or goods bought before this system went live.
-            </span>
+            <InfoTip text="Use &quot;Without a purchase&quot; for opening stock, or goods bought before this system went live." />
         </div>
 
         <p
@@ -237,14 +236,16 @@ function submit() {
                     <p v-if="form.errors.reason" class="mt-1 text-sm text-danger">{{ form.errors.reason }}</p>
                 </div>
                 <div>
-                    <label class="mb-1 block text-sm font-semibold text-text-base">Refund via</label>
+                    <div class="mb-1 flex items-center gap-1">
+                        <label class="block text-sm font-semibold text-text-base">Refund via</label>
+                        <InfoTip text="Leave empty to only reduce what you owe the supplier." />
+                    </div>
                     <Combobox
                         :model-value="form.refund_account_id"
                         :options="refundAccountOptions"
                         placeholder="No refund (debit note only)"
                         @update:model-value="(v) => (form.refund_account_id = v)"
                     />
-                    <p class="mt-1 text-xs text-text-faint">Leave empty to only reduce what you owe the supplier.</p>
                     <p v-if="form.errors.refund_account_id" class="mt-1 text-sm text-danger">{{ form.errors.refund_account_id }}</p>
                 </div>
                 <div>
@@ -260,7 +261,12 @@ function submit() {
             </div>
 
             <div v-if="selectedPurchase">
-                <h4 class="mb-2 border-b-[1.5px] border-border pb-1 text-sm font-bold text-text-strong">Items to return</h4>
+                <div class="mb-2 flex items-center gap-1 border-b-[1.5px] border-border pb-1">
+                    <h4 class="text-sm font-bold text-text-strong">Items to return</h4>
+                    <InfoTip
+                        text="Quantities are in the unit each line was purchased in. Returning one Box of twelve puts twelve pieces back out of stock. Free goods can be returned too: paid units are credited first, so anything beyond the billed quantity goes back at no value."
+                    />
+                </div>
                 <div class="mb-2 grid grid-cols-[1fr_90px_110px_110px_90px_110px_140px] gap-2 text-[10px] font-bold tracking-[.8px] text-text-muted uppercase">
                     <span>Item</span>
                     <span>Unit</span>
@@ -297,12 +303,6 @@ function submit() {
                         </p>
                     </div>
                 </div>
-
-                <p class="mt-1 text-xs text-text-muted">
-                    Quantities are in the unit each line was purchased in. Returning one Box of twelve puts twelve pieces
-                    back out of stock. Free goods can be returned too: paid units are credited first, so anything beyond
-                    the billed quantity goes back at no value.
-                </p>
             </div>
 
             <div class="flex items-center justify-end gap-2">

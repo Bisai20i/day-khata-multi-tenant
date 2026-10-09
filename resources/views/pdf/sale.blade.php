@@ -2,7 +2,7 @@
 <html>
 <head>
 <meta charset="utf-8">
-<title>{{ ['abbreviated' => 'Abbreviated Tax Invoice', 'pan' => 'PAN Invoice'][$sale->invoice_type] ?? 'Tax Invoice' }} {{ $documentNumber }}</title>
+<title>{{ ($isEstimate ?? false) ? 'Estimate' : (['abbreviated' => 'Abbreviated Tax Invoice', 'pan' => 'PAN Invoice'][$sale->invoice_type] ?? 'Tax Invoice').' '.$documentNumber }}</title>
 @include('pdf.ird._styles')
 </head>
 <body>
@@ -59,6 +59,11 @@
     $printDateBs = $dateBs ?? \App\Support\NepaliCalendar::formatBs($printDateAd);
     $printFiscalYearName = $fiscalYearName ?? null;
     $printAmountInWords = $amountInWords ?? null;
+
+    // SaleController::estimate() renders an unposted cart through these same
+    // formats. Only what would make the sheet pass for an issued invoice
+    // changes: the title and the Original/Copy stamp.
+    $isEstimate = $isEstimate ?? false;
 
     // BS first, AD beside it: the Bikram Sambat date is the one the IRD reads.
     $dateLabel = $printDateBs !== '' ? "{$printDateBs} (AD {$printDateAd})" : $printDateAd;

@@ -75,6 +75,30 @@
 }
 
 /*
+ * Pointer cursor on everything clickable, applied app-wide. Tailwind v4's
+ * preflight leaves buttons on the default arrow, so this restores the hand
+ * in one place instead of repeating `cursor-pointer` per element. It sits
+ * in the base layer so any `cursor-*` utility still wins.
+ */
+@layer base {
+    button:not(:disabled),
+    [role='button']:not([aria-disabled='true']),
+    [role='tab'],
+    [role='menuitem'],
+    [role='option'],
+    [role='switch'],
+    [role='checkbox'],
+    [role='radio'],
+    a[href],
+    summary,
+    select:not(:disabled),
+    label[for],
+    input:is([type='checkbox'], [type='radio'], [type='submit'], [type='button'], [type='reset'], [type='file']):not(:disabled) {
+        cursor: pointer;
+    }
+}
+
+/*
  * Thin scrollbars, applied app-wide. The browser default scrollbar is wide
  * and visually heavy next to this design's flat, low-chrome surfaces, so we
  * slim it down using existing neutral tokens rather than new colors.

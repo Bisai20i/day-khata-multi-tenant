@@ -16,6 +16,37 @@ function enteredQuantity(value) {
 }
 
 /**
+ * The cart as `POST /sales` wants it. Shared with the estimate preview
+ * (usePosEstimate), so the bill previewed is built from the same payload as
+ * the bill posted.
+ *
+ * The server computes the actual Rs discount itself from the raw value plus
+ * its type, so the raw entered value and the mapped type are sent as-is -
+ * never a client-resolved amount.
+ */
+export function toSalePayload(data, paymentMode) {
+    return {
+        ...data,
+        payment_mode: paymentMode,
+        discount: data.discount === '' ? '0' : data.discount,
+        discount_type: data.discount_type === 'percent' ? 'percentage' : 'flat',
+        cash_amount: data.cash_amount === '' ? '0' : data.cash_amount,
+        bank_amount: data.bank_amount === '' ? '0' : data.bank_amount,
+        tds_amount: data.tds_amount === '' ? '0' : data.tds_amount,
+        lines: data.lines.map((line) => ({
+            item_id: line.item_id,
+            quantity: line.quantity,
+            // Free units: an explicit '0' when the box is empty, never
+            // `undefined`. `mrp` is not sent - it only ever filled `rate`.
+            bonus_quantity: enteredQuantity(line.bonus_quantity),
+            rate: line.rate,
+            discount: line.discount === '' ? '0' : line.discount,
+            discount_type: line.discountType === 'percent' ? 'percentage' : 'flat',
+        })),
+    };
+}
+
+/**
  * Sale submission + receipt confirmation. Posts the /sales payload, stashes
  * the created-sale receipt in sessionStorage across the server redirect and
  * re-opens it once the bounce back to /pos lands.
@@ -69,29 +100,10 @@ export function usePosCheckout({
         tenderedCash = cashReceived.value;
 
         form.transform((data) => ({
-            ...data,
-            payment_mode: resolvedPaymentMode.value,
-            // The server computes the actual Rs discount itself from the raw value
-            // plus its type, so the raw entered value and the mapped type are sent
-            // as-is - never a client-resolved amount.
-            discount: data.discount === '' ? '0' : data.discount,
-            discount_type: data.discount_type === 'percent' ? 'percentage' : 'flat',
-            cash_amount: data.cash_amount === '' ? '0' : data.cash_amount,
-            bank_amount: data.bank_amount === '' ? '0' : data.bank_amount,
-            tds_amount: data.tds_amount === '' ? '0' : data.tds_amount,
+            ...toSalePayload(data, resolvedPaymentMode.value),
             // C8: the total the cashier was looking at. The server refuses the
             // save if it arrives at anything else.
             expected_total: expectedTotal,
-            lines: data.lines.map((line) => ({
-                item_id: line.item_id,
-                quantity: line.quantity,
-                // Free units: an explicit '0' when the box is empty, never
-                // `undefined`. `mrp` is not sent - it only ever filled `rate`.
-                bonus_quantity: enteredQuantity(line.bonus_quantity),
-                rate: line.rate,
-                discount: line.discount === '' ? '0' : line.discount,
-                discount_type: line.discountType === 'percent' ? 'percentage' : 'flat',
-            })),
         })).post('/sales', {
             preserveScroll: true,
             onSuccess: () => {

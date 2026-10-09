@@ -1,6 +1,7 @@
 <script setup>
-import { h, ref, watch } from 'vue';
+import { h, watch } from 'vue';
 import { router, useForm, usePage } from '@inertiajs/vue3';
+import { Plus } from '@lucide/vue';
 import AppLayout from '@/layouts/AppLayout.vue';
 import { useLayoutChrome } from '@/composables/useLayoutChrome';
 import PageHeader from '@/components/ui/PageHeader.vue';
@@ -10,9 +11,12 @@ import Badge from '@/components/ui/Badge.vue';
 import DataTable from '@/components/ui/DataTable.vue';
 import Modal from '@/components/ui/Modal.vue';
 import Input from '@/components/ui/Input.vue';
+import FormField from '@/components/ui/FormField.vue';
+import CheckboxField from '@/components/ui/CheckboxField.vue';
 import RowActions from '@/components/ui/RowActions.vue';
 import { useToast } from '@/composables/useToast';
 import { useConfirm } from '@/composables/useConfirm';
+import { useCrudModal } from '@/composables/useCrudModal';
 import { usePermissions } from '@/composables/usePermissions';
 
 defineOptions({ layout: AppLayout });
@@ -43,9 +47,6 @@ watch(
     { immediate: true },
 );
 
-const showModal = ref(false);
-const editing = ref(null);
-
 const form = useForm({
     name: '',
     address: '',
@@ -53,41 +54,17 @@ const form = useForm({
     is_active: true,
 });
 
-function openCreate() {
-    editing.value = null;
-    form.reset();
-    form.clearErrors();
-    showModal.value = true;
-}
-
-function openEdit(store) {
-    editing.value = store;
-    form.clearErrors();
-    form.name = store.name;
-    form.address = store.address ?? '';
-    form.phone = store.phone ?? '';
-    form.is_active = !!store.is_active;
-    showModal.value = true;
-}
-
-function closeModal() {
-    showModal.value = false;
-    editing.value = null;
-    form.reset();
-    form.clearErrors();
-}
-
-function onModalOpenChange(value) {
-    if (!value) closeModal();
-}
-
-function submit() {
-    if (editing.value) {
-        form.put(`/stores/${editing.value.id}`, { onSuccess: closeModal });
-    } else {
-        form.post('/stores', { onSuccess: closeModal });
-    }
-}
+const { showModal, editing, addAnother, savedNotice, isDirty, openCreate, openEdit, closeModal, onModalOpenChange, submit } = useCrudModal({
+    form,
+    url: '/stores',
+    formId: 'store-form',
+    fill: (store) => {
+        form.name = store.name;
+        form.address = store.address ?? '';
+        form.phone = store.phone ?? '';
+        form.is_active = !!store.is_active;
+    },
+});
 
 async function destroy(store) {
     if (!(await confirm({ message: `Delete store "${store.name}"? Stock recorded in it will no longer be available to select. This cannot be undone.`, tone: 'danger', confirmLabel: 'Delete store' }))) return;
@@ -125,7 +102,10 @@ const columns = [
 <template>
     <div>
         <PageHeader title="Stores" description="Stores: the warehouses, shops or godowns where you keep stock.">
-            <Button v-if="can('stores.manage')" variant="primary" tone="purple" @click="openCreate">New store</Button>
+            <Button v-if="can('stores.manage')" variant="primary" tone="purple" @click="openCreate">
+                <Plus class="size-4" />
+                New store
+            </Button>
         </PageHeader>
 
         <Card variant="panel">
@@ -135,44 +115,68 @@ const columns = [
         <Modal
             :open="showModal"
             :title="editing ? 'Edit store' : 'New store'"
-            size="compact"
+            :description="editing ? '' : 'A warehouse, shop or godown where you keep stock.'"
+            :dirty="isDirty"
             @update:open="onModalOpenChange"
         >
             <form id="store-form" class="flex flex-col gap-4" @submit.prevent="submit">
-                <div>
-                    <label for="name" class="mb-1 block text-sm font-semibold text-text-base">Name <span class="text-danger">*</span></label>
-                    <Input id="name" v-model="form.name" type="text" placeholder="e.g. Main Warehouse" required />
-                    <p v-if="form.errors.name" class="mt-1 text-sm text-danger">{{ form.errors.name }}</p>
+                <p v-if="savedNotice" class="border-[1.5px] border-success bg-success-bg-soft px-3 py-2 text-[13px] text-success" role="status">
+                    {{ savedNotice }}
+                </p>
+
+                <FormField v-slot="{ describedBy }" label="Name" for="store-name" required :error="form.errors.name">
+                    <Input
+                        id="store-name"
+                        v-model="form.name"
+                        type="text"
+                        placeholder="e.g. Main Warehouse"
+                        :aria-describedby="describedBy"
+                        :aria-invalid="form.errors.name ? 'true' : undefined"
+                        required
+                        data-autofocus
+                    />
+                </FormField>
+
+                <div class="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                    <FormField v-slot="{ describedBy }" label="Address" for="store-address" :error="form.errors.address">
+                        <Input
+                            id="store-address"
+                            v-model="form.address"
+                            type="text"
+                            placeholder="e.g. Street, City"
+                            :aria-describedby="describedBy"
+                            :aria-invalid="form.errors.address ? 'true' : undefined"
+                        />
+                    </FormField>
+
+                    <FormField v-slot="{ describedBy }" label="Phone" for="store-phone" :error="form.errors.phone">
+                        <Input
+                            id="store-phone"
+                            v-model="form.phone"
+                            type="tel"
+                            placeholder="e.g. 98XXXXXXXX"
+                            :aria-describedby="describedBy"
+                            :aria-invalid="form.errors.phone ? 'true' : undefined"
+                        />
+                    </FormField>
                 </div>
 
-                <div>
-                    <label for="address" class="mb-1 block text-sm font-semibold text-text-base">Address</label>
-                    <Input id="address" v-model="form.address" type="text" placeholder="e.g. Street, City" />
-                    <p v-if="form.errors.address" class="mt-1 text-sm text-danger">{{ form.errors.address }}</p>
-                </div>
-
-                <div>
-                    <label for="phone" class="mb-1 block text-sm font-semibold text-text-base">Phone</label>
-                    <Input id="phone" v-model="form.phone" type="text" placeholder="e.g. 98XXXXXXXX" />
-                    <p v-if="form.errors.phone" class="mt-1 text-sm text-danger">{{ form.errors.phone }}</p>
-                </div>
-
-                <div class="flex items-center gap-2">
-                    <input id="is_active" v-model="form.is_active" type="checkbox" class="size-4 border-[1.5px] border-border" />
-                    <label for="is_active" class="text-sm font-semibold text-text-base">Active</label>
-                    <span class="text-xs text-text-faint">(inactive entries are hidden from selection lists)</span>
-                </div>
+                <CheckboxField
+                    v-if="editing"
+                    id="store-is-active"
+                    v-model="form.is_active"
+                    label="Active"
+                    hint="Inactive stores are hidden from selection lists."
+                />
             </form>
 
             <template #footer>
+                <label v-if="!editing" class="mr-auto flex items-center gap-2 text-[13px] text-text-base">
+                    <input v-model="addAnother" type="checkbox" class="size-4 border-[1.5px] border-border" />
+                    Add another
+                </label>
                 <Button variant="secondary" tone="purple" type="button" @click="closeModal">Cancel</Button>
-                <Button
-                    variant="primary"
-                    tone="purple"
-                    type="submit"
-                    form="store-form"
-                    :disabled="form.processing"
-                >
+                <Button variant="primary" tone="purple" type="submit" form="store-form" :disabled="form.processing">
                     {{ form.processing ? 'Saving...' : editing ? 'Save store' : 'Create store' }}
                 </Button>
             </template>

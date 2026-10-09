@@ -1,20 +1,22 @@
 <script setup>
 import { computed, h, ref, watch } from 'vue';
 import { useForm, usePage } from '@inertiajs/vue3';
-import { Plus, Printer } from '@lucide/vue';
+import { Ban, FileText, HandCoins, Plus, Printer } from '@lucide/vue';
 import AppLayout from '@/layouts/AppLayout.vue';
 import { useLayoutChrome } from '@/composables/useLayoutChrome';
 import Card from '@/components/ui/Card.vue';
 import Button from '@/components/ui/Button.vue';
 import Input from '@/components/ui/Input.vue';
 import PageHeader from '@/components/ui/PageHeader.vue';
-import Tooltip from '@/components/ui/Tooltip.vue';
 import PurchaseStatusCell from '@/components/purchases/PurchaseStatusCell.vue';
 import Modal from '@/components/ui/Modal.vue';
 import Select from '@/components/ui/Select.vue';
 import Combobox from '@/components/ui/Combobox.vue';
 import NepaliDateInput from '@/components/ui/NepaliDateInput.vue';
 import DataTable from '@/components/ui/DataTable.vue';
+import DropdownMenuItem from '@/components/ui/DropdownMenuItem.vue';
+import RowActions from '@/components/ui/RowActions.vue';
+import Tooltip from '@/components/ui/Tooltip.vue';
 import { useToast } from '@/composables/useToast';
 import { formatMoney } from '@/lib/money';
 import { formatBsDate, todayInKathmandu } from '@/lib/format';
@@ -228,9 +230,14 @@ const columns = [
         id: 'actions',
         header: 'Actions',
         numeric: false,
-        cell: ({ row }) =>
-            h('div', { class: 'flex flex-wrap items-center gap-2' }, [
-                // Every bill prints, live or cancelled (flags G-01).
+        cell: ({ row }) => {
+            const moreActions = moreActionsFor(row.original);
+
+            if (!canPrintCapitalPurchase.value && moreActions.length === 0) {
+                return null;
+            }
+
+            return h('div', { class: 'flex items-center gap-2' }, [
                 canPrintCapitalPurchase.value
                     ? h(Tooltip, { label: 'Print this bill' }, () =>
                           h(
@@ -240,55 +247,65 @@ const columns = [
                                   target: '_blank',
                                   rel: 'noopener',
                                   class: 'flex h-[26px] w-[26px] items-center justify-center bg-bg-subtle text-text-faint transition-colors duration-150 hover:bg-primary-tint hover:text-primary',
-                                  'aria-label': `Print capital purchase of ${formatMoney(row.original.total)}`,
+                                  'aria-label': 'Print this bill',
                               },
                               [h(Printer, { class: 'h-[13px] w-[13px]' })],
                           ),
                       )
                     : null,
-                row.original.journal_voucher_id && canPrintVoucher.value
+                moreActions.length > 0
                     ? h(
-                          'a',
+                          RowActions,
+                          { canEdit: false, canDelete: false },
                           {
-                              href: `/journal-vouchers/${row.original.journal_voucher_id}/print`,
-                              target: '_blank',
-                              rel: 'noopener',
-                              class: 'text-xs font-semibold text-primary hover:underline',
+                              more: () =>
+                                  moreActions.map((action) =>
+                                      h(
+                                          DropdownMenuItem,
+                                          action.href
+                                              ? { key: action.label, as: 'a', href: action.href, target: '_blank', rel: 'noopener', title: action.title }
+                                              : { key: action.label, title: action.title, onSelect: action.run },
+                                          () => [h(action.icon, { class: 'size-3.5', 'aria-hidden': 'true' }), action.label],
+                                      ),
+                                  ),
                           },
-                          `Voucher #${row.original.journal_voucher?.voucher_number ?? row.original.journal_voucher_id}`,
                       )
                     : null,
-                ...(row.original.status === 'posted'
-                    ? [
-                      // Only a credit bill owes anything later: "partial" is an exact
-                      // cash + bank split of the whole total (CONTRACTS C3).
-                      row.original.supplier_id && row.original.payment_mode === 'credit' && canSettle.value
-                          ? h(Tooltip, { label: 'Record a payment, or review payments made, against this bill' }, () =>
-                                h(Button, {
-                                    variant: 'secondary',
-                                    tone: 'purple',
-                                    type: 'button',
-                                    'aria-label': `Settle capital purchase of ${formatMoney(row.original.total)}`,
-                                    onClick: () => openSettle(row.original),
-                                }, () => 'Settle'),
-                            )
-                          : null,
-                      props.canCancel
-                          ? h(Tooltip, { label: 'Cancel this purchase and reverse its entries' }, () =>
-                                h(Button, {
-                                    variant: 'secondary',
-                                    tone: 'purple',
-                                    type: 'button',
-                                    'aria-label': `Cancel capital purchase of ${formatMoney(row.original.total)}`,
-                                    onClick: () => openCancel(row.original),
-                                }, () => 'Cancel'),
-                            )
-                          : null,
-                      ]
-                    : []),
-            ]),
+            ]);
+        },
     },
 ];
+
+/**
+ * The row actions shown under the "More" button, filtered by permission and
+ * by the bill's state; Print sits beside it as an inline icon, since every
+ * bill prints, live or cancelled (flags G-01). Only a credit bill owes
+ * anything later: "partial" is an exact cash + bank split of the whole total
+ * (CONTRACTS C3).
+ */
+function moreActionsFor(purchase) {
+    const isPosted = purchase.status === 'posted';
+
+    return [
+        purchase.journal_voucher_id && canPrintVoucher.value && {
+            label: `Voucher #${purchase.journal_voucher?.voucher_number ?? purchase.journal_voucher_id}`,
+            icon: FileText,
+            href: `/journal-vouchers/${purchase.journal_voucher_id}/print`,
+        },
+        isPosted && purchase.supplier_id && purchase.payment_mode === 'credit' && canSettle.value && {
+            label: 'Settle',
+            title: 'Record a payment, or review payments made, against this bill',
+            icon: HandCoins,
+            run: () => openSettle(purchase),
+        },
+        isPosted && props.canCancel && {
+            label: 'Cancel',
+            title: 'Cancel this purchase and reverse its entries',
+            icon: Ban,
+            run: () => openCancel(purchase),
+        },
+    ].filter(Boolean);
+}
 </script>
 
 <template>

@@ -1,6 +1,6 @@
 <script setup>
 import { ref } from 'vue';
-import { CirclePause } from '@lucide/vue';
+import { ChevronDown, ChevronUp, CirclePause } from '@lucide/vue';
 import Card from '@/components/ui/Card.vue';
 import Button from '@/components/ui/Button.vue';
 import Input from '@/components/ui/Input.vue';
@@ -56,7 +56,18 @@ const { can } = usePermissions();
         <!-- Payment -->
         <Card variant="panel" class="-mt-3 shrink-0">
             <div class="mb-2 flex flex-wrap items-center justify-between gap-1.5">
-                <p class="text-xs font-bold tracking-[.8px] text-text-muted uppercase">Payment</p>
+                <div class="flex items-center gap-2">
+                    <p class="text-xs font-bold tracking-[.8px] text-text-muted uppercase">Payment</p>
+                    <button
+                        type="button"
+                        class="flex h-6 cursor-pointer items-center gap-0.5 text-[11px] font-semibold text-primary focus-visible:outline-2 focus-visible:outline-primary"
+                        :aria-expanded="showAdvanced"
+                        @click="showAdvanced = !showAdvanced"
+                    >
+                        More options
+                        <component :is="showAdvanced ? ChevronUp : ChevronDown" class="h-3.5 w-3.5" />
+                    </button>
+                </div>
                 <div class="flex flex-wrap gap-1.5" role="group" aria-label="Quick payment">
                     <Button variant="secondary" tone="blue" type="button" class="h-6 cursor-pointer !px-2 !text-[11px]" @click="emit('quick-pay-full-cash')">
                         Full Cash
@@ -95,10 +106,6 @@ const { can } = usePermissions();
             <p v-if="resolvedPaymentMode === 'partial' && !paymentBalanced" class="mt-1 text-xs font-semibold text-danger">
                 Cash + bank must add up to exactly {{ settlementDue ? formatMoney(settlementDue) : '-' }} for a split payment.
             </p>
-
-            <button type="button" class="mt-3 h-9 cursor-pointer text-sm font-semibold text-primary focus-visible:outline-2 focus-visible:outline-primary" @click="showAdvanced = !showAdvanced">
-                {{ showAdvanced ? 'Hide' : 'Show' }} more options
-            </button>
 
             <!-- Fields legacy never had at all (store, header discount,
                  TDS, chalani number) stay tucked away here - Date moved

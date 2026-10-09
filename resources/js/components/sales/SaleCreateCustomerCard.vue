@@ -3,6 +3,7 @@ import { computed } from 'vue';
 import { Plus } from '@lucide/vue';
 import Card from '@/components/ui/Card.vue';
 import Input from '@/components/ui/Input.vue';
+import InfoTip from '@/components/ui/InfoTip.vue';
 import Combobox from '@/components/ui/Combobox.vue';
 import NepaliDateInput from '@/components/ui/NepaliDateInput.vue';
 import { usePermissions } from '@/composables/usePermissions';
@@ -25,7 +26,10 @@ const customerOptions = computed(() => props.customers.map((c) => ({ value: c.id
     <Card variant="panel" title="Customer & date" class="!p-4">
         <div class="grid grid-cols-1 gap-4 sm:grid-cols-3">
             <div>
-                <label class="mb-1 block text-sm font-semibold text-text-base">Customer <span class="text-danger" aria-hidden="true">*</span></label>
+                <div class="mb-1 flex items-center gap-1">
+                    <label class="block text-sm font-semibold text-text-base">Customer <span class="text-danger" aria-hidden="true">*</span></label>
+                    <InfoTip text="Pick Walk-in customer for a counter sale." />
+                </div>
                 <Combobox
                     :model-value="form.customer_id"
                     :options="customerOptions"
@@ -45,19 +49,25 @@ const customerOptions = computed(() => props.customers.map((c) => ({ value: c.id
                         </button>
                     </template>
                 </Combobox>
-                <p id="sale-customer-help" class="mt-1 text-xs text-text-muted">Pick Walk-in customer for a counter sale.</p>
+                <p id="sale-customer-help" class="sr-only">Pick Walk-in customer for a counter sale.</p>
                 <p v-if="form.errors.customer_id" id="sale-customer-error" class="mt-1 text-sm text-danger" role="alert">{{ form.errors.customer_id }}</p>
             </div>
             <div>
-                <label for="sale-date" class="mb-1 block text-sm font-semibold text-text-base">Sale date (BS) <span class="text-danger" aria-hidden="true">*</span></label>
+                <div class="mb-1 flex items-center gap-1">
+                    <label for="sale-date" class="block text-sm font-semibold text-text-base">Sale date (BS) <span class="text-danger" aria-hidden="true">*</span></label>
+                    <InfoTip text="Bikram Sambat (Nepali) date of the bill." />
+                </div>
                 <NepaliDateInput v-model="form.date" required aria-describedby="sale-date-help sale-date-error" />
-                <p id="sale-date-help" class="mt-1 text-xs text-text-muted">Bikram Sambat (Nepali) date of the bill.</p>
+                <p id="sale-date-help" class="sr-only">Bikram Sambat (Nepali) date of the bill.</p>
                 <p v-if="form.errors.date" id="sale-date-error" class="mt-1 text-sm text-danger" role="alert">{{ form.errors.date }}</p>
             </div>
             <div>
-                <label for="sale-chalani" class="mb-1 block text-sm font-semibold text-text-base">Chalani (delivery challan) number</label>
+                <div class="mb-1 flex items-center gap-1">
+                    <label for="sale-chalani" class="block text-sm font-semibold text-text-base">Chalani (delivery challan) number</label>
+                    <InfoTip text="Only needed if this bill travels with a delivery challan." />
+                </div>
                 <Input id="sale-chalani" v-model="form.chalani_number" type="text" placeholder="Optional" aria-describedby="sale-chalani-help sale-chalani-error" />
-                <p id="sale-chalani-help" class="mt-1 text-xs text-text-muted">Only needed if this bill travels with a delivery challan.</p>
+                <p id="sale-chalani-help" class="sr-only">Only needed if this bill travels with a delivery challan.</p>
                 <p v-if="form.errors.chalani_number" id="sale-chalani-error" class="mt-1 text-sm text-danger" role="alert">{{ form.errors.chalani_number }}</p>
             </div>
         </div>

@@ -74,7 +74,7 @@ function submit() {
             </FormSection>
 
             <FormSection title="Web address" description="Where the tenant's staff sign in. It must be unique. You can add or remove domains later from the tenant page.">
-                <FormField label="Subdomain" for="subdomain" required :error="form.errors.subdomain">
+                <FormField label="Subdomain" for="subdomain" required help="Letters, numbers and hyphens only." :error="form.errors.subdomain">
                     <template #default>
                         <Input
                             id="subdomain"
@@ -85,14 +85,14 @@ function submit() {
                             autocapitalize="none"
                             spellcheck="false"
                             required
-                            :aria-describedby="form.errors.subdomain ? 'subdomain-error' : 'subdomain-help'"
+                            :aria-describedby="form.errors.subdomain ? 'subdomain-error' : 'subdomain-help subdomain-preview'"
                         >
                             <template #addon>
                                 <span class="max-w-[50vw] truncate bg-bg-muted px-3 text-[13px] text-text-muted sm:max-w-none">.{{ tenantBaseDomain }}</span>
                             </template>
                         </Input>
-                        <p v-if="!form.errors.subdomain" id="subdomain-help" class="mt-1.5 text-xs text-text-muted">
-                            Letters, numbers and hyphens only. The address will be
+                        <p v-if="!form.errors.subdomain" id="subdomain-preview" class="mt-1.5 text-xs text-text-muted">
+                            The address will be
                             <span class="font-semibold break-all text-text-strong">{{ previewAddress }}</span>
                         </p>
                     </template>

@@ -184,8 +184,13 @@ function hasQuantityInCart(itemId) {
 
 .pos-grid {
     grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
-    /* Room for the hover shadow, which the scroll container would otherwise crop. */
-    padding: 14px 16px 20px;
+    /*
+     * Room for the hover shadow, which the scroll container would otherwise crop.
+     * The matching negative margin spends the panel's own p-3 on it, so the tiles
+     * stay flush with the search row and category chips.
+     */
+    margin: -12px;
+    padding: 12px;
 }
 
 @media (max-width: 600px) {

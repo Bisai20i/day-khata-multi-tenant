@@ -11,7 +11,7 @@
     @include('pdf.ird._company')
 
     <div class="title-bar section">
-        <div class="title">ABBREVIATED TAX INVOICE</div>
+        <div class="title">{{ $isEstimate ? 'ESTIMATE' : 'ABBREVIATED TAX INVOICE' }}</div>
         @if($sale->status === 'cancelled')
             <div><span class="cancelled">Cancelled</span></div>
         @endif

@@ -11,6 +11,7 @@ import Input from '@/components/ui/Input.vue';
 import Modal from '@/components/ui/Modal.vue';
 import DataTable from '@/components/ui/DataTable.vue';
 import Tooltip from '@/components/ui/Tooltip.vue';
+import InfoTip from '@/components/ui/InfoTip.vue';
 import Combobox from '@/components/ui/Combobox.vue';
 import NepaliDateInput from '@/components/ui/NepaliDateInput.vue';
 import { useToast } from '@/composables/useToast';
@@ -354,14 +355,16 @@ const columns = [
                         <p v-if="importForm.errors.date" class="mt-1 text-sm text-danger">{{ importForm.errors.date }}</p>
                     </div>
                     <div>
-                        <label class="mb-1 block text-sm font-semibold text-text-base">Store</label>
+                        <div class="mb-1 flex items-center gap-1">
+                            <label class="block text-sm font-semibold text-text-base">Store</label>
+                            <InfoTip text="Opening stock is the quantity you already had when you started using the system." />
+                        </div>
                         <Combobox
                             :model-value="importForm.store_id"
                             :options="storeOptions"
                             placeholder="Default store"
                             @update:model-value="(v) => (importForm.store_id = v)"
                         />
-                        <p class="mt-1 text-xs text-text-faint">Opening stock is the quantity you already had when you started using the system.</p>
                         <p v-if="importForm.errors.store_id" class="mt-1 text-sm text-danger">{{ importForm.errors.store_id }}</p>
                     </div>
                 </div>

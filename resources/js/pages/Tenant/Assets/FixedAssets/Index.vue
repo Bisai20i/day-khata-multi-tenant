@@ -1,6 +1,7 @@
 <script setup>
 import { computed, h, ref, watch } from 'vue';
 import { useForm, usePage } from '@inertiajs/vue3';
+import { Plus } from '@lucide/vue';
 import AppLayout from '@/layouts/AppLayout.vue';
 import { useLayoutChrome } from '@/composables/useLayoutChrome';
 import PageHeader from '@/components/ui/PageHeader.vue';
@@ -8,6 +9,7 @@ import Card from '@/components/ui/Card.vue';
 import Button from '@/components/ui/Button.vue';
 import Badge from '@/components/ui/Badge.vue';
 import Input from '@/components/ui/Input.vue';
+import InfoTip from '@/components/ui/InfoTip.vue';
 import Select from '@/components/ui/Select.vue';
 import Combobox from '@/components/ui/Combobox.vue';
 import Modal from '@/components/ui/Modal.vue';
@@ -187,13 +189,19 @@ const columns = [
                 <Button v-if="canManageAssets && hasOpenFiscalYear" variant="secondary" tone="purple" @click="postDepreciation">
                     Post depreciation
                 </Button>
-                <Button v-if="canCreateAsset && hasOpenFiscalYear" variant="primary" tone="purple" @click="showCreateForm = true">New asset</Button>
+                <Button v-if="canCreateAsset && hasOpenFiscalYear" variant="primary" tone="purple" @click="showCreateForm = true">
+                    <Plus class="size-4" />
+                    New asset
+                </Button>
             </PageHeader>
 
             <Card v-if="fixedAssets.length === 0" variant="panel">
                 <div class="px-1 py-8 text-center">
                     <p class="text-sm text-text-muted">No fixed assets yet. Add equipment, vehicles or property to track their value and depreciation.</p>
-                    <Button v-if="canCreateAsset && hasOpenFiscalYear" class="mt-3" variant="primary" tone="purple" @click="showCreateForm = true">Add your first asset</Button>
+                    <Button v-if="canCreateAsset && hasOpenFiscalYear" class="mt-3" variant="primary" tone="purple" @click="showCreateForm = true">
+                        <Plus class="size-4" />
+                        Add your first asset
+                    </Button>
                 </div>
             </Card>
             <Card v-else variant="panel">
@@ -217,9 +225,11 @@ const columns = [
                     <p v-if="disposeForm.errors.disposal_date" class="mt-1 text-sm text-danger">{{ disposeForm.errors.disposal_date }}</p>
                 </div>
                 <div>
-                    <label class="mb-1 block text-sm font-semibold text-text-base">Proceeds</label>
+                    <div class="mb-1 flex items-center gap-1">
+                        <label class="block text-sm font-semibold text-text-base">Proceeds</label>
+                        <InfoTip text="Amount received from selling the asset. Leave blank if scrapped for nothing." />
+                    </div>
                     <Input v-model="disposeForm.disposal_amount" type="number" min="0" step="0.01" placeholder="0.00" />
-                    <p class="mt-1 text-xs text-text-faint">Amount received from selling the asset. Leave blank if scrapped for nothing.</p>
                 </div>
                 <div>
                     <label class="mb-1 block text-sm font-semibold text-text-base">Settlement Mode <span class="text-danger">*</span></label>

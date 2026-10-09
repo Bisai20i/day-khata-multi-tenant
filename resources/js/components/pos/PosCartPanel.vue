@@ -1,18 +1,17 @@
 <script setup>
-import { ChevronDown, Minus, Plus, ScanBarcode, SplitSquareHorizontal, X } from '@lucide/vue';
+import { FileText, Minus, Plus, ScanBarcode, SplitSquareHorizontal, X } from '@lucide/vue';
 import Card from '@/components/ui/Card.vue';
 import Button from '@/components/ui/Button.vue';
 import Badge from '@/components/ui/Badge.vue';
 import Input from '@/components/ui/Input.vue';
 import Combobox from '@/components/ui/Combobox.vue';
 import Tooltip from '@/components/ui/Tooltip.vue';
-import { formatMoney } from '@/lib/money';
 import { usePermissions } from '@/composables/usePermissions';
 
 /**
  * Cart column, top half of the POS right-hand side: customer picker plus the
  * cart lines list. Presentational only - `Sales/Pos.vue` owns the cart state
- * and every mutation below (quantity stepping, MRP entry, splitting, removal)
+ * and every mutation below (quantity stepping, splitting, removal)
  * arrives as an emitted event. The root uses `display: contents` so its
  * children still lay out as direct flex items of the `.pos-right` column.
  * The customer field wrapper is handed back through `customer-wrapper` (a
@@ -22,20 +21,18 @@ const props = defineProps({
     form: { type: Object, required: true },
     customerOptions: { type: Array, default: () => [] },
     itemsById: { type: Object, default: () => ({}) },
-    lineTotal: { type: Function, required: true },
     isRateMissing: { type: Function, required: true },
 });
 
 const emit = defineEmits([
     'new-customer',
+    'estimate',
     'clear-cart',
     'remove-line',
     'increment-qty',
     'decrement-qty',
     'warn-overstock',
     'toggle-discount-type',
-    'toggle-more',
-    'apply-mrp',
     'split-line',
     'customer-wrapper',
 ]);
@@ -72,14 +69,23 @@ const { can } = usePermissions();
         >
             <div class="mb-2 flex items-center justify-between">
                 <p class="text-[10px] font-bold tracking-[.8px] text-text-muted uppercase">Cart</p>
-                <button
-                    v-if="form.lines.length > 0"
-                    type="button"
-                    class="h-7 cursor-pointer px-2 text-xs font-semibold text-text-muted hover:text-danger focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
-                    @click="emit('clear-cart')"
-                >
-                    Clear cart
-                </button>
+                <div v-if="form.lines.length > 0" class="flex items-center">
+                    <button
+                        type="button"
+                        class="flex h-7 cursor-pointer items-center gap-1 px-2 text-xs font-semibold text-primary focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
+                        title="Preview and print an estimate of this bill - nothing is saved"
+                        @click="emit('estimate')"
+                    >
+                        <FileText class="h-3.5 w-3.5" /> Estimate
+                    </button>
+                    <button
+                        type="button"
+                        class="h-7 cursor-pointer px-2 text-xs font-semibold text-text-muted hover:text-danger focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
+                        @click="emit('clear-cart')"
+                    >
+                        Clear cart
+                    </button>
+                </div>
             </div>
             <div v-if="form.lines.length === 0" class="flex flex-col items-center gap-1 py-6 text-center">
                 <ScanBarcode class="h-8 w-8 text-text-faint" />
@@ -88,24 +94,22 @@ const { can } = usePermissions();
             </div>
             <div v-for="(line, index) in form.lines" :key="index" class="mb-1.5 flex flex-col gap-1.5 border-[1.5px] border-border bg-white p-2 last:mb-0">
                 <div class="flex items-center gap-2">
-                    <p class="min-w-0 flex-1 truncate text-sm font-semibold text-text-strong">
-                        {{ itemsById[line.item_id]?.name ?? 'Item' }}
-                    </p>
-                    <Badge :variant="itemsById[line.item_id]?.is_vatable ? 'tax' : 'free'">
-                        {{ itemsById[line.item_id]?.is_vatable ? 'TAX' : 'VAT-FREE' }}
-                    </Badge>
-                    <span class="shrink-0 text-sm font-bold tabular-nums" :class="lineTotal(index) === null ? 'text-text-faint' : 'text-text-strong'">
-                        {{ lineTotal(index) === null ? '—' : formatMoney(lineTotal(index)) }}
-                    </span>
-                    <Tooltip label="More: MRP, free units, split">
+                    <div class="flex min-w-0 flex-1 items-center gap-2">
+                        <p class="min-w-0 truncate text-sm font-semibold text-text-strong">
+                            {{ itemsById[line.item_id]?.name ?? 'Item' }}
+                        </p>
+                        <Badge :variant="itemsById[line.item_id]?.is_vatable ? 'tax' : 'free'" class="shrink-0">
+                            {{ itemsById[line.item_id]?.is_vatable ? 'TAX' : 'VAT-FREE' }}
+                        </Badge>
+                    </div>
+                    <Tooltip label="Split to new cart">
                         <button
                             type="button"
                             class="flex h-8 w-8 shrink-0 cursor-pointer items-center justify-center text-text-muted hover:text-primary focus-visible:outline-2 focus-visible:outline-primary"
-                            aria-label="Show more options for this line"
-                            :aria-expanded="!!line.showMore"
-                            @click="emit('toggle-more', line)"
+                            aria-label="Split this item to a new cart"
+                            @click="emit('split-line', index)"
                         >
-                            <ChevronDown class="h-4 w-4 transition-transform" :class="line.showMore ? 'rotate-180' : ''" />
+                            <SplitSquareHorizontal class="h-4 w-4" />
                         </button>
                     </Tooltip>
                     <Tooltip label="Remove this item">
@@ -122,114 +126,110 @@ const { can } = usePermissions();
                 <p v-if="form.errors[`lines.${index}.item_id`]" class="text-xs text-danger">
                     {{ form.errors[`lines.${index}.item_id`] }}
                 </p>
-                <div class="flex flex-wrap items-center gap-1.5">
-                    <div class="flex w-32 shrink-0 items-stretch border-[1.5px] border-border bg-white focus-within:border-primary">
-                        <button
-                            type="button"
-                            class="flex h-8 w-8 shrink-0 cursor-pointer items-center justify-center bg-bg-subtle text-text-muted hover:text-primary focus-visible:outline-2 focus-visible:outline-primary"
-                            aria-label="Decrease quantity"
-                            title="Decrease quantity"
-                            @click="emit('decrement-qty', index)"
-                        >
-                            <Minus class="h-4 w-4" />
-                        </button>
-                        <Input
-                            v-model="line.quantity"
-                            type="number"
-                            min="0"
-                            step="0.0001"
-                            placeholder="Qty"
-                            aria-label="Quantity"
-                            class="!h-8 min-w-0 flex-1 !border-0 !bg-white text-center !shadow-none !outline-none"
-                            @blur="emit('warn-overstock', line.item_id)"
-                        />
-                        <button
-                            type="button"
-                            class="flex h-8 w-8 shrink-0 cursor-pointer items-center justify-center bg-bg-subtle text-text-muted hover:text-primary focus-visible:outline-2 focus-visible:outline-primary"
-                            aria-label="Increase quantity"
-                            title="Increase quantity"
-                            @click="emit('increment-qty', index)"
-                        >
-                            <Plus class="h-4 w-4" />
-                        </button>
+                <div class="pos-line-inputs flex items-end gap-1.5">
+                    <div class="min-w-0 flex-[1.5]">
+                        <span class="mb-0.5 block truncate text-[10px] leading-3 font-semibold text-text-muted">Qty</span>
+                        <div class="flex items-stretch border-[1.5px] border-border bg-white focus-within:border-primary">
+                            <button
+                                type="button"
+                                class="flex h-8 w-7 shrink-0 cursor-pointer items-center justify-center bg-bg-subtle text-text-muted hover:text-primary focus-visible:outline-2 focus-visible:outline-primary"
+                                aria-label="Decrease quantity"
+                                title="Decrease quantity"
+                                @click="emit('decrement-qty', index)"
+                            >
+                                <Minus class="h-4 w-4" />
+                            </button>
+                            <Input
+                                v-model="line.quantity"
+                                type="number"
+                                min="0"
+                                step="0.0001"
+                                placeholder="0"
+                                aria-label="Quantity"
+                                class="!h-8 min-w-0 flex-1 !border-0 !bg-white px-1 text-center text-xs tabular-nums !shadow-none !outline-none"
+                                @blur="emit('warn-overstock', line.item_id)"
+                            />
+                            <button
+                                type="button"
+                                class="flex h-8 w-7 shrink-0 cursor-pointer items-center justify-center bg-bg-subtle text-text-muted hover:text-primary focus-visible:outline-2 focus-visible:outline-primary"
+                                aria-label="Increase quantity"
+                                title="Increase quantity"
+                                @click="emit('increment-qty', index)"
+                            >
+                                <Plus class="h-4 w-4" />
+                            </button>
+                        </div>
                     </div>
-                    <div class="w-20 shrink-0" :data-rate-index="index">
+                    <div class="min-w-0 flex-1" :data-rate-index="index">
+                        <span class="mb-0.5 block truncate text-[10px] leading-3 font-semibold text-text-muted">Rate</span>
                         <Input
                             v-model="line.rate"
                             type="number"
                             min="0"
                             step="0.01"
-                            placeholder="Rate"
+                            placeholder="0.00"
                             aria-label="Rate"
-                            :class="isRateMissing(line) ? '!h-8 !border-danger text-center' : '!h-8 text-center'"
+                            :class="isRateMissing(line) ? '!h-8 !border-danger px-1 text-center text-xs tabular-nums' : '!h-8 px-1 text-center text-xs tabular-nums'"
                         />
                     </div>
-                    <div class="flex w-28 shrink-0 items-stretch border-[1.5px] border-border bg-white focus-within:border-primary">
-                        <Input
-                            v-model="line.discount"
-                            type="number"
-                            min="0"
-                            :max="line.discountType === 'percent' ? 100 : undefined"
-                            :placeholder="line.discountType === 'percent' ? '%' : 'Disc.'"
-                            aria-label="Line discount"
-                            class="!h-8 min-w-0 flex-1 !border-0 !bg-white text-center !shadow-none !outline-none"
-                        />
-                        <button
-                            type="button"
-                            class="flex h-8 w-8 shrink-0 cursor-pointer items-center justify-center bg-bg-subtle text-xs font-bold text-text-muted hover:text-primary focus-visible:outline-2 focus-visible:outline-primary"
-                            title="Click to switch between % and Rs discount"
-                            :aria-label="`Discount type: ${line.discountType === 'percent' ? 'percent' : 'rupees'}. Click to switch`"
-                            @click="emit('toggle-discount-type', index)"
-                        >
-                            {{ line.discountType === 'percent' ? '%' : 'Rs' }}
-                        </button>
+                    <div class="min-w-0 flex-[1.3]">
+                        <span class="mb-0.5 block truncate text-[10px] leading-3 font-semibold text-text-muted">Discount</span>
+                        <div class="flex items-stretch border-[1.5px] border-border bg-white focus-within:border-primary">
+                            <Input
+                                v-model="line.discount"
+                                type="number"
+                                min="0"
+                                :max="line.discountType === 'percent' ? 100 : undefined"
+                                placeholder="0"
+                                aria-label="Line discount"
+                                class="!h-8 min-w-0 flex-1 !border-0 !bg-white px-1 text-center text-xs tabular-nums !shadow-none !outline-none"
+                            />
+                            <button
+                                type="button"
+                                class="flex h-8 w-7 shrink-0 cursor-pointer items-center justify-center bg-bg-subtle text-xs font-bold text-text-muted hover:text-primary focus-visible:outline-2 focus-visible:outline-primary"
+                                title="Click to switch between % and Rs discount"
+                                :aria-label="`Discount type: ${line.discountType === 'percent' ? 'percent' : 'rupees'}. Click to switch`"
+                                @click="emit('toggle-discount-type', index)"
+                            >
+                                {{ line.discountType === 'percent' ? '%' : 'Rs' }}
+                            </button>
+                        </div>
                     </div>
-                </div>
-                <!-- MRP is VAT-inclusive entry (audit section 3
-                     "Sales"): typing it fills Rate above with
-                     MRP / 1.13 for a vatable item. Browser-only,
-                     never submitted. Bonus units move stock and
-                     are never billed, so the line total above and
-                     the bill total below ignore them. Collapsed by
-                     default - edited far less often than
-                     qty/rate/discount. -->
-                <div v-if="line.showMore" class="flex items-center gap-1.5">
-                    <div class="w-20 shrink-0">
-                        <Input
-                            :model-value="line.mrp"
-                            type="number"
-                            min="0"
-                            step="0.0001"
-                            placeholder="MRP"
-                            title="VAT-inclusive price: fills Rate with MRP / (1 + VAT%)"
-                            class="!h-8 text-center"
-                            @update:model-value="(v) => emit('apply-mrp', line, v)"
-                        />
-                    </div>
-                    <div class="w-20 shrink-0">
+                    <!-- Bonus units move stock and are never billed, so
+                         the bill total ignores them. -->
+                    <div class="min-w-0 flex-1">
+                        <span class="mb-0.5 block truncate text-[10px] leading-3 font-semibold text-text-muted">Free qty</span>
                         <Input
                             v-model="line.bonus_quantity"
                             type="number"
                             min="0"
                             step="0.0001"
-                            placeholder="Free"
-                            title="Free units given with this line - moves stock, never billed"
-                            class="!h-8 text-center"
+                            placeholder="0"
+                            aria-label="Free quantity"
+                            title="Free quantity given with this line (units, not an amount) - moves stock, never billed"
+                            class="!h-8 px-1 text-center text-xs tabular-nums"
                             @blur="emit('warn-overstock', line.item_id)"
                         />
                     </div>
-                    <button
-                        type="button"
-                        class="ml-auto flex h-8 cursor-pointer items-center gap-1.5 px-2 text-xs font-semibold text-text-muted hover:text-primary focus-visible:outline-2 focus-visible:outline-primary"
-                        @click="emit('split-line', index)"
-                    >
-                        <SplitSquareHorizontal class="h-4 w-4" /> Split to new cart
-                    </button>
-                    <span v-if="form.errors[`lines.${index}.bonus_quantity`]" class="text-xs text-danger">
-                        {{ form.errors[`lines.${index}.bonus_quantity`] }}
-                    </span>
                 </div>
+                <p v-if="form.errors[`lines.${index}.bonus_quantity`]" class="text-xs text-danger">
+                    {{ form.errors[`lines.${index}.bonus_quantity`] }}
+                </p>
             </div>
         </Card>
     </div>
 </template>
+
+<style scoped>
+/* The browser's number spinners eat ~16px of every field; the cart has its own steppers. */
+.pos-line-inputs :deep(input[type='number']) {
+    -moz-appearance: textfield;
+    appearance: textfield;
+}
+
+.pos-line-inputs :deep(input[type='number']::-webkit-inner-spin-button),
+.pos-line-inputs :deep(input[type='number']::-webkit-outer-spin-button) {
+    margin: 0;
+    -webkit-appearance: none;
+}
+</style>

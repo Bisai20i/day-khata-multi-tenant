@@ -7,6 +7,8 @@ use App\Models\CompanySetting;
 use App\Models\Customer;
 use App\Models\FiscalYear;
 use App\Models\Item;
+use App\Models\JournalVoucher;
+use App\Models\PrintLog;
 use App\Models\Sale;
 use App\Models\Store;
 use App\Models\Tenant;
@@ -181,6 +183,53 @@ test('a POS quick-sale with partial cash/bank payment posts correctly', function
         expect($sale->payment_mode)->toBe('partial')
             ->and($sale->cash_amount)->toBe('60.00')
             ->and($sale->bank_amount)->toBe('40.00');
+    });
+
+    $tenant->delete();
+});
+
+test('a POS estimate renders the cart as a PDF without posting anything', function () {
+    $domain = 'pos-estimate-http.tenant-test';
+    $tenant = provisionPosTestTenant($domain);
+
+    $customerId = null;
+    $itemId = null;
+    $tenant->run(function () use (&$customerId, &$itemId) {
+        User::factory()->create(['email' => 'owner@example.com']);
+        FiscalYear::create(['name' => 'FY1', 'start_date' => '2026-01-01', 'end_date' => '2026-12-31', 'status' => FiscalYearStatus::Open]);
+        $customerId = Customer::factory()->create()->id;
+        // Stockable with nothing on the shelf: an estimate is a price, so the
+        // stock guard that would stop this sale must not stop its estimate.
+        $itemId = Item::factory()->create(['is_vatable' => true, 'is_stockable' => true])->id;
+    });
+
+    loginPosTestUser($domain);
+
+    // Shape mirrors usePosCheckout's toSalePayload(), minus expected_total.
+    $this->postJson("http://{$domain}/pos/estimate", [
+        'customer_id' => $customerId,
+        'store_id' => null,
+        'date' => '2026-06-01',
+        'payment_mode' => 'credit',
+        'bank_account_id' => null,
+        'discount' => '0',
+        'discount_type' => 'flat',
+        'cash_amount' => '0',
+        'bank_amount' => '0',
+        'tds_account_id' => null,
+        'tds_amount' => '0',
+        'narration' => '',
+        'lines' => [
+            ['item_id' => $itemId, 'quantity' => '2', 'bonus_quantity' => '1', 'rate' => '50', 'discount' => '10', 'discount_type' => 'percentage'],
+        ],
+    ])
+        ->assertOk()
+        ->assertHeader('Content-Type', 'application/pdf');
+
+    $tenant->run(function () {
+        expect(Sale::query()->count())->toBe(0)
+            ->and(JournalVoucher::query()->count())->toBe(0)
+            ->and(PrintLog::query()->count())->toBe(0);
     });
 
     $tenant->delete();

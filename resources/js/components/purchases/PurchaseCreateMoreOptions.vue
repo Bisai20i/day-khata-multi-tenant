@@ -2,6 +2,7 @@
 import { computed } from 'vue';
 import Input from '@/components/ui/Input.vue';
 import Combobox from '@/components/ui/Combobox.vue';
+import InfoTip from '@/components/ui/InfoTip.vue';
 import { formatMoney } from '@/lib/money';
 
 // Rare fields behind progressive disclosure, toggled from the sticky bar in
@@ -50,8 +51,10 @@ const tdsAccountOptions = computed(() =>
 
         <div class="grid grid-cols-1 gap-4 sm:grid-cols-3">
             <div>
-                <label class="mb-1 block text-sm font-semibold text-text-base">Discount on whole bill</label>
-                <p class="mb-1 text-xs text-text-muted">Applied after item discounts. Use % or Rs with the button.</p>
+                <div class="mb-1 flex items-center gap-1">
+                    <label class="block text-sm font-semibold text-text-base">Discount on whole bill</label>
+                    <InfoTip text="Applied after item discounts. Use % or Rs with the button." />
+                </div>
                 <Input
                     v-model="form.discount"
                     type="number"
@@ -75,8 +78,10 @@ const tdsAccountOptions = computed(() =>
                 <p v-if="form.errors.discount" class="mt-1 text-sm text-danger">{{ form.errors.discount }}</p>
             </div>
             <div>
-                <label for="purchase-vat-rate" class="mb-1 block text-sm font-semibold text-text-base">VAT rate (%)</label>
-                <p class="mb-1 text-xs text-text-muted">{{ form.force_non_taxable ? 'Not used on a PAN bill.' : 'Charged on the taxable items.' }}</p>
+                <div class="mb-1 flex items-center gap-1">
+                    <label for="purchase-vat-rate" class="block text-sm font-semibold text-text-base">VAT rate (%)</label>
+                    <InfoTip :text="form.force_non_taxable ? 'Not used on a PAN bill.' : 'Charged on the taxable items.'" />
+                </div>
                 <Input id="purchase-vat-rate" v-model="form.vat_rate" type="number" min="0" max="100" step="0.01" :disabled="form.force_non_taxable" />
                 <p v-if="form.errors.vat_rate" class="mt-1 text-sm text-danger">{{ form.errors.vat_rate }}</p>
             </div>
@@ -84,8 +89,10 @@ const tdsAccountOptions = computed(() =>
 
         <div class="grid grid-cols-1 gap-4 sm:grid-cols-3">
             <div>
-                <label class="mb-1 block text-sm font-semibold text-text-base">TDS account (tax withheld)</label>
-                <p class="mb-1 text-xs text-text-muted">TDS = tax you deduct from the supplier and pay to the government.</p>
+                <div class="mb-1 flex items-center gap-1">
+                    <label class="block text-sm font-semibold text-text-base">TDS account (tax withheld)</label>
+                    <InfoTip text="TDS = tax you deduct from the supplier and pay to the government." />
+                </div>
                 <Combobox
                     :model-value="form.tds_account_id"
                     :options="tdsAccountOptions"
@@ -95,18 +102,22 @@ const tdsAccountOptions = computed(() =>
                 <p v-if="form.errors.tds_account_id" class="mt-1 text-sm text-danger">{{ form.errors.tds_account_id }}</p>
             </div>
             <div>
-                <label for="purchase-tds-rate" class="mb-1 block text-sm font-semibold text-text-base">TDS rate (%)</label>
-                <p class="mb-1 text-xs text-text-muted">A rate takes precedence over a typed amount.</p>
+                <div class="mb-1 flex items-center gap-1">
+                    <label for="purchase-tds-rate" class="block text-sm font-semibold text-text-base">TDS rate (%)</label>
+                    <InfoTip text="A rate takes precedence over a typed amount." />
+                </div>
                 <Input id="purchase-tds-rate" v-model="form.tds_rate" type="number" min="0" max="100" step="0.01" placeholder="Optional" />
                 <p v-if="form.errors.tds_rate" class="mt-1 text-sm text-danger">{{ form.errors.tds_rate }}</p>
             </div>
             <div>
-                <label for="purchase-tds-amount" class="mb-1 block text-sm font-semibold text-text-base">TDS amount (Rs)</label>
-                <p class="mb-1 text-xs text-text-muted">
-                    <template v-if="form.tds_rate !== ''">Computed from the rate: {{ totals ? formatMoney(totals.tds_amount) : '-' }}</template>
-                    <template v-else>Or type the amount withheld.</template>
-                </p>
+                <div class="mb-1 flex items-center gap-1">
+                    <label for="purchase-tds-amount" class="block text-sm font-semibold text-text-base">TDS amount (Rs)</label>
+                    <InfoTip v-if="form.tds_rate === ''" text="Or type the amount withheld." />
+                </div>
                 <Input id="purchase-tds-amount" v-model="form.tds_amount" type="number" min="0" step="0.01" placeholder="0.00" :disabled="form.tds_rate !== ''" />
+                <p v-if="form.tds_rate !== ''" class="mt-1 text-xs text-text-muted">
+                    Computed from the rate: {{ totals ? formatMoney(totals.tds_amount) : '-' }}
+                </p>
                 <p v-if="form.errors.tds_amount" class="mt-1 text-sm text-danger">{{ form.errors.tds_amount }}</p>
             </div>
         </div>

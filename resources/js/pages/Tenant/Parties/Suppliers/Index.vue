@@ -8,6 +8,7 @@ import PageHeader from '@/components/ui/PageHeader.vue';
 import Card from '@/components/ui/Card.vue';
 import Button from '@/components/ui/Button.vue';
 import Input from '@/components/ui/Input.vue';
+import InfoTip from '@/components/ui/InfoTip.vue';
 import Modal from '@/components/ui/Modal.vue';
 import DataTable from '@/components/ui/DataTable.vue';
 import RowActions from '@/components/ui/RowActions.vue';
@@ -241,9 +242,11 @@ const columns = [
                 </div>
 
                 <div>
-                    <label for="tpin" class="mb-1 block text-sm font-semibold text-text-base">TPIN</label>
+                    <div class="mb-1 flex items-center gap-1">
+                        <label for="tpin" class="block text-sm font-semibold text-text-base">TPIN</label>
+                        <InfoTip text="Taxpayer PIN (PAN/VAT number) printed on the supplier's bills." />
+                    </div>
                     <Input id="tpin" v-model="form.tpin" type="text" placeholder="e.g. 123456789" />
-                    <p class="mt-1 text-xs text-text-muted">Taxpayer PIN (PAN/VAT number) printed on the supplier's bills.</p>
                     <p v-if="form.errors.tpin" class="mt-1 text-sm text-danger">{{ form.errors.tpin }}</p>
                 </div>
 
@@ -256,10 +259,8 @@ const columns = [
                             class="size-4 border-[1.5px] border-border"
                         />
                         <label for="is_vat_registered" class="text-sm font-semibold text-text-base">VAT registered</label>
+                        <InfoTip text="Unticked, a purchase from this supplier opens as a PAN bill with no VAT." />
                     </div>
-                    <p class="mt-1 text-xs text-text-faint">
-                        Unticked, a purchase from this supplier opens as a PAN bill with no VAT.
-                    </p>
                     <p v-if="form.errors.is_vat_registered" class="mt-1 text-sm text-danger">{{ form.errors.is_vat_registered }}</p>
                 </div>
             </form>

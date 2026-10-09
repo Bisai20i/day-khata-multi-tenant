@@ -19,11 +19,18 @@ class ItemCategoryController extends Controller
         ]);
     }
 
+    /**
+     * A `quick_add` request comes from another page's form (the "+ New
+     * category" shortcut on the item and subcategory forms), so it returns
+     * there instead of landing on the categories list.
+     */
     public function store(Request $request): RedirectResponse
     {
         ItemCategory::create($this->validated($request));
 
-        return redirect()->route('tenant.item-categories.index')->with('status', 'Category added.');
+        $redirect = $request->boolean('quick_add') ? back() : redirect()->route('tenant.item-categories.index');
+
+        return $redirect->with('status', 'Category added.');
     }
 
     public function update(Request $request, ItemCategory $itemCategory): RedirectResponse

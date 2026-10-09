@@ -1,6 +1,7 @@
 <script setup>
 import Combobox from '@/components/ui/Combobox.vue';
 import Input from '@/components/ui/Input.vue';
+import InfoTip from '@/components/ui/InfoTip.vue';
 import { formatMoney } from '@/lib/money';
 
 defineProps({
@@ -18,14 +19,16 @@ defineProps({
          due exactly (CONTRACTS C3, assertExactSplit). -->
     <div class="grid grid-cols-3 gap-4 border-t-[1.5px] border-border pt-3">
         <div>
-            <label class="mb-1 block text-sm font-semibold text-text-base">Refund via (optional)</label>
+            <div class="mb-1 flex items-center gap-1">
+                <label class="block text-sm font-semibold text-text-base">Refund via (optional)</label>
+                <InfoTip text="Cash and bank accounts only. Leave empty to only reduce what the customer owes." />
+            </div>
             <Combobox
                 :model-value="form.refund_account_id"
                 :options="refundAccountOptions"
                 placeholder="No refund - credit note only"
                 @update:model-value="(value) => (form.refund_account_id = value)"
             />
-            <p class="mt-1 text-xs text-text-muted">Cash and bank accounts only. Leave empty to only reduce what the customer owes.</p>
             <p v-if="form.errors.refund_account_id" class="mt-1 text-sm text-danger">{{ form.errors.refund_account_id }}</p>
         </div>
         <div>

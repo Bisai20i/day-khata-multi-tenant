@@ -1,7 +1,7 @@
 <script setup>
 import { computed, h, onMounted, reactive, ref, watch } from 'vue';
 import { Link, router, usePage } from '@inertiajs/vue3';
-import { ChevronLeft, ChevronRight, CirclePause, CirclePlay, Eye, LogIn, Plus, Search, X } from '@lucide/vue';
+import { ChevronLeft, ChevronRight, CirclePause, CirclePlay, Ellipsis, Eye, LogIn, Plus, Search, X } from '@lucide/vue';
 import AppLayout from '@/layouts/AppLayout.vue';
 import { useLayoutChrome } from '@/composables/useLayoutChrome';
 import Card from '@/components/ui/Card.vue';
@@ -11,6 +11,9 @@ import Input from '@/components/ui/Input.vue';
 import Select from '@/components/ui/Select.vue';
 import Tooltip from '@/components/ui/Tooltip.vue';
 import DataTable from '@/components/ui/DataTable.vue';
+import RowActions from '@/components/ui/RowActions.vue';
+import DropdownMenu from '@/components/ui/DropdownMenu.vue';
+import DropdownMenuItem from '@/components/ui/DropdownMenuItem.vue';
 import PageHeader from '@/components/ui/PageHeader.vue';
 import { useConfirm } from '@/composables/useConfirm';
 import { useToast } from '@/composables/useToast';
@@ -123,7 +126,46 @@ const statusLabel = {
     suspended: 'Suspended',
 };
 
-const secondaryActionClass = 'inline-flex items-center gap-1.5 px-2.5 py-1.5 text-xs';
+/**
+ * The state-changing row actions shown under the "More" button. Which ones
+ * apply depends on the tenant's status; an action in flight is disabled.
+ */
+function moreActionsFor(tenant) {
+    if (tenant.status === 'active') {
+        return [
+            {
+                label: 'Impersonate',
+                title: 'Sign in as this tenant admin',
+                icon: LogIn,
+                loading: isRowActionLoading(tenant.id, 'impersonate'),
+                run: () => impersonateRow(tenant),
+            },
+            {
+                label: 'Suspend',
+                title: 'Block this tenant from signing in',
+                icon: CirclePause,
+                class: 'text-danger',
+                loading: isRowActionLoading(tenant.id, 'suspend'),
+                run: () => suspendRow(tenant),
+            },
+        ];
+    }
+
+    if (tenant.status === 'suspended') {
+        return [
+            {
+                label: 'Resume',
+                title: 'Restore access for this tenant',
+                icon: CirclePlay,
+                class: 'text-success',
+                loading: isRowActionLoading(tenant.id, 'resume'),
+                run: () => resumeRow(tenant),
+            },
+        ];
+    }
+
+    return [];
+}
 
 const columns = [
     { accessorKey: 'company_name', header: 'Company' },
@@ -151,6 +193,8 @@ const columns = [
         cell: ({ row }) => {
             const tenant = row.original;
 
+            const moreActions = moreActionsFor(tenant);
+
             const buttons = [
                 h(Tooltip, { label: 'Open tenant details' }, () =>
                     h(
@@ -165,56 +209,26 @@ const columns = [
                 ),
             ];
 
-            if (tenant.status === 'active') {
+            if (moreActions.length > 0) {
                 buttons.push(
-                    h(Tooltip, { label: 'Sign in as this tenant admin' }, () =>
-                        h(
-                            Button,
-                            {
-                                variant: 'secondary',
-                                class: secondaryActionClass,
-                                loading: isRowActionLoading(tenant.id, 'impersonate'),
-                                'aria-label': `Impersonate admin of ${tenant.company_name}`,
-                                onClick: () => impersonateRow(tenant),
-                            },
-                            () => [h(LogIn, { class: 'size-[13px]', 'aria-hidden': 'true' }), 'Impersonate'],
-                        ),
-                    ),
-                    h(Tooltip, { label: 'Block this tenant from signing in' }, () =>
-                        h(
-                            Button,
-                            {
-                                variant: 'secondary',
-                                tone: 'danger',
-                                class: secondaryActionClass,
-                                loading: isRowActionLoading(tenant.id, 'suspend'),
-                                'aria-label': `Suspend ${tenant.company_name}`,
-                                onClick: () => suspendRow(tenant),
-                            },
-                            () => [h(CirclePause, { class: 'size-[13px]', 'aria-hidden': 'true' }), 'Suspend'],
-                        ),
-                    ),
-                );
-            } else if (tenant.status === 'suspended') {
-                buttons.push(
-                    h(Tooltip, { label: 'Restore access for this tenant' }, () =>
-                        h(
-                            Button,
-                            {
-                                variant: 'secondary',
-                                tone: 'success',
-                                class: secondaryActionClass,
-                                loading: isRowActionLoading(tenant.id, 'resume'),
-                                'aria-label': `Resume ${tenant.company_name}`,
-                                onClick: () => resumeRow(tenant),
-                            },
-                            () => [h(CirclePlay, { class: 'size-[13px]', 'aria-hidden': 'true' }), 'Resume'],
-                        ),
+                    h(
+                        RowActions,
+                        { canEdit: false, canDelete: false, moreLabel: `More actions for ${tenant.company_name}` },
+                        {
+                            more: () =>
+                                moreActions.map((action) =>
+                                    h(
+                                        DropdownMenuItem,
+                                        { key: action.label, class: action.class, title: action.title, disabled: action.loading, onSelect: action.run },
+                                        () => [h(action.icon, { class: 'size-3.5', 'aria-hidden': 'true' }), action.label],
+                                    ),
+                                ),
+                        },
                     ),
                 );
             }
 
-            return h('div', { class: 'flex flex-wrap items-center gap-1.5' }, buttons);
+            return h('div', { class: 'flex items-center gap-2' }, buttons);
         },
     },
 ];
@@ -301,39 +315,30 @@ const columns = [
                                     <Eye class="hidden size-4 shrink-0 min-[400px]:block" aria-hidden="true" />
                                     View
                                 </Button>
-                                <Button
-                                    v-if="tenant.status === 'active'"
-                                    variant="secondary"
-                                    tone="purple"
-                                    :loading="isRowActionLoading(tenant.id, 'impersonate')"
-                                    :aria-label="`Impersonate admin of ${tenant.company_name}`"
-                                    @click="impersonateRow(tenant)"
-                                >
-                                    <LogIn class="hidden size-4 shrink-0 min-[400px]:block" aria-hidden="true" />
-                                    Impersonate
-                                </Button>
-                                <Button
-                                    v-if="tenant.status === 'active'"
-                                    variant="secondary"
-                                    tone="danger"
-                                    :loading="isRowActionLoading(tenant.id, 'suspend')"
-                                    :aria-label="`Suspend ${tenant.company_name}`"
-                                    @click="suspendRow(tenant)"
-                                >
-                                    <CirclePause class="hidden size-4 shrink-0 min-[400px]:block" aria-hidden="true" />
-                                    Suspend
-                                </Button>
-                                <Button
-                                    v-else-if="tenant.status === 'suspended'"
-                                    variant="secondary"
-                                    tone="success"
-                                    :loading="isRowActionLoading(tenant.id, 'resume')"
-                                    :aria-label="`Resume ${tenant.company_name}`"
-                                    @click="resumeRow(tenant)"
-                                >
-                                    <CirclePlay class="hidden size-4 shrink-0 min-[400px]:block" aria-hidden="true" />
-                                    Resume
-                                </Button>
+                                <DropdownMenu v-if="moreActionsFor(tenant).length > 0" align="end">
+                                    <template #trigger>
+                                        <Button
+                                            variant="secondary"
+                                            tone="neutral"
+                                            :loading="Boolean(rowAction[tenant.id])"
+                                            :aria-label="`More actions for ${tenant.company_name}`"
+                                        >
+                                            <Ellipsis class="hidden size-4 shrink-0 min-[400px]:block" aria-hidden="true" />
+                                            More
+                                        </Button>
+                                    </template>
+                                    <DropdownMenuItem
+                                        v-for="action in moreActionsFor(tenant)"
+                                        :key="action.label"
+                                        :class="action.class"
+                                        :title="action.title"
+                                        :disabled="action.loading"
+                                        @select="action.run"
+                                    >
+                                        <component :is="action.icon" class="size-3.5" aria-hidden="true" />
+                                        {{ action.label }}
+                                    </DropdownMenuItem>
+                                </DropdownMenu>
                             </div>
                         </li>
                     </ul>

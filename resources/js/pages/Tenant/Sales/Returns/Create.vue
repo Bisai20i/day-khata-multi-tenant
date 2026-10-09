@@ -4,6 +4,7 @@ import { useForm } from '@inertiajs/vue3';
 import Card from '@/components/ui/Card.vue';
 import Button from '@/components/ui/Button.vue';
 import Input from '@/components/ui/Input.vue';
+import InfoTip from '@/components/ui/InfoTip.vue';
 import Combobox from '@/components/ui/Combobox.vue';
 import NepaliDateInput from '@/components/ui/NepaliDateInput.vue';
 import SaleReturnCreateLinkedLines from '@/components/sales/SaleReturnCreateLinkedLines.vue';
@@ -272,9 +273,11 @@ function submit() {
 
                 <div class="grid grid-cols-2 gap-4">
                     <div>
-                        <label class="mb-1 block text-sm font-semibold text-text-base">Return date <span class="text-danger">*</span></label>
+                        <div class="mb-1 flex items-center gap-1">
+                            <label class="block text-sm font-semibold text-text-base">Return date <span class="text-danger">*</span></label>
+                            <InfoTip :text="`On or after the invoice date ${selectedSale.date}.`" />
+                        </div>
                         <NepaliDateInput v-model="form.date" required />
-                        <p class="mt-1 text-xs text-text-muted">On or after the invoice date {{ selectedSale.date }}.</p>
                         <p v-if="form.errors.date" class="mt-1 text-sm text-danger">{{ form.errors.date }}</p>
                     </div>
                     <div>

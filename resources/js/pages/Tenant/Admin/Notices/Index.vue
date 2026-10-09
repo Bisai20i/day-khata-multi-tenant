@@ -1,6 +1,7 @@
 <script setup>
 import { h, ref, watch } from 'vue';
 import { router, useForm, usePage } from '@inertiajs/vue3';
+import { Plus } from '@lucide/vue';
 import AppLayout from '@/layouts/AppLayout.vue';
 import { useLayoutChrome } from '@/composables/useLayoutChrome';
 import PageHeader from '@/components/ui/PageHeader.vue';
@@ -12,6 +13,7 @@ import Modal from '@/components/ui/Modal.vue';
 import Input from '@/components/ui/Input.vue';
 import NepaliDateInput from '@/components/ui/NepaliDateInput.vue';
 import RowActions from '@/components/ui/RowActions.vue';
+import InfoTip from '@/components/ui/InfoTip.vue';
 import { useToast } from '@/composables/useToast';
 import { useConfirm } from '@/composables/useConfirm';
 
@@ -127,7 +129,10 @@ const columns = [
 <template>
     <div>
         <PageHeader title="Notices" description="Announcements shown to all users of your company.">
-            <Button variant="primary" tone="purple" @click="openCreate">New notice</Button>
+            <Button variant="primary" tone="purple" @click="openCreate">
+                <Plus class="size-4" />
+                New notice
+            </Button>
         </PageHeader>
 
         <Card variant="panel">
@@ -161,17 +166,19 @@ const columns = [
 
                 <div class="grid grid-cols-2 gap-4">
                     <div>
-                        <label for="starts_at" class="mb-1 block text-sm font-semibold text-text-base">
-                            Starts on <span class="font-normal text-text-muted">(optional - active immediately if blank)</span>
-                        </label>
+                        <div class="mb-1 flex items-center gap-1">
+                            <label for="starts_at" class="block text-sm font-semibold text-text-base">Starts on</label>
+                            <InfoTip text="Optional. The notice is active immediately if left blank." />
+                        </div>
                         <NepaliDateInput id="starts_at" v-model="form.starts_at" />
                         <p v-if="form.errors.starts_at" class="mt-1 text-sm text-danger">{{ form.errors.starts_at }}</p>
                     </div>
 
                     <div>
-                        <label for="ends_at" class="mb-1 block text-sm font-semibold text-text-base">
-                            Ends on <span class="font-normal text-text-muted">(optional - never expires if blank)</span>
-                        </label>
+                        <div class="mb-1 flex items-center gap-1">
+                            <label for="ends_at" class="block text-sm font-semibold text-text-base">Ends on</label>
+                            <InfoTip text="Optional. The notice never expires if left blank." />
+                        </div>
                         <NepaliDateInput id="ends_at" v-model="form.ends_at" />
                         <p v-if="form.errors.ends_at" class="mt-1 text-sm text-danger">{{ form.errors.ends_at }}</p>
                     </div>
@@ -180,7 +187,7 @@ const columns = [
                 <div class="flex items-center gap-2">
                     <input id="is_active" v-model="form.is_active" type="checkbox" class="size-4 border-[1.5px] border-border" />
                     <label for="is_active" class="text-sm font-semibold text-text-base">Active</label>
-                    <span class="text-xs text-text-faint">(inactive notices are not shown to users)</span>
+                    <InfoTip text="Inactive notices are not shown to users." />
                 </div>
             </form>
 

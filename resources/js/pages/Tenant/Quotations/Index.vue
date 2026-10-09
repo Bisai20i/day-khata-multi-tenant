@@ -1,13 +1,15 @@
 <script setup>
 import { computed, h, reactive, ref, watch } from 'vue';
 import { Link, router, usePage } from '@inertiajs/vue3';
-import { ArrowRightCircle, Ban, Pencil, Plus, Printer, Search, Trash2, X } from '@lucide/vue';
+import { ArrowRightCircle, Ban, Plus, Printer, Search, X } from '@lucide/vue';
 import AppLayout from '@/layouts/AppLayout.vue';
 import { useLayoutChrome } from '@/composables/useLayoutChrome';
 import Card from '@/components/ui/Card.vue';
 import Button from '@/components/ui/Button.vue';
 import Badge from '@/components/ui/Badge.vue';
 import DataTable from '@/components/ui/DataTable.vue';
+import RowActions from '@/components/ui/RowActions.vue';
+import DropdownMenuItem from '@/components/ui/DropdownMenuItem.vue';
 import PageHeader from '@/components/ui/PageHeader.vue';
 import Tooltip from '@/components/ui/Tooltip.vue';
 import NepaliDateInput from '@/components/ui/NepaliDateInput.vue';
@@ -224,71 +226,49 @@ const columns = [
                 return h('div', { class: 'flex items-center gap-1' }, [printBtn]);
             }
 
-            const convertBtn = canConvert.value
-                ? h(Tooltip, { label: 'Convert to sale (posts to ledger)' }, () =>
-                      h(
-                          'button',
-                          {
-                              type: 'button',
-                              class: 'flex h-[26px] w-[26px] items-center justify-center bg-primary-tint text-primary transition-colors duration-150 disabled:cursor-not-allowed disabled:opacity-40',
-                              'aria-label': 'Convert to sale',
-                              disabled: converting.value !== null,
-                              onClick: () => convertToSale(quotation),
-                          },
-                          [h(ArrowRightCircle, { class: 'h-[13px] w-[13px]' })],
-                      ),
-                  )
-                : null;
+            const moreActions = moreActionsFor(quotation);
 
-            const editBtn = can('quotations.edit')
-                ? h(Tooltip, { label: 'Edit quotation' }, () =>
-                      h(
-                          'button',
-                          {
-                              type: 'button',
-                              class: 'flex h-[26px] w-[26px] items-center justify-center bg-bg-subtle text-text-faint transition-colors duration-150 hover:bg-primary-tint hover:text-primary',
-                              'aria-label': 'Edit quotation',
-                              onClick: () => edit(quotation),
-                          },
-                          [h(Pencil, { class: 'h-[13px] w-[13px]' })],
-                      ),
-                  )
-                : null;
-
-            const deleteBtn = can('quotations.delete')
-                ? h(Tooltip, { label: 'Delete quotation' }, () =>
-                      h(
-                          'button',
-                          {
-                              type: 'button',
-                              class: 'flex h-[26px] w-[26px] items-center justify-center bg-bg-subtle text-text-faint transition-colors duration-150 hover:bg-danger-bg hover:text-danger',
-                              'aria-label': 'Delete quotation',
-                              onClick: () => destroy(quotation),
-                          },
-                          [h(Trash2, { class: 'h-[13px] w-[13px]' })],
-                      ),
-                  )
-                : null;
-
-            const cancelBtn = can('quotations.cancel')
-                ? h(Tooltip, { label: 'Cancel quotation' }, () =>
-                      h(
-                          'button',
-                          {
-                              type: 'button',
-                              class: 'flex h-[26px] w-[26px] items-center justify-center bg-bg-subtle text-text-faint transition-colors duration-150 hover:bg-danger-bg hover:text-danger',
-                              'aria-label': 'Cancel quotation',
-                              onClick: () => cancelQuotation(quotation),
-                          },
-                          [h(Ban, { class: 'h-[13px] w-[13px]' })],
-                      ),
-                  )
-                : null;
-
-            return h('div', { class: 'flex items-center gap-1' }, [printBtn, convertBtn, editBtn, cancelBtn, deleteBtn]);
+            return h('div', { class: 'flex items-center gap-2' }, [
+                printBtn,
+                h(
+                    RowActions,
+                    {
+                        canEdit: can('quotations.edit'),
+                        canDelete: can('quotations.delete'),
+                        editLabel: 'Edit quotation',
+                        deleteLabel: 'Delete quotation',
+                        onEdit: () => edit(quotation),
+                        onDelete: () => destroy(quotation),
+                    },
+                    moreActions.length > 0
+                        ? {
+                              more: () =>
+                                  moreActions.map((action) =>
+                                      h(DropdownMenuItem, { key: action.label, ...action.attrs, onSelect: action.run }, () => [
+                                          h(action.icon, { class: 'size-3.5', 'aria-hidden': 'true' }),
+                                          action.label,
+                                      ]),
+                                  ),
+                          }
+                        : {},
+                ),
+            ]);
         },
     },
 ];
+
+/** The secondary actions of a draft quotation shown under the "More" button, filtered by permission. */
+function moreActionsFor(quotation) {
+    return [
+        canConvert.value && {
+            label: 'Convert to sale',
+            icon: ArrowRightCircle,
+            attrs: { title: 'Convert to sale (posts to ledger)', disabled: converting.value !== null },
+            run: () => convertToSale(quotation),
+        },
+        can('quotations.cancel') && { label: 'Cancel quotation', icon: Ban, run: () => cancelQuotation(quotation) },
+    ].filter(Boolean);
+}
 </script>
 
 <template>

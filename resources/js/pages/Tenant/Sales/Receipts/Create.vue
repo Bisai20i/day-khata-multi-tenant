@@ -4,6 +4,7 @@ import { useForm } from '@inertiajs/vue3';
 import Card from '@/components/ui/Card.vue';
 import Button from '@/components/ui/Button.vue';
 import Input from '@/components/ui/Input.vue';
+import InfoTip from '@/components/ui/InfoTip.vue';
 import Select from '@/components/ui/Select.vue';
 import Combobox from '@/components/ui/Combobox.vue';
 import NepaliDateInput from '@/components/ui/NepaliDateInput.vue';
@@ -197,13 +198,15 @@ function submit() {
                     <p v-if="form.errors.date" class="mt-1 text-sm text-danger">{{ form.errors.date }}</p>
                 </div>
                 <div>
-                    <label class="mb-1 block text-sm font-semibold text-text-base">Amount <span class="text-danger">*</span></label>
+                    <div class="mb-1 flex items-center gap-1">
+                        <label class="block text-sm font-semibold text-text-base">Amount <span class="text-danger">*</span></label>
+                        <InfoTip text="Total amount the customer paid." />
+                    </div>
                     <Input v-model="form.amount" type="text" inputmode="decimal" placeholder="0.00" required />
                     <p v-if="form.amount !== '' && receiptAmount === null" class="mt-1 text-sm text-danger">
                         Enter an amount with at most 2 decimals.
                     </p>
                     <p v-if="form.errors.amount" class="mt-1 text-sm text-danger" role="alert">{{ form.errors.amount }}</p>
-                    <p v-else class="mt-1 text-xs text-text-muted">Total amount the customer paid.</p>
                 </div>
                 <div>
                     <label class="mb-1 block text-sm font-semibold text-text-base">Payment mode <span class="text-danger">*</span></label>
@@ -224,9 +227,11 @@ function submit() {
                     <p v-if="form.errors.bank_account_id" class="mt-1 text-sm text-danger">{{ form.errors.bank_account_id }}</p>
                 </div>
                 <div>
-                    <label class="mb-1 block text-sm font-semibold text-text-base">Reference #</label>
+                    <div class="mb-1 flex items-center gap-1">
+                        <label class="block text-sm font-semibold text-text-base">Reference #</label>
+                        <InfoTip text="Cheque or transaction number, if any." />
+                    </div>
                     <Input v-model="form.reference_number" type="text" placeholder="Optional" />
-                    <p class="mt-1 text-xs text-text-muted">Cheque or transaction number, if any.</p>
                 </div>
                 <div class="col-span-3">
                     <label class="mb-1 block text-sm font-semibold text-text-base">Narration</label>
@@ -235,8 +240,10 @@ function submit() {
             </div>
 
             <div v-if="form.customer_id">
-                <p class="mb-2 text-sm font-semibold text-text-base">Match to unpaid invoices (optional)</p>
-                <p class="mb-2 text-xs text-text-muted">Enter how much of this receipt pays off each invoice. Anything left over stays as an advance on the customer's account.</p>
+                <div class="mb-2 flex items-center gap-1">
+                    <p class="text-sm font-semibold text-text-base">Match to unpaid invoices (optional)</p>
+                    <InfoTip text="Enter how much of this receipt pays off each invoice. Anything left over stays as an advance on the customer's account." />
+                </div>
                 <p v-if="!customerSales.length" class="text-sm text-text-muted">This customer has no outstanding invoices.</p>
 
                 <div v-else class="flex flex-col gap-2">

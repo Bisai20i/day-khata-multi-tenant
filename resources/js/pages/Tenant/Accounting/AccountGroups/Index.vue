@@ -10,6 +10,7 @@ import Button from '@/components/ui/Button.vue';
 import Input from '@/components/ui/Input.vue';
 import Select from '@/components/ui/Select.vue';
 import Modal from '@/components/ui/Modal.vue';
+import InfoTip from '@/components/ui/InfoTip.vue';
 import DataTable from '@/components/ui/DataTable.vue';
 import RowActions from '@/components/ui/RowActions.vue';
 import { useToast } from '@/composables/useToast';
@@ -150,21 +151,25 @@ const columns = [
         <Modal :open="showModal" :title="editing ? 'Edit Account Group' : 'New Account Group'" @update:open="onModalOpenChange">
             <form class="flex flex-col gap-4" @submit.prevent="submit">
                 <div>
-                    <label for="account_head_id" class="mb-1 block text-sm font-semibold text-text-base">Account head <span class="text-danger">*</span></label>
+                    <div class="mb-1 flex items-center gap-1">
+                        <label for="account_head_id" class="block text-sm font-semibold text-text-base">Account head <span class="text-danger">*</span></label>
+                        <InfoTip text="The main statement section (Assets, Liabilities, Income, Expense, Equity) this group belongs to." />
+                    </div>
                     <Select
                         id="account_head_id"
                         v-model="form.account_head_id"
                         :options="headOptions"
                         placeholder="Select account head"
                     />
-                    <p class="mt-1 text-xs text-text-muted">The main statement section (Assets, Liabilities, Income, Expense, Equity) this group belongs to.</p>
                     <p v-if="form.errors.account_head_id" class="mt-1 text-sm text-danger">{{ form.errors.account_head_id }}</p>
                 </div>
 
                 <div>
-                    <label for="name" class="mb-1 block text-sm font-semibold text-text-base">Name <span class="text-danger">*</span></label>
+                    <div class="mb-1 flex items-center gap-1">
+                        <label for="name" class="block text-sm font-semibold text-text-base">Name <span class="text-danger">*</span></label>
+                        <InfoTip text="Account group is the broadest level; subgroups and individual accounts go beneath it." />
+                    </div>
                     <Input id="name" v-model="form.name" type="text" placeholder="e.g. Current Assets" required />
-                    <p class="mt-1 text-xs text-text-muted">Account group is the broadest level; subgroups and individual accounts go beneath it.</p>
                     <p v-if="form.errors.name" class="mt-1 text-sm text-danger">{{ form.errors.name }}</p>
                 </div>
             </form>
