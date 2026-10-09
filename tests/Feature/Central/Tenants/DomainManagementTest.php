@@ -52,6 +52,85 @@ test('a domain must be unique across all tenants', function () {
         ->assertSessionHasErrors('domain');
 });
 
+test('a platform admin can change a tenant domain after typing the current one', function () {
+    $admin = PlatformAdmin::factory()->create();
+    $tenant = provisionDomainTestTenant($this, $admin, 'domainedit');
+    $domain = $tenant->domains()->firstOrFail();
+
+    $this->actingAs($admin, 'platform')
+        ->put(route('central.tenants.domains.update', [$tenant, $domain]), [
+            'domain' => 'Fixed-DomainEdit.localhost',
+            'current_domain' => 'domainedit.localhost',
+        ])
+        ->assertRedirect(route('central.tenants.show', $tenant))
+        ->assertSessionHas('status', 'Domain updated.');
+
+    expect($domain->fresh()->domain)->toBe('fixed-domainedit.localhost')
+        ->and(Domain::where('domain', 'domainedit.localhost')->exists())->toBeFalse();
+
+    $log = PlatformAdminActivityLog::where('tenant_id', $tenant->id)
+        ->where('action', 'tenant.domain.update')
+        ->firstOrFail();
+
+    expect($log->metadata)->toMatchArray(['from' => 'domainedit.localhost', 'to' => 'fixed-domainedit.localhost']);
+});
+
+test('a tenant domain is not changed unless the current domain is typed correctly', function (?string $typed) {
+    $admin = PlatformAdmin::factory()->create();
+    $tenant = provisionDomainTestTenant($this, $admin, 'domainconfirm');
+    $domain = $tenant->domains()->firstOrFail();
+
+    $this->actingAs($admin, 'platform')
+        ->put(route('central.tenants.domains.update', [$tenant, $domain]), [
+            'domain' => 'fixed-domainconfirm.localhost',
+            'current_domain' => $typed,
+        ])
+        ->assertSessionHasErrors('current_domain');
+
+    expect($domain->fresh()->domain)->toBe('domainconfirm.localhost');
+})->with([
+    'missing' => [null],
+    'wrong' => ['something-else.localhost'],
+    'the new domain' => ['fixed-domainconfirm.localhost'],
+]);
+
+test('a tenant domain cannot be changed to an unavailable domain', function (string $newDomain) {
+    $admin = PlatformAdmin::factory()->create();
+    $tenant = provisionDomainTestTenant($this, $admin, 'domainclash');
+    provisionDomainTestTenant($this, $admin, 'domaintaken');
+    $domain = $tenant->domains()->firstOrFail();
+
+    $this->actingAs($admin, 'platform')
+        ->put(route('central.tenants.domains.update', [$tenant, $domain]), [
+            'domain' => $newDomain,
+            'current_domain' => 'domainclash.localhost',
+        ])
+        ->assertSessionHasErrors('domain');
+
+    expect($domain->fresh()->domain)->toBe('domainclash.localhost');
+})->with([
+    'another tenant domain' => ['domaintaken.localhost'],
+    'a central domain' => ['localhost'],
+    'unchanged' => ['domainclash.localhost'],
+    'invalid characters' => ['not a domain'],
+]);
+
+test('a domain belonging to another tenant cannot be changed through this tenant', function () {
+    $admin = PlatformAdmin::factory()->create();
+    $tenantA = provisionDomainTestTenant($this, $admin, 'domaineditowner');
+    $tenantB = provisionDomainTestTenant($this, $admin, 'domaineditintruder');
+    $tenantBDomain = $tenantB->domains()->firstOrFail();
+
+    $this->actingAs($admin, 'platform')
+        ->put(route('central.tenants.domains.update', [$tenantA, $tenantBDomain]), [
+            'domain' => 'hijacked.localhost',
+            'current_domain' => $tenantBDomain->domain,
+        ])
+        ->assertNotFound();
+
+    expect($tenantBDomain->fresh()->domain)->toBe('domaineditintruder.localhost');
+});
+
 test('a platform admin can remove an additional domain from a tenant', function () {
     $admin = PlatformAdmin::factory()->create();
     $tenant = provisionDomainTestTenant($this, $admin, 'domainremove');

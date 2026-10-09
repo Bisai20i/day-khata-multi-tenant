@@ -32,6 +32,7 @@ Route::middleware('auth:platform')->prefix('tenants')->name('central.tenants.')-
     Route::post('/{tenant}/retry-provisioning', [TenantController::class, 'retryProvisioning'])->name('retry-provisioning');
 
     Route::post('/{tenant}/domains', [TenantDomainController::class, 'store'])->name('domains.store');
+    Route::put('/{tenant}/domains/{domain}', [TenantDomainController::class, 'update'])->name('domains.update');
     Route::delete('/{tenant}/domains/{domain}', [TenantDomainController::class, 'destroy'])->name('domains.destroy');
 
     // Module entitlements: any platform admin, like the plain update() above

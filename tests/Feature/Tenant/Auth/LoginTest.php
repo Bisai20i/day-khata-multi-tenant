@@ -42,7 +42,11 @@ test('the tenant login screen can be rendered', function () {
     $response = $this->get("http://{$domain}/login");
 
     $response->assertStatus(200);
-    $response->assertInertia(fn ($page) => $page->component('Tenant/Auth/Login'));
+    // AuthLayout reads the business name (and decides whether to show the
+    // "Powered by Day Khata" credit) from this shared prop.
+    $response->assertInertia(fn ($page) => $page
+        ->component('Tenant/Auth/Login')
+        ->where('tenant.company_name', 'Acme Co'));
 
     $tenant->delete();
 });

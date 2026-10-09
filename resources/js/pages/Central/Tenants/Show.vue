@@ -28,6 +28,7 @@ import Modal from '@/components/ui/Modal.vue';
 import PageHeader from '@/components/ui/PageHeader.vue';
 import { useToast } from '@/composables/useToast';
 import { useConfirm } from '@/composables/useConfirm';
+import EditDomainModal from './EditDomainModal.vue';
 import ModuleSelector from './ModuleSelector.vue';
 import OwnerSection from './OwnerSection.vue';
 
@@ -240,6 +241,14 @@ function addDomain() {
     });
 }
 
+const showEditDomainModal = ref(false);
+const editingDomain = ref(null);
+
+function openEditDomainModal(domain) {
+    editingDomain.value = domain;
+    showEditDomainModal.value = true;
+}
+
 const removingDomainId = ref(null);
 
 function removeDomain(domain) {
@@ -396,7 +405,16 @@ function removeDomain(domain) {
                     <p class="mb-3 text-sm text-text-muted">Addresses this tenant can be reached at. At least one is required.</p>
                     <ul class="mb-4 divide-y divide-border-soft border-y border-border-soft text-sm">
                         <li v-for="domain in tenant.domains" :key="domain.id" class="flex items-center justify-between gap-3 py-2">
-                            <span class="min-w-0 break-all text-text-strong">{{ domain.domain }}</span>
+                            <span class="min-w-0 flex-1 break-all text-text-strong">{{ domain.domain }}</span>
+                            <button
+                                type="button"
+                                class="flex size-9 shrink-0 cursor-pointer items-center justify-center text-text-muted transition-colors duration-150 hover:bg-bg-muted hover:text-text-strong focus-visible:outline-2 focus-visible:outline-primary"
+                                title="Change domain"
+                                :aria-label="`Change domain ${domain.domain}`"
+                                @click="openEditDomainModal(domain)"
+                            >
+                                <Pencil class="size-4" />
+                            </button>
                             <button
                                 type="button"
                                 class="flex size-9 shrink-0 cursor-pointer items-center justify-center text-text-muted transition-colors duration-150 hover:bg-danger-bg hover:text-danger focus-visible:outline-2 focus-visible:outline-primary disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent disabled:hover:text-text-muted"
@@ -472,6 +490,8 @@ function removeDomain(domain) {
                 </div>
             </div>
         </section>
+
+        <EditDomainModal v-model:open="showEditDomainModal" :tenant-id="tenant.id" :domain="editingDomain" />
 
         <Modal v-model:open="showDeleteModal" :title="deleteIntent === 'cancel' ? 'Cancel provisioning' : 'Delete tenant'" size="compact">
             <div class="flex items-start gap-2">

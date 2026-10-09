@@ -18,17 +18,13 @@ import {
     HandCoins,
     ReceiptText,
     Percent,
-    ShoppingCart,
-    ArrowDownLeft,
-    ArrowUpRight,
 } from '@lucide/vue';
 import AppLayout from '@/layouts/AppLayout.vue';
 import { useLayoutChrome } from '@/composables/useLayoutChrome';
 import Card from '@/components/ui/Card.vue';
 import Button from '@/components/ui/Button.vue';
-import PageHeader from '@/components/ui/PageHeader.vue';
 import { formatMoney, formatQuantity, compareMoney, parseMoney } from '@/lib/money.js';
-import { allowedActions, holdsAll } from '@/lib/quickActions';
+import { holdsAll } from '@/lib/quickActions';
 import { usePermissions } from '@/composables/usePermissions';
 
 defineOptions({ layout: AppLayout });
@@ -168,20 +164,7 @@ function trendDayLabel(dateString) {
 
 const { can } = usePermissions();
 
-// UI gating only: each target route is still guarded server-side by `can:`.
-const quickActions = computed(() =>
-    allowedActions(
-        [
-            { label: 'New sale', href: '/sales', icon: Receipt, permissions: ['sales.create'] },
-            { label: 'Quick POS sale', href: '/pos', icon: ScanBarcode, permissions: ['pos.view', 'sales.create'] },
-            { label: 'New purchase', href: '/purchases', icon: ShoppingCart, permissions: ['purchases.create'] },
-            { label: 'Receive payment', href: '/receipts', icon: ArrowDownLeft, permissions: ['receipts.create'] },
-            { label: 'Make payment', href: '/payments', icon: ArrowUpRight, permissions: ['payments.create'] },
-        ],
-        can,
-    ),
-);
-
+// UI gating only: the POS route is still guarded server-side by `can:`.
 const canStartPosSale = computed(() => holdsAll(['pos.view', 'sales.create'], can));
 
 const dotPalette = ['#6600FF', '#0EA5E9', '#F59E0B', '#10B981', '#EC4899'];
@@ -209,18 +192,6 @@ function formatAmount(amount) {
 
 <template>
     <div>
-        <PageHeader
-            title="Dashboard"
-            :description="fiscalYear ? `Your business at a glance - fiscal year ${fiscalYear.name}.` : 'Your business at a glance.'"
-        />
-
-        <section v-if="quickActions.length" aria-label="Quick actions" class="mb-5 flex flex-wrap gap-2">
-            <Button v-for="action in quickActions" :key="action.href" :as="Link" :href="action.href" variant="primary" tone="purple">
-                <component :is="action.icon" class="size-4" aria-hidden="true" />
-                {{ action.label }}
-            </Button>
-        </section>
-
         <div v-if="visibleNotices.length" class="mb-5 flex flex-col gap-2">
             <div
                 v-for="notice in visibleNotices"
@@ -243,7 +214,6 @@ function formatAmount(amount) {
             </div>
         </div>
 
-        <h3 v-if="kpiCards.length" class="mb-2 text-sm font-bold text-text-strong">Your business</h3>
         <div v-if="kpiCards.length" class="mb-5 grid grid-cols-2 gap-4 lg:grid-cols-4">
             <Link v-for="card in kpiCards" :key="card.key" :href="card.href" class="block">
             <Card variant="panel" class="h-full transition-colors hover:border-primary">

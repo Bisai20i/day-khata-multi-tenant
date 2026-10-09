@@ -309,7 +309,7 @@ function selectActiveCommand() {
             class="fixed inset-y-0 left-0 z-40 flex w-[264px] shrink-0 flex-col border-r border-border bg-bg-surface transition-[transform,visibility] duration-200 ease-out lg:static lg:visible lg:translate-x-0 lg:transition-none motion-reduce:transition-none"
             :class="sidebarOpen ? 'visible translate-x-0 shadow-[0_8px_24px_rgba(0,0,0,.12)] lg:shadow-none' : 'invisible -translate-x-full'"
         >
-            <div class="flex h-16 shrink-0 items-center gap-2.5 border-b border-border px-5 lg:h-[72px]">
+            <div class="flex h-16 shrink-0 items-center gap-2.5 border-b border-border px-5">
                 <img :src="logoMark" alt="Day Khata" class="size-[30px] shrink-0 object-contain" />
                 <div class="min-w-0 leading-tight">
                     <p class="text-sm font-bold text-text-strong">Day Khata</p>

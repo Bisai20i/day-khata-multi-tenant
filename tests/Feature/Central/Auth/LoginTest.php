@@ -10,7 +10,11 @@ test('the login screen can be rendered', function () {
     $response = $this->get('/login');
 
     $response->assertStatus(200);
-    $response->assertInertia(fn ($page) => $page->component('Central/Auth/Login'));
+    // No tenant on the central domain, so AuthLayout shows neither a business
+    // name nor the "Powered by Day Khata" credit here.
+    $response->assertInertia(fn ($page) => $page
+        ->component('Central/Auth/Login')
+        ->where('tenant', null));
 });
 
 test('a platform admin can authenticate using the login screen', function () {
