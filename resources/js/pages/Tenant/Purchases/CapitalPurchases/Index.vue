@@ -1,7 +1,7 @@
 <script setup>
 import { computed, h, ref, watch } from 'vue';
 import { useForm, usePage } from '@inertiajs/vue3';
-import { Ban, FileText, HandCoins, Plus, Printer } from '@lucide/vue';
+import { Ban, Download, FileText, HandCoins, Plus, Printer } from '@lucide/vue';
 import AppLayout from '@/layouts/AppLayout.vue';
 import { useLayoutChrome } from '@/composables/useLayoutChrome';
 import Card from '@/components/ui/Card.vue';
@@ -17,6 +17,7 @@ import DataTable from '@/components/ui/DataTable.vue';
 import DropdownMenuItem from '@/components/ui/DropdownMenuItem.vue';
 import RowActions from '@/components/ui/RowActions.vue';
 import Tooltip from '@/components/ui/Tooltip.vue';
+import Label from '@/components/ui/Label.vue';
 import { useToast } from '@/composables/useToast';
 import { formatMoney } from '@/lib/money';
 import { formatBsDate, todayInKathmandu } from '@/lib/format';
@@ -325,20 +326,28 @@ function moreActionsFor(purchase) {
 
         <template v-else>
             <PageHeader title="Capital purchases" description="Long-term assets and services you bought, such as equipment or furniture. Cancel one that was posted in error.">
-                <a v-if="canExportCapitalPurchases" href="/capital-purchases/export">
-                    <Button variant="secondary" tone="purple" type="button">Export list</Button>
-                </a>
                 <Button v-if="hasOpenFiscalYear && canCreateCapitalPurchase" variant="primary" tone="purple" @click="showCreateForm = true">
                     <Plus class="size-4" aria-hidden="true" />
                     New capital purchase
                 </Button>
             </PageHeader>
 
-            <Card variant="panel">
-                <div v-if="capitalPurchases.length === 0" class="py-10 text-center">
+            <Card variant="panel" class="bg-white">
+                <div v-if="canExportCapitalPurchases" class="mb-3 flex flex-wrap items-center justify-between gap-2">
+                    <div class="ml-auto flex items-center gap-2">
+                        <a href="/capital-purchases/export">
+                            <Button variant="secondary" tone="neutral" type="button">
+                                <Download class="size-4" />
+                                Export
+                            </Button>
+                        </a>
+                    </div>
+                </div>
+
+                <div v-if="capitalPurchases.length === 0" class="flex flex-col items-center gap-3 py-10 text-center">
                     <p class="text-sm font-semibold text-text-strong">No capital purchases yet</p>
-                    <p class="mt-1 text-sm text-text-muted">Record the first asset or service bill you received.</p>
-                    <Button v-if="hasOpenFiscalYear && canCreateCapitalPurchase" class="mt-3" variant="primary" tone="purple" type="button" @click="showCreateForm = true">
+                    <p v-if="hasOpenFiscalYear && canCreateCapitalPurchase" class="text-xs text-text-muted">Record the first asset or service bill you received and it will be listed here.</p>
+                    <Button v-if="hasOpenFiscalYear && canCreateCapitalPurchase" variant="primary" tone="purple" @click="showCreateForm = true">
                         <Plus class="size-4" aria-hidden="true" />
                         New capital purchase
                     </Button>
@@ -366,26 +375,26 @@ function moreActionsFor(purchase) {
                 </p>
                 <div v-if="Number(settling.outstanding_amount) > 0" class="flex flex-col gap-3">
                     <div>
-                        <label class="mb-1 block text-sm font-semibold text-text-base">Date (BS) <span class="text-danger">*</span></label>
+                        <Label class="mb-1">Date (BS) <span class="text-danger">*</span></Label>
                         <NepaliDateInput v-model="settleForm.date" required />
                         <p v-if="settleForm.errors.date" class="mt-1 text-sm text-danger">{{ settleForm.errors.date }}</p>
                     </div>
                     <div>
-                        <label class="mb-1 block text-sm font-semibold text-text-base">Amount <span class="text-danger">*</span></label>
+                        <Label class="mb-1">Amount <span class="text-danger">*</span></Label>
                         <Input v-model="settleForm.amount" type="text" inputmode="decimal" required />
                         <p v-if="settleForm.errors.amount" class="mt-1 text-sm text-danger">{{ settleForm.errors.amount }}</p>
                     </div>
                     <div>
-                        <label class="mb-1 block text-sm font-semibold text-text-base">Paid by <span class="text-danger">*</span></label>
+                        <Label class="mb-1">Paid by <span class="text-danger">*</span></Label>
                         <Select :model-value="settleForm.payment_mode" :options="settleModeOptions" @update:model-value="(v) => (settleForm.payment_mode = v)" />
                     </div>
                     <div v-if="settleForm.payment_mode === 'bank'">
-                        <label class="mb-1 block text-sm font-semibold text-text-base">Bank account <span class="text-danger">*</span></label>
+                        <Label class="mb-1">Bank account <span class="text-danger">*</span></Label>
                         <Combobox :model-value="settleForm.bank_account_id" :options="settleAccountOptions" placeholder="Select bank account" @update:model-value="(v) => (settleForm.bank_account_id = v)" />
                         <p v-if="settleForm.errors.bank_account_id" class="mt-1 text-sm text-danger">{{ settleForm.errors.bank_account_id }}</p>
                     </div>
                     <div>
-                        <label class="mb-1 block text-sm font-semibold text-text-base">Reference</label>
+                        <Label class="mb-1">Reference</Label>
                         <Input v-model="settleForm.reference_number" type="text" maxlength="255" />
                     </div>
                 </div>
@@ -394,14 +403,14 @@ function moreActionsFor(purchase) {
                     <ul class="mt-2 flex flex-col gap-2 text-sm">
                         <li v-for="settlement in liveSettlements(settling)" :key="settlement.id" class="flex items-center justify-between gap-2">
                             <span>{{ formatBsDate(settlement.date) }} - Rs. {{ formatMoney(settlement.amount) }} ({{ settlement.payment_mode }})</span>
-                            <Button v-if="canCancelSettlement" variant="secondary" tone="purple" type="button" @click="openCancelSettlement(settlement)">Cancel</Button>
+                            <Button v-if="canCancelSettlement" variant="secondary" tone="neutral" type="button" @click="openCancelSettlement(settlement)">Cancel</Button>
                         </li>
                     </ul>
                 </div>
             </div>
 
             <template #footer>
-                <Button variant="secondary" tone="purple" type="button" @click="settling = null">Close</Button>
+                <Button variant="secondary" tone="neutral" type="button" @click="settling = null">Close</Button>
                 <Button
                     v-if="settling && Number(settling.outstanding_amount) > 0"
                     variant="primary"
@@ -426,13 +435,13 @@ function moreActionsFor(purchase) {
                     Cancelling the settlement of Rs. {{ formatMoney(cancellingSettlement.amount) }} posts a reversing entry and makes the amount outstanding again.
                 </p>
                 <div>
-                    <label class="mb-1 block text-sm font-semibold text-text-base">Reason <span class="text-danger">*</span></label>
+                    <Label class="mb-1">Reason <span class="text-danger">*</span></Label>
                     <Input v-model="settlementReasonForm.reason" type="text" maxlength="500" placeholder="Reason for cancellation" required />
                     <p v-if="settlementReasonForm.errors.reason" class="mt-1 text-sm text-danger">{{ settlementReasonForm.errors.reason }}</p>
                 </div>
             </div>
             <template #footer>
-                <Button variant="secondary" tone="purple" type="button" @click="cancellingSettlement = null">Keep settlement</Button>
+                <Button variant="secondary" tone="neutral" type="button" @click="cancellingSettlement = null">Keep settlement</Button>
                 <Button variant="primary" tone="purple" type="button" :loading="settlementReasonForm.processing" @click="submitCancelSettlement">
                     Cancel this settlement
                 </Button>
@@ -450,14 +459,14 @@ function moreActionsFor(purchase) {
                     Cancelling the capital purchase of {{ formatMoney(cancelling.total) }} posts a reversing entry. This cannot be undone.
                 </p>
                 <div>
-                    <label class="mb-1 block text-sm font-semibold text-text-base">Reason <span class="text-danger">*</span></label>
+                    <Label class="mb-1">Reason <span class="text-danger">*</span></Label>
                     <Input v-model="reasonForm.reason" type="text" maxlength="500" placeholder="Reason for cancellation" required />
                     <p v-if="reasonForm.errors.reason" class="mt-1 text-sm text-danger">{{ reasonForm.errors.reason }}</p>
                 </div>
             </div>
 
             <template #footer>
-                <Button variant="secondary" tone="purple" type="button" @click="cancelling = null">Keep purchase</Button>
+                <Button variant="secondary" tone="neutral" type="button" @click="cancelling = null">Keep purchase</Button>
                 <Button variant="primary" tone="purple" type="button" :loading="reasonForm.processing" @click="submitCancel">
                     Cancel this purchase
                 </Button>

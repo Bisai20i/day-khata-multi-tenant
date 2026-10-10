@@ -7,6 +7,7 @@ import Input from '@/components/ui/Input.vue';
 import InfoTip from '@/components/ui/InfoTip.vue';
 import Select from '@/components/ui/Select.vue';
 import Combobox from '@/components/ui/Combobox.vue';
+import Label from '@/components/ui/Label.vue';
 
 const props = defineProps({
     form: { type: Object, required: true },
@@ -71,11 +72,11 @@ function saveNoteTemplate() {
             </template>
             <div class="grid grid-cols-1 gap-4 sm:grid-cols-2">
                 <div>
-                    <label for="sale-payment-mode" class="mb-1 block text-sm font-semibold text-text-base">Payment type <span class="text-danger" aria-hidden="true">*</span></label>
+                    <Label for="sale-payment-mode" class="mb-1">Payment type <span class="text-danger" aria-hidden="true">*</span></Label>
                     <Select id="sale-payment-mode" v-model="form.payment_mode" :options="paymentModeOptions" aria-describedby="sale-payment-help" />
                 </div>
                 <div v-if="showBankField">
-                    <label class="mb-1 block text-sm font-semibold text-text-base">Bank account <span class="text-danger">*</span></label>
+                    <Label class="mb-1">Bank account <span class="text-danger">*</span></Label>
                     <Combobox
                         :model-value="form.bank_account_id"
                         :options="bankAccountOptions"
@@ -88,12 +89,12 @@ function saveNoteTemplate() {
 
             <div v-if="showPartialFields" class="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2">
                 <div>
-                    <label for="sale-cash-amount" class="mb-1 block text-sm font-semibold text-text-base">Cash received (Rs) <span class="text-danger" aria-hidden="true">*</span></label>
+                    <Label for="sale-cash-amount" class="mb-1">Cash received (Rs) <span class="text-danger" aria-hidden="true">*</span></Label>
                     <Input id="sale-cash-amount" v-model="form.cash_amount" type="number" min="0" step="0.01" placeholder="0.00" required aria-describedby="sale-cash-error" />
                     <p v-if="form.errors.cash_amount" id="sale-cash-error" class="mt-1 text-sm text-danger" role="alert">{{ form.errors.cash_amount }}</p>
                 </div>
                 <div>
-                    <label for="sale-bank-amount" class="mb-1 block text-sm font-semibold text-text-base">Bank received (Rs) <span class="text-danger" aria-hidden="true">*</span></label>
+                    <Label for="sale-bank-amount" class="mb-1">Bank received (Rs) <span class="text-danger" aria-hidden="true">*</span></Label>
                     <Input id="sale-bank-amount" v-model="form.bank_amount" type="number" min="0" step="0.01" placeholder="0.00" required aria-describedby="sale-bank-error" />
                     <p v-if="form.errors.bank_amount" id="sale-bank-error" class="mt-1 text-sm text-danger" role="alert">{{ form.errors.bank_amount }}</p>
                 </div>
@@ -103,7 +104,7 @@ function saveNoteTemplate() {
         <!-- Notes: narration only - kept as its own, visually lighter
              section now that Payment has its own card. -->
         <Card variant="panel" title="Notes" class="!p-4">
-            <label for="sale-narration" class="mb-1 block text-sm font-semibold text-text-base">Narration (printed on the bill)</label>
+            <Label for="sale-narration" class="mb-1">Narration (printed on the bill)</Label>
             <div class="flex gap-2">
                 <Input id="sale-narration" v-model="form.narration" type="text" placeholder="Optional" class="flex-1">
                     <template #addon>

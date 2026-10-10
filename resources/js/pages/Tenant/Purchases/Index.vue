@@ -16,6 +16,7 @@ import NepaliDateInput from '@/components/ui/NepaliDateInput.vue';
 import Combobox from '@/components/ui/Combobox.vue';
 import DropdownMenu from '@/components/ui/DropdownMenu.vue';
 import DropdownMenuItem from '@/components/ui/DropdownMenuItem.vue';
+import Label from '@/components/ui/Label.vue';
 import { useToast } from '@/composables/useToast';
 import { formatMoney } from '@/lib/money';
 import { formatBsDate } from '@/lib/format';
@@ -424,19 +425,19 @@ const columns = [
                 </div>
                 <div :class="[showFilters ? 'mt-3 flex' : 'hidden', 'flex-wrap items-end gap-3 md:mt-0 md:flex']">
                     <div class="min-w-[160px]">
-                        <label class="mb-1 block text-xs font-semibold text-text-muted">From date (BS)</label>
+                        <Label class="mb-1">From date (BS)</Label>
                         <NepaliDateInput v-model="filterState.from" />
                     </div>
                     <div class="min-w-[160px]">
-                        <label class="mb-1 block text-xs font-semibold text-text-muted">To date (BS)</label>
+                        <Label class="mb-1">To date (BS)</Label>
                         <NepaliDateInput v-model="filterState.to" />
                     </div>
                     <div class="min-w-[220px]">
-                        <label class="mb-1 block text-xs font-semibold text-text-muted">Supplier</label>
+                        <Label class="mb-1">Supplier</Label>
                         <Combobox v-model="filterState.supplier_id" @update:model-value="applyFilters" :options="supplierOptions" placeholder="All suppliers" />
                     </div>
                     <div class="min-w-[200px] flex-1">
-                        <label class="mb-1 block text-xs font-semibold text-text-muted">Supplier bill #</label>
+                        <Label class="mb-1">Supplier bill #</Label>
                         <div class="relative">
                             <Search class="pointer-events-none absolute top-1/2 left-2.5 size-4 -translate-y-1/2 text-text-faint" />
                             <Input v-model="filterState.search" type="text" placeholder="Search supplier bill number" class="pl-8" @keydown.enter.prevent="applyFilters" />
@@ -467,6 +468,7 @@ const columns = [
 
             <Card variant="panel" class="bg-white">
                 <div class="mb-3 flex flex-wrap items-center justify-between gap-2">
+                    <p v-if="purchases.data.length > 0" class="text-xs text-text-muted" aria-live="polite">Showing {{ purchases.from }}–{{ purchases.to }} of {{ purchases.total }}</p>
                     <div class="ml-auto flex items-center gap-2">
                         <Button variant="secondary" tone="neutral" type="button" @click="printList">
                             <Printer class="size-4" />
@@ -526,7 +528,6 @@ const columns = [
                     </div>
                 </div>
 
-                <p v-if="purchases.data.length > 0" class="mt-3 text-xs text-text-muted" aria-live="polite">Showing {{ purchases.from }}–{{ purchases.to }} of {{ purchases.total }}</p>
                 <nav v-if="purchases.data.length > 0 && purchases.last_page > 1" aria-label="Purchases pagination" class="mt-3 flex items-center justify-end gap-2">
                     <Link
                         v-if="purchases.prev_page_url"
@@ -567,7 +568,7 @@ const columns = [
                     ({{ formatMoney(cancelling.total) }}) posts a reversing entry and reduces stock. This cannot be undone.
                 </p>
                 <div>
-                    <label class="mb-1 block text-sm font-semibold text-text-base">Reason <span class="text-danger">*</span></label>
+                    <Label class="mb-1">Reason <span class="text-danger">*</span></Label>
                     <Input v-model="reasonForm.reason" type="text" maxlength="500" placeholder="Reason for cancellation" required />
                     <p v-if="reasonForm.errors.reason" class="mt-1 text-sm text-danger">{{ reasonForm.errors.reason }}</p>
                 </div>

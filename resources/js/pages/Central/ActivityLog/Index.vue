@@ -10,6 +10,7 @@ import Badge from '@/components/ui/Badge.vue';
 import Select from '@/components/ui/Select.vue';
 import DataTable from '@/components/ui/DataTable.vue';
 import PageHeader from '@/components/ui/PageHeader.vue';
+import Label from '@/components/ui/Label.vue';
 
 defineOptions({ layout: AppLayout });
 
@@ -109,15 +110,15 @@ const columns = [
             <div class="flex flex-col gap-3 border-b border-border p-4 lg:flex-row lg:items-end">
                 <div class="grid flex-1 grid-cols-1 gap-3 sm:grid-cols-3">
                     <div class="min-w-0">
-                        <label for="filter-tenant" class="mb-1.5 block text-xs font-semibold text-text-muted">Tenant</label>
+                        <Label for="filter-tenant" class="mb-1.5">Tenant</Label>
                         <Select id="filter-tenant" v-model="tenantId" :options="tenantOptions" placeholder="All tenants" />
                     </div>
                     <div class="min-w-0">
-                        <label for="filter-action" class="mb-1.5 block text-xs font-semibold text-text-muted">Action</label>
+                        <Label for="filter-action" class="mb-1.5">Action</Label>
                         <Select id="filter-action" v-model="action" :options="humanActionOptions" placeholder="All actions" />
                     </div>
                     <div class="min-w-0">
-                        <label for="filter-platform-admin" class="mb-1.5 block text-xs font-semibold text-text-muted">Platform admin</label>
+                        <Label for="filter-platform-admin" class="mb-1.5">Platform admin</Label>
                         <Select id="filter-platform-admin" v-model="platformAdminId" :options="platformAdminOptions" placeholder="All admins" />
                     </div>
                 </div>
@@ -134,6 +135,10 @@ const columns = [
             </div>
 
             <div class="p-4">
+                <div v-if="logs.data.length > 0" class="mb-3 flex flex-wrap items-center justify-between gap-2">
+                    <p class="text-xs text-text-muted" aria-live="polite">Showing {{ logs.from }}–{{ logs.to }} of {{ logs.total }}</p>
+                </div>
+
                 <DataTable
                     :columns="columns"
                     :data="logs.data"
@@ -142,8 +147,7 @@ const columns = [
                     :empty-message="hasFilters ? 'No activity matches these filters. Try clearing them.' : 'No activity has been recorded yet.'"
                 />
 
-                <div v-if="logs.data.length > 0" class="mt-4 flex flex-col gap-3 border-t border-border-soft pt-4 sm:flex-row sm:items-center sm:justify-between">
-                    <p class="text-xs text-text-muted">Showing {{ logs.from }}–{{ logs.to }} of {{ logs.total }}</p>
+                <div v-if="logs.data.length > 0" class="mt-4 flex flex-col gap-3 border-t border-border-soft pt-4 sm:flex-row sm:items-center sm:justify-end">
                     <nav class="flex items-center justify-between gap-2 sm:justify-end" aria-label="Pagination">
                         <Link v-if="logs.prev_page_url" :href="logs.prev_page_url" aria-label="Previous page" preserve-state preserve-scroll :class="pageLinkClass">
                             <ChevronLeft class="size-4" aria-hidden="true" />

@@ -13,6 +13,7 @@ import Modal from '@/components/ui/Modal.vue';
 import InfoTip from '@/components/ui/InfoTip.vue';
 import DataTable from '@/components/ui/DataTable.vue';
 import RowActions from '@/components/ui/RowActions.vue';
+import Label from '@/components/ui/Label.vue';
 import { useToast } from '@/composables/useToast';
 import { useConfirm } from '@/composables/useConfirm';
 import { usePermissions } from '@/composables/usePermissions';
@@ -144,15 +145,23 @@ const columns = [
             </Button>
         </PageHeader>
 
-        <Card variant="panel">
-            <DataTable :columns="columns" :data="groups" :page-size="10" empty-message="No account groups yet. Use New group to create your first one." />
+        <Card variant="panel" class="bg-white">
+            <div v-if="groups.length === 0" class="flex flex-col items-center gap-3 py-10 text-center">
+                <p class="text-sm font-semibold text-text-strong">No account groups yet</p>
+                <p v-if="can('accounts.create')" class="text-xs text-text-muted">Create your first group and it will be listed here.</p>
+                <Button v-if="can('accounts.create')" variant="primary" tone="purple" @click="openCreate">
+                    <Plus class="size-4" />
+                    New group
+                </Button>
+            </div>
+            <DataTable v-else :columns="columns" :data="groups" :page-size="10" empty-message="No account groups" />
         </Card>
 
         <Modal :open="showModal" :title="editing ? 'Edit Account Group' : 'New Account Group'" @update:open="onModalOpenChange">
             <form class="flex flex-col gap-4" @submit.prevent="submit">
                 <div>
                     <div class="mb-1 flex items-center gap-1">
-                        <label for="account_head_id" class="block text-sm font-semibold text-text-base">Account head <span class="text-danger">*</span></label>
+                        <Label for="account_head_id">Account head <span class="text-danger">*</span></Label>
                         <InfoTip text="The main statement section (Assets, Liabilities, Income, Expense, Equity) this group belongs to." />
                     </div>
                     <Select
@@ -166,7 +175,7 @@ const columns = [
 
                 <div>
                     <div class="mb-1 flex items-center gap-1">
-                        <label for="name" class="block text-sm font-semibold text-text-base">Name <span class="text-danger">*</span></label>
+                        <Label for="name">Name <span class="text-danger">*</span></Label>
                         <InfoTip text="Account group is the broadest level; subgroups and individual accounts go beneath it." />
                     </div>
                     <Input id="name" v-model="form.name" type="text" placeholder="e.g. Current Assets" required />
@@ -175,7 +184,7 @@ const columns = [
             </form>
 
             <template #footer>
-                <Button variant="secondary" tone="purple" @click="closeModal">Cancel</Button>
+                <Button variant="secondary" tone="neutral" @click="closeModal">Cancel</Button>
                 <Button variant="primary" tone="purple" :disabled="form.processing" @click="submit">
                     {{ editing ? 'Save changes' : 'Create group' }}
                 </Button>

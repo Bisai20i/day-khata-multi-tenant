@@ -1,7 +1,7 @@
 <script setup>
 import { computed, h, reactive, ref, watch } from 'vue';
 import { Link, router, useForm, usePage } from '@inertiajs/vue3';
-import { Ban, Check, Plus, Printer, Search, X } from '@lucide/vue';
+import { Ban, Check, Plus, Printer, Search, SlidersHorizontal, X } from '@lucide/vue';
 import AppLayout from '@/layouts/AppLayout.vue';
 import { useLayoutChrome } from '@/composables/useLayoutChrome';
 import Card from '@/components/ui/Card.vue';
@@ -14,6 +14,7 @@ import DataTable from '@/components/ui/DataTable.vue';
 import Tooltip from '@/components/ui/Tooltip.vue';
 import NepaliDateInput from '@/components/ui/NepaliDateInput.vue';
 import Combobox from '@/components/ui/Combobox.vue';
+import Label from '@/components/ui/Label.vue';
 import { useToast } from '@/composables/useToast';
 import { useConfirm } from '@/composables/useConfirm';
 import { formatMoney } from '@/lib/money';
@@ -69,6 +70,26 @@ function applyFilters() {
         { from: filterState.from || undefined, to: filterState.to || undefined, customer_id: filterState.customer_id || undefined },
         { preserveState: true, preserveScroll: true, onStart: () => (filtering.value = true), onFinish: () => (filtering.value = false) },
     );
+}
+
+const showFilters = ref(false);
+
+const activeFilterChips = computed(() => {
+    const chips = [];
+
+    if (props.filters.from) chips.push({ key: 'from', label: `From ${formatBsDate(props.filters.from)}` });
+    if (props.filters.to) chips.push({ key: 'to', label: `To ${formatBsDate(props.filters.to)}` });
+    if (props.filters.customer_id) {
+        const customer = props.customers.find((c) => c.id === Number(props.filters.customer_id));
+        chips.push({ key: 'customer_id', label: customer?.name ?? 'Customer' });
+    }
+
+    return chips;
+});
+
+function removeFilter(key) {
+    filterState[key] = key === 'customer_id' ? null : '';
+    applyFilters();
 }
 
 function clearFilters() {
@@ -390,14 +411,14 @@ const columns = [
                 description="Goods a customer sends back. A return issues a credit note, adds the stock back and reduces what the customer owes you."
             >
                 <div class="flex flex-wrap items-center gap-2">
-                    <Button v-if="can('sales_return_requests.create')" variant="secondary" tone="purple" @click="createMode = 'request'">
+                    <Button v-if="can('sales_return_requests.create')" variant="secondary" tone="neutral" @click="createMode = 'request'">
                         <Plus class="size-4" aria-hidden="true" />
                         Request return for approval
                     </Button>
                     <!-- Goods back with no bill this system ever issued
                          (audit section 3 "Sales") - posts immediately, so it
                          has no request/approve counterpart. -->
-                    <Button v-if="hasOpenFiscalYear && can('unlinked_sales_returns.create')" variant="secondary" tone="purple" @click="createMode = 'unlinked'">
+                    <Button v-if="hasOpenFiscalYear && can('unlinked_sales_returns.create')" variant="secondary" tone="neutral" @click="createMode = 'unlinked'">
                         <Plus class="size-4" />
                         Return without a bill
                     </Button>
@@ -408,8 +429,7 @@ const columns = [
                 </div>
             </PageHeader>
 
-            <Card v-if="pendingRequests.length > 0" variant="panel" class="mb-4">
-                <h3 class="mb-3 text-sm font-bold text-text-strong">Pending requests</h3>
+            <Card v-if="pendingRequests.length > 0" variant="panel" title="Pending requests" class="mb-4 bg-white">
                 <DataTable
                     :columns="requestColumns"
                     :data="pendingRequests"
@@ -418,36 +438,59 @@ const columns = [
                 />
             </Card>
 
-            <Card variant="panel" class="mb-4">
-                <div class="flex flex-wrap items-end gap-3">
+            <Card variant="panel" class="mb-4 bg-white">
+                <div class="flex items-center justify-between gap-2 md:hidden">
+                    <Button variant="secondary" tone="neutral" type="button" :aria-expanded="showFilters" @click="showFilters = !showFilters">
+                        <SlidersHorizontal class="size-4" />
+                        Filters
+                        <span v-if="activeFilterChips.length" class="bg-bg-muted px-1.5 text-[11px] text-text-strong">{{ activeFilterChips.length }}</span>
+                    </Button>
+                </div>
+                <div :class="[showFilters ? 'mt-3 flex' : 'hidden', 'flex-wrap items-end gap-3 md:mt-0 md:flex']">
                     <div class="min-w-[160px]">
-                        <label class="mb-1 block text-xs font-semibold text-text-muted">From date (BS)</label>
+                        <Label class="mb-1">From date (BS)</Label>
                         <NepaliDateInput v-model="filterState.from" />
                     </div>
                     <div class="min-w-[160px]">
-                        <label class="mb-1 block text-xs font-semibold text-text-muted">To date (BS)</label>
+                        <Label class="mb-1">To date (BS)</Label>
                         <NepaliDateInput v-model="filterState.to" />
                     </div>
                     <div class="min-w-[220px]">
-                        <label class="mb-1 block text-xs font-semibold text-text-muted">Customer</label>
-                        <Combobox v-model="filterState.customer_id" :options="customerOptions" placeholder="All customers" />
+                        <Label class="mb-1">Customer</Label>
+                        <Combobox v-model="filterState.customer_id" @update:model-value="applyFilters" :options="customerOptions" placeholder="All customers" />
                     </div>
-                    <Button variant="primary" tone="purple" :loading="filtering" @click="applyFilters">
+                    <Button variant="secondary" tone="neutral" :loading="filtering" @click="applyFilters">
                         <Search class="size-4" />
                         Filter
                     </Button>
-                    <Button v-if="hasActiveFilters" variant="secondary" tone="purple" @click="clearFilters">
-                        <X class="size-4" />
-                        Clear filters
-                    </Button>
+                </div>
+                <div v-if="activeFilterChips.length" class="mt-3 flex flex-wrap items-center gap-2 border-t border-border pt-3">
+                    <button
+                        v-for="chip in activeFilterChips"
+                        :key="chip.key"
+                        type="button"
+                        class="inline-flex cursor-pointer items-center gap-1 border-[1.5px] border-border bg-bg-subtle px-2 py-1 text-xs font-semibold text-text-base transition-colors duration-150 hover:bg-bg-muted focus-visible:outline-2 focus-visible:outline-primary"
+                        :aria-label="`Remove filter: ${chip.label}`"
+                        @click="removeFilter(chip.key)"
+                    >
+                        {{ chip.label }}
+                        <X class="size-3 text-text-muted" />
+                    </button>
+                    <button type="button" class="cursor-pointer text-xs font-semibold text-primary hover:underline focus-visible:outline-2 focus-visible:outline-primary" @click="clearFilters">
+                        Clear all
+                    </button>
                 </div>
             </Card>
 
-            <Card variant="panel">
+            <Card variant="panel" class="bg-white">
+                <div v-if="returns.data.length > 0" class="mb-3 flex flex-wrap items-center justify-between gap-2">
+                    <p class="text-xs text-text-muted" aria-live="polite">Showing {{ returns.from }}–{{ returns.to }} of {{ returns.total }}</p>
+                </div>
+
                 <div v-if="returns.data.length === 0" class="flex flex-col items-center gap-3 py-10 text-center">
                     <template v-if="hasActiveFilters">
                         <p class="text-sm font-semibold text-text-strong">No sales returns match these filters</p>
-                        <Button variant="secondary" tone="purple" @click="clearFilters">
+                        <Button variant="secondary" tone="neutral" @click="clearFilters">
                             <X class="size-4" aria-hidden="true" />
                             Clear filters
                         </Button>
@@ -463,43 +506,30 @@ const columns = [
                 </div>
                 <DataTable v-else :columns="columns" :data="returns.data" :page-size="Math.max(returns.data.length, 1)" empty-message="No sales returns" />
 
-                <p v-if="returns.data.length > 0" class="mt-3 text-xs text-text-muted" aria-live="polite">Showing {{ returns.from }}–{{ returns.to }} of {{ returns.total }}</p>
                 <nav v-if="returns.data.length > 0 && returns.last_page > 1" aria-label="Sales returns pagination" class="mt-3 flex items-center justify-end gap-2">
-                    <div class="flex items-center gap-2">
-                        <Link
-                            v-if="returns.prev_page_url"
-                            :href="returns.prev_page_url"
-                            preserve-state
-                            preserve-scroll
-                            aria-label="Previous page"
-                            class="inline-flex items-center border-[1.5px] border-border bg-white px-3 py-1.5 text-xs font-semibold text-text-muted transition-colors duration-150 ease-out hover:border-primary hover:text-primary"
-                        >
-                            Previous
-                        </Link>
-                        <span
-                            v-else
-                            class="inline-flex cursor-not-allowed items-center border-[1.5px] border-border bg-white px-3 py-1.5 text-xs font-semibold text-text-faint opacity-40"
-                        >
-                            Previous
-                        </span>
-                        <span class="text-xs text-text-muted" aria-current="page">Page {{ returns.current_page }} of {{ returns.last_page }}</span>
-                        <Link
-                            v-if="returns.next_page_url"
-                            :href="returns.next_page_url"
-                            preserve-state
-                            preserve-scroll
-                            aria-label="Next page"
-                            class="inline-flex items-center border-[1.5px] border-border bg-white px-3 py-1.5 text-xs font-semibold text-text-muted transition-colors duration-150 ease-out hover:border-primary hover:text-primary"
-                        >
-                            Next
-                        </Link>
-                        <span
-                            v-else
-                            class="inline-flex cursor-not-allowed items-center border-[1.5px] border-border bg-white px-3 py-1.5 text-xs font-semibold text-text-faint opacity-40"
-                        >
-                            Next
-                        </span>
-                    </div>
+                    <Link
+                        v-if="returns.prev_page_url"
+                        :href="returns.prev_page_url"
+                        preserve-state
+                        preserve-scroll
+                        aria-label="Previous page"
+                        class="inline-flex items-center border-[1.5px] border-border bg-white px-3 py-1.5 text-xs font-semibold text-text-muted transition-colors duration-150 ease-out hover:border-primary hover:text-primary"
+                    >
+                        Previous
+                    </Link>
+                    <span v-else aria-disabled="true" class="inline-flex cursor-not-allowed items-center border-[1.5px] border-border bg-white px-3 py-1.5 text-xs font-semibold text-text-faint opacity-40">Previous</span>
+                    <span class="text-xs text-text-muted" aria-current="page">Page {{ returns.current_page }} of {{ returns.last_page }}</span>
+                    <Link
+                        v-if="returns.next_page_url"
+                        :href="returns.next_page_url"
+                        preserve-state
+                        preserve-scroll
+                        aria-label="Next page"
+                        class="inline-flex items-center border-[1.5px] border-border bg-white px-3 py-1.5 text-xs font-semibold text-text-muted transition-colors duration-150 ease-out hover:border-primary hover:text-primary"
+                    >
+                        Next
+                    </Link>
+                    <span v-else aria-disabled="true" class="inline-flex cursor-not-allowed items-center border-[1.5px] border-border bg-white px-3 py-1.5 text-xs font-semibold text-text-faint opacity-40">Next</span>
                 </nav>
             </Card>
         </template>
@@ -510,14 +540,14 @@ const columns = [
                     This posts a reversing entry: the credit note is voided, returned stock is taken out again, and the customer owes you the amount once more (any refund settlement is reversed too). This cannot be undone.
                 </p>
                 <div>
-                    <label for="return-cancel-reason" class="mb-1 block text-sm font-semibold text-text-base">Reason <span class="text-danger">*</span></label>
+                    <Label for="return-cancel-reason" class="mb-1">Reason <span class="text-danger">*</span></Label>
                     <Input id="return-cancel-reason" v-model="cancelForm.reason" type="text" placeholder="Reason for cancellation" maxlength="500" required />
                     <p v-if="cancelForm.errors.reason" class="mt-1 text-sm text-danger" role="alert">{{ cancelForm.errors.reason }}</p>
                 </div>
             </form>
 
             <template #footer>
-                <Button variant="secondary" tone="purple" type="button" @click="cancelling = null">Keep return</Button>
+                <Button variant="secondary" tone="neutral" type="button" @click="cancelling = null">Keep return</Button>
                 <Button variant="primary" tone="purple" type="button" :disabled="cancelForm.processing" :loading="cancelForm.processing" @click="submitCancel">
                     Cancel return
                 </Button>
@@ -530,14 +560,14 @@ const columns = [
                     Nothing was posted for this request, so rejecting it has no ledger/stock effect - it just records why.
                 </p>
                 <div>
-                    <label for="return-reject-reason" class="mb-1 block text-sm font-semibold text-text-base">Reason <span class="text-danger">*</span></label>
+                    <Label for="return-reject-reason" class="mb-1">Reason <span class="text-danger">*</span></Label>
                     <Input id="return-reject-reason" v-model="rejectForm.reason" type="text" placeholder="Reason for rejection" maxlength="500" required />
                     <p v-if="rejectForm.errors.reason" class="mt-1 text-sm text-danger" role="alert">{{ rejectForm.errors.reason }}</p>
                 </div>
             </form>
 
             <template #footer>
-                <Button variant="secondary" tone="purple" type="button" @click="rejecting = null">Keep request</Button>
+                <Button variant="secondary" tone="neutral" type="button" @click="rejecting = null">Keep request</Button>
                 <Button variant="primary" tone="danger" type="button" :disabled="rejectForm.processing" :loading="rejectForm.processing" @click="submitReject">
                     Reject request
                 </Button>

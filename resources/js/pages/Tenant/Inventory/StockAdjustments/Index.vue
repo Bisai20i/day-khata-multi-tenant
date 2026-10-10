@@ -1,7 +1,7 @@
 <script setup>
 import { computed, h, ref, watch } from 'vue';
 import { router, useForm, usePage } from '@inertiajs/vue3';
-import { Ban, Plus, Printer } from '@lucide/vue';
+import { Ban, Plus, Printer, Search, SlidersHorizontal, Upload, X } from '@lucide/vue';
 import AppLayout from '@/layouts/AppLayout.vue';
 import { useLayoutChrome } from '@/composables/useLayoutChrome';
 import PageHeader from '@/components/ui/PageHeader.vue';
@@ -14,6 +14,7 @@ import Tooltip from '@/components/ui/Tooltip.vue';
 import InfoTip from '@/components/ui/InfoTip.vue';
 import Combobox from '@/components/ui/Combobox.vue';
 import NepaliDateInput from '@/components/ui/NepaliDateInput.vue';
+import Label from '@/components/ui/Label.vue';
 import { useToast } from '@/composables/useToast';
 import { usePermissions } from '@/composables/usePermissions';
 import { formatMoney, formatQuantity } from '@/lib/money.js';
@@ -68,15 +69,37 @@ watch(
     },
 );
 
+const filtering = ref(false);
+
 function applyDateFilter() {
     router.get('/stock-adjustments', { from: dateFilter.value.from, to: dateFilter.value.to }, {
         preserveState: true,
         preserveScroll: true,
         replace: true,
+        onStart: () => (filtering.value = true),
+        onFinish: () => (filtering.value = false),
     });
 }
 
-function clearDateFilter() {
+const showFilters = ref(false);
+
+const activeFilterChips = computed(() => {
+    const chips = [];
+
+    if (props.filters.from) chips.push({ key: 'from', label: `From ${formatBsDate(props.filters.from)}` });
+    if (props.filters.to) chips.push({ key: 'to', label: `To ${formatBsDate(props.filters.to)}` });
+
+    return chips;
+});
+
+const hasActiveFilters = computed(() => !!(props.filters.from || props.filters.to));
+
+function removeFilter(key) {
+    dateFilter.value = { ...dateFilter.value, [key]: '' };
+    applyDateFilter();
+}
+
+function clearFilters() {
     dateFilter.value = { from: '', to: '' };
     applyDateFilter();
 }
@@ -277,30 +300,81 @@ const columns = [
 
         <template v-else>
             <PageHeader title="Stock Adjustments" description="Stock adjustments: correct stock after a count, damage or loss.">
-                    <Button v-if="hasOpenFiscalYear && can('opening_stock.import')" variant="secondary" tone="purple" @click="openImport">Import opening stock (CSV)</Button>
-                    <Button v-if="hasOpenFiscalYear && can('stock_adjustments.create')" variant="primary" tone="purple" @click="showCreateForm = true">
-                        <Plus class="size-4" />
-                        New adjustment
-                    </Button>
-                </PageHeader>
+                <Button v-if="hasOpenFiscalYear && can('stock_adjustments.create')" variant="primary" tone="purple" @click="showCreateForm = true">
+                    <Plus class="size-4" />
+                    New adjustment
+                </Button>
+            </PageHeader>
 
-            <Card variant="panel">
-                <div class="mb-4 flex flex-wrap items-end gap-3 border-b-[1.5px] border-border pb-4">
-                    <div>
-                        <label class="mb-1 block text-sm font-semibold text-text-base">From date</label>
+            <Card variant="panel" class="mb-4 bg-white">
+                <div class="flex items-center justify-between gap-2 md:hidden">
+                    <Button variant="secondary" tone="neutral" type="button" :aria-expanded="showFilters" @click="showFilters = !showFilters">
+                        <SlidersHorizontal class="size-4" />
+                        Filters
+                        <span v-if="activeFilterChips.length" class="bg-bg-muted px-1.5 text-[11px] text-text-strong">{{ activeFilterChips.length }}</span>
+                    </Button>
+                </div>
+                <div :class="[showFilters ? 'mt-3 flex' : 'hidden', 'flex-wrap items-end gap-3 md:mt-0 md:flex']">
+                    <div class="min-w-[160px]">
+                        <Label class="mb-1">From date (BS)</Label>
                         <NepaliDateInput v-model="dateFilter.from" @update:model-value="applyDateFilter" />
                     </div>
-                    <div>
-                        <label class="mb-1 block text-sm font-semibold text-text-base">To date</label>
+                    <div class="min-w-[160px]">
+                        <Label class="mb-1">To date (BS)</Label>
                         <NepaliDateInput v-model="dateFilter.to" @update:model-value="applyDateFilter" />
                     </div>
-                    <Button variant="secondary" tone="purple" type="button" @click="clearDateFilter">Clear filters</Button>
-                    <p class="ml-auto self-center text-[12px] text-text-faint">
-                        Showing {{ stockAdjustments.length }} adjustment(s) in this date range.
-                    </p>
+                    <Button variant="secondary" tone="neutral" :loading="filtering" @click="applyDateFilter">
+                        <Search class="size-4" />
+                        Filter
+                    </Button>
+                </div>
+                <div v-if="activeFilterChips.length" class="mt-3 flex flex-wrap items-center gap-2 border-t border-border pt-3">
+                    <button
+                        v-for="chip in activeFilterChips"
+                        :key="chip.key"
+                        type="button"
+                        class="inline-flex cursor-pointer items-center gap-1 border-[1.5px] border-border bg-bg-subtle px-2 py-1 text-xs font-semibold text-text-base transition-colors duration-150 hover:bg-bg-muted focus-visible:outline-2 focus-visible:outline-primary"
+                        :aria-label="`Remove filter: ${chip.label}`"
+                        @click="removeFilter(chip.key)"
+                    >
+                        {{ chip.label }}
+                        <X class="size-3 text-text-muted" />
+                    </button>
+                    <button type="button" class="cursor-pointer text-xs font-semibold text-primary hover:underline focus-visible:outline-2 focus-visible:outline-primary" @click="clearFilters">
+                        Clear all
+                    </button>
+                </div>
+            </Card>
+
+            <Card variant="panel" class="bg-white">
+                <div v-if="stockAdjustments.length > 0 || (hasOpenFiscalYear && can('opening_stock.import'))" class="mb-3 flex flex-wrap items-center justify-between gap-2">
+                    <p v-if="stockAdjustments.length > 0" class="text-xs text-text-muted" aria-live="polite">Showing {{ stockAdjustments.length }} adjustment(s) in this date range.</p>
+                    <div v-if="hasOpenFiscalYear && can('opening_stock.import')" class="ml-auto flex items-center gap-2">
+                        <Button variant="secondary" tone="neutral" type="button" @click="openImport">
+                            <Upload class="size-4" />
+                            Import opening stock (CSV)
+                        </Button>
+                    </div>
                 </div>
 
-                <DataTable :columns="columns" :data="stockAdjustments" :page-size="10" empty-message="No stock adjustments in this date range. Use 'New adjustment' above, or clear the date filters." />
+                <div v-if="stockAdjustments.length === 0" class="flex flex-col items-center gap-3 py-10 text-center">
+                    <template v-if="hasActiveFilters">
+                        <p class="text-sm font-semibold text-text-strong">No stock adjustments in this date range</p>
+                        <Button variant="secondary" tone="neutral" @click="clearFilters">
+                            <X class="size-4" />
+                            Clear filters
+                        </Button>
+                    </template>
+                    <template v-else>
+                        <p class="text-sm font-semibold text-text-strong">No stock adjustments yet</p>
+                        <p v-if="hasOpenFiscalYear && can('stock_adjustments.create')" class="text-xs text-text-muted">Record your first adjustment and it will be listed here.</p>
+                        <Button v-if="hasOpenFiscalYear && can('stock_adjustments.create')" variant="primary" tone="purple" @click="showCreateForm = true">
+                            <Plus class="size-4" />
+                            New adjustment
+                        </Button>
+                    </template>
+                </div>
+                <DataTable v-else :columns="columns" :data="stockAdjustments" :page-size="10" empty-message="No stock adjustments" />
             </Card>
         </template>
 
@@ -310,14 +384,14 @@ const columns = [
                     This reverts the quantity impact of this adjustment. This cannot be undone.
                 </p>
                 <div>
-                    <label class="mb-1 block text-sm font-semibold text-text-base">Reason <span class="text-danger">*</span></label>
+                    <Label class="mb-1">Reason <span class="text-danger">*</span></Label>
                     <Input v-model="cancelForm.reason" type="text" placeholder="Reason for cancellation" required />
                     <p v-if="cancelForm.errors.reason" class="mt-1 text-sm text-danger">{{ cancelForm.errors.reason }}</p>
                 </div>
             </form>
 
             <template #footer>
-                <Button variant="secondary" tone="purple" type="button" @click="cancelling = null">Back</Button>
+                <Button variant="secondary" tone="neutral" type="button" @click="cancelling = null">Back</Button>
                 <Button variant="primary" tone="purple" type="button" :disabled="cancelForm.processing" @click="submitCancel">
                     Confirm cancellation
                 </Button>
@@ -350,13 +424,13 @@ const columns = [
 
                 <div class="grid grid-cols-2 gap-4">
                     <div>
-                        <label class="mb-1 block text-sm font-semibold text-text-base">Date <span class="text-danger">*</span></label>
+                        <Label class="mb-1">Date <span class="text-danger">*</span></Label>
                         <NepaliDateInput v-model="importForm.date" required />
                         <p v-if="importForm.errors.date" class="mt-1 text-sm text-danger">{{ importForm.errors.date }}</p>
                     </div>
                     <div>
                         <div class="mb-1 flex items-center gap-1">
-                            <label class="block text-sm font-semibold text-text-base">Store</label>
+                            <Label>Store</Label>
                             <InfoTip text="Opening stock is the quantity you already had when you started using the system." />
                         </div>
                         <Combobox
@@ -370,9 +444,9 @@ const columns = [
                 </div>
 
                 <div>
-                    <label for="opening-stock-import-file" class="mb-1 block text-sm font-semibold text-text-base">
+                    <Label for="opening-stock-import-file" class="mb-1">
                         CSV file <span class="text-danger">*</span>
-                    </label>
+                    </Label>
                     <input
                         id="opening-stock-import-file"
                         type="file"
@@ -415,7 +489,7 @@ const columns = [
 
             <template #footer>
                 <template v-if="!importResult">
-                    <Button variant="secondary" tone="purple" type="button" @click="closeImportModal">Cancel</Button>
+                    <Button variant="secondary" tone="neutral" type="button" @click="closeImportModal">Cancel</Button>
                     <Button
                         variant="primary"
                         tone="purple"

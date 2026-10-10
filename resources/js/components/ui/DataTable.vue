@@ -144,7 +144,7 @@ function onHeaderKeydown(event, column) {
                                 :aria-sort="ariaSort(header.column)"
                                 :tabindex="header.column.getCanSort() ? 0 : undefined"
                                 :class="cn(
-                                    'border-b-[1.5px] border-border px-[9px] py-2 text-left text-[10px] font-bold tracking-[.8px] text-text-muted uppercase',
+                                    'px-[9px] py-2 text-left text-[10px] font-bold tracking-[.8px] text-text-muted uppercase',
                                     header.column.getCanSort() ? 'cursor-pointer select-none outline-none focus-visible:text-primary' : '',
                                     isNumeric(header.column.id) ? 'text-right' : 'text-left',
                                 )"

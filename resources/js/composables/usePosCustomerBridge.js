@@ -18,15 +18,25 @@ export function usePosCustomerBridge({ props, form, toast }) {
     }
 
     function onCustomerCreated(pending) {
-        sessionStorage.setItem(PENDING_CUSTOMER_KEY, JSON.stringify(pending));
+        try {
+            sessionStorage.setItem(PENDING_CUSTOMER_KEY, JSON.stringify(pending));
+        } catch {
+            // Storage unavailable - the customer is saved, it just won't be
+            // auto-selected after the bounce back to /pos.
+        }
         customerModalOpen.value = false;
         router.visit('/pos', { onSuccess: applyPendingCustomer });
     }
 
     function applyPendingCustomer() {
-        const raw = sessionStorage.getItem(PENDING_CUSTOMER_KEY);
-        if (!raw) return;
-        sessionStorage.removeItem(PENDING_CUSTOMER_KEY);
+        let raw;
+        try {
+            raw = sessionStorage.getItem(PENDING_CUSTOMER_KEY);
+            if (!raw) return;
+            sessionStorage.removeItem(PENDING_CUSTOMER_KEY);
+        } catch {
+            return;
+        }
 
         try {
             const pending = JSON.parse(raw);

@@ -14,6 +14,7 @@ import DataTable from '@/components/ui/DataTable.vue';
 import Badge from '@/components/ui/Badge.vue';
 import Tooltip from '@/components/ui/Tooltip.vue';
 import InfoTip from '@/components/ui/InfoTip.vue';
+import Label from '@/components/ui/Label.vue';
 import { useToast } from '@/composables/useToast';
 import { useConfirm } from '@/composables/useConfirm';
 import { formatBsDate, todayInKathmandu } from '@/lib/format.js';
@@ -325,15 +326,23 @@ const columns = [
             </Button>
         </PageHeader>
 
-        <Card variant="panel">
-            <DataTable :columns="columns" :data="fiscalYears" :page-size="10" empty-message="No fiscal years yet. Use New fiscal year to create your first accounting period." />
+        <Card variant="panel" class="bg-white">
+            <div v-if="fiscalYears.length === 0" class="flex flex-col items-center gap-3 py-10 text-center">
+                <p class="text-sm font-semibold text-text-strong">No fiscal years yet</p>
+                <p v-if="canCreateFiscalYear" class="text-xs text-text-muted">Create your first accounting period and it will be listed here.</p>
+                <Button v-if="canCreateFiscalYear" variant="primary" tone="purple" @click="openCreate">
+                    <Plus class="size-4" />
+                    New fiscal year
+                </Button>
+            </div>
+            <DataTable v-else :columns="columns" :data="fiscalYears" :page-size="10" empty-message="No fiscal years" />
         </Card>
 
         <Modal :open="createModalOpen" title="New fiscal year" @update:open="onCreateModalOpenChange">
             <form class="flex flex-col gap-4" @submit.prevent="submitCreate">
                 <div>
                     <div class="mb-1 flex items-center gap-1">
-                        <label for="bs_year" class="block text-sm font-semibold text-text-base">Fiscal year (BS) <span class="text-danger">*</span></label>
+                        <Label for="bs_year">Fiscal year (BS) <span class="text-danger">*</span></Label>
                         <InfoTip text="A fiscal year always runs from Shrawan 1 to the end of Ashad." />
                     </div>
                     <Select id="bs_year" v-model="form.bs_year" :options="fiscalYearOptions" placeholder="Select fiscal year…" />
@@ -346,7 +355,7 @@ const columns = [
 
                 <div>
                     <div class="mb-1 flex items-center gap-1">
-                        <label for="name" class="block text-sm font-semibold text-text-base">Name</label>
+                        <Label for="name">Name</Label>
                         <InfoTip text="Optional. Defaults to the BS year, e.g. 2082/83." />
                     </div>
                     <Input id="name" v-model="form.name" type="text" :placeholder="selectedFiscalYearOption?.label ?? 'e.g. 2082/83'" />
@@ -355,7 +364,7 @@ const columns = [
             </form>
 
             <template #footer>
-                <Button variant="secondary" tone="purple" type="button" @click="closeCreateModal">Cancel</Button>
+                <Button variant="secondary" tone="neutral" type="button" @click="closeCreateModal">Cancel</Button>
                 <Button
                     variant="primary"
                     tone="purple"
@@ -378,9 +387,9 @@ const columns = [
                 </p>
 
                 <div>
-                    <label for="next_fiscal_year_id" class="mb-1 block text-sm font-semibold text-text-base">
+                    <Label for="next_fiscal_year_id" class="mb-1">
                         Next fiscal year <span class="text-danger">*</span>
-                    </label>
+                    </Label>
                     <Select
                         id="next_fiscal_year_id"
                         v-model="closeForm.next_fiscal_year_id"
@@ -394,9 +403,9 @@ const columns = [
 
                 <div v-if="closingEarly">
                     <div class="mb-1 flex items-center gap-1">
-                        <label for="close_reason" class="block text-sm font-semibold text-text-base">
+                        <Label for="close_reason">
                             Reason for closing early <span class="text-danger">*</span>
-                        </label>
+                        </Label>
                         <InfoTip text="This year has not finished yet. Closing it now freezes a period that can still receive documents, so an admin has to say why." />
                     </div>
                     <Input
@@ -412,7 +421,7 @@ const columns = [
             </div>
 
             <template #footer>
-                <Button variant="secondary" tone="purple" type="button" @click="closeCloseModal">Cancel</Button>
+                <Button variant="secondary" tone="neutral" type="button" @click="closeCloseModal">Cancel</Button>
                 <Button
                     variant="primary"
                     tone="purple"
@@ -435,9 +444,9 @@ const columns = [
                 </p>
 
                 <div>
-                    <label for="reopen_reason" class="mb-1 block text-sm font-semibold text-text-base">
+                    <Label for="reopen_reason" class="mb-1">
                         Reason <span class="text-danger">*</span>
-                    </label>
+                    </Label>
                     <textarea
                         id="reopen_reason"
                         v-model="reopenForm.reason"
@@ -451,7 +460,7 @@ const columns = [
             </div>
 
             <template #footer>
-                <Button variant="secondary" tone="purple" type="button" @click="closeReopenModal">Cancel</Button>
+                <Button variant="secondary" tone="neutral" type="button" @click="closeReopenModal">Cancel</Button>
                 <Button
                     variant="primary"
                     tone="purple"

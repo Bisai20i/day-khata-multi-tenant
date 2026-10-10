@@ -4,6 +4,7 @@ import { Plus } from '@lucide/vue';
 import Button from '@/components/ui/Button.vue';
 import Input from '@/components/ui/Input.vue';
 import Combobox from '@/components/ui/Combobox.vue';
+import Label from '@/components/ui/Label.vue';
 import { isZeroMoney } from '@/lib/money';
 import { balancingEntry, emptyVoucherLine, voucherAmountOf } from '@/lib/journalVoucherCreate';
 
@@ -102,7 +103,7 @@ function onStagingEnter(field) {
 <template>
     <div ref="stagingLineEl" class="grid grid-cols-1 items-end gap-3 sm:grid-cols-[2fr_1fr_1fr_1.6fr]">
         <div ref="stagingAccountEl">
-            <label class="mb-1 block text-sm font-semibold text-text-base">Account</label>
+            <Label class="mb-1">Account</Label>
             <Combobox
                 :model-value="stagingLine.account_id"
                 :options="accountOptions"
@@ -111,7 +112,7 @@ function onStagingEnter(field) {
             />
         </div>
         <div data-staging-field="debit">
-            <label class="mb-1 block text-sm font-semibold text-text-base">Debit (Dr)</label>
+            <Label class="mb-1">Debit (Dr)</Label>
             <Input
                 :model-value="stagingLine.debit"
                 type="number"
@@ -124,7 +125,7 @@ function onStagingEnter(field) {
             />
         </div>
         <div data-staging-field="credit">
-            <label class="mb-1 block text-sm font-semibold text-text-base">Credit (Cr)</label>
+            <Label class="mb-1">Credit (Cr)</Label>
             <Input
                 :model-value="stagingLine.credit"
                 type="number"
@@ -138,7 +139,7 @@ function onStagingEnter(field) {
         </div>
         <div class="flex items-end gap-2">
             <div data-staging-field="narration" class="flex-1">
-                <label class="mb-1 block text-sm font-semibold text-text-base">Line narration</label>
+                <Label class="mb-1">Line narration</Label>
                 <Input
                     v-model="stagingLine.narration"
                     type="text"

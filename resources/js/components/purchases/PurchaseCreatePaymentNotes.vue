@@ -5,6 +5,7 @@ import Input from '@/components/ui/Input.vue';
 import Select from '@/components/ui/Select.vue';
 import Combobox from '@/components/ui/Combobox.vue';
 import InfoTip from '@/components/ui/InfoTip.vue';
+import Label from '@/components/ui/Label.vue';
 
 // Payment and Notes side by side, same layout as SaleCreatePaymentNotes.
 const props = defineProps({
@@ -42,11 +43,11 @@ const bankAccountOptions = computed(() =>
             </template>
             <div class="grid grid-cols-1 gap-4 sm:grid-cols-2">
                 <div>
-                    <label for="purchase-payment-mode" class="mb-1 block text-sm font-semibold text-text-base">Payment type <span class="text-danger" aria-hidden="true">*</span></label>
+                    <Label for="purchase-payment-mode" class="mb-1">Payment type <span class="text-danger" aria-hidden="true">*</span></Label>
                     <Select id="purchase-payment-mode" v-model="form.payment_mode" :options="paymentModeOptions" aria-describedby="purchase-payment-help" />
                 </div>
                 <div v-if="showBankField">
-                    <label class="mb-1 block text-sm font-semibold text-text-base">Bank account <span class="text-danger">*</span></label>
+                    <Label class="mb-1">Bank account <span class="text-danger">*</span></Label>
                     <Combobox
                         :model-value="form.bank_account_id"
                         :options="bankAccountOptions"
@@ -59,12 +60,12 @@ const bankAccountOptions = computed(() =>
 
             <div v-if="showPartialFields" class="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2">
                 <div>
-                    <label for="purchase-cash-amount" class="mb-1 block text-sm font-semibold text-text-base">Paid in cash (Rs) <span class="text-danger" aria-hidden="true">*</span></label>
+                    <Label for="purchase-cash-amount" class="mb-1">Paid in cash (Rs) <span class="text-danger" aria-hidden="true">*</span></Label>
                     <Input id="purchase-cash-amount" v-model="form.cash_amount" type="number" min="0" step="0.01" placeholder="0.00" required aria-describedby="purchase-cash-error" />
                     <p v-if="form.errors.cash_amount" id="purchase-cash-error" class="mt-1 text-sm text-danger" role="alert">{{ form.errors.cash_amount }}</p>
                 </div>
                 <div>
-                    <label for="purchase-bank-amount" class="mb-1 block text-sm font-semibold text-text-base">Paid by bank (Rs) <span class="text-danger" aria-hidden="true">*</span></label>
+                    <Label for="purchase-bank-amount" class="mb-1">Paid by bank (Rs) <span class="text-danger" aria-hidden="true">*</span></Label>
                     <Input id="purchase-bank-amount" v-model="form.bank_amount" type="number" min="0" step="0.01" placeholder="0.00" required aria-describedby="purchase-bank-error" />
                     <p v-if="form.errors.bank_amount" id="purchase-bank-error" class="mt-1 text-sm text-danger" role="alert">{{ form.errors.bank_amount }}</p>
                 </div>
@@ -72,7 +73,7 @@ const bankAccountOptions = computed(() =>
         </Card>
 
         <Card variant="panel" title="Notes" class="!p-4">
-            <label for="purchase-narration" class="mb-1 block text-sm font-semibold text-text-base">Narration</label>
+            <Label for="purchase-narration" class="mb-1">Narration</Label>
             <Input id="purchase-narration" v-model="form.narration" type="text" placeholder="Optional note kept with this purchase" />
             <p v-if="form.errors.narration" class="mt-1 text-sm text-danger">{{ form.errors.narration }}</p>
         </Card>

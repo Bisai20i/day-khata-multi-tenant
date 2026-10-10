@@ -9,6 +9,7 @@ import Select from '@/components/ui/Select.vue';
 import Combobox from '@/components/ui/Combobox.vue';
 import InfoTip from '@/components/ui/InfoTip.vue';
 import NepaliDateInput from '@/components/ui/NepaliDateInput.vue';
+import Label from '@/components/ui/Label.vue';
 import { compareMoney, formatMoney, parseMoney, sumMoney } from '@/lib/money';
 import { formatBsDate, todayInKathmandu } from '@/lib/format';
 
@@ -140,16 +141,16 @@ function submit() {
 </script>
 
 <template>
-    <Card variant="panel">
+    <div>
         <PageHeader title="New supplier payment" description="Record money paid to a supplier, and optionally apply it to their outstanding bills. Fields marked * are required.">
             <Button variant="secondary" tone="purple" type="button" @click="emit('cancel')">Cancel</Button>
         </PageHeader>
 
         <form class="flex flex-col gap-4" @submit.prevent="submit">
-            <h4 class="border-b-[1.5px] border-border pb-1 text-sm font-bold text-text-strong">Supplier &amp; payment</h4>
+            <Card variant="panel" class="!p-4">
             <div class="grid grid-cols-1 gap-4 sm:grid-cols-3">
                 <div>
-                    <label class="mb-1 block text-sm font-semibold text-text-base">Supplier <span class="text-danger">*</span></label>
+                    <Label class="mb-1">Supplier <span class="text-danger">*</span></Label>
                     <Combobox
                         :model-value="form.supplier_id"
                         :options="supplierOptions"
@@ -159,17 +160,17 @@ function submit() {
                     <p v-if="form.errors.supplier_id" class="mt-1 text-sm text-danger">{{ form.errors.supplier_id }}</p>
                 </div>
                 <div>
-                    <label class="mb-1 block text-sm font-semibold text-text-base">Payment date (BS) <span class="text-danger">*</span></label>
+                    <Label class="mb-1">Payment date (BS) <span class="text-danger">*</span></Label>
                     <NepaliDateInput v-model="form.date" required />
                     <p v-if="form.errors.date" class="mt-1 text-sm text-danger">{{ form.errors.date }}</p>
                 </div>
                 <div>
-                    <label class="mb-1 block text-sm font-semibold text-text-base">Amount paid (Rs.) <span class="text-danger">*</span></label>
+                    <Label class="mb-1">Amount paid (Rs.) <span class="text-danger">*</span></Label>
                     <Input v-model="form.amount" type="number" min="0.01" step="0.01" placeholder="0.00" required />
                     <p v-if="form.errors.amount" class="mt-1 text-sm text-danger">{{ form.errors.amount }}</p>
                 </div>
                 <div>
-                    <label class="mb-1 block text-sm font-semibold text-text-base">Paid by <span class="text-danger">*</span></label>
+                    <Label class="mb-1">Paid by <span class="text-danger">*</span></Label>
                     <Select
                         :model-value="form.payment_mode"
                         :options="paymentModeOptions"
@@ -177,7 +178,7 @@ function submit() {
                     />
                 </div>
                 <div v-if="showBankAccount">
-                    <label class="mb-1 block text-sm font-semibold text-text-base">Bank account <span class="text-danger">*</span></label>
+                    <Label class="mb-1">Bank account <span class="text-danger">*</span></Label>
                     <Combobox
                         :model-value="form.bank_account_id"
                         :options="bankAccountOptions"
@@ -187,20 +188,23 @@ function submit() {
                     <p v-if="form.errors.bank_account_id" class="mt-1 text-sm text-danger">{{ form.errors.bank_account_id }}</p>
                 </div>
                 <div>
-                    <label class="mb-1 block text-sm font-semibold text-text-base">Reference number</label>
+                    <Label class="mb-1">Reference number</Label>
                     <Input v-model="form.reference_number" type="text" maxlength="255" placeholder="Cheque or transfer number (optional)" />
                 </div>
                 <div class="sm:col-span-3">
-                    <label class="mb-1 block text-sm font-semibold text-text-base">Notes (narration)</label>
+                    <Label class="mb-1">Notes (narration)</Label>
                     <Input v-model="form.narration" type="text" maxlength="255" placeholder="Optional note kept with this payment" />
                 </div>
             </div>
+            </Card>
 
-            <div v-if="form.supplier_id" class="border-t-[1.5px] border-border pt-4">
-                <div class="mb-2 flex items-center gap-1 border-b-[1.5px] border-border pb-1">
-                    <h4 class="text-sm font-bold text-text-strong">Apply to outstanding bills (optional)</h4>
-                    <InfoTip text="Any unallocated amount is recorded on account and won't reduce a specific bill's outstanding balance." />
-                </div>
+            <Card v-if="form.supplier_id" variant="panel" class="!p-4">
+                <template #title>
+                    <div class="flex items-center gap-1">
+                        <span>Apply to outstanding bills (optional)</span>
+                        <InfoTip text="Any unallocated amount is recorded on account and won't reduce a specific bill's outstanding balance." />
+                    </div>
+                </template>
                 <p v-if="supplierPurchases.length === 0" class="text-sm text-text-muted">No outstanding bills for this supplier.</p>
 
                 <div v-else class="flex flex-col gap-2">
@@ -244,7 +248,7 @@ function submit() {
                 <p class="mt-2 text-xs text-text-muted">
                     Allocated so far: {{ formatMoney(totalAllocated) }} of {{ formatMoney(paymentAmount) }}.
                 </p>
-            </div>
+            </Card>
 
             <div class="flex items-center justify-end gap-2">
                 <Button variant="secondary" tone="purple" type="button" @click="emit('cancel')">Cancel</Button>
@@ -259,5 +263,5 @@ function submit() {
                 </Button>
             </div>
         </form>
-    </Card>
+    </div>
 </template>

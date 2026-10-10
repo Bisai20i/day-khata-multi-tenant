@@ -14,6 +14,7 @@ import Input from '@/components/ui/Input.vue';
 import NepaliDateInput from '@/components/ui/NepaliDateInput.vue';
 import RowActions from '@/components/ui/RowActions.vue';
 import InfoTip from '@/components/ui/InfoTip.vue';
+import Label from '@/components/ui/Label.vue';
 import { useToast } from '@/composables/useToast';
 import { useConfirm } from '@/composables/useConfirm';
 
@@ -135,8 +136,16 @@ const columns = [
             </Button>
         </PageHeader>
 
-        <Card variant="panel">
-            <DataTable :columns="columns" :data="notices" :page-size="10" />
+        <Card variant="panel" class="bg-white">
+            <div v-if="notices.length === 0" class="flex flex-col items-center gap-3 py-10 text-center">
+                <p class="text-sm font-semibold text-text-strong">No notices yet</p>
+                <p class="text-xs text-text-muted">Create your first notice and it will be listed here.</p>
+                <Button variant="primary" tone="purple" @click="openCreate">
+                    <Plus class="size-4" />
+                    New notice
+                </Button>
+            </div>
+            <DataTable v-else :columns="columns" :data="notices" :page-size="10" />
         </Card>
 
         <Modal
@@ -146,13 +155,13 @@ const columns = [
         >
             <form id="notice-form" class="flex flex-col gap-4" @submit.prevent="submit">
                 <div>
-                    <label for="title" class="mb-1 block text-sm font-semibold text-text-base">Title <span class="text-danger">*</span></label>
+                    <Label for="title" class="mb-1">Title <span class="text-danger">*</span></Label>
                     <Input id="title" v-model="form.title" type="text" placeholder="e.g. Holiday hours" required />
                     <p v-if="form.errors.title" class="mt-1 text-sm text-danger">{{ form.errors.title }}</p>
                 </div>
 
                 <div>
-                    <label for="body" class="mb-1 block text-sm font-semibold text-text-base">Body <span class="text-danger">*</span></label>
+                    <Label for="body" class="mb-1">Body <span class="text-danger">*</span></Label>
                     <textarea
                         id="body"
                         v-model="form.body"
@@ -167,7 +176,7 @@ const columns = [
                 <div class="grid grid-cols-2 gap-4">
                     <div>
                         <div class="mb-1 flex items-center gap-1">
-                            <label for="starts_at" class="block text-sm font-semibold text-text-base">Starts on</label>
+                            <Label for="starts_at">Starts on</Label>
                             <InfoTip text="Optional. The notice is active immediately if left blank." />
                         </div>
                         <NepaliDateInput id="starts_at" v-model="form.starts_at" />
@@ -176,7 +185,7 @@ const columns = [
 
                     <div>
                         <div class="mb-1 flex items-center gap-1">
-                            <label for="ends_at" class="block text-sm font-semibold text-text-base">Ends on</label>
+                            <Label for="ends_at">Ends on</Label>
                             <InfoTip text="Optional. The notice never expires if left blank." />
                         </div>
                         <NepaliDateInput id="ends_at" v-model="form.ends_at" />
@@ -192,7 +201,7 @@ const columns = [
             </form>
 
             <template #footer>
-                <Button variant="secondary" tone="purple" type="button" @click="closeModal">Cancel</Button>
+                <Button variant="secondary" tone="neutral" type="button" @click="closeModal">Cancel</Button>
                 <Button
                     variant="primary"
                     tone="purple"

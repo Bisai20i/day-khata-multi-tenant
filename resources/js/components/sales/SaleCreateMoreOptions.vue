@@ -3,6 +3,7 @@ import { computed } from 'vue';
 import Input from '@/components/ui/Input.vue';
 import InfoTip from '@/components/ui/InfoTip.vue';
 import Combobox from '@/components/ui/Combobox.vue';
+import Label from '@/components/ui/Label.vue';
 
 // Rare fields (Store, header discount, TDS, agent) behind progressive
 // disclosure; toggled from the sticky bar in SaleCreateTotalsBar.
@@ -26,7 +27,7 @@ const agentOptions = computed(() => props.agents.map((a) => ({ value: a.id, labe
     <div class="flex flex-col gap-4 border-[1.5px] border-border bg-bg-subtle p-4">
         <div class="grid grid-cols-2 gap-4">
             <div v-if="storeOptions.length > 1">
-                <label class="mb-1 block text-sm font-semibold text-text-base">Store (stock is taken from here)</label>
+                <Label class="mb-1">Store (stock is taken from here)</Label>
                 <Combobox
                     :model-value="form.store_id"
                     :options="storeOptions"
@@ -37,7 +38,7 @@ const agentOptions = computed(() => props.agents.map((a) => ({ value: a.id, labe
             </div>
             <div>
                 <div class="mb-1 flex items-center gap-1">
-                    <label class="block text-sm font-semibold text-text-base">Discount on whole bill</label>
+                    <Label>Discount on whole bill</Label>
                     <InfoTip text="Applied to the subtotal. Use % or Rs with the button." />
                 </div>
                 <Input
@@ -66,7 +67,7 @@ const agentOptions = computed(() => props.agents.map((a) => ({ value: a.id, labe
         <div class="grid grid-cols-2 gap-4">
             <div>
                 <div class="mb-1 flex items-center gap-1">
-                    <label class="block text-sm font-semibold text-text-base">TDS account (optional)</label>
+                    <Label>TDS account (optional)</Label>
                     <InfoTip text="TDS = tax the customer deducts at source and pays to the government." />
                 </div>
                 <Combobox
@@ -78,7 +79,7 @@ const agentOptions = computed(() => props.agents.map((a) => ({ value: a.id, labe
                 <p v-if="form.errors.tds_account_id" class="mt-1 text-sm text-danger">{{ form.errors.tds_account_id }}</p>
             </div>
             <div>
-                <label class="mb-1 block text-sm font-semibold text-text-base">TDS amount</label>
+                <Label class="mb-1">TDS amount</Label>
                 <Input v-model="form.tds_amount" type="number" min="0" step="0.01" placeholder="0.00" />
                 <p v-if="form.errors.tds_amount" class="mt-1 text-sm text-danger">{{ form.errors.tds_amount }}</p>
             </div>
@@ -87,7 +88,7 @@ const agentOptions = computed(() => props.agents.map((a) => ({ value: a.id, labe
         <div class="grid grid-cols-2 gap-4">
             <div>
                 <div class="mb-1 flex items-center gap-1">
-                    <label class="block text-sm font-semibold text-text-base">Sales agent (optional)</label>
+                    <Label>Sales agent (optional)</Label>
                     <InfoTip text="Agent who brought this sale; earns the commission below." />
                 </div>
                 <Combobox
@@ -99,7 +100,7 @@ const agentOptions = computed(() => props.agents.map((a) => ({ value: a.id, labe
                 <p v-if="form.errors.agent_id" class="mt-1 text-sm text-danger">{{ form.errors.agent_id }}</p>
             </div>
             <div>
-                <label class="mb-1 block text-sm font-semibold text-text-base">Commission amount</label>
+                <Label class="mb-1">Commission amount</Label>
                 <Input v-model="form.commission_amount" type="number" min="0" step="0.01" placeholder="0.00" :disabled="!form.agent_id" />
                 <p v-if="form.errors.commission_amount" class="mt-1 text-sm text-danger">{{ form.errors.commission_amount }}</p>
             </div>

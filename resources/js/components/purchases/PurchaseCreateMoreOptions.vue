@@ -3,6 +3,7 @@ import { computed } from 'vue';
 import Input from '@/components/ui/Input.vue';
 import Combobox from '@/components/ui/Combobox.vue';
 import InfoTip from '@/components/ui/InfoTip.vue';
+import Label from '@/components/ui/Label.vue';
 import { formatMoney } from '@/lib/money';
 
 // Rare fields behind progressive disclosure, toggled from the sticky bar in
@@ -28,7 +29,7 @@ const tdsAccountOptions = computed(() =>
     <div class="flex flex-col gap-4 border-[1.5px] border-border bg-bg-subtle p-4">
         <div class="grid grid-cols-1 gap-4 sm:grid-cols-3">
             <div v-if="storeOptions.length > 1">
-                <label class="mb-1 block text-sm font-semibold text-text-base">Store (stock is received here)</label>
+                <Label class="mb-1">Store (stock is received here)</Label>
                 <Combobox
                     :model-value="form.store_id"
                     :options="storeOptions"
@@ -38,12 +39,12 @@ const tdsAccountOptions = computed(() =>
                 <p v-if="form.errors.store_id" class="mt-1 text-sm text-danger">{{ form.errors.store_id }}</p>
             </div>
             <div>
-                <label for="purchase-pan-number" class="mb-1 block text-sm font-semibold text-text-base">Supplier PAN number</label>
+                <Label for="purchase-pan-number" class="mb-1">Supplier PAN number</Label>
                 <Input id="purchase-pan-number" v-model="form.pan_number" type="text" placeholder="Optional" />
                 <p v-if="form.errors.pan_number" class="mt-1 text-sm text-danger">{{ form.errors.pan_number }}</p>
             </div>
             <div>
-                <label for="purchase-chalani" class="mb-1 block text-sm font-semibold text-text-base">Chalani (dispatch) number</label>
+                <Label for="purchase-chalani" class="mb-1">Chalani (dispatch) number</Label>
                 <Input id="purchase-chalani" v-model="form.chalani_number" type="text" placeholder="Optional" />
                 <p v-if="form.errors.chalani_number" class="mt-1 text-sm text-danger">{{ form.errors.chalani_number }}</p>
             </div>
@@ -52,7 +53,7 @@ const tdsAccountOptions = computed(() =>
         <div class="grid grid-cols-1 gap-4 sm:grid-cols-3">
             <div>
                 <div class="mb-1 flex items-center gap-1">
-                    <label class="block text-sm font-semibold text-text-base">Discount on whole bill</label>
+                    <Label>Discount on whole bill</Label>
                     <InfoTip text="Applied after item discounts. Use % or Rs with the button." />
                 </div>
                 <Input
@@ -79,7 +80,7 @@ const tdsAccountOptions = computed(() =>
             </div>
             <div>
                 <div class="mb-1 flex items-center gap-1">
-                    <label for="purchase-vat-rate" class="block text-sm font-semibold text-text-base">VAT rate (%)</label>
+                    <Label for="purchase-vat-rate">VAT rate (%)</Label>
                     <InfoTip :text="form.force_non_taxable ? 'Not used on a PAN bill.' : 'Charged on the taxable items.'" />
                 </div>
                 <Input id="purchase-vat-rate" v-model="form.vat_rate" type="number" min="0" max="100" step="0.01" :disabled="form.force_non_taxable" />
@@ -90,7 +91,7 @@ const tdsAccountOptions = computed(() =>
         <div class="grid grid-cols-1 gap-4 sm:grid-cols-3">
             <div>
                 <div class="mb-1 flex items-center gap-1">
-                    <label class="block text-sm font-semibold text-text-base">TDS account (tax withheld)</label>
+                    <Label>TDS account (tax withheld)</Label>
                     <InfoTip text="TDS = tax you deduct from the supplier and pay to the government." />
                 </div>
                 <Combobox
@@ -103,7 +104,7 @@ const tdsAccountOptions = computed(() =>
             </div>
             <div>
                 <div class="mb-1 flex items-center gap-1">
-                    <label for="purchase-tds-rate" class="block text-sm font-semibold text-text-base">TDS rate (%)</label>
+                    <Label for="purchase-tds-rate">TDS rate (%)</Label>
                     <InfoTip text="A rate takes precedence over a typed amount." />
                 </div>
                 <Input id="purchase-tds-rate" v-model="form.tds_rate" type="number" min="0" max="100" step="0.01" placeholder="Optional" />
@@ -111,7 +112,7 @@ const tdsAccountOptions = computed(() =>
             </div>
             <div>
                 <div class="mb-1 flex items-center gap-1">
-                    <label for="purchase-tds-amount" class="block text-sm font-semibold text-text-base">TDS amount (Rs)</label>
+                    <Label for="purchase-tds-amount">TDS amount (Rs)</Label>
                     <InfoTip v-if="form.tds_rate === ''" text="Or type the amount withheld." />
                 </div>
                 <Input id="purchase-tds-amount" v-model="form.tds_amount" type="number" min="0" step="0.01" placeholder="0.00" :disabled="form.tds_rate !== ''" />

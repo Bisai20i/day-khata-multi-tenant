@@ -15,6 +15,7 @@ import Combobox from '@/components/ui/Combobox.vue';
 import Modal from '@/components/ui/Modal.vue';
 import NepaliDateInput from '@/components/ui/NepaliDateInput.vue';
 import DataTable from '@/components/ui/DataTable.vue';
+import Label from '@/components/ui/Label.vue';
 import { useToast } from '@/composables/useToast';
 import { useConfirm } from '@/composables/useConfirm';
 import { formatMoney } from '@/lib/money.js';
@@ -168,7 +169,7 @@ const columns = [
             row.original.status === 'active' && canManageAssets.value
                 ? h(Button, {
                       variant: 'secondary',
-                      tone: 'purple',
+                      tone: 'neutral',
                       type: 'button',
                       onClick: () => openDispose(row.original),
                       'aria-label': `Dispose ${row.original.asset_name}`,
@@ -186,7 +187,7 @@ const columns = [
 
         <template v-else>
             <PageHeader title="Fixed Assets" description="Long-lived assets and their depreciation.">
-                <Button v-if="canManageAssets && hasOpenFiscalYear" variant="secondary" tone="purple" @click="postDepreciation">
+                <Button v-if="canManageAssets && hasOpenFiscalYear" variant="secondary" tone="neutral" @click="postDepreciation">
                     Post depreciation
                 </Button>
                 <Button v-if="canCreateAsset && hasOpenFiscalYear" variant="primary" tone="purple" @click="showCreateForm = true">
@@ -195,17 +196,16 @@ const columns = [
                 </Button>
             </PageHeader>
 
-            <Card v-if="fixedAssets.length === 0" variant="panel">
-                <div class="px-1 py-8 text-center">
-                    <p class="text-sm text-text-muted">No fixed assets yet. Add equipment, vehicles or property to track their value and depreciation.</p>
-                    <Button v-if="canCreateAsset && hasOpenFiscalYear" class="mt-3" variant="primary" tone="purple" @click="showCreateForm = true">
+            <Card variant="panel" class="bg-white">
+                <div v-if="fixedAssets.length === 0" class="flex flex-col items-center gap-3 py-10 text-center">
+                    <p class="text-sm font-semibold text-text-strong">No fixed assets yet</p>
+                    <p class="text-xs text-text-muted">Add equipment, vehicles or property to track their value and depreciation.</p>
+                    <Button v-if="canCreateAsset && hasOpenFiscalYear" variant="primary" tone="purple" @click="showCreateForm = true">
                         <Plus class="size-4" />
-                        Add your first asset
+                        New asset
                     </Button>
                 </div>
-            </Card>
-            <Card v-else variant="panel">
-                <DataTable :columns="columns" :data="fixedAssets" :page-size="10" empty-message="No fixed assets yet" />
+                <DataTable v-else :columns="columns" :data="fixedAssets" :page-size="10" empty-message="No fixed assets" />
             </Card>
         </template>
 
@@ -220,19 +220,19 @@ const columns = [
                     posts any gain or loss on disposal. This cannot be undone.
                 </p>
                 <div>
-                    <label class="mb-1 block text-sm font-semibold text-text-base">Disposal Date <span class="text-danger">*</span></label>
+                    <Label class="mb-1">Disposal Date <span class="text-danger">*</span></Label>
                     <NepaliDateInput v-model="disposeForm.disposal_date" required />
                     <p v-if="disposeForm.errors.disposal_date" class="mt-1 text-sm text-danger">{{ disposeForm.errors.disposal_date }}</p>
                 </div>
                 <div>
                     <div class="mb-1 flex items-center gap-1">
-                        <label class="block text-sm font-semibold text-text-base">Proceeds</label>
+                        <Label>Proceeds</Label>
                         <InfoTip text="Amount received from selling the asset. Leave blank if scrapped for nothing." />
                     </div>
                     <Input v-model="disposeForm.disposal_amount" type="number" min="0" step="0.01" placeholder="0.00" />
                 </div>
                 <div>
-                    <label class="mb-1 block text-sm font-semibold text-text-base">Settlement Mode <span class="text-danger">*</span></label>
+                    <Label class="mb-1">Settlement Mode <span class="text-danger">*</span></Label>
                     <Select
                         :model-value="disposeForm.disposal_mode"
                         :options="disposalModeOptions"
@@ -240,7 +240,7 @@ const columns = [
                     />
                 </div>
                 <div v-if="disposeForm.disposal_mode === 'bank'">
-                    <label class="mb-1 block text-sm font-semibold text-text-base">Bank Account</label>
+                    <Label class="mb-1">Bank Account</Label>
                     <Combobox
                         :model-value="disposeForm.bank_account_id"
                         :options="accountOptions"
@@ -253,7 +253,7 @@ const columns = [
             </div>
 
             <template #footer>
-                <Button variant="secondary" tone="purple" type="button" @click="disposing = null">Back</Button>
+                <Button variant="secondary" tone="neutral" type="button" @click="disposing = null">Back</Button>
                 <Button variant="primary" tone="purple" type="button" :disabled="disposeForm.processing" @click="submitDispose">
                     {{ disposeForm.processing ? 'Disposing...' : 'Confirm disposal' }}
                 </Button>

@@ -9,6 +9,7 @@ import Select from '@/components/ui/Select.vue';
 import Button from '@/components/ui/Button.vue';
 import NepaliDateInput from '@/components/ui/NepaliDateInput.vue';
 import DataTable from '@/components/ui/DataTable.vue';
+import Label from '@/components/ui/Label.vue';
 import { formatMoney } from '@/lib/money';
 import { formatBsDate } from '@/lib/format';
 
@@ -213,15 +214,15 @@ const columns = [
         <Card v-if="fiscalYearId !== null" variant="panel" class="mb-4">
             <div class="flex flex-wrap items-end gap-3">
                 <div class="w-56">
-                    <label class="mb-1 block text-xs font-semibold text-text-muted">Fiscal year</label>
+                    <Label class="mb-1">Fiscal year</Label>
                     <Select :model-value="fiscalYearId" :options="fiscalYearOptions" @update:model-value="onFiscalYearChange" />
                 </div>
                 <div>
-                    <label class="mb-1 block text-xs font-semibold text-text-muted">From date</label>
+                    <Label class="mb-1">From date</Label>
                     <NepaliDateInput v-model="from" />
                 </div>
                 <div>
-                    <label class="mb-1 block text-xs font-semibold text-text-muted">To date</label>
+                    <Label class="mb-1">To date</Label>
                     <NepaliDateInput v-model="to" />
                 </div>
                 <Button variant="primary" tone="purple" @click="applyWindow">Apply filters</Button>

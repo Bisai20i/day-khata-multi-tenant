@@ -4,10 +4,12 @@ import { router } from '@inertiajs/vue3';
 import AppLayout from '@/layouts/AppLayout.vue';
 import { useLayoutChrome } from '@/composables/useLayoutChrome';
 import Card from '@/components/ui/Card.vue';
+import Button from '@/components/ui/Button.vue';
 import PageHeader from '@/components/ui/PageHeader.vue';
 import NepaliDateInput from '@/components/ui/NepaliDateInput.vue';
 import Select from '@/components/ui/Select.vue';
 import DataTable from '@/components/ui/DataTable.vue';
+import Label from '@/components/ui/Label.vue';
 import { formatMoney, formatQuantity, formatRate } from '@/lib/money';
 import { formatBsDate } from '@/lib/format';
 import { itemLedgerColumn } from '@/lib/itemLedger';
@@ -85,15 +87,15 @@ const columns = [
 
         <div class="mb-4 flex flex-wrap items-end gap-3">
             <div class="w-40">
-                <label class="mb-1 block text-[11px] font-semibold text-text-muted">From date (BS)</label>
+                <Label class="mb-1 text-[11px]">From date (BS)</Label>
                 <NepaliDateInput v-model="fromInput" />
             </div>
             <div class="w-40">
-                <label class="mb-1 block text-[11px] font-semibold text-text-muted">To date (BS)</label>
+                <Label class="mb-1 text-[11px]">To date (BS)</Label>
                 <NepaliDateInput v-model="toInput" />
             </div>
             <div class="w-56">
-                <label class="mb-1 block text-[11px] font-semibold text-text-muted">Store</label>
+                <Label class="mb-1 text-[11px]">Store</Label>
                 <Select v-model="storeId" :options="storeOptions" />
             </div>
             <Button variant="primary" tone="purple" :loading="isLoading" @click="applyFilter">Generate report</Button>

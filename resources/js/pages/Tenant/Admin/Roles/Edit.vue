@@ -10,6 +10,7 @@ import Button from '@/components/ui/Button.vue';
 import Input from '@/components/ui/Input.vue';
 import Badge from '@/components/ui/Badge.vue';
 import PageHeader from '@/components/ui/PageHeader.vue';
+import Label from '@/components/ui/Label.vue';
 import PermissionMatrix from './PermissionMatrix.vue';
 import { changedKeys } from '@/lib/roleMatrix';
 
@@ -179,7 +180,7 @@ function reloadLatest() {
         <Card variant="panel" class="mb-4">
             <form class="flex flex-col gap-4" @submit.prevent="submit">
                 <div class="max-w-md">
-                    <label for="role_name" class="mb-1 block text-sm font-semibold text-text-base">Role name <span class="text-danger">*</span></label>
+                    <Label for="role_name" class="mb-1">Role name <span class="text-danger">*</span></Label>
                     <Input id="role_name" v-model="form.name" type="text" placeholder="e.g. Cashier" :disabled="isSystem" required />
                     <p v-if="form.errors.name" class="mt-1 text-sm text-danger">{{ form.errors.name }}</p>
                 </div>

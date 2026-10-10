@@ -5,6 +5,7 @@ import Button from '@/components/ui/Button.vue';
 import Input from '@/components/ui/Input.vue';
 import Select from '@/components/ui/Select.vue';
 import Combobox from '@/components/ui/Combobox.vue';
+import Label from '@/components/ui/Label.vue';
 import { formatQuantity } from '@/lib/money';
 import { emptyLine, toggleDiscountTypeOn, unitOptionsFor } from '@/lib/saleCreate';
 
@@ -89,7 +90,7 @@ function onStagingEnter(field) {
     <div>
         <div ref="stagingLineEl" class="grid grid-cols-[2.2fr_1fr_0.8fr_1fr_1.2fr] items-end gap-3">
             <div ref="stagingItemEl">
-                <label class="mb-1 block text-sm font-semibold text-text-base">Item or scan barcode</label>
+                <Label class="mb-1">Item or scan barcode</Label>
                 <Combobox
                     :model-value="stagingLine.item_id"
                     :options="itemOptions"
@@ -98,7 +99,7 @@ function onStagingEnter(field) {
                 />
             </div>
             <div>
-                <label class="mb-1 block text-sm font-semibold text-text-base">Unit</label>
+                <Label class="mb-1">Unit</Label>
                 <Select
                     v-if="stagingItem?.units?.length"
                     :model-value="stagingLine.item_unit_id"
@@ -108,7 +109,7 @@ function onStagingEnter(field) {
                 <span v-else class="block h-9 pt-2 text-xs text-text-muted">{{ stagingItem?.unit ?? '-' }}</span>
             </div>
             <div ref="stagingQuantityEl" data-staging-field="quantity">
-                <label class="mb-1 block text-sm font-semibold text-text-base">Quantity</label>
+                <Label class="mb-1">Quantity</Label>
                 <Input
                     v-model="stagingLine.quantity"
                     type="number"
@@ -118,7 +119,7 @@ function onStagingEnter(field) {
                 />
             </div>
             <div data-staging-field="rate">
-                <label class="mb-1 block text-sm font-semibold text-text-base">Rate</label>
+                <Label class="mb-1">Rate</Label>
                 <Input
                     v-model="stagingLine.rate"
                     type="number"
@@ -130,7 +131,7 @@ function onStagingEnter(field) {
             </div>
             <div class="flex items-end gap-2">
                 <div data-staging-field="discount" class="flex-1">
-                    <label class="mb-1 block text-sm font-semibold text-text-base">Discount</label>
+                    <Label class="mb-1">Discount</Label>
                     <Input
                         v-model="stagingLine.discount"
                         type="number"
@@ -162,7 +163,7 @@ function onStagingEnter(field) {
         <Transition name="extras">
             <div v-if="showLineExtras" class="mt-3 grid grid-cols-2 gap-3 sm:[grid-template-columns:2.2fr_1fr_0.8fr_1fr_1.2fr]">
                 <div class="sm:col-start-3">
-                    <label class="mb-1 block text-sm font-semibold text-text-base">Bonus</label>
+                    <Label class="mb-1">Bonus</Label>
                     <Input
                         v-model="stagingLine.bonus_quantity"
                         type="number"
@@ -173,7 +174,7 @@ function onStagingEnter(field) {
                     />
                 </div>
                 <div class="sm:col-start-4">
-                    <label class="mb-1 block text-sm font-semibold text-text-base">MRP</label>
+                    <Label class="mb-1">MRP</Label>
                     <Input
                         :model-value="stagingLine.mrp"
                         type="number"

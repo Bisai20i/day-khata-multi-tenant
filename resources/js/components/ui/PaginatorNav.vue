@@ -2,8 +2,9 @@
 import { Link } from '@inertiajs/vue3';
 
 /**
- * "Showing 1-25 of 80" plus Previous/Next links for a Laravel
- * LengthAwarePaginator prop, the same markup the receipts list uses inline.
+ * Previous/Next links for a Laravel LengthAwarePaginator prop, the same
+ * markup the receipts list uses inline. The "Showing 1-25 of 80" summary is
+ * rendered by the page, at the top of its table card.
  */
 defineProps({
     paginator: { type: Object, required: true },
@@ -18,7 +19,6 @@ const disabledClass =
 
 <template>
     <div v-if="paginator.data.length > 0">
-        <p class="mt-3 text-xs text-text-muted" aria-live="polite">Showing {{ paginator.from }}–{{ paginator.to }} of {{ paginator.total }}</p>
         <nav v-if="paginator.last_page > 1" :aria-label="label" class="mt-3 flex items-center justify-end gap-2">
             <Link v-if="paginator.prev_page_url" :href="paginator.prev_page_url" preserve-state preserve-scroll aria-label="Previous page" :class="linkClass">
                 Previous

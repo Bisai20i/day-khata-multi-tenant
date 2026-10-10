@@ -1,12 +1,13 @@
 <script setup>
 import { computed } from 'vue';
-import { useForm } from '@inertiajs/vue3';
+import { useForm, usePage } from '@inertiajs/vue3';
 import Card from '@/components/ui/Card.vue';
 import Button from '@/components/ui/Button.vue';
 import Input from '@/components/ui/Input.vue';
 import Select from '@/components/ui/Select.vue';
 import NepaliDateInput from '@/components/ui/NepaliDateInput.vue';
 import InfoTip from '@/components/ui/InfoTip.vue';
+import Label from '@/components/ui/Label.vue';
 import JournalVoucherStagingRow from '@/components/accounting/JournalVoucherStagingRow.vue';
 import JournalVoucherLinesTable from '@/components/accounting/JournalVoucherLinesTable.vue';
 import JournalVoucherTotalsBar from '@/components/accounting/JournalVoucherTotalsBar.vue';
@@ -39,6 +40,7 @@ const props = defineProps({
 
 const emit = defineEmits(['cancel', 'posted']);
 const { confirm } = useConfirm();
+const page = usePage();
 
 const { can } = usePermissions();
 // fiscal_year.edit is the key JournalVoucher::post() re-checks server-side.
@@ -167,16 +169,16 @@ function submit(print = false) {
     </p>
 
     <form class="flex flex-col gap-4 pb-4" @submit.prevent="submit(false)">
-        <Card variant="panel" title="Voucher details" class="!p-4">
+        <Card variant="panel" class="!p-4">
             <div class="grid grid-cols-1 gap-4 sm:grid-cols-3">
                 <div>
-                    <label for="jv-date" class="mb-1 block text-sm font-semibold text-text-base">Date (BS) <span class="text-danger" aria-hidden="true">*</span></label>
+                    <Label for="jv-date" class="mb-1">Date (BS) <span class="text-danger" aria-hidden="true">*</span></Label>
                     <NepaliDateInput id="jv-date" v-model="form.date" required />
                     <p v-if="form.errors.date" class="mt-1 text-sm text-danger" role="alert">{{ form.errors.date }}</p>
                 </div>
                 <div class="sm:col-span-2">
                     <div class="mb-1 flex items-center gap-1">
-                        <label for="jv-narration" class="block text-sm font-semibold text-text-base">Narration <span class="text-danger" aria-hidden="true">*</span></label>
+                        <Label for="jv-narration">Narration <span class="text-danger" aria-hidden="true">*</span></Label>
                         <InfoTip text="Printed on the voucher and shown in every ledger it touches." />
                     </div>
                     <Input id="jv-narration" v-model="form.narration" type="text" placeholder="Describe this transaction" required aria-describedby="jv-narration-help" />
@@ -185,7 +187,7 @@ function submit(print = false) {
                 </div>
                 <div v-if="canPostCorrection && correctionFiscalYear">
                     <div class="mb-1 flex items-center gap-1">
-                        <label for="jv-fiscal-year" class="block text-sm font-semibold text-text-base">Fiscal year</label>
+                        <Label for="jv-fiscal-year">Fiscal year</Label>
                         <InfoTip text="Leave blank to post into the currently open fiscal year." />
                     </div>
                     <Select
@@ -197,7 +199,7 @@ function submit(print = false) {
                     <p v-if="form.errors.fiscal_year_id" class="mt-1 text-sm text-danger">{{ form.errors.fiscal_year_id }}</p>
                 </div>
                 <div v-if="isClosedYearSelected" class="sm:col-span-2">
-                    <label for="jv-reason" class="mb-1 block text-sm font-semibold text-text-base">Reason <span class="text-danger">*</span></label>
+                    <Label for="jv-reason" class="mb-1">Reason <span class="text-danger">*</span></Label>
                     <textarea
                         id="jv-reason"
                         v-model="form.reason"
@@ -216,7 +218,7 @@ function submit(print = false) {
         </Card>
 
         <Card variant="panel" class="!p-4">
-            <div class="mb-3 text-[10px] font-bold tracking-[.8px] text-text-muted uppercase">Entries <span class="text-danger">*</span></div>
+            <template #title>Entries <span class="text-danger">*</span></template>
 
             <JournalVoucherStagingRow
                 :account-options="accountOptions"

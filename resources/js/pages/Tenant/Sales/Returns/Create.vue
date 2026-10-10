@@ -7,6 +7,7 @@ import Input from '@/components/ui/Input.vue';
 import InfoTip from '@/components/ui/InfoTip.vue';
 import Combobox from '@/components/ui/Combobox.vue';
 import NepaliDateInput from '@/components/ui/NepaliDateInput.vue';
+import Label from '@/components/ui/Label.vue';
 import SaleReturnCreateLinkedLines from '@/components/sales/SaleReturnCreateLinkedLines.vue';
 import SaleReturnCreateRefundFields from '@/components/sales/SaleReturnCreateRefundFields.vue';
 import SaleReturnCreateSalePicker from '@/components/sales/SaleReturnCreateSalePicker.vue';
@@ -230,7 +231,7 @@ function submit() {
 </script>
 
 <template>
-    <Card variant="panel">
+    <div>
         <div class="mb-4 flex items-center justify-between">
             <div>
                 <h3 class="text-base font-bold text-text-strong">{{ heading }}</h3>
@@ -263,7 +264,8 @@ function submit() {
             />
 
             <template v-else-if="!isUnlinked">
-                <div class="flex items-center justify-between border-[1.5px] border-border bg-bg-subtle px-3 py-2">
+                <Card variant="panel" class="flex flex-col gap-4 !p-4">
+                <div class="flex items-center justify-between">
                     <div class="text-sm">
                         <span class="font-bold text-text-strong">{{ selectedSale.invoice_number ?? `#${selectedSale.id}` }}</span>
                         <span class="text-text-muted"> - {{ selectedSale.customer ?? '-' }} - {{ selectedSale.date }} - {{ formatMoney(selectedSale.total) }}</span>
@@ -274,19 +276,21 @@ function submit() {
                 <div class="grid grid-cols-2 gap-4">
                     <div>
                         <div class="mb-1 flex items-center gap-1">
-                            <label class="block text-sm font-semibold text-text-base">Return date <span class="text-danger">*</span></label>
+                            <Label>Return date <span class="text-danger">*</span></Label>
                             <InfoTip :text="`On or after the invoice date ${selectedSale.date}.`" />
                         </div>
                         <NepaliDateInput v-model="form.date" required />
                         <p v-if="form.errors.date" class="mt-1 text-sm text-danger">{{ form.errors.date }}</p>
                     </div>
                     <div>
-                        <label class="mb-1 block text-sm font-semibold text-text-base">Reason</label>
+                        <Label class="mb-1">Reason</Label>
                         <Input v-model="form.reason" type="text" placeholder="Optional" />
                         <p v-if="form.errors.reason" class="mt-1 text-sm text-danger">{{ form.errors.reason }}</p>
                     </div>
                 </div>
+                </Card>
 
+                <Card variant="panel" title="Items" class="flex flex-col gap-4 !p-4">
                 <SaleReturnCreateLinkedLines
                     :lines="selectedSale.lines"
                     :quantities="quantities"
@@ -299,7 +303,7 @@ function submit() {
 
                 <div class="grid grid-cols-2 gap-4">
                     <div>
-                        <label class="mb-1 block text-sm font-semibold text-text-base">Store</label>
+                        <Label class="mb-1">Store</Label>
                         <Combobox
                             :model-value="form.store_id"
                             :options="storeOptions"
@@ -309,8 +313,9 @@ function submit() {
                         <p v-if="form.errors.store_id" class="mt-1 text-sm text-danger">{{ form.errors.store_id }}</p>
                     </div>
                 </div>
+                </Card>
 
-                <div class="grid grid-cols-5 gap-3 border-t-[1.5px] border-border pt-3 text-sm">
+                <Card variant="panel" class="grid grid-cols-5 gap-3 !p-4 text-sm">
                     <div>
                         <p class="text-[10px] font-bold tracking-[.8px] text-text-muted uppercase">Taxable</p>
                         <p class="font-bold text-text-strong">{{ formatMoney(totals.taxable) }}</p>
@@ -331,7 +336,7 @@ function submit() {
                         <p class="text-[10px] font-bold tracking-[.8px] text-text-muted uppercase">Credit note total</p>
                         <p class="font-bold text-text-strong">{{ formatMoney(totals.total) }}</p>
                     </div>
-                </div>
+                </Card>
             </template>
 
             <SaleReturnCreateUnlinkedFields
@@ -364,5 +369,5 @@ function submit() {
                 </Button>
             </div>
         </form>
-    </Card>
+    </div>
 </template>

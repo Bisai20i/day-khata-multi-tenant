@@ -9,6 +9,7 @@ import Input from '@/components/ui/Input.vue';
 import Combobox from '@/components/ui/Combobox.vue';
 import InfoTip from '@/components/ui/InfoTip.vue';
 import NepaliDateInput from '@/components/ui/NepaliDateInput.vue';
+import Label from '@/components/ui/Label.vue';
 import { formatMoney, formatQuantity, formatRate } from '@/lib/money';
 import { todayInKathmandu } from '@/lib/format';
 import PurchaseReturnUnlinkedForm from '@/components/purchases/PurchaseReturnUnlinkedForm.vue';
@@ -160,7 +161,7 @@ function submit() {
 </script>
 
 <template>
-    <Card variant="panel">
+    <div>
         <PageHeader title="New purchase return" description="Send goods back to a supplier and issue a debit note. Stock reduces when you create the return. Fields marked * are required.">
             <Button variant="secondary" tone="purple" type="button" @click="emit('cancel')">Cancel</Button>
         </PageHeader>
@@ -183,9 +184,10 @@ function submit() {
         </p>
 
         <form v-if="mode === 'linked'" class="flex flex-col gap-4" @submit.prevent="submit">
-            <div class="flex flex-wrap items-end gap-3">
+            <Card variant="panel" class="!p-4">
+            <div class="mb-4 flex flex-wrap items-end gap-3">
                 <div class="min-w-[260px] flex-1">
-                    <label class="mb-1 block text-sm font-semibold text-text-base">Find a purchase</label>
+                    <Label class="mb-1">Find a purchase</Label>
                     <Input v-model="search" type="text" placeholder="Bill number, supplier or purchase id" @keyup.enter="runSearch" />
                 </div>
                 <Button variant="secondary" tone="purple" type="button" :loading="searching" @click="runSearch">
@@ -213,10 +215,9 @@ function submit() {
                 </div>
             </div>
 
-            <h4 class="border-b-[1.5px] border-border pb-1 text-sm font-bold text-text-strong">Purchase &amp; date</h4>
             <div class="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-5">
                 <div>
-                    <label class="mb-1 block text-sm font-semibold text-text-base">Original purchase <span class="text-danger">*</span></label>
+                    <Label class="mb-1">Original purchase <span class="text-danger">*</span></Label>
                     <Combobox
                         :model-value="form.purchase_id"
                         :options="purchaseOptions"
@@ -226,18 +227,18 @@ function submit() {
                     <p v-if="form.errors.purchase_id" class="mt-1 text-sm text-danger">{{ form.errors.purchase_id }}</p>
                 </div>
                 <div>
-                    <label class="mb-1 block text-sm font-semibold text-text-base">Return date (BS) <span class="text-danger">*</span></label>
+                    <Label class="mb-1">Return date (BS) <span class="text-danger">*</span></Label>
                     <NepaliDateInput v-model="form.date" required />
                     <p v-if="form.errors.date" class="mt-1 text-sm text-danger">{{ form.errors.date }}</p>
                 </div>
                 <div>
-                    <label class="mb-1 block text-sm font-semibold text-text-base">Reason for return</label>
+                    <Label class="mb-1">Reason for return</Label>
                     <Input v-model="form.reason" type="text" maxlength="255" placeholder="e.g. Damaged goods (optional)" />
                     <p v-if="form.errors.reason" class="mt-1 text-sm text-danger">{{ form.errors.reason }}</p>
                 </div>
                 <div>
                     <div class="mb-1 flex items-center gap-1">
-                        <label class="block text-sm font-semibold text-text-base">Refund via</label>
+                        <Label>Refund via</Label>
                         <InfoTip text="Leave empty to only reduce what you owe the supplier." />
                     </div>
                     <Combobox
@@ -249,7 +250,7 @@ function submit() {
                     <p v-if="form.errors.refund_account_id" class="mt-1 text-sm text-danger">{{ form.errors.refund_account_id }}</p>
                 </div>
                 <div>
-                    <label class="mb-1 block text-sm font-semibold text-text-base">Store</label>
+                    <Label class="mb-1">Store</Label>
                     <Combobox
                         :model-value="form.store_id"
                         :options="storeOptions"
@@ -259,14 +260,17 @@ function submit() {
                     <p v-if="form.errors.store_id" class="mt-1 text-sm text-danger">{{ form.errors.store_id }}</p>
                 </div>
             </div>
+            </Card>
 
-            <div v-if="selectedPurchase">
-                <div class="mb-2 flex items-center gap-1 border-b-[1.5px] border-border pb-1">
-                    <h4 class="text-sm font-bold text-text-strong">Items to return</h4>
-                    <InfoTip
-                        text="Quantities are in the unit each line was purchased in. Returning one Box of twelve puts twelve pieces back out of stock. Free goods can be returned too: paid units are credited first, so anything beyond the billed quantity goes back at no value."
-                    />
-                </div>
+            <Card v-if="selectedPurchase" variant="panel" class="!p-4">
+                <template #title>
+                    <div class="flex items-center gap-1">
+                        <span>Items to return</span>
+                        <InfoTip
+                            text="Quantities are in the unit each line was purchased in. Returning one Box of twelve puts twelve pieces back out of stock. Free goods can be returned too: paid units are credited first, so anything beyond the billed quantity goes back at no value."
+                        />
+                    </div>
+                </template>
                 <div class="mb-2 grid grid-cols-[1fr_90px_110px_110px_90px_110px_140px] gap-2 text-[10px] font-bold tracking-[.8px] text-text-muted uppercase">
                     <span>Item</span>
                     <span>Unit</span>
@@ -303,7 +307,7 @@ function submit() {
                         </p>
                     </div>
                 </div>
-            </div>
+            </Card>
 
             <div class="flex items-center justify-end gap-2">
                 <Button variant="secondary" tone="purple" type="button" @click="emit('cancel')">Cancel</Button>
@@ -329,5 +333,5 @@ function submit() {
             @cancel="emit('cancel')"
             @posted="emit('posted')"
         />
-    </Card>
+    </div>
 </template>

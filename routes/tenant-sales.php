@@ -28,6 +28,11 @@ Route::name('tenant.')->group(function () {
         Route::get('/', [SaleController::class, 'index'])->middleware('can:sales.view')->name('index');
         Route::get('/export', [SaleController::class, 'export'])->middleware('can:sales.export')->name('export');
         Route::post('/', [SaleController::class, 'store'])->middleware('can:sales.create')->name('store');
+        // The sale form's "Estimate" preview: the same action as POST
+        // /pos/estimate (nothing is posted), on sales.create because this
+        // page's user need not hold pos.view. Declared ahead of the
+        // /{sale}/... routes so it can never be read as a sale id.
+        Route::post('/estimate', [SaleController::class, 'estimate'])->middleware('can:sales.create')->name('estimate');
         Route::post('/{sale}/cancel', [SaleController::class, 'cancel'])->middleware('can:sales.cancel')->name('cancel');
         Route::get('/{sale}/print', [SaleController::class, 'print'])->middleware('can:sales.print')->name('print');
         // Sale::create()'s saved-note picker (audit section 4 polish, "note

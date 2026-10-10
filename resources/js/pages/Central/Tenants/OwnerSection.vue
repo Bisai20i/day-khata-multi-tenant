@@ -5,6 +5,7 @@ import { AlertTriangle, UserCog } from '@lucide/vue';
 import Card from '@/components/ui/Card.vue';
 import Button from '@/components/ui/Button.vue';
 import Select from '@/components/ui/Select.vue';
+import Label from '@/components/ui/Label.vue';
 import { useConfirm } from '@/composables/useConfirm';
 
 /**
@@ -70,10 +71,10 @@ async function reassign() {
         </div>
 
         <form class="flex flex-col gap-2" @submit.prevent="reassign">
-            <label class="block text-sm font-semibold text-text-base">
+            <Label>
                 {{ owner ? 'Transfer ownership to' : 'Make this user the owner' }}
                 <Select v-model="form.user_id" class="mt-1 font-normal" :options="options" placeholder="Choose an active user" />
-            </label>
+            </Label>
             <p v-if="form.errors.user_id" class="text-sm text-danger">{{ form.errors.user_id }}</p>
             <p v-if="options.length === 0" class="text-xs text-text-muted">This tenant has no other active users.</p>
             <div>

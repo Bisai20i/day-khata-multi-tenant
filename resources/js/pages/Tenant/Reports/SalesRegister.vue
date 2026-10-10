@@ -9,6 +9,7 @@ import NepaliDateInput from '@/components/ui/NepaliDateInput.vue';
 import Select from '@/components/ui/Select.vue';
 import Button from '@/components/ui/Button.vue';
 import DataTable from '@/components/ui/DataTable.vue';
+import Label from '@/components/ui/Label.vue';
 import { formatMoney } from '@/lib/money';
 import { formatBsDate } from '@/lib/format';
 
@@ -146,23 +147,23 @@ const columns = [
         <Card variant="panel" class="mb-4">
             <div class="flex flex-wrap items-end gap-3">
                 <div>
-                    <label class="mb-1 block text-xs font-semibold text-text-muted">From date (BS)</label>
+                    <Label class="mb-1">From date (BS)</Label>
                     <NepaliDateInput v-model="from" />
                 </div>
                 <div>
-                    <label class="mb-1 block text-xs font-semibold text-text-muted">To date (BS)</label>
+                    <Label class="mb-1">To date (BS)</Label>
                     <NepaliDateInput v-model="to" />
                 </div>
                 <div class="w-56">
-                    <label class="mb-1 block text-xs font-semibold text-text-muted">Customer</label>
+                    <Label class="mb-1">Customer</Label>
                     <Select v-model="customerId" :options="customerOptions" />
                 </div>
                 <div class="w-56">
-                    <label class="mb-1 block text-xs font-semibold text-text-muted">Store</label>
+                    <Label class="mb-1">Store</Label>
                     <Select v-model="storeId" :options="storeOptions" />
                 </div>
                 <div class="w-48">
-                    <label class="mb-1 block text-xs font-semibold text-text-muted">Payment mode</label>
+                    <Label class="mb-1">Payment mode</Label>
                     <Select v-model="paymentMode" :options="paymentModeOptions" />
                 </div>
                 <Button variant="primary" tone="purple" :loading="isLoading" @click="applyFilter">Generate report</Button>

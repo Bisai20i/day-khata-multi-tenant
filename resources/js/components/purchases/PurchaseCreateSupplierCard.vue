@@ -6,6 +6,7 @@ import Input from '@/components/ui/Input.vue';
 import Combobox from '@/components/ui/Combobox.vue';
 import InfoTip from '@/components/ui/InfoTip.vue';
 import NepaliDateInput from '@/components/ui/NepaliDateInput.vue';
+import Label from '@/components/ui/Label.vue';
 
 // Mirrors SaleCreateCustomerCard: who the bill is from, when, and the number
 // printed on it. The PAN / non-VAT toggle sits here rather than behind
@@ -26,10 +27,10 @@ const supplierOptions = computed(() => props.suppliers.map((s) => ({ value: s.id
 </script>
 
 <template>
-    <Card variant="panel" title="Supplier & bill" class="!p-4">
+    <Card variant="panel" class="!p-4">
         <div class="grid grid-cols-1 gap-4 sm:grid-cols-3">
             <div>
-                <label class="mb-1 block text-sm font-semibold text-text-base">Supplier <span class="text-danger" aria-hidden="true">*</span></label>
+                <Label class="mb-1">Supplier <span class="text-danger" aria-hidden="true">*</span></Label>
                 <Combobox
                     :model-value="form.supplier_id"
                     :options="supplierOptions"
@@ -60,7 +61,7 @@ const supplierOptions = computed(() => props.suppliers.map((s) => ({ value: s.id
             </div>
             <div>
                 <div class="mb-1 flex items-center gap-1">
-                    <label for="purchase-date" class="block text-sm font-semibold text-text-base">Purchase date (BS) <span class="text-danger" aria-hidden="true">*</span></label>
+                    <Label for="purchase-date">Purchase date (BS) <span class="text-danger" aria-hidden="true">*</span></Label>
                     <InfoTip text="Bikram Sambat date printed on the supplier's bill." />
                 </div>
                 <NepaliDateInput v-model="form.date" required aria-describedby="purchase-date-help purchase-date-error" />
@@ -69,7 +70,7 @@ const supplierOptions = computed(() => props.suppliers.map((s) => ({ value: s.id
             </div>
             <div>
                 <div class="mb-1 flex items-center gap-1">
-                    <label for="purchase-bill-number" class="block text-sm font-semibold text-text-base">Supplier bill number</label>
+                    <Label for="purchase-bill-number">Supplier bill number</Label>
                     <InfoTip text="Optional. Helps you match this entry to the paper bill." />
                 </div>
                 <Input id="purchase-bill-number" v-model="form.bill_number" type="text" placeholder="Number printed on the bill" aria-describedby="purchase-bill-help purchase-bill-error" />

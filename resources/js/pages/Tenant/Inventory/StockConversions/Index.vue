@@ -11,6 +11,7 @@ import Input from '@/components/ui/Input.vue';
 import Modal from '@/components/ui/Modal.vue';
 import DataTable from '@/components/ui/DataTable.vue';
 import Tooltip from '@/components/ui/Tooltip.vue';
+import Label from '@/components/ui/Label.vue';
 import { useToast } from '@/composables/useToast';
 import { usePermissions } from '@/composables/usePermissions';
 import { formatMoney, formatQuantity } from '@/lib/money.js';
@@ -194,8 +195,16 @@ const columns = [
                 </Button>
             </PageHeader>
 
-            <Card variant="panel">
-                <DataTable :columns="columns" :data="stockConversions" :page-size="10" empty-message="No production or refining entries yet. Use 'New entry' above to record one." />
+            <Card variant="panel" class="bg-white">
+                <div v-if="stockConversions.length === 0" class="flex flex-col items-center gap-3 py-10 text-center">
+                    <p class="text-sm font-semibold text-text-strong">No production or refining entries yet</p>
+                    <p v-if="hasOpenFiscalYear && can('stock_conversions.create')" class="text-xs text-text-muted">Record your first entry and it will be listed here.</p>
+                    <Button v-if="hasOpenFiscalYear && can('stock_conversions.create')" variant="primary" tone="purple" @click="showCreateForm = true">
+                        <Plus class="size-4" />
+                        New entry
+                    </Button>
+                </div>
+                <DataTable v-else :columns="columns" :data="stockConversions" :page-size="10" empty-message="No production or refining entries" />
             </Card>
         </template>
 
@@ -205,14 +214,14 @@ const columns = [
                     This reverts the quantity impact of this entry for every item involved. This cannot be undone.
                 </p>
                 <div>
-                    <label class="mb-1 block text-sm font-semibold text-text-base">Reason <span class="text-danger">*</span></label>
+                    <Label class="mb-1">Reason <span class="text-danger">*</span></Label>
                     <Input v-model="cancelForm.reason" type="text" placeholder="Reason for cancellation" required />
                     <p v-if="cancelForm.errors.reason" class="mt-1 text-sm text-danger">{{ cancelForm.errors.reason }}</p>
                 </div>
             </form>
 
             <template #footer>
-                <Button variant="secondary" tone="purple" type="button" @click="cancelling = null">Back</Button>
+                <Button variant="secondary" tone="neutral" type="button" @click="cancelling = null">Back</Button>
                 <Button variant="primary" tone="purple" type="button" :disabled="cancelForm.processing" @click="submitCancel">
                     Confirm cancellation
                 </Button>

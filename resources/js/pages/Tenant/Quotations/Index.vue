@@ -1,7 +1,7 @@
 <script setup>
 import { computed, h, reactive, ref, watch } from 'vue';
 import { Link, router, usePage } from '@inertiajs/vue3';
-import { ArrowRightCircle, Ban, Plus, Printer, Search, X } from '@lucide/vue';
+import { ArrowRightCircle, Ban, Plus, Printer, Search, SlidersHorizontal, X } from '@lucide/vue';
 import AppLayout from '@/layouts/AppLayout.vue';
 import { useLayoutChrome } from '@/composables/useLayoutChrome';
 import Card from '@/components/ui/Card.vue';
@@ -14,6 +14,7 @@ import PageHeader from '@/components/ui/PageHeader.vue';
 import Tooltip from '@/components/ui/Tooltip.vue';
 import NepaliDateInput from '@/components/ui/NepaliDateInput.vue';
 import Combobox from '@/components/ui/Combobox.vue';
+import Label from '@/components/ui/Label.vue';
 import { useToast } from '@/composables/useToast';
 import { useConfirm } from '@/composables/useConfirm';
 import { usePermissions } from '@/composables/usePermissions';
@@ -70,6 +71,26 @@ function clearFilters() {
 }
 
 const hasActiveFilters = computed(() => !!(props.filters.from || props.filters.to || props.filters.customer_id));
+
+const showFilters = ref(false);
+
+const activeFilterChips = computed(() => {
+    const chips = [];
+
+    if (props.filters.from) chips.push({ key: 'from', label: `From ${formatBsDate(props.filters.from)}` });
+    if (props.filters.to) chips.push({ key: 'to', label: `To ${formatBsDate(props.filters.to)}` });
+    if (props.filters.customer_id) {
+        const customer = props.customers.find((c) => c.id === Number(props.filters.customer_id));
+        chips.push({ key: 'customer_id', label: customer?.name ?? 'Customer' });
+    }
+
+    return chips;
+});
+
+function removeFilter(key) {
+    filterState[key] = key === 'customer_id' ? null : '';
+    applyFilters();
+}
 
 // Posting/editing/converting redirects back to this same route + component,
 // which Inertia re-renders in place without an onMounted re-run - watch the
@@ -289,36 +310,59 @@ function moreActionsFor(quotation) {
                 </Button>
             </PageHeader>
 
-            <Card variant="panel" class="mb-4">
-                <div class="flex flex-wrap items-end gap-3">
+            <Card variant="panel" class="mb-4 bg-white">
+                <div class="flex items-center justify-between gap-2 md:hidden">
+                    <Button variant="secondary" tone="neutral" type="button" :aria-expanded="showFilters" @click="showFilters = !showFilters">
+                        <SlidersHorizontal class="size-4" />
+                        Filters
+                        <span v-if="activeFilterChips.length" class="bg-bg-muted px-1.5 text-[11px] text-text-strong">{{ activeFilterChips.length }}</span>
+                    </Button>
+                </div>
+                <div :class="[showFilters ? 'mt-3 flex' : 'hidden', 'flex-wrap items-end gap-3 md:mt-0 md:flex']">
                     <div class="min-w-[160px]">
-                        <label class="mb-1 block text-xs font-semibold text-text-muted">From date (BS)</label>
+                        <Label class="mb-1">From date (BS)</Label>
                         <NepaliDateInput v-model="filterState.from" />
                     </div>
                     <div class="min-w-[160px]">
-                        <label class="mb-1 block text-xs font-semibold text-text-muted">To date (BS)</label>
+                        <Label class="mb-1">To date (BS)</Label>
                         <NepaliDateInput v-model="filterState.to" />
                     </div>
                     <div class="min-w-[220px]">
-                        <label class="mb-1 block text-xs font-semibold text-text-muted">Customer</label>
+                        <Label class="mb-1">Customer</Label>
                         <Combobox v-model="filterState.customer_id" @update:model-value="applyFilters" :options="customerOptions" placeholder="All customers" />
                     </div>
-                    <Button variant="primary" tone="purple" :loading="filtering" @click="applyFilters">
+                    <Button variant="secondary" tone="neutral" :loading="filtering" @click="applyFilters">
                         <Search class="size-4" />
                         Filter
                     </Button>
-                    <Button v-if="hasActiveFilters" variant="secondary" tone="purple" @click="clearFilters">
-                        <X class="size-4" />
-                        Clear filters
-                    </Button>
+                </div>
+                <div v-if="activeFilterChips.length" class="mt-3 flex flex-wrap items-center gap-2 border-t border-border pt-3">
+                    <button
+                        v-for="chip in activeFilterChips"
+                        :key="chip.key"
+                        type="button"
+                        class="inline-flex cursor-pointer items-center gap-1 border-[1.5px] border-border bg-bg-subtle px-2 py-1 text-xs font-semibold text-text-base transition-colors duration-150 hover:bg-bg-muted focus-visible:outline-2 focus-visible:outline-primary"
+                        :aria-label="`Remove filter: ${chip.label}`"
+                        @click="removeFilter(chip.key)"
+                    >
+                        {{ chip.label }}
+                        <X class="size-3 text-text-muted" />
+                    </button>
+                    <button type="button" class="cursor-pointer text-xs font-semibold text-primary hover:underline focus-visible:outline-2 focus-visible:outline-primary" @click="clearFilters">
+                        Clear all
+                    </button>
                 </div>
             </Card>
 
-            <Card variant="panel">
+            <Card variant="panel" class="bg-white">
+                <div v-if="quotations.data.length > 0" class="mb-3 flex flex-wrap items-center justify-between gap-2">
+                    <p class="text-xs text-text-muted" aria-live="polite">Showing {{ quotations.from }}–{{ quotations.to }} of {{ quotations.total }}</p>
+                </div>
+
                 <div v-if="quotations.data.length === 0" class="flex flex-col items-center gap-3 py-10 text-center">
                     <template v-if="hasActiveFilters">
                         <p class="text-sm font-semibold text-text-strong">No quotations match these filters</p>
-                        <Button variant="secondary" tone="purple" @click="clearFilters">
+                        <Button variant="secondary" tone="neutral" @click="clearFilters">
                             <X class="size-4" />
                             Clear filters
                         </Button>
@@ -334,7 +378,6 @@ function moreActionsFor(quotation) {
                 </div>
                 <DataTable v-else :columns="columns" :data="quotations.data" :page-size="Math.max(quotations.data.length, 1)" empty-message="No quotations" />
 
-                <p v-if="quotations.data.length > 0" class="mt-3 text-xs text-text-muted" aria-live="polite">Showing {{ quotations.from }}–{{ quotations.to }} of {{ quotations.total }}</p>
                 <nav v-if="quotations.data.length > 0 && quotations.last_page > 1" aria-label="Quotations pagination" class="mt-3 flex items-center justify-end gap-2">
                     <Link
                         v-if="quotations.prev_page_url"

@@ -5,6 +5,7 @@ import Card from '@/components/ui/Card.vue';
 import Button from '@/components/ui/Button.vue';
 import Input from '@/components/ui/Input.vue';
 import Combobox from '@/components/ui/Combobox.vue';
+import Label from '@/components/ui/Label.vue';
 import { addMoney, formatMoney } from '@/lib/money';
 import { usePermissions } from '@/composables/usePermissions';
 
@@ -84,15 +85,15 @@ const { can } = usePermissions();
             <!-- Legacy's fixed 2x2 layout: Cash | Bank / Note | Bank account -->
             <div class="pos-pay-fields grid gap-2.5">
                 <div>
-                    <label class="mb-1 block text-xs font-semibold text-text-muted">Cash Paid</label>
+                    <Label class="mb-1">Cash Paid</Label>
                     <Input v-model="form.cash_amount" type="number" min="0" step="0.01" placeholder="0.00" class="!h-8" />
                 </div>
                 <div>
-                    <label class="mb-1 block text-xs font-semibold text-text-muted">Bank / QR Paid</label>
+                    <Label class="mb-1">Bank / QR Paid</Label>
                     <Input v-model="form.bank_amount" type="number" min="0" step="0.01" placeholder="0.00" class="!h-8" />
                 </div>
                 <div v-if="showBankAccountField" class="col-span-2">
-                    <label class="mb-1 block text-sm font-semibold text-text-base">Bank account</label>
+                    <Label class="mb-1">Bank account</Label>
                     <Combobox
                         :model-value="form.bank_account_id"
                         :options="bankAccountOptions"
@@ -114,7 +115,7 @@ const { can } = usePermissions();
             <div v-if="showAdvanced" class="mt-3 flex flex-col gap-3 border-t border-border pt-3">
                 <div class="grid grid-cols-2 gap-3">
                     <div>
-                        <label class="mb-1 block text-xs font-semibold text-text-muted">Store</label>
+                        <Label class="mb-1">Store</Label>
                         <Combobox
                             :model-value="form.store_id"
                             :options="storeOptions"
@@ -123,13 +124,13 @@ const { can } = usePermissions();
                         />
                     </div>
                     <div>
-                        <label class="mb-1 block text-xs font-semibold text-text-muted">TDS amount</label>
+                        <Label class="mb-1">TDS amount</Label>
                         <Input v-model="form.tds_amount" type="number" min="0" step="0.01" placeholder="0.00" />
                     </div>
                 </div>
                 <div class="grid grid-cols-2 gap-3">
                     <div>
-                        <label class="mb-1 block text-xs font-semibold text-text-muted">Header discount</label>
+                        <Label class="mb-1">Header discount</Label>
                         <div class="flex gap-1.5">
                             <Input
                                 v-model="form.discount"
@@ -150,7 +151,7 @@ const { can } = usePermissions();
                         </div>
                     </div>
                     <div>
-                        <label class="mb-1 block text-xs font-semibold text-text-muted">TDS account</label>
+                        <Label class="mb-1">TDS account</Label>
                         <Combobox
                             :model-value="form.tds_account_id"
                             :options="tdsAccountOptions"
@@ -161,11 +162,11 @@ const { can } = usePermissions();
                 </div>
                 <div class="grid grid-cols-2 gap-3">
                     <div>
-                        <label class="mb-1 block text-xs font-semibold text-text-muted">Chalani number</label>
+                        <Label class="mb-1">Chalani number</Label>
                         <Input v-model="form.chalani_number" type="text" placeholder="Optional" />
                     </div>
                     <div>
-                        <label class="mb-1 block text-xs font-semibold text-text-muted">Note</label>
+                        <Label class="mb-1">Note</Label>
                         <Input v-model="form.narration" type="text" placeholder="Optional" />
                     </div>
                 </div>

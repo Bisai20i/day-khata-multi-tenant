@@ -1,7 +1,7 @@
 <script setup>
 import { computed, h, onMounted, ref, watch } from 'vue';
 import { Link, router, useForm, usePage } from '@inertiajs/vue3';
-import { BookOpen, Plus } from '@lucide/vue';
+import { BookOpen, Plus, Upload } from '@lucide/vue';
 import AppLayout from '@/layouts/AppLayout.vue';
 import { useLayoutChrome } from '@/composables/useLayoutChrome';
 import PageHeader from '@/components/ui/PageHeader.vue';
@@ -15,6 +15,7 @@ import NepaliDateInput from '@/components/ui/NepaliDateInput.vue';
 import DataTable from '@/components/ui/DataTable.vue';
 import RowActions from '@/components/ui/RowActions.vue';
 import DropdownMenuItem from '@/components/ui/DropdownMenuItem.vue';
+import Label from '@/components/ui/Label.vue';
 import { useToast } from '@/composables/useToast';
 import { useConfirm } from '@/composables/useConfirm';
 import { usePermissions } from '@/composables/usePermissions';
@@ -261,18 +262,35 @@ const columns = [
 <template>
     <div>
         <PageHeader title="Accounts" description="Your chart of accounts: every ledger that money is recorded against. Open an account's Ledger to see its full history and running balance.">
-            <Button v-if="can('opening_balances.import')" variant="secondary" tone="purple" @click="openImport">Import opening balances</Button>
             <Button v-if="can('accounts.create')" variant="primary" tone="purple" @click="openCreate">
                 <Plus class="size-4" />
                 New account
             </Button>
         </PageHeader>
 
-        <Card variant="panel">
-            <DataTable :columns="columns" :data="accounts" :page-size="10" empty-message="No accounts yet. Use New account to add your first one." />
+        <Card variant="panel" class="bg-white">
+            <div v-if="can('opening_balances.import')" class="mb-3 flex flex-wrap items-center justify-between gap-2">
+                <div class="ml-auto flex items-center gap-2">
+                    <Button variant="secondary" tone="neutral" type="button" @click="openImport">
+                        <Upload class="size-4" />
+                        Import opening balances
+                    </Button>
+                </div>
+            </div>
+
+            <div v-if="accounts.length === 0" class="flex flex-col items-center gap-3 py-10 text-center">
+                <p class="text-sm font-semibold text-text-strong">No accounts yet</p>
+                <p v-if="can('accounts.create')" class="text-xs text-text-muted">Add your first account and it will be listed here.</p>
+                <Button v-if="can('accounts.create')" variant="primary" tone="purple" @click="openCreate">
+                    <Plus class="size-4" />
+                    New account
+                </Button>
+            </div>
+            <DataTable v-else :columns="columns" :data="accounts" :page-size="10" empty-message="No accounts" />
         </Card>
 
-        <Card v-if="openingBalanceImports.length" variant="panel" title="Opening balance imports" class="mt-4">
+        <div v-if="openingBalanceImports.length" class="mt-4">
+        <Card variant="panel" class="bg-white" title="Opening balance imports">
             <p v-if="page.props.errors?.opening_balance_import" class="mb-3 border-[1.5px] border-danger bg-danger-bg px-3 py-2 text-sm text-danger">
                 {{ page.props.errors.opening_balance_import }}
             </p>
@@ -310,19 +328,20 @@ const columns = [
                 </tbody>
             </table>
         </Card>
+        </div>
 
         <Modal :open="showModal" :title="editing ? 'Edit Account' : 'New Account'" @update:open="onModalOpenChange">
             <form class="flex flex-col gap-4" @submit.prevent="submit">
                 <div>
                     <div class="mb-1 flex items-center gap-1">
-                        <label for="parent_type" class="block text-sm font-semibold text-text-base">File under</label>
+                        <Label for="parent_type">File under</Label>
                         <InfoTip text="Choose whether this account sits directly under an account group or under a subgroup." />
                     </div>
                     <Select id="parent_type" v-model="parentType" :options="parentTypeOptions" />
                 </div>
 
                 <div v-if="parentType === 'group'">
-                    <label for="account_group_id" class="mb-1 block text-sm font-semibold text-text-base">Account group <span class="text-danger">*</span></label>
+                    <Label for="account_group_id" class="mb-1">Account group <span class="text-danger">*</span></Label>
                     <Select
                         id="account_group_id"
                         v-model="form.account_group_id"
@@ -333,7 +352,7 @@ const columns = [
                 </div>
 
                 <div v-else>
-                    <label for="account_subgroup_id" class="mb-1 block text-sm font-semibold text-text-base">Account subgroup <span class="text-danger">*</span></label>
+                    <Label for="account_subgroup_id" class="mb-1">Account subgroup <span class="text-danger">*</span></Label>
                     <Select
                         id="account_subgroup_id"
                         v-model="form.account_subgroup_id"
@@ -345,7 +364,7 @@ const columns = [
 
                 <div>
                     <div class="mb-1 flex items-center gap-1">
-                        <label for="code" class="block text-sm font-semibold text-text-base">Code</label>
+                        <Label for="code">Code</Label>
                         <InfoTip text="Optional short reference number. Leave blank to auto-assign." />
                     </div>
                     <Input id="code" v-model="form.code" type="text" placeholder="e.g. 1001" />
@@ -353,26 +372,26 @@ const columns = [
                 </div>
 
                 <div>
-                    <label for="name" class="mb-1 block text-sm font-semibold text-text-base">Name <span class="text-danger">*</span></label>
+                    <Label for="name" class="mb-1">Name <span class="text-danger">*</span></Label>
                     <Input id="name" v-model="form.name" type="text" placeholder="e.g. Cash in Hand" required />
                     <p v-if="form.errors.name" class="mt-1 text-sm text-danger">{{ form.errors.name }}</p>
                 </div>
 
                 <div>
-                    <label for="phone" class="mb-1 block text-sm font-semibold text-text-base">Phone</label>
+                    <Label for="phone" class="mb-1">Phone</Label>
                     <Input id="phone" v-model="form.phone" type="text" placeholder="98XXXXXXXX" />
                     <p v-if="form.errors.phone" class="mt-1 text-sm text-danger">{{ form.errors.phone }}</p>
                 </div>
 
                 <div>
-                    <label for="address" class="mb-1 block text-sm font-semibold text-text-base">Address</label>
+                    <Label for="address" class="mb-1">Address</Label>
                     <Input id="address" v-model="form.address" type="text" placeholder="e.g. Kathmandu-10" />
                     <p v-if="form.errors.address" class="mt-1 text-sm text-danger">{{ form.errors.address }}</p>
                 </div>
             </form>
 
             <template #footer>
-                <Button variant="secondary" tone="purple" @click="closeModal">Cancel</Button>
+                <Button variant="secondary" tone="neutral" @click="closeModal">Cancel</Button>
                 <Button variant="primary" tone="purple" :disabled="form.processing" @click="submit">
                     {{ form.processing ? 'Saving...' : editing ? 'Save changes' : 'Save account' }}
                 </Button>
@@ -395,14 +414,14 @@ const columns = [
                     Download CSV template
                 </a>
                 <div>
-                    <label class="mb-1 block text-sm font-semibold text-text-base">Date <span class="text-danger">*</span></label>
+                    <Label class="mb-1">Date <span class="text-danger">*</span></Label>
                     <NepaliDateInput v-model="importForm.date" required />
                     <p v-if="importForm.errors.date" class="mt-1 text-sm text-danger">{{ importForm.errors.date }}</p>
                 </div>
                 <div>
-                    <label for="opening-balance-import-file" class="mb-1 block text-sm font-semibold text-text-base">
+                    <Label for="opening-balance-import-file" class="mb-1">
                         CSV file <span class="text-danger">*</span>
-                    </label>
+                    </Label>
                     <input
                         id="opening-balance-import-file"
                         type="file"
@@ -445,7 +464,7 @@ const columns = [
 
             <template #footer>
                 <template v-if="!importResult">
-                    <Button variant="secondary" tone="purple" type="button" @click="closeImportModal">Cancel</Button>
+                    <Button variant="secondary" tone="neutral" type="button" @click="closeImportModal">Cancel</Button>
                     <Button
                         variant="primary"
                         tone="purple"

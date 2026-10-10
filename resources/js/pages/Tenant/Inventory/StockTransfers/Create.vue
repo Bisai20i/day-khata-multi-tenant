@@ -8,6 +8,7 @@ import Input from '@/components/ui/Input.vue';
 import InfoTip from '@/components/ui/InfoTip.vue';
 import Combobox from '@/components/ui/Combobox.vue';
 import NepaliDateInput from '@/components/ui/NepaliDateInput.vue';
+import Label from '@/components/ui/Label.vue';
 import { formatMoney, multiplyMoney, sumMoney } from '@/lib/money.js';
 import { todayInKathmandu } from '@/lib/format.js';
 
@@ -97,7 +98,7 @@ function submit() {
 </script>
 
 <template>
-    <Card variant="panel">
+    <div>
         <div class="mb-4 flex items-center justify-between">
             <div>
                 <h3 class="text-base font-bold text-text-strong">New stock transfer</h3>
@@ -111,14 +112,14 @@ function submit() {
         </p>
 
         <form class="flex flex-col gap-4" @submit.prevent="submit">
-            <div class="grid grid-cols-4 gap-4">
+            <Card variant="panel" class="grid grid-cols-4 gap-4 !p-4">
                 <div>
-                    <label class="mb-1 block text-sm font-semibold text-text-base">Date <span class="text-danger">*</span></label>
+                    <Label class="mb-1">Date <span class="text-danger">*</span></Label>
                     <NepaliDateInput v-model="form.date" required />
                     <p v-if="form.errors.date" class="mt-1 text-sm text-danger">{{ form.errors.date }}</p>
                 </div>
                 <div>
-                    <label class="mb-1 block text-sm font-semibold text-text-base">Transfer from (source store) <span class="text-danger">*</span></label>
+                    <Label class="mb-1">Transfer from (source store) <span class="text-danger">*</span></Label>
                     <Combobox
                         :model-value="form.from_store_id"
                         :options="storeOptions"
@@ -128,7 +129,7 @@ function submit() {
                     <p v-if="form.errors.from_store_id" class="mt-1 text-sm text-danger">{{ form.errors.from_store_id }}</p>
                 </div>
                 <div>
-                    <label class="mb-1 block text-sm font-semibold text-text-base">Transfer to (destination store) <span class="text-danger">*</span></label>
+                    <Label class="mb-1">Transfer to (destination store) <span class="text-danger">*</span></Label>
                     <Combobox
                         :model-value="form.to_store_id"
                         :options="storeOptions"
@@ -139,13 +140,13 @@ function submit() {
                     <p v-else-if="sameStoreSelected" class="mt-1 text-sm text-danger">The source and destination store must be different.</p>
                 </div>
                 <div>
-                    <label class="mb-1 block text-sm font-semibold text-text-base">Note</label>
+                    <Label class="mb-1">Note</Label>
                     <Input v-model="form.note" type="text" placeholder="Optional" />
                     <p v-if="form.errors.note" class="mt-1 text-sm text-danger">{{ form.errors.note }}</p>
                 </div>
-            </div>
+            </Card>
 
-            <div>
+            <Card variant="panel" title="Items" class="!p-4">
                 <div class="mb-2 grid grid-cols-[1fr_120px_140px_1fr_28px] gap-2 text-[10px] font-bold tracking-[.8px] text-text-muted uppercase">
                     <span>Item <span class="text-danger">*</span></span>
                     <span>Quantity <span class="text-danger">*</span></span>
@@ -195,14 +196,14 @@ function submit() {
                 <Button variant="secondary" tone="purple" type="button" class="mt-1" @click="addLine">
                     <Plus class="h-3.5 w-3.5" /> Add line
                 </Button>
-            </div>
+            </Card>
 
-            <div class="grid grid-cols-1 gap-2 border-t-[1.5px] border-border pt-3 text-sm">
+            <Card variant="panel" class="grid grid-cols-1 gap-2 !p-4 text-sm">
                 <div>
                     <p class="text-[10px] font-bold tracking-[.8px] text-text-muted uppercase">Total value</p>
                     <p class="font-bold text-text-strong">{{ formatMoney(totalValue) }}</p>
                 </div>
-            </div>
+            </Card>
 
             <div class="flex items-center justify-end gap-2">
                 <Button variant="secondary" tone="purple" type="button" @click="emit('cancel')">Cancel</Button>
@@ -211,5 +212,5 @@ function submit() {
                 </Button>
             </div>
         </form>
-    </Card>
+    </div>
 </template>

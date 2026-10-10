@@ -1,6 +1,6 @@
 <script setup>
 import { ref } from 'vue';
-import { ChevronDown, ChevronUp } from '@lucide/vue';
+import { ChevronDown, ChevronUp, FileText } from '@lucide/vue';
 import Button from '@/components/ui/Button.vue';
 import DropdownMenu from '@/components/ui/DropdownMenu.vue';
 import DropdownMenuItem from '@/components/ui/DropdownMenuItem.vue';
@@ -14,12 +14,15 @@ defineProps({
     showMoreOptions: { type: Boolean, default: false },
     canSubmit: { type: Boolean, default: false },
     processing: { type: Boolean, default: false },
+    // True once the bill has a line: there is something to estimate.
+    canEstimate: { type: Boolean, default: false },
 });
 
-const emit = defineEmits(['update:showMoreOptions', 'cancel', 'print']);
+const emit = defineEmits(['update:showMoreOptions', 'cancel', 'print', 'estimate']);
 
 // Save & Print opens GET /sales/{sale}/print (sales.print); without the key
 // the split button is hidden rather than saving and then opening a 403.
+// Estimate posts to POST /sales/estimate (sales.create), hidden likewise.
 const { can } = usePermissions();
 
 // "Save & Print" copy count (audit section 4 polish, "Save & Print N
@@ -87,6 +90,17 @@ function submitAndPrint(copies) {
 
             <div class="flex items-center gap-2">
                 <Button variant="secondary" tone="purple" type="button" @click="$emit('cancel')">Cancel</Button>
+                <Button
+                    v-if="can('sales.create')"
+                    variant="secondary"
+                    tone="purple"
+                    type="button"
+                    :disabled="!canEstimate"
+                    title="Preview and print an estimate of this bill - nothing is saved"
+                    @click="$emit('estimate')"
+                >
+                    <FileText class="h-3.5 w-3.5" /> Estimate
+                </Button>
                 <div v-if="can('sales.print')" class="flex">
                     <Button
                         variant="secondary"

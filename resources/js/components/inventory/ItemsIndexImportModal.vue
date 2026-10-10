@@ -3,6 +3,7 @@ import { ref, watch } from 'vue';
 import { useForm, usePage } from '@inertiajs/vue3';
 import Button from '@/components/ui/Button.vue';
 import Modal from '@/components/ui/Modal.vue';
+import Label from '@/components/ui/Label.vue';
 
 const page = usePage();
 
@@ -69,9 +70,9 @@ defineExpose({ openImport });
                     Download CSV template
                 </a>
                 <div>
-                    <label for="item-import-file" class="mb-1 block text-sm font-semibold text-text-base">
+                    <Label for="item-import-file" class="mb-1">
                         CSV file <span class="text-danger">*</span>
-                    </label>
+                    </Label>
                     <input
                         id="item-import-file"
                         type="file"
@@ -109,7 +110,7 @@ defineExpose({ openImport });
 
             <template #footer>
                 <template v-if="!importResult">
-                    <Button variant="secondary" tone="purple" type="button" @click="closeImportModal">Cancel</Button>
+                    <Button variant="secondary" tone="neutral" type="button" @click="closeImportModal">Cancel</Button>
                     <Button
                         variant="primary"
                         tone="purple"

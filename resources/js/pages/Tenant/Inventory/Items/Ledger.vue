@@ -10,6 +10,7 @@ import Button from '@/components/ui/Button.vue';
 import InfoTip from '@/components/ui/InfoTip.vue';
 import NepaliDateInput from '@/components/ui/NepaliDateInput.vue';
 import DataTable from '@/components/ui/DataTable.vue';
+import Label from '@/components/ui/Label.vue';
 import { usePermissions } from '@/composables/usePermissions';
 import { formatQuantity, formatRate } from '@/lib/money';
 import { formatBsDate } from '@/lib/format';
@@ -152,17 +153,17 @@ const columns = [
             <div class="flex flex-wrap items-end gap-3">
                 <div>
                     <div class="mb-1 flex items-center gap-1">
-                        <label class="block text-xs font-semibold text-text-muted">From date</label>
+                        <Label>From date</Label>
                         <InfoTip text="With no dates the current fiscal year is shown. The opening balance is the stock on hand the day before your From date." />
                     </div>
                     <NepaliDateInput v-model="from" />
                 </div>
                 <div>
-                    <label class="mb-1 block text-xs font-semibold text-text-muted">To date</label>
+                    <Label class="mb-1">To date</Label>
                     <NepaliDateInput v-model="to" />
                 </div>
                 <div class="w-56">
-                    <label class="mb-1 block text-xs font-semibold text-text-muted">Store</label>
+                    <Label class="mb-1">Store</Label>
                     <Select v-model="storeId" :options="storeOptions" />
                 </div>
                 <Button variant="primary" tone="purple" @click="applyFilters">Apply filters</Button>

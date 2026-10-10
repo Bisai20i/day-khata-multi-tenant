@@ -6,6 +6,7 @@ import Badge from '@/components/ui/Badge.vue';
 import Modal from '@/components/ui/Modal.vue';
 import Input from '@/components/ui/Input.vue';
 import RowActions from '@/components/ui/RowActions.vue';
+import Label from '@/components/ui/Label.vue';
 import { useConfirm } from '@/composables/useConfirm';
 import { formatQuantity, formatRate } from '@/lib/money.js';
 
@@ -157,34 +158,34 @@ defineExpose({ openUnits });
 
                 <form id="item-unit-form" class="grid grid-cols-2 gap-4 border-t-[1.5px] border-border pt-4" @submit.prevent="submitUnit">
                     <div>
-                        <label for="unit_name" class="mb-1 block text-sm font-semibold text-text-base">Name <span class="text-danger">*</span></label>
+                        <Label for="unit_name" class="mb-1">Name <span class="text-danger">*</span></Label>
                         <Input id="unit_name" v-model="unitForm.name" type="text" placeholder="e.g. Box" required />
                         <p v-if="unitForm.errors.name" class="mt-1 text-sm text-danger">{{ unitForm.errors.name }}</p>
                     </div>
                     <div>
-                        <label for="unit_conversion_factor" class="mb-1 block text-sm font-semibold text-text-base">
+                        <Label for="unit_conversion_factor" class="mb-1">
                             Equals (in {{ unitsItem.unit }}) <span class="text-danger">*</span>
-                        </label>
+                        </Label>
                         <Input id="unit_conversion_factor" v-model="unitForm.conversion_factor" type="number" min="1" step="0.0001" placeholder="e.g. 12" required />
                         <p v-if="unitForm.errors.conversion_factor" class="mt-1 text-sm text-danger">{{ unitForm.errors.conversion_factor }}</p>
                     </div>
                     <div>
-                        <label for="unit_purchase_rate" class="mb-1 block text-sm font-semibold text-text-base">Purchase rate</label>
+                        <Label for="unit_purchase_rate" class="mb-1">Purchase rate</Label>
                         <Input id="unit_purchase_rate" v-model="unitForm.purchase_rate" type="number" step="0.01" min="0" placeholder="Defaults to item's rate" />
                         <p v-if="unitForm.errors.purchase_rate" class="mt-1 text-sm text-danger">{{ unitForm.errors.purchase_rate }}</p>
                     </div>
                     <div>
-                        <label for="unit_sale_rate" class="mb-1 block text-sm font-semibold text-text-base">Sale rate</label>
+                        <Label for="unit_sale_rate" class="mb-1">Sale rate</Label>
                         <Input id="unit_sale_rate" v-model="unitForm.sale_rate" type="number" step="0.01" min="0" placeholder="Defaults to item's rate" />
                         <p v-if="unitForm.errors.sale_rate" class="mt-1 text-sm text-danger">{{ unitForm.errors.sale_rate }}</p>
                     </div>
                     <div>
-                        <label for="unit_mrp" class="mb-1 block text-sm font-semibold text-text-base">MRP</label>
+                        <Label for="unit_mrp" class="mb-1">MRP</Label>
                         <Input id="unit_mrp" v-model="unitForm.mrp" type="number" step="0.01" min="0" placeholder="Optional" />
                         <p v-if="unitForm.errors.mrp" class="mt-1 text-sm text-danger">{{ unitForm.errors.mrp }}</p>
                     </div>
                     <div>
-                        <label for="unit_barcode" class="mb-1 block text-sm font-semibold text-text-base">Barcode</label>
+                        <Label for="unit_barcode" class="mb-1">Barcode</Label>
                         <Input id="unit_barcode" v-model="unitForm.barcode" type="text" placeholder="Scan or type a barcode for this unit" />
                         <p v-if="unitForm.errors.barcode" class="mt-1 text-sm text-danger">{{ unitForm.errors.barcode }}</p>
                     </div>
@@ -196,8 +197,8 @@ defineExpose({ openUnits });
             </div>
 
             <template #footer>
-                <Button v-if="editingUnit" variant="secondary" tone="purple" type="button" @click="resetUnitForm">Cancel edit</Button>
-                <Button variant="secondary" tone="purple" type="button" @click="closeUnitsModal">Close</Button>
+                <Button v-if="editingUnit" variant="secondary" tone="neutral" type="button" @click="resetUnitForm">Cancel edit</Button>
+                <Button variant="secondary" tone="neutral" type="button" @click="closeUnitsModal">Close</Button>
                 <Button variant="primary" tone="purple" type="submit" form="item-unit-form" :disabled="unitForm.processing">
                     {{ editingUnit ? 'Save unit' : 'Add unit' }}
                 </Button>

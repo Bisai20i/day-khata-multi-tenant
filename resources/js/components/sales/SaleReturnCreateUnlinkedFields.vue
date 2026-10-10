@@ -1,9 +1,11 @@
 <script setup>
 import { X } from '@lucide/vue';
+import Card from '@/components/ui/Card.vue';
 import Button from '@/components/ui/Button.vue';
 import Input from '@/components/ui/Input.vue';
 import Combobox from '@/components/ui/Combobox.vue';
 import NepaliDateInput from '@/components/ui/NepaliDateInput.vue';
+import Label from '@/components/ui/Label.vue';
 import { formatMoney } from '@/lib/money';
 
 defineProps({
@@ -26,7 +28,8 @@ defineEmits(['add-line', 'remove-line', 'item-picked']);
          taxed at the company VAT rate, exactly like a fresh sale of
          the same goods (SalesReturn::postUnlinked()). -->
     <div class="flex flex-col gap-4">
-        <p class="border-[1.5px] border-border bg-bg-subtle px-3 py-2 text-sm text-text-muted">
+        <Card variant="panel" class="flex flex-col gap-4 !p-4">
+        <p class="text-sm text-text-muted">
             Use this for goods returned against a bill this system never issued: a pre-cutover sale, a walk-in
             who lost their receipt, or a paper invoice from before you went live. It posts a credit note
             straight away at the company VAT rate of {{ invoiceSettings.default_vat_rate }}%.
@@ -34,7 +37,7 @@ defineEmits(['add-line', 'remove-line', 'item-picked']);
 
         <div class="grid grid-cols-3 gap-4">
             <div>
-                <label class="mb-1 block text-sm font-semibold text-text-base">Customer <span class="text-danger">*</span></label>
+                <Label class="mb-1">Customer <span class="text-danger">*</span></Label>
                 <Combobox
                     :model-value="form.customer_id"
                     :options="customerOptions"
@@ -44,12 +47,12 @@ defineEmits(['add-line', 'remove-line', 'item-picked']);
                 <p v-if="form.errors.customer_id" class="mt-1 text-sm text-danger">{{ form.errors.customer_id }}</p>
             </div>
             <div>
-                <label class="mb-1 block text-sm font-semibold text-text-base">Return date <span class="text-danger">*</span></label>
+                <Label class="mb-1">Return date <span class="text-danger">*</span></Label>
                 <NepaliDateInput v-model="form.date" required />
                 <p v-if="form.errors.date" class="mt-1 text-sm text-danger">{{ form.errors.date }}</p>
             </div>
             <div>
-                <label class="mb-1 block text-sm font-semibold text-text-base">Store</label>
+                <Label class="mb-1">Store</Label>
                 <Combobox
                     :model-value="form.store_id"
                     :options="storeOptions"
@@ -61,12 +64,13 @@ defineEmits(['add-line', 'remove-line', 'item-picked']);
         </div>
 
         <div>
-            <label class="mb-1 block text-sm font-semibold text-text-base">Reason</label>
+            <Label class="mb-1">Reason</Label>
             <Input v-model="form.reason" type="text" placeholder="Optional" />
             <p v-if="form.errors.reason" class="mt-1 text-sm text-danger">{{ form.errors.reason }}</p>
         </div>
+        </Card>
 
-        <div>
+        <Card variant="panel" title="Items" class="!p-4">
             <div class="mb-2 grid grid-cols-[1fr_140px_100px_100px_110px_40px] gap-2 text-[10px] font-bold tracking-[.8px] text-text-muted uppercase">
                 <span>Item</span>
                 <span>Unit</span>
@@ -103,13 +107,13 @@ defineEmits(['add-line', 'remove-line', 'item-picked']);
 
             <Button variant="secondary" tone="purple" type="button" @click="$emit('add-line')">Add line</Button>
             <p v-if="form.errors.lines" class="mt-1 text-sm text-danger">{{ form.errors.lines }}</p>
-        </div>
+        </Card>
 
         <div v-if="unlinkedTotals?.error" class="border-[1.5px] border-danger bg-danger-bg px-3 py-2 text-sm text-danger">
             {{ unlinkedTotals.error }}
         </div>
 
-        <div v-else-if="unlinkedTotals" class="grid grid-cols-4 gap-3 border-t-[1.5px] border-border pt-3 text-sm">
+        <Card v-else-if="unlinkedTotals" variant="panel" class="grid grid-cols-4 gap-3 !p-4 text-sm">
             <div>
                 <p class="text-[10px] font-bold tracking-[.8px] text-text-muted uppercase">Taxable</p>
                 <p class="font-bold text-text-strong">{{ formatMoney(unlinkedTotals.taxable_amount) }}</p>
@@ -126,6 +130,6 @@ defineEmits(['add-line', 'remove-line', 'item-picked']);
                 <p class="text-[10px] font-bold tracking-[.8px] text-text-muted uppercase">Credit note total</p>
                 <p class="font-bold text-text-strong">{{ formatMoney(unlinkedTotals.total) }}</p>
             </div>
-        </div>
+        </Card>
     </div>
 </template>

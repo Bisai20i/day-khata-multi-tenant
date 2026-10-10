@@ -1,7 +1,7 @@
 <script setup>
 import { h, ref, watch } from 'vue';
 import { useForm, usePage } from '@inertiajs/vue3';
-import { Plus, Printer } from '@lucide/vue';
+import { Ban, Plus, Printer } from '@lucide/vue';
 import AppLayout from '@/layouts/AppLayout.vue';
 import { useLayoutChrome } from '@/composables/useLayoutChrome';
 import Card from '@/components/ui/Card.vue';
@@ -12,6 +12,7 @@ import Badge from '@/components/ui/Badge.vue';
 import PageHeader from '@/components/ui/PageHeader.vue';
 import DataTable from '@/components/ui/DataTable.vue';
 import Tooltip from '@/components/ui/Tooltip.vue';
+import Label from '@/components/ui/Label.vue';
 import { useToast } from '@/composables/useToast';
 import { formatMoney } from '@/lib/money';
 import { formatBsDate } from '@/lib/format';
@@ -174,14 +175,18 @@ const columns = [
 
             return h('div', { class: 'flex items-center gap-1' }, [
                 printBtn,
-                h(Button, {
-                    variant: 'secondary',
-                    tone: 'purple',
-                    type: 'button',
-                    title: 'Cancel this capital sale (posts a reversing voucher)',
-                    'aria-label': `Cancel capital sale ${capitalSale.invoice_number ?? capitalSale.id}`,
-                    onClick: () => openCancel(capitalSale),
-                }, () => 'Cancel sale'),
+                h(Tooltip, { label: 'Cancel capital sale (posts a reversing voucher)' }, () =>
+                    h(
+                        'button',
+                        {
+                            type: 'button',
+                            class: 'flex h-[26px] w-[26px] items-center justify-center bg-bg-subtle text-text-faint transition-colors duration-150 hover:bg-danger-bg hover:text-danger',
+                            'aria-label': `Cancel capital sale ${capitalSale.invoice_number ?? capitalSale.id}`,
+                            onClick: () => openCancel(capitalSale),
+                        },
+                        [h(Ban, { class: 'h-[13px] w-[13px]' })],
+                    ),
+                ),
             ]);
         },
     },
@@ -212,7 +217,7 @@ const columns = [
                 </Button>
             </PageHeader>
 
-            <Card variant="panel">
+            <Card variant="panel" class="bg-white">
                 <div v-if="capitalSales.length === 0" class="flex flex-col items-center gap-3 py-10 text-center">
                     <p class="text-sm font-semibold text-text-strong">No capital sales yet</p>
                     <p class="text-xs text-text-muted">Record the sale of an asset and it will be listed here.</p>
@@ -239,14 +244,14 @@ const columns = [
                     This posts a reversing voucher for the capital sale of {{ formatMoney(cancelling.total) }}: the asset sale, customer balance and any gain or loss are reversed. This cannot be undone.
                 </p>
                 <div>
-                    <label for="capital-cancel-reason" class="mb-1 block text-sm font-semibold text-text-base">Reason <span class="text-danger">*</span></label>
+                    <Label for="capital-cancel-reason" class="mb-1">Reason <span class="text-danger">*</span></Label>
                     <Input id="capital-cancel-reason" v-model="reasonForm.reason" type="text" maxlength="500" placeholder="Reason for cancellation" required />
                     <p v-if="reasonForm.errors.reason" class="mt-1 text-sm text-danger" role="alert">{{ reasonForm.errors.reason }}</p>
                 </div>
             </div>
 
             <template #footer>
-                <Button variant="secondary" tone="purple" type="button" @click="cancelling = null">Keep capital sale</Button>
+                <Button variant="secondary" tone="neutral" type="button" @click="cancelling = null">Keep capital sale</Button>
                 <Button variant="primary" tone="purple" type="button" :disabled="reasonForm.processing" :loading="reasonForm.processing" @click="submitCancel">
                     Cancel capital sale
                 </Button>

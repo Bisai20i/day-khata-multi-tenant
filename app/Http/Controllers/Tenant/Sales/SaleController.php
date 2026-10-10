@@ -519,7 +519,8 @@ class SaleController extends Controller
     }
 
     /**
-     * The POS "Estimate" preview: the bill this cart would become, rendered
+     * The "Estimate" preview, reached from the POS cart (POST /pos/estimate)
+     * and the sales entry form (POST /sales/estimate): the bill, rendered
      * through the very same views as print() above but from an unsaved
      * Sale::estimate(), so the customer sees the layout and the figures the
      * invoice will carry.

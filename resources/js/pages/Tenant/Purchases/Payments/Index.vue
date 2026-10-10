@@ -1,7 +1,7 @@
 <script setup>
 import { computed, h, ref, watch } from 'vue';
 import { useForm, usePage } from '@inertiajs/vue3';
-import { Plus } from '@lucide/vue';
+import { Ban, Plus } from '@lucide/vue';
 import AppLayout from '@/layouts/AppLayout.vue';
 import { useLayoutChrome } from '@/composables/useLayoutChrome';
 import Card from '@/components/ui/Card.vue';
@@ -13,6 +13,7 @@ import Input from '@/components/ui/Input.vue';
 import Modal from '@/components/ui/Modal.vue';
 import DataTable from '@/components/ui/DataTable.vue';
 import PaginatorNav from '@/components/ui/PaginatorNav.vue';
+import Label from '@/components/ui/Label.vue';
 import { useToast } from '@/composables/useToast';
 import { formatMoney, sumMoney } from '@/lib/money';
 import { formatBsDate } from '@/lib/format';
@@ -141,13 +142,16 @@ const columns = [
         cell: ({ row }) =>
             row.original.status === 'posted' && canCancelPayment.value
                 ? h(Tooltip, { label: 'Cancel this payment and reverse its entries' }, () =>
-                      h(Button, {
-                          variant: 'secondary',
-                          tone: 'purple',
-                          type: 'button',
-                          'aria-label': `Cancel payment to ${row.original.supplier?.name ?? 'supplier'}`,
-                          onClick: () => openCancel(row.original),
-                      }, () => 'Cancel'),
+                      h(
+                          'button',
+                          {
+                              type: 'button',
+                              class: 'flex h-[26px] w-[26px] items-center justify-center bg-bg-subtle text-text-faint transition-colors duration-150 hover:bg-danger-bg hover:text-danger',
+                              'aria-label': `Cancel payment to ${row.original.supplier?.name ?? 'supplier'}`,
+                              onClick: () => openCancel(row.original),
+                          },
+                          [h(Ban, { class: 'h-[13px] w-[13px]' })],
+                      ),
                   )
                 : '-',
     },
@@ -174,16 +178,19 @@ const columns = [
                 </Button>
             </PageHeader>
 
-            <Card variant="panel">
-                <div v-if="payments.data.length === 0" class="py-10 text-center">
+            <Card variant="panel" class="bg-white">
+                <div v-if="payments.data.length === 0" class="flex flex-col items-center gap-3 py-10 text-center">
                     <p class="text-sm font-semibold text-text-strong">No payments yet</p>
-                    <p class="mt-1 text-sm text-text-muted">Record the first payment you made to a supplier.</p>
-                    <Button v-if="hasOpenFiscalYear && canCreatePayment" class="mt-3" variant="primary" tone="purple" type="button" @click="showCreateForm = true">
+                    <p v-if="hasOpenFiscalYear && canCreatePayment" class="text-xs text-text-muted">Record the first payment you made to a supplier and it will be listed here.</p>
+                    <Button v-if="hasOpenFiscalYear && canCreatePayment" variant="primary" tone="purple" @click="showCreateForm = true">
                         <Plus class="size-4" aria-hidden="true" />
                         New payment
                     </Button>
                 </div>
                 <template v-else>
+                    <div class="mb-3 flex flex-wrap items-center justify-between gap-2">
+                        <p class="text-xs text-text-muted" aria-live="polite">Showing {{ payments.from }}–{{ payments.to }} of {{ payments.total }}</p>
+                    </div>
                     <DataTable :columns="columns" :data="payments.data" :page-size="Math.max(payments.data.length, 1)" empty-message="No payments yet" />
                     <PaginatorNav :paginator="payments" label="Payments pagination" />
                 </template>
@@ -196,14 +203,14 @@ const columns = [
                     Cancelling this payment posts a reversing entry and reopens the supplier bills it was applied to. This cannot be undone.
                 </p>
                 <div>
-                    <label class="mb-1 block text-sm font-semibold text-text-base">Reason <span class="text-danger">*</span></label>
+                    <Label class="mb-1">Reason <span class="text-danger">*</span></Label>
                     <Input v-model="cancelForm.reason" type="text" maxlength="500" placeholder="e.g. Entered wrong amount" required />
                     <p v-if="cancelForm.errors.reason" class="mt-1 text-sm text-danger">{{ cancelForm.errors.reason }}</p>
                 </div>
             </form>
 
             <template #footer>
-                <Button variant="secondary" tone="purple" type="button" @click="cancelling = null">Keep payment</Button>
+                <Button variant="secondary" tone="neutral" type="button" @click="cancelling = null">Keep payment</Button>
                 <Button variant="primary" tone="purple" type="button" :loading="cancelForm.processing" @click="submitCancel">
                     Cancel this payment
                 </Button>

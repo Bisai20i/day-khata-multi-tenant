@@ -15,9 +15,12 @@ import { useSaleCreateItems } from '@/composables/useSaleCreateItems';
 import { useSaleCreatePreview } from '@/composables/useSaleCreatePreview';
 import { useSaleCreateCustomer } from '@/composables/useSaleCreateCustomer';
 import { percentOf } from '@/lib/money';
-import { enteredQuantity } from '@/lib/saleCreate';
+import { toSaleCreatePayload } from '@/lib/saleCreate';
 import { todayInKathmandu } from '@/lib/format';
 import { usePermissions } from '@/composables/usePermissions';
+import PosEstimateModal from '@/components/pos/PosEstimateModal.vue';
+import { useSaleEstimate } from '@/composables/useSaleEstimate';
+import { useToast } from '@/composables/useToast';
 
 /**
  * Every rupee shown on this form comes from calculateDocument(), the exact
@@ -117,6 +120,17 @@ const { totals, previewError, toggleHeaderDiscountType, showBankField, showParti
     useSaleCreatePreview(form, { itemsById, isPanInvoice, effectiveVatRate });
 const { customerModalOpen, customerForm, openCustomerModal, closeCustomerModal, submitCustomer } = useSaleCreateCustomer(form, props);
 
+// Estimate: the bill this form would post, previewed without saving. Sent
+// to the sales-gated twin of the POS route, since this page needs no pos.view.
+const { estimateOpen, estimateUrl, estimateLoading, openEstimate, closeEstimate } = useSaleEstimate({
+    form,
+    totals,
+    previewError,
+    toast: useToast().toast,
+    url: '/sales/estimate',
+    buildPayload: () => toSaleCreatePayload(form.data()),
+});
+
 // Progressive disclosure for the remaining rare fields (Store, header
 // discount, TDS, agent) - Narration stays directly visible per the redesign,
 // it's common enough not to hide.
@@ -142,27 +156,7 @@ function submit(print = false, copies = 1) {
 
     const expectedTotal = totals.value.total;
 
-    form.transform((data) => ({
-        ...data,
-        discount: data.discount === '' ? '0' : data.discount,
-        cash_amount: data.payment_mode === 'partial' ? (data.cash_amount === '' ? '0' : data.cash_amount) : undefined,
-        bank_amount: data.payment_mode === 'partial' ? (data.bank_amount === '' ? '0' : data.bank_amount) : undefined,
-        tds_amount: data.tds_amount === '' ? '0' : data.tds_amount,
-        commission_amount: data.agent_id ? (data.commission_amount === '' ? '0' : data.commission_amount) : undefined,
-        expected_total: expectedTotal,
-        lines: data.lines.map((line) => ({
-            item_id: line.item_id,
-            item_unit_id: line.item_unit_id || null,
-            quantity: line.quantity,
-            // Free units: sent as an explicit '0' when the box is empty, and
-            // never as `undefined`. `mrp` is NOT sent - it only ever existed
-            // to fill `rate` (see applyLineMrp()).
-            bonus_quantity: enteredQuantity(line.bonus_quantity),
-            rate: line.rate,
-            discount: line.discount === '' ? '0' : line.discount,
-            discount_type: line.discount_type,
-        })),
-    })).post('/sales', {
+    form.transform((data) => ({ ...toSaleCreatePayload(data), expected_total: expectedTotal })).post('/sales', {
         preserveScroll: true,
         onSuccess: () => {
             // C11: the server flashes exactly which document it just created,
@@ -201,12 +195,14 @@ function submit(print = false, copies = 1) {
             <!-- Items: staging row + the bill's committed lines, merged into
                  one section instead of two separate cards. -->
             <Card variant="panel" class="!p-4">
-                <div class="mb-3 flex items-center justify-between">
-                    <div class="text-[10px] font-bold tracking-[.8px] text-text-muted uppercase">Items</div>
-                    <button type="button" class="text-xs font-semibold text-primary" @click="showLineExtras = !showLineExtras">
-                        {{ showLineExtras ? 'Hide' : 'Show' }} bonus &amp; MRP columns
-                    </button>
-                </div>
+                <template #title>
+                    <div class="flex items-center justify-between">
+                        <span>Items</span>
+                        <button type="button" class="text-xs font-semibold tracking-normal text-primary normal-case" @click="showLineExtras = !showLineExtras">
+                            {{ showLineExtras ? 'Hide' : 'Show' }} bonus &amp; MRP columns
+                        </button>
+                    </div>
+                </template>
 
                 <SaleCreateStagingRow
                     :item-options="itemOptions"
@@ -268,7 +264,9 @@ function submit(print = false, copies = 1) {
                 :partial-balanced="partialBalanced"
                 :can-submit="canSubmit"
                 :processing="form.processing"
+                :can-estimate="form.lines.length > 0"
                 @cancel="requestCancel"
+                @estimate="openEstimate"
                 @print="(copies) => submit(true, copies)"
             />
         </form>
@@ -279,6 +277,8 @@ function submit(print = false, copies = 1) {
         @close="closeCustomerModal"
         @submit="submitCustomer"
     />
+
+    <PosEstimateModal :open="estimateOpen" :url="estimateUrl" :loading="estimateLoading" @close="closeEstimate" />
     </div>
 </template>
 

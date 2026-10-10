@@ -1,7 +1,7 @@
 <script setup>
 import { h, ref, watch } from 'vue';
 import { router, usePage } from '@inertiajs/vue3';
-import { Download, Trash2 } from '@lucide/vue';
+import { Download, Plus, Trash2 } from '@lucide/vue';
 import AppLayout from '@/layouts/AppLayout.vue';
 import { useLayoutChrome } from '@/composables/useLayoutChrome';
 import PageHeader from '@/components/ui/PageHeader.vue';
@@ -155,6 +155,7 @@ const columns = [
     <div>
         <PageHeader title="Backups" description="Download or restore copies of your company data.">
             <Button variant="primary" tone="purple" :disabled="creating" @click="createBackup">
+                <Plus class="size-4" />
                 {{ creating ? 'Creating backup...' : 'Create backup now' }}
             </Button>
         </PageHeader>
@@ -163,8 +164,16 @@ const columns = [
             A backup is a snapshot of all your company data (sales, purchases, items, parties and accounts) at the moment it is created. Download a backup and keep it somewhere safe. Creating one can take a minute for large companies.
         </p>
 
-        <Card variant="panel">
-            <DataTable :columns="columns" :data="backups" :page-size="10" />
+        <Card variant="panel" class="bg-white">
+            <div v-if="backups.length === 0" class="flex flex-col items-center gap-3 py-10 text-center">
+                <p class="text-sm font-semibold text-text-strong">No backups yet</p>
+                <p class="text-xs text-text-muted">Create your first backup and it will be listed here.</p>
+                <Button variant="primary" tone="purple" :disabled="creating" @click="createBackup">
+                    <Plus class="size-4" />
+                    {{ creating ? 'Creating backup...' : 'Create backup now' }}
+                </Button>
+            </div>
+            <DataTable v-else :columns="columns" :data="backups" :page-size="10" />
         </Card>
     </div>
 </template>

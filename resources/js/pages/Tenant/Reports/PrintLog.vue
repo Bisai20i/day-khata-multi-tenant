@@ -9,6 +9,7 @@ import PageHeader from '@/components/ui/PageHeader.vue';
 import Select from '@/components/ui/Select.vue';
 import NepaliDateInput from '@/components/ui/NepaliDateInput.vue';
 import Badge from '@/components/ui/Badge.vue';
+import Label from '@/components/ui/Label.vue';
 
 defineOptions({ layout: AppLayout });
 
@@ -72,15 +73,15 @@ function clearFilter() {
         <Card variant="panel" class="mb-4">
             <div class="flex flex-wrap items-end gap-3">
                 <div>
-                    <label class="mb-1 block text-xs font-semibold text-text-muted">From date (BS)</label>
+                    <Label class="mb-1">From date (BS)</Label>
                     <NepaliDateInput v-model="from" />
                 </div>
                 <div>
-                    <label class="mb-1 block text-xs font-semibold text-text-muted">To date (BS)</label>
+                    <Label class="mb-1">To date (BS)</Label>
                     <NepaliDateInput v-model="to" />
                 </div>
                 <div class="min-w-[180px]">
-                    <label class="mb-1 block text-xs font-semibold text-text-muted">Document type</label>
+                    <Label class="mb-1">Document type</Label>
                     <Select v-model="printableType" :options="documentTypeOptions" placeholder="All types" />
                 </div>
                 <label class="flex items-center gap-2 pb-2 text-xs font-semibold text-text-muted">
@@ -96,6 +97,10 @@ function clearFilter() {
         </Card>
 
         <Card variant="panel">
+            <div v-if="logs.data.length > 0" class="mb-3 flex flex-wrap items-center justify-between gap-2">
+                <p class="text-xs text-text-muted" aria-live="polite">Showing {{ logs.from }}-{{ logs.to }} of {{ logs.total }}</p>
+            </div>
+
             <p v-if="logs.data.length === 0" class="px-1 py-6 text-center text-[13px] text-text-muted">
                 No transactions in this period. Try widening the date range or resetting the filters.
             </p>
@@ -139,10 +144,7 @@ function clearFilter() {
                 </table>
             </div>
 
-            <div v-if="logs.data.length > 0" class="mt-3 flex flex-wrap items-center justify-between gap-3">
-                <p class="text-xs text-text-muted">
-                    Showing {{ logs.from }}-{{ logs.to }} of {{ logs.total }}
-                </p>
+            <div v-if="logs.data.length > 0" class="mt-3 flex flex-wrap items-center justify-end gap-3">
                 <div class="flex items-center gap-2">
                     <Link
                         v-if="logs.prev_page_url"

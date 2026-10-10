@@ -13,6 +13,7 @@ import Modal from '@/components/ui/Modal.vue';
 import InfoTip from '@/components/ui/InfoTip.vue';
 import DataTable from '@/components/ui/DataTable.vue';
 import RowActions from '@/components/ui/RowActions.vue';
+import Label from '@/components/ui/Label.vue';
 import { useToast } from '@/composables/useToast';
 import { useConfirm } from '@/composables/useConfirm';
 import { usePermissions } from '@/composables/usePermissions';
@@ -144,15 +145,23 @@ const columns = [
             </Button>
         </PageHeader>
 
-        <Card variant="panel">
-            <DataTable :columns="columns" :data="subgroups" :page-size="10" empty-message="No account subgroups yet. Use New subgroup to add one under a group." />
+        <Card variant="panel" class="bg-white">
+            <div v-if="subgroups.length === 0" class="flex flex-col items-center gap-3 py-10 text-center">
+                <p class="text-sm font-semibold text-text-strong">No account subgroups yet</p>
+                <p v-if="can('accounts.create')" class="text-xs text-text-muted">Add a subgroup under a group and it will be listed here.</p>
+                <Button v-if="can('accounts.create')" variant="primary" tone="purple" @click="openCreate">
+                    <Plus class="size-4" />
+                    New subgroup
+                </Button>
+            </div>
+            <DataTable v-else :columns="columns" :data="subgroups" :page-size="10" empty-message="No account subgroups" />
         </Card>
 
         <Modal :open="showModal" :title="editing ? 'Edit Account Subgroup' : 'New Account Subgroup'" @update:open="onModalOpenChange">
             <form class="flex flex-col gap-4" @submit.prevent="submit">
                 <div>
                     <div class="mb-1 flex items-center gap-1">
-                        <label for="account_group_id" class="block text-sm font-semibold text-text-base">Account group <span class="text-danger">*</span></label>
+                        <Label for="account_group_id">Account group <span class="text-danger">*</span></Label>
                         <InfoTip text="The account group this subgroup sits under." />
                     </div>
                     <Select
@@ -165,14 +174,14 @@ const columns = [
                 </div>
 
                 <div>
-                    <label for="name" class="mb-1 block text-sm font-semibold text-text-base">Name <span class="text-danger">*</span></label>
+                    <Label for="name" class="mb-1">Name <span class="text-danger">*</span></Label>
                     <Input id="name" v-model="form.name" type="text" placeholder="e.g. Sundry Debtors" required />
                     <p v-if="form.errors.name" class="mt-1 text-sm text-danger">{{ form.errors.name }}</p>
                 </div>
             </form>
 
             <template #footer>
-                <Button variant="secondary" tone="purple" @click="closeModal">Cancel</Button>
+                <Button variant="secondary" tone="neutral" @click="closeModal">Cancel</Button>
                 <Button variant="primary" tone="purple" :disabled="form.processing" @click="submit">
                     {{ editing ? 'Save changes' : 'Create subgroup' }}
                 </Button>

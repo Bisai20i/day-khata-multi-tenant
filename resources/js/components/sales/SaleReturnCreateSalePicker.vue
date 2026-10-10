@@ -1,7 +1,9 @@
 <script setup>
 import { Search } from '@lucide/vue';
+import Card from '@/components/ui/Card.vue';
 import Button from '@/components/ui/Button.vue';
 import Input from '@/components/ui/Input.vue';
+import Label from '@/components/ui/Label.vue';
 import { formatMoney } from '@/lib/money';
 
 defineProps({
@@ -15,8 +17,8 @@ defineEmits(['update:searchTerm', 'search', 'page', 'pick']);
 </script>
 
 <template>
-    <div>
-        <label class="mb-1 block text-sm font-semibold text-text-base">Original invoice <span class="text-danger">*</span></label>
+    <Card variant="panel" class="!p-4">
+        <Label class="mb-1">Original invoice <span class="text-danger">*</span></Label>
         <div class="mb-3 flex items-end gap-2">
             <Input
                 :model-value="searchTerm"
@@ -74,5 +76,5 @@ defineEmits(['update:searchTerm', 'search', 'page', 'pick']);
                 </Button>
             </div>
         </div>
-    </div>
+    </Card>
 </template>

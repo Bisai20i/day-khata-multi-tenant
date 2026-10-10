@@ -9,6 +9,7 @@ import Select from '@/components/ui/Select.vue';
 import InfoTip from '@/components/ui/InfoTip.vue';
 import Combobox from '@/components/ui/Combobox.vue';
 import NepaliDateInput from '@/components/ui/NepaliDateInput.vue';
+import Label from '@/components/ui/Label.vue';
 import { formatMoney, multiplyMoney, sumMoney } from '@/lib/money.js';
 import { todayInKathmandu } from '@/lib/format.js';
 
@@ -115,7 +116,7 @@ function submit() {
 </script>
 
 <template>
-    <Card variant="panel">
+    <div>
         <div class="mb-4 flex items-center justify-between">
             <div>
                 <h3 class="text-base font-bold text-text-strong">New production / refining entry</h3>
@@ -128,20 +129,20 @@ function submit() {
             {{ form.errors.input_lines }}
         </p>
 
-        <form class="flex flex-col gap-5" @submit.prevent="submit">
-            <div class="grid grid-cols-4 gap-4">
+        <form class="flex flex-col gap-4" @submit.prevent="submit">
+            <Card variant="panel" class="grid grid-cols-4 gap-4 !p-4">
                 <div>
-                    <label class="mb-1 block text-sm font-semibold text-text-base">Type <span class="text-danger">*</span></label>
+                    <Label class="mb-1">Type <span class="text-danger">*</span></Label>
                     <Select :model-value="form.type" :options="typeOptions" @update:model-value="(v) => (form.type = v)" />
                 </div>
                 <div>
-                    <label class="mb-1 block text-sm font-semibold text-text-base">Date <span class="text-danger">*</span></label>
+                    <Label class="mb-1">Date <span class="text-danger">*</span></Label>
                     <NepaliDateInput v-model="form.date" required />
                     <p v-if="form.errors.date" class="mt-1 text-sm text-danger">{{ form.errors.date }}</p>
                 </div>
                 <div>
                     <div class="mb-1 flex items-center gap-1">
-                        <label class="block text-sm font-semibold text-text-base">Store</label>
+                        <Label>Store</Label>
                         <InfoTip text="Where the stock is used and produced. Leave blank for your default store." />
                     </div>
                     <Combobox
@@ -153,14 +154,13 @@ function submit() {
                     <p v-if="form.errors.store_id" class="mt-1 text-sm text-danger">{{ form.errors.store_id }}</p>
                 </div>
                 <div>
-                    <label class="mb-1 block text-sm font-semibold text-text-base">Note</label>
+                    <Label class="mb-1">Note</Label>
                     <Input v-model="form.note" type="text" placeholder="Optional" />
                     <p v-if="form.errors.note" class="mt-1 text-sm text-danger">{{ form.errors.note }}</p>
                 </div>
-            </div>
+            </Card>
 
-            <div>
-                <h4 class="mb-2 text-sm font-bold text-text-strong">{{ labels.input }}</h4>
+            <Card variant="panel" :title="labels.input" class="!p-4">
                 <div class="mb-2 grid grid-cols-[1fr_140px_140px_1fr_28px] gap-2 text-[10px] font-bold tracking-[.8px] text-text-muted uppercase">
                     <span>Item <span class="text-danger">*</span></span>
                     <span>Quantity <span class="text-danger">*</span></span>
@@ -207,10 +207,9 @@ function submit() {
                 <Button variant="secondary" tone="purple" type="button" class="mt-1" @click="addLine('input_lines')">
                     <Plus class="h-3.5 w-3.5" /> Add input item
                 </Button>
-            </div>
+            </Card>
 
-            <div class="border-t-[1.5px] border-border pt-4">
-                <h4 class="mb-2 text-sm font-bold text-text-strong">{{ labels.output }}</h4>
+            <Card variant="panel" :title="labels.output" class="!p-4">
                 <div class="mb-2 grid grid-cols-[1fr_140px_140px_1fr_28px] gap-2 text-[10px] font-bold tracking-[.8px] text-text-muted uppercase">
                     <span>Item <span class="text-danger">*</span></span>
                     <span>Quantity <span class="text-danger">*</span></span>
@@ -257,14 +256,14 @@ function submit() {
                 <Button variant="secondary" tone="purple" type="button" class="mt-1" @click="addLine('output_lines')">
                     <Plus class="h-3.5 w-3.5" /> Add output item
                 </Button>
-            </div>
+            </Card>
 
-            <div class="grid grid-cols-1 gap-2 border-t-[1.5px] border-border pt-3 text-sm">
+            <Card variant="panel" class="grid grid-cols-1 gap-2 !p-4 text-sm">
                 <div>
                     <p class="text-[10px] font-bold tracking-[.8px] text-text-muted uppercase">Total value</p>
                     <p class="font-bold text-text-strong">{{ formatMoney(totalValue) }}</p>
                 </div>
-            </div>
+            </Card>
 
             <div class="flex items-center justify-end gap-2">
                 <Button variant="secondary" tone="purple" type="button" @click="emit('cancel')">Cancel</Button>
@@ -273,5 +272,5 @@ function submit() {
                 </Button>
             </div>
         </form>
-    </Card>
+    </div>
 </template>

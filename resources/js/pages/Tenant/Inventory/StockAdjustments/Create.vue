@@ -9,6 +9,7 @@ import Select from '@/components/ui/Select.vue';
 import InfoTip from '@/components/ui/InfoTip.vue';
 import Combobox from '@/components/ui/Combobox.vue';
 import NepaliDateInput from '@/components/ui/NepaliDateInput.vue';
+import Label from '@/components/ui/Label.vue';
 import { usePermissions } from '@/composables/usePermissions';
 import { formatMoney, multiplyMoney, parseQuantity, sumMoney } from '@/lib/money.js';
 import { todayInKathmandu } from '@/lib/format.js';
@@ -37,18 +38,18 @@ const storeOptions = computed(() => props.stores.map((s) => ({ value: s.id, labe
 const itemsById = computed(() => new Map(props.items.map((i) => [i.id, i])));
 
 // Alternate-unit entry (item 7): mirrors Purchases/Create.vue's
-// unitOptionsFor()/selectLineItem()/conversionFactorFor() exactly - '' means
+// unitOptionsFor()/selectLineItem()/conversionFactorFor() exactly - null means
 // the item's own base unit, the only value StockAdjustment::resolveItemUnit()
 // also treats that way.
 function unitOptionsFor(item) {
     if (!item) return [];
 
-    return [{ value: '', label: item.unit }, ...(item.units ?? []).map((u) => ({ value: u.id, label: u.name }))];
+    return [{ value: null, label: item.unit }, ...(item.units ?? []).map((u) => ({ value: u.id, label: u.name }))];
 }
 
 function selectLineItem(line, itemId) {
     line.item_id = itemId;
-    line.item_unit_id = '';
+    line.item_unit_id = null;
 }
 
 function selectLineUnit(line, unitId) {
@@ -86,9 +87,9 @@ const reasonOptions = [
 const zeroValueReasons = ['damage', 'lost'];
 
 function emptyLine() {
-    // item_unit_id '' means the item's own base unit (item 7) - same
+    // item_unit_id null means the item's own base unit (item 7) - same
     // convention as Purchases/Create.vue's emptyLine().
-    return { item_id: null, item_unit_id: '', direction: 'in', reason_type: 'correction', quantity: '', unit_cost_rate: '', remarks: '' };
+    return { item_id: null, item_unit_id: null, direction: 'in', reason_type: 'correction', quantity: '', unit_cost_rate: '', remarks: '' };
 }
 
 /**
@@ -225,7 +226,7 @@ function submit() {
 </script>
 
 <template>
-    <Card variant="panel">
+    <div>
         <div class="mb-4 flex items-center justify-between">
             <div>
                 <h3 class="text-base font-bold text-text-strong">New stock adjustment</h3>
@@ -239,63 +240,65 @@ function submit() {
         </p>
 
         <form class="flex flex-col gap-4" @submit.prevent="submit">
-            <div v-if="can('fiscal_year.edit') && correctionFiscalYear">
-                <label for="adjustment-fiscal-year" class="mb-1 block text-sm font-semibold text-text-base">Fiscal year</label>
-                <Select
-                    id="adjustment-fiscal-year"
-                    v-model="form.fiscal_year_id"
-                    :options="fiscalYearOptions"
-                    placeholder="Currently open fiscal year"
-                />
-                <p v-if="form.errors.fiscal_year_id" class="mt-1 text-sm text-danger">{{ form.errors.fiscal_year_id }}</p>
-            </div>
-
-            <div v-if="isCorrectionSelected" class="flex flex-col gap-3 border-[1.5px] border-warning-text bg-warning-bg px-3 py-3">
-                <p class="text-sm text-warning-text">
-                    {{ correctionFiscalYear.name }} is reopened for correction. This adjustment will post into
-                    that year's window instead of the currently open one.
-                </p>
-                <div>
-                    <label for="adjustment-reason" class="mb-1 block text-sm font-semibold text-text-base">Reason <span class="text-danger">*</span></label>
-                    <textarea
-                        id="adjustment-reason"
-                        v-model="form.reason"
-                        rows="2"
-                        placeholder="Explain why this correction is needed"
-                        required
-                        class="w-full border-[1.5px] border-border bg-bg-subtle px-3 py-2 text-[13px] text-text-base outline-none transition-colors duration-150 focus:border-primary focus:bg-white focus:[box-shadow:0_0_0_3px_var(--color-primary-focus-ring)]"
-                    ></textarea>
-                    <p v-if="form.errors.reason" class="mt-1 text-sm text-danger">{{ form.errors.reason }}</p>
-                </div>
-            </div>
-
-            <div class="grid grid-cols-3 gap-4">
-                <div>
-                    <label class="mb-1 block text-sm font-semibold text-text-base">Date <span class="text-danger">*</span></label>
-                    <NepaliDateInput v-model="form.date" required />
-                    <p v-if="form.errors.date" class="mt-1 text-sm text-danger">{{ form.errors.date }}</p>
-                </div>
-                <div>
-                    <label class="mb-1 block text-sm font-semibold text-text-base">Note</label>
-                    <Input v-model="form.note" type="text" placeholder="Optional" />
-                    <p v-if="form.errors.note" class="mt-1 text-sm text-danger">{{ form.errors.note }}</p>
-                </div>
-                <div>
-                    <div class="mb-1 flex items-center gap-1">
-                        <label class="block text-sm font-semibold text-text-base">Store</label>
-                        <InfoTip text="The store whose stock is adjusted. Blank uses your default store." />
-                    </div>
-                    <Combobox
-                        :model-value="form.store_id"
-                        :options="storeOptions"
-                        placeholder="Default store"
-                        @update:model-value="(v) => (form.store_id = v)"
+            <Card variant="panel" class="flex flex-col gap-4 !p-4">
+                <div v-if="can('fiscal_year.edit') && correctionFiscalYear">
+                    <Label for="adjustment-fiscal-year" class="mb-1">Fiscal year</Label>
+                    <Select
+                        id="adjustment-fiscal-year"
+                        v-model="form.fiscal_year_id"
+                        :options="fiscalYearOptions"
+                        placeholder="Currently open fiscal year"
                     />
-                    <p v-if="form.errors.store_id" class="mt-1 text-sm text-danger">{{ form.errors.store_id }}</p>
+                    <p v-if="form.errors.fiscal_year_id" class="mt-1 text-sm text-danger">{{ form.errors.fiscal_year_id }}</p>
                 </div>
-            </div>
 
-            <div>
+                <div v-if="isCorrectionSelected" class="flex flex-col gap-3 border-[1.5px] border-warning-text bg-warning-bg px-3 py-3">
+                    <p class="text-sm text-warning-text">
+                        {{ correctionFiscalYear.name }} is reopened for correction. This adjustment will post into
+                        that year's window instead of the currently open one.
+                    </p>
+                    <div>
+                        <Label for="adjustment-reason" class="mb-1">Reason <span class="text-danger">*</span></Label>
+                        <textarea
+                            id="adjustment-reason"
+                            v-model="form.reason"
+                            rows="2"
+                            placeholder="Explain why this correction is needed"
+                            required
+                            class="w-full border-[1.5px] border-border bg-bg-subtle px-3 py-2 text-[13px] text-text-base outline-none transition-colors duration-150 focus:border-primary focus:bg-white focus:[box-shadow:0_0_0_3px_var(--color-primary-focus-ring)]"
+                        ></textarea>
+                        <p v-if="form.errors.reason" class="mt-1 text-sm text-danger">{{ form.errors.reason }}</p>
+                    </div>
+                </div>
+
+                <div class="grid grid-cols-3 gap-4">
+                    <div>
+                        <Label class="mb-1">Date <span class="text-danger">*</span></Label>
+                        <NepaliDateInput v-model="form.date" required />
+                        <p v-if="form.errors.date" class="mt-1 text-sm text-danger">{{ form.errors.date }}</p>
+                    </div>
+                    <div>
+                        <Label class="mb-1">Note</Label>
+                        <Input v-model="form.note" type="text" placeholder="Optional" />
+                        <p v-if="form.errors.note" class="mt-1 text-sm text-danger">{{ form.errors.note }}</p>
+                    </div>
+                    <div>
+                        <div class="mb-1 flex items-center gap-1">
+                            <Label>Store</Label>
+                            <InfoTip text="The store whose stock is adjusted. Blank uses your default store." />
+                        </div>
+                        <Combobox
+                            :model-value="form.store_id"
+                            :options="storeOptions"
+                            placeholder="Default store"
+                            @update:model-value="(v) => (form.store_id = v)"
+                        />
+                        <p v-if="form.errors.store_id" class="mt-1 text-sm text-danger">{{ form.errors.store_id }}</p>
+                    </div>
+                </div>
+            </Card>
+
+            <Card variant="panel" title="Items" class="!p-4">
                 <div class="mb-2 grid grid-cols-[1fr_100px_130px_140px_100px_110px_1fr_28px] gap-2 text-[10px] font-bold tracking-[.8px] text-text-muted uppercase">
                     <span>Item <span class="text-danger">*</span></span>
                     <span>Unit</span>
@@ -377,14 +380,14 @@ function submit() {
                 <Button variant="secondary" tone="purple" type="button" class="mt-1" @click="addLine">
                     <Plus class="h-3.5 w-3.5" /> Add line
                 </Button>
-            </div>
+            </Card>
 
-            <div class="grid grid-cols-1 gap-2 border-t-[1.5px] border-border pt-3 text-sm">
+            <Card variant="panel" class="grid grid-cols-1 gap-2 !p-4 text-sm">
                 <div>
                     <p class="text-[10px] font-bold tracking-[.8px] text-text-muted uppercase">Total value</p>
                     <p class="font-bold text-text-strong">{{ formatMoney(totalValue) }}</p>
                 </div>
-            </div>
+            </Card>
 
             <div class="flex items-center justify-end gap-2">
                 <Button variant="secondary" tone="purple" type="button" @click="emit('cancel')">Cancel</Button>
@@ -393,5 +396,5 @@ function submit() {
                 </Button>
             </div>
         </form>
-    </Card>
+    </div>
 </template>

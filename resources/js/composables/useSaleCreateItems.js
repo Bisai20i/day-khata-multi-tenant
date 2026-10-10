@@ -36,7 +36,7 @@ export function useSaleCreateItems(props) {
     const itemsById = computed(() => Object.fromEntries(props.items.map((i) => [i.id, i])));
 
     // Selecting an alternate unit auto-fills the rate from that unit's own
-    // sale_rate override; switching back to the base unit ('') restores the
+    // sale_rate override; switching back to the base unit (null) restores the
     // item's own sale_rate, so a mis-click no longer leaves a Box rate sitting on
     // a Piece line. Still freely editable afterwards - Sale::post() only ever
     // uses the entered rate, never the unit's.
@@ -65,7 +65,7 @@ export function useSaleCreateItems(props) {
     // item's own sale rate is prefilled.
     function selectLineItem(line, itemId) {
         line.item_id = itemId;
-        line.item_unit_id = '';
+        line.item_unit_id = null;
         line.mrp = '';
 
         const item = itemsById.value[itemId];

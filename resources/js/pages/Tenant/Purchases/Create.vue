@@ -5,6 +5,7 @@ import { Plus } from '@lucide/vue';
 import Card from '@/components/ui/Card.vue';
 import Button from '@/components/ui/Button.vue';
 import Select from '@/components/ui/Select.vue';
+import Label from '@/components/ui/Label.vue';
 import PurchaseCreateSupplierCard from '@/components/purchases/PurchaseCreateSupplierCard.vue';
 import PurchaseCreateStagingRow from '@/components/purchases/PurchaseCreateStagingRow.vue';
 import PurchaseCreateLinesTable from '@/components/purchases/PurchaseCreateLinesTable.vue';
@@ -158,7 +159,7 @@ function selectLineUnit(line, unitId) {
 // item's own purchase rate - mirrors useSaleCreateItems().selectLineItem().
 function selectLineItem(line, itemId) {
     line.item_id = itemId;
-    line.item_unit_id = '';
+    line.item_unit_id = null;
 
     const item = itemsById.value.get(itemId);
     line.rate = item?.purchase_rate != null ? String(item.purchase_rate) : '';
@@ -302,7 +303,7 @@ function submit(print = false) {
         <Card v-if="canPostCorrection && correctionFiscalYear" variant="panel" title="Fiscal year" class="!p-4">
             <div class="grid grid-cols-1 gap-4 sm:grid-cols-3">
                 <div>
-                    <label for="purchase-fiscal-year" class="mb-1 block text-sm font-semibold text-text-base">Post into</label>
+                    <Label for="purchase-fiscal-year" class="mb-1">Post into</Label>
                     <Select
                         id="purchase-fiscal-year"
                         v-model="form.fiscal_year_id"
@@ -312,7 +313,7 @@ function submit(print = false) {
                     <p v-if="form.errors.fiscal_year_id" class="mt-1 text-sm text-danger">{{ form.errors.fiscal_year_id }}</p>
                 </div>
                 <div v-if="isCorrectionSelected" class="sm:col-span-2">
-                    <label for="purchase-reason" class="mb-1 block text-sm font-semibold text-text-base">Reason <span class="text-danger">*</span></label>
+                    <Label for="purchase-reason" class="mb-1">Reason <span class="text-danger">*</span></Label>
                     <textarea
                         id="purchase-reason"
                         v-model="form.reason"
@@ -341,17 +342,19 @@ function submit(print = false) {
         <!-- Items: staging row + the bill's committed lines, one section -
              same as the sale form. -->
         <Card variant="panel" class="!p-4">
-            <div class="mb-3 flex items-center justify-between gap-3">
-                <div class="text-[10px] font-bold tracking-[.8px] text-text-muted uppercase">Items <span class="text-danger">*</span></div>
-                <div class="flex items-center gap-4">
-                    <button v-if="canAddItem" type="button" class="flex items-center gap-1 text-xs font-semibold text-primary" @click="openItemModal">
-                        <Plus class="h-3.5 w-3.5" /> New item
-                    </button>
-                    <button type="button" class="text-xs font-semibold text-primary" @click="showLineExtras = !showLineExtras">
-                        {{ showLineExtras ? 'Hide' : 'Show' }} free qty &amp; note columns
-                    </button>
+            <template #title>
+                <div class="flex items-center justify-between gap-3">
+                    <span>Items <span class="text-danger">*</span></span>
+                    <div class="flex items-center gap-4">
+                        <button v-if="canAddItem" type="button" class="flex items-center gap-1 text-xs font-semibold tracking-normal text-primary normal-case" @click="openItemModal">
+                            <Plus class="h-3.5 w-3.5" /> New item
+                        </button>
+                        <button type="button" class="text-xs font-semibold tracking-normal text-primary normal-case" @click="showLineExtras = !showLineExtras">
+                            {{ showLineExtras ? 'Hide' : 'Show' }} free qty &amp; note columns
+                        </button>
+                    </div>
                 </div>
-            </div>
+            </template>
 
             <PurchaseCreateStagingRow
                 ref="stagingRow"

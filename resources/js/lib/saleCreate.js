@@ -5,16 +5,15 @@ import { parseMoney, parseQuantity } from '@/lib/money';
  */
 
 export function emptyLine() {
-    // item_unit_id '' means "the item's own base unit" (matches this app's
-    // existing '' = None convention for optional Select fields, e.g. Items/
-    // Index.vue's item_subcategory_id) - transformed to null on submit.
+    // item_unit_id null means "the item's own base unit" - never '', which
+    // reka-ui's <SelectItem> refuses as an option value. Submitted as null.
     //
     // `bonus_quantity` is the free-of-charge quantity handed over with the
     // line (audit section 3 "Sales"): it moves stock but is never priced, so
     // it is submitted to the server and deliberately kept out of the preview.
     // `mrp` is the opposite - a browser-only entry aid that fills `rate` and
     // is never submitted (see applyLineMrp() and submit()).
-    return { item_id: null, item_unit_id: '', quantity: '', bonus_quantity: '', mrp: '', rate: '', discount: '', discount_type: 'flat' };
+    return { item_id: null, item_unit_id: null, quantity: '', bonus_quantity: '', mrp: '', rate: '', discount: '', discount_type: 'flat' };
 }
 
 /**
@@ -27,15 +26,44 @@ export function enteredQuantity(value) {
     return value === '' || value === null || value === undefined ? '0' : String(value);
 }
 
+/**
+ * The sale form as `POST /sales` wants it. Shared with the estimate preview
+ * (useSaleEstimate), so the bill previewed is built from the same payload as
+ * the bill posted. Carries no total: the save adds its own `expected_total`,
+ * and the estimate is computed entirely server-side.
+ */
+export function toSaleCreatePayload(data) {
+    return {
+        ...data,
+        discount: data.discount === '' ? '0' : data.discount,
+        cash_amount: data.payment_mode === 'partial' ? (data.cash_amount === '' ? '0' : data.cash_amount) : undefined,
+        bank_amount: data.payment_mode === 'partial' ? (data.bank_amount === '' ? '0' : data.bank_amount) : undefined,
+        tds_amount: data.tds_amount === '' ? '0' : data.tds_amount,
+        commission_amount: data.agent_id ? (data.commission_amount === '' ? '0' : data.commission_amount) : undefined,
+        lines: data.lines.map((line) => ({
+            item_id: line.item_id,
+            item_unit_id: line.item_unit_id || null,
+            quantity: line.quantity,
+            // Free units: sent as an explicit '0' when the box is empty, and
+            // never as `undefined`. `mrp` is NOT sent - it only ever existed
+            // to fill `rate` (see applyLineMrp()).
+            bonus_quantity: enteredQuantity(line.bonus_quantity),
+            rate: line.rate,
+            discount: line.discount === '' ? '0' : line.discount,
+            discount_type: line.discount_type,
+        })),
+    };
+}
+
 // Options for a line's unit dropdown: the item's own base unit first
-// (value '' - always present, even for an item with zero alt units), then
+// (value null - always present, even for an item with zero alt units), then
 // every active ItemUnit row. Only rendered at all when the item has at
 // least one alt unit (see the templates) - an item with none shows nothing
 // here, unchanged from before this feature existed.
 export function unitOptionsFor(item) {
     if (!item) return [];
 
-    return [{ value: '', label: item.unit }, ...(item.units ?? []).map((u) => ({ value: u.id, label: u.name }))];
+    return [{ value: null, label: item.unit }, ...(item.units ?? []).map((u) => ({ value: u.id, label: u.name }))];
 }
 
 // -1/0/1 on two quantity strings, exact (scaled BigInt, never Number()) -

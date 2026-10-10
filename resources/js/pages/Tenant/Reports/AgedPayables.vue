@@ -9,6 +9,7 @@ import Select from '@/components/ui/Select.vue';
 import Button from '@/components/ui/Button.vue';
 import PageHeader from '@/components/ui/PageHeader.vue';
 import DataTable from '@/components/ui/DataTable.vue';
+import Label from '@/components/ui/Label.vue';
 import { formatMoney } from '@/lib/money';
 import { formatBsDate } from '@/lib/format';
 
@@ -73,11 +74,11 @@ const columns = [
         <Card variant="panel" class="mb-4">
             <div class="flex flex-wrap items-end gap-3">
                 <div>
-                    <label class="mb-1 block text-xs font-semibold text-text-muted">As of date (BS)</label>
+                    <Label class="mb-1">As of date (BS)</Label>
                     <NepaliDateInput v-model="asOf" />
                 </div>
                 <div class="w-56">
-                    <label class="mb-1 block text-xs font-semibold text-text-muted">Store</label>
+                    <Label class="mb-1">Store</Label>
                     <Select v-model="storeId" :options="storeOptions" />
                 </div>
                 <Button variant="primary" tone="purple" @click="applyFilter">Generate report</Button>

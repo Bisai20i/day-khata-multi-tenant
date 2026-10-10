@@ -12,6 +12,7 @@ import Tabs from '@/components/ui/Tabs.vue';
 import FormActions from '@/components/ui/FormActions.vue';
 import PageHeader from '@/components/ui/PageHeader.vue';
 import InfoTip from '@/components/ui/InfoTip.vue';
+import Label from '@/components/ui/Label.vue';
 import { useToast } from '@/composables/useToast';
 
 defineOptions({ layout: AppLayout });
@@ -183,31 +184,31 @@ function submitLogo() {
                         <div class="flex flex-col gap-4">
                             <div class="grid grid-cols-1 gap-4 sm:grid-cols-2">
                                 <div>
-                                    <label for="company_name" class="mb-1 block text-sm font-semibold text-text-base">Company name <span class="text-danger">*</span></label>
+                                    <Label for="company_name" class="mb-1">Company name <span class="text-danger">*</span></Label>
                                     <Input id="company_name" v-model="form.company_name" type="text" placeholder="e.g. Sharma Traders Pvt. Ltd." required />
                                     <p v-if="form.errors.company_name" class="mt-1 text-sm text-danger">{{ form.errors.company_name }}</p>
                                 </div>
 
                                 <div>
-                                    <label for="pan_vat_number" class="mb-1 block text-sm font-semibold text-text-base">PAN/VAT number</label>
+                                    <Label for="pan_vat_number" class="mb-1">PAN/VAT number</Label>
                                     <Input id="pan_vat_number" v-model="form.pan_vat_number" type="text" placeholder="e.g. 123456789" />
                                     <p v-if="form.errors.pan_vat_number" class="mt-1 text-sm text-danger">{{ form.errors.pan_vat_number }}</p>
                                 </div>
 
                                 <div class="sm:col-span-2">
-                                    <label for="address" class="mb-1 block text-sm font-semibold text-text-base">Address</label>
+                                    <Label for="address" class="mb-1">Address</Label>
                                     <Input id="address" v-model="form.address" type="text" placeholder="e.g. Kathmandu-10" />
                                     <p v-if="form.errors.address" class="mt-1 text-sm text-danger">{{ form.errors.address }}</p>
                                 </div>
 
                                 <div>
-                                    <label for="phone" class="mb-1 block text-sm font-semibold text-text-base">Phone</label>
+                                    <Label for="phone" class="mb-1">Phone</Label>
                                     <Input id="phone" v-model="form.phone" type="text" placeholder="98XXXXXXXX" />
                                     <p v-if="form.errors.phone" class="mt-1 text-sm text-danger">{{ form.errors.phone }}</p>
                                 </div>
 
                                 <div>
-                                    <label for="email" class="mb-1 block text-sm font-semibold text-text-base">Email</label>
+                                    <Label for="email" class="mb-1">Email</Label>
                                     <Input id="email" v-model="form.email" type="email" placeholder="name@example.com" />
                                     <p v-if="form.errors.email" class="mt-1 text-sm text-danger">{{ form.errors.email }}</p>
                                 </div>
@@ -216,7 +217,7 @@ function submitLogo() {
 
                         <div class="mt-4 border-t border-border pt-4">
                             <div class="mb-2 flex items-center gap-1">
-                                <label for="logo" class="block text-sm font-semibold text-text-base">Company logo</label>
+                                <Label for="logo">Company logo</Label>
                                 <InfoTip text="Shown on printed invoices. Uploading saves the logo immediately." />
                             </div>
                             <div class="flex flex-col gap-3 sm:flex-row sm:items-end sm:gap-4">
@@ -258,7 +259,7 @@ function submitLogo() {
                             <div class="grid grid-cols-1 gap-4 sm:grid-cols-2">
                                 <div>
                                     <div class="mb-1 flex items-center gap-1">
-                                        <label class="block text-sm font-semibold text-text-base">Print paper size</label>
+                                        <Label>Print paper size</Label>
                                         <InfoTip text="Paper format used when printing invoices." />
                                     </div>
                                     <Select v-model="form.print_paper_size" :options="paperSizeOptions" />
@@ -267,7 +268,7 @@ function submitLogo() {
 
                                 <div>
                                     <div class="mb-1 flex items-center gap-1">
-                                        <label for="default_vat_rate" class="block text-sm font-semibold text-text-base">Default VAT rate (%)</label>
+                                        <Label for="default_vat_rate">Default VAT rate (%)</Label>
                                         <InfoTip text="Pre-filled on new sale lines; can still be changed per item." />
                                     </div>
                                     <Input id="default_vat_rate" v-model="form.default_vat_rate" type="number" min="0" max="100" step="0.01" placeholder="13.00" />
@@ -315,19 +316,19 @@ function submitLogo() {
                                 </div>
                                 <div class="grid grid-cols-1 gap-3 md:grid-cols-3 md:gap-4">
                                     <div>
-                                        <label for="purchase_prefix" class="mb-1 block text-sm font-semibold text-text-base">Purchase prefix</label>
+                                        <Label for="purchase_prefix" class="mb-1">Purchase prefix</Label>
                                         <Input id="purchase_prefix" v-model="form.purchase_prefix" type="text" placeholder="PU" />
                                         <p v-if="form.errors.purchase_prefix" class="mt-1 text-sm text-danger">{{ form.errors.purchase_prefix }}</p>
                                     </div>
 
                                     <div>
-                                        <label for="sale_return_prefix" class="mb-1 block text-sm font-semibold text-text-base">Credit note prefix (sales returns)</label>
+                                        <Label for="sale_return_prefix" class="mb-1">Credit note prefix (sales returns)</Label>
                                         <Input id="sale_return_prefix" v-model="form.sale_return_prefix" type="text" placeholder="SR" />
                                         <p v-if="form.errors.sale_return_prefix" class="mt-1 text-sm text-danger">{{ form.errors.sale_return_prefix }}</p>
                                     </div>
 
                                     <div>
-                                        <label for="purchase_return_prefix" class="mb-1 block text-sm font-semibold text-text-base">Debit note prefix (purchase returns)</label>
+                                        <Label for="purchase_return_prefix" class="mb-1">Debit note prefix (purchase returns)</Label>
                                         <Input id="purchase_return_prefix" v-model="form.purchase_return_prefix" type="text" placeholder="PR" />
                                         <p v-if="form.errors.purchase_return_prefix" class="mt-1 text-sm text-danger">{{ form.errors.purchase_return_prefix }}</p>
                                     </div>
@@ -336,9 +337,9 @@ function submitLogo() {
 
                             <div class="border-t border-border pt-4">
                                 <div class="mb-1 flex items-center gap-1">
-                                    <label for="invoice_footer_note" class="block text-sm font-semibold text-text-base">
+                                    <Label for="invoice_footer_note">
                                         Invoice footer note
-                                    </label>
+                                    </Label>
                                     <InfoTip text="Printed at the bottom of every invoice." />
                                 </div>
                                 <textarea
@@ -439,7 +440,7 @@ function submitLogo() {
 
                                 <div>
                                     <div class="mb-1 flex items-center gap-1">
-                                        <label class="block text-sm font-semibold text-text-base">Default store</label>
+                                        <Label>Default store</Label>
                                         <InfoTip text="Store that sales and purchases use unless another is picked." />
                                     </div>
                                     <Select v-model="form.default_store_id" :options="storeOptions" />

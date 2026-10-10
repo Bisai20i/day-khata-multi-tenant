@@ -181,13 +181,14 @@ Decisions and justifications:
 | tenant.accounts.ledger.print | GET /accounts/{account}/ledger/print | AccountController@ledgerPrint | any auth | account_ledger.print, or party_ledger.print for customer/supplier accounts |
 | tenant.accounts.ledger.export | GET /accounts/{account}/ledger/export | AccountController@ledgerExport | any auth | account_ledger.export, or party_ledger.export for customer/supplier accounts |
 
-### routes/tenant-sales.php (11)
+### routes/tenant-sales.php (12)
 
 | route name | method + URI | controller@method | gated today | proposed key |
 |---|---|---|---|---|
 | tenant.sales.index | GET /sales | SaleController@index | any auth | sales.view |
 | tenant.sales.export | GET /sales/export | SaleController@export | any auth | sales.export |
 | tenant.sales.store | POST /sales | SaleController@store | any auth | sales.create |
+| tenant.sales.estimate | POST /sales/estimate | SaleController@estimate | new | sales.create |
 | tenant.sales.cancel | POST /sales/{sale}/cancel | SaleController@cancel | admin | sales.cancel |
 | tenant.sales.print | GET /sales/{sale}/print | SaleController@print | any auth | sales.print |
 | tenant.sales.note-templates.store | POST /sales/note-templates | SaleController@storeNoteTemplate | any auth | sales.create |
@@ -462,7 +463,7 @@ Route definitions counted per file (explicit `Route::get/post/put/delete` calls,
 | tenant-business.php | 54 | tenant-reports-inventory.php | 1 |
 | tenant-stores.php | 4 | tenant-reports-tds.php | 1 |
 | tenant-ledger.php | 14 | tenant-reports-stock-valuation.php | 1 |
-| tenant-sales.php | 11 | tenant-reports-item-wise-sales.php | 1 |
+| tenant-sales.php | 12 | tenant-reports-item-wise-sales.php | 1 |
 | tenant-purchase.php | 12 | tenant-reports-item-wise-purchase.php | 1 |
 | tenant-sales-returns.php | 8 | tenant-reports-category-wise.php | 3 |
 | tenant-purchase-returns.php | 7 | tenant-reports-vat-summary.php | 2 |

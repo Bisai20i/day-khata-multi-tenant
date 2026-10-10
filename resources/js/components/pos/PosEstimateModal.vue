@@ -5,8 +5,8 @@ import Button from '@/components/ui/Button.vue';
 import Modal from '@/components/ui/Modal.vue';
 
 /**
- * Estimate preview: the cart rendered by the server as the bill it would
- * become (`POST /pos/estimate`, see usePosEstimate), shown as the PDF itself
+ * Estimate preview: the cart (or the sales entry form) rendered by the server
+ * as the bill it would become (see useSaleEstimate), shown as the PDF itself
  * so what the cashier sees is what prints. `url` is an object URL of that PDF.
  */
 const props = defineProps({

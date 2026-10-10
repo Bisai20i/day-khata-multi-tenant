@@ -9,6 +9,7 @@ import Combobox from '@/components/ui/Combobox.vue';
 import Select from '@/components/ui/Select.vue';
 import NepaliDateInput from '@/components/ui/NepaliDateInput.vue';
 import InfoTip from '@/components/ui/InfoTip.vue';
+import Label from '@/components/ui/Label.vue';
 import JournalVoucherTotalsBar from '@/components/accounting/JournalVoucherTotalsBar.vue';
 import { useConfirm } from '@/composables/useConfirm';
 import { isZeroMoney, parseMoney, sumMoney } from '@/lib/money';
@@ -185,11 +186,11 @@ function submit(print = false) {
     </p>
 
     <form class="flex flex-col gap-4 pb-4" @submit.prevent="submit(false)">
-        <Card variant="panel" title="Voucher details" class="!p-4">
+        <Card variant="panel" class="!p-4">
             <div class="grid grid-cols-1 gap-4 sm:grid-cols-3">
                 <div>
                     <div class="mb-1 flex items-center gap-1">
-                        <label class="block text-sm font-semibold text-text-base">Voucher type <span class="text-danger" aria-hidden="true">*</span></label>
+                        <Label>Voucher type <span class="text-danger" aria-hidden="true">*</span></Label>
                         <InfoTip
                             :text="
                                 isContra
@@ -203,13 +204,13 @@ function submit(print = false) {
                     <Select v-model="form.voucher_type" :options="voucherTypeOptions" />
                 </div>
                 <div>
-                    <label class="mb-1 block text-sm font-semibold text-text-base">Date (BS) <span class="text-danger" aria-hidden="true">*</span></label>
+                    <Label class="mb-1">Date (BS) <span class="text-danger" aria-hidden="true">*</span></Label>
                     <NepaliDateInput v-model="form.date" required />
                     <p v-if="form.errors.date" class="mt-1 text-sm text-danger" role="alert">{{ form.errors.date }}</p>
                 </div>
                 <div>
                     <div class="mb-1 flex items-center gap-1">
-                        <label class="block text-sm font-semibold text-text-base">Narration <span class="text-danger" aria-hidden="true">*</span></label>
+                        <Label>Narration <span class="text-danger" aria-hidden="true">*</span></Label>
                         <InfoTip text="What this voucher is for, shown in the ledger." />
                     </div>
                     <Input v-model="form.narration" type="text" placeholder="Describe this transaction" required />
@@ -219,23 +220,21 @@ function submit(print = false) {
         </Card>
 
         <Card variant="panel" class="!p-4">
-            <div class="mb-3 text-[10px] font-bold tracking-[.8px] text-text-muted uppercase">
-                {{ isContra ? 'Transfer' : 'Entries' }} <span class="text-danger">*</span>
-            </div>
+            <template #title>{{ isContra ? 'Transfer' : 'Entries' }} <span class="text-danger">*</span></template>
 
             <div v-if="isContra" class="grid grid-cols-1 gap-4 sm:grid-cols-3">
                 <div>
-                    <label class="mb-1 block text-sm font-semibold text-text-base">From account <span class="text-danger" aria-hidden="true">*</span></label>
+                    <Label class="mb-1">From account <span class="text-danger" aria-hidden="true">*</span></Label>
                     <Combobox v-model="form.from_account_id" :options="accountOptions" placeholder="Money moves from" />
                     <p v-if="form.errors.from_account_id" class="mt-1 text-sm text-danger">{{ form.errors.from_account_id }}</p>
                 </div>
                 <div>
-                    <label class="mb-1 block text-sm font-semibold text-text-base">To account <span class="text-danger" aria-hidden="true">*</span></label>
+                    <Label class="mb-1">To account <span class="text-danger" aria-hidden="true">*</span></Label>
                     <Combobox v-model="form.to_account_id" :options="accountOptions" placeholder="Money moves to" />
                     <p v-if="form.errors.to_account_id" class="mt-1 text-sm text-danger">{{ form.errors.to_account_id }}</p>
                 </div>
                 <div>
-                    <label class="mb-1 block text-sm font-semibold text-text-base">Amount <span class="text-danger" aria-hidden="true">*</span></label>
+                    <Label class="mb-1">Amount <span class="text-danger" aria-hidden="true">*</span></Label>
                     <Input v-model="form.amount" class="text-right" type="number" min="0.01" step="0.01" inputmode="decimal" placeholder="0.00" required />
                     <p v-if="form.errors.amount" class="mt-1 text-sm text-danger">{{ form.errors.amount }}</p>
                 </div>
@@ -243,7 +242,7 @@ function submit(print = false) {
 
             <template v-else>
                 <div v-if="isBank" class="mb-4 sm:w-1/2">
-                    <label class="mb-1 block text-sm font-semibold text-text-base">{{ cashOrBankLabel }} <span class="text-danger" aria-hidden="true">*</span></label>
+                    <Label class="mb-1">{{ cashOrBankLabel }} <span class="text-danger" aria-hidden="true">*</span></Label>
                     <Combobox v-model="form.bank_account_id" :options="accountOptions" placeholder="Select bank account" />
                     <p v-if="form.errors.bank_account_id" class="mt-1 text-sm text-danger">{{ form.errors.bank_account_id }}</p>
                 </div>

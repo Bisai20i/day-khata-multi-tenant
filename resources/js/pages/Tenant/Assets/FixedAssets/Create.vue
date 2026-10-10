@@ -8,6 +8,7 @@ import Select from '@/components/ui/Select.vue';
 import Combobox from '@/components/ui/Combobox.vue';
 import InfoTip from '@/components/ui/InfoTip.vue';
 import NepaliDateInput from '@/components/ui/NepaliDateInput.vue';
+import Label from '@/components/ui/Label.vue';
 
 const props = defineProps({
     accounts: { type: Array, default: () => [] },
@@ -123,7 +124,7 @@ function submit() {
 </script>
 
 <template>
-    <Card variant="panel">
+    <div>
         <div class="mb-4 flex items-center justify-between">
             <h3 class="text-base font-bold text-text-strong">
                 {{ registeringExisting ? 'Register an existing asset' : 'New fixed asset' }}
@@ -137,117 +138,119 @@ function submit() {
         </label>
 
         <form class="flex flex-col gap-4" @submit.prevent="submit">
-            <div class="grid grid-cols-1 gap-4 md:grid-cols-3">
-                <div>
-                    <label class="mb-1 block text-sm font-semibold text-text-base">Asset Name <span class="text-danger">*</span></label>
-                    <Input v-model="form.asset_name" type="text" placeholder="e.g. Office Laptop" required />
-                    <p v-if="form.errors.asset_name" class="mt-1 text-sm text-danger">{{ form.errors.asset_name }}</p>
-                </div>
-                <div>
-                    <div class="mb-1 flex items-center gap-1">
-                        <label class="block text-sm font-semibold text-text-base">Depreciation Pool <span class="text-danger">*</span></label>
-                        <InfoTip text="The tax group that sets the standard rate." />
-                    </div>
-                    <Select
-                        :model-value="form.category"
-                        :options="poolOptions"
-                        placeholder="Select pool"
-                        @update:model-value="(v) => (form.category = v)"
-                    />
-                    <p v-if="form.errors.category" class="mt-1 text-sm text-danger">{{ form.errors.category }}</p>
-                </div>
-                <div>
-                    <label class="mb-1 block text-sm font-semibold text-text-base">Purchase Date <span class="text-danger">*</span></label>
-                    <NepaliDateInput v-model="form.purchase_date" required />
-                    <p v-if="form.errors.purchase_date" class="mt-1 text-sm text-danger">{{ form.errors.purchase_date }}</p>
-                </div>
-                <div>
-                    <div class="mb-1 flex items-center gap-1">
-                        <label class="block text-sm font-semibold text-text-base">Cost <span class="text-danger">*</span></label>
-                        <InfoTip text="Purchase cost before VAT, in rupees." />
-                    </div>
-                    <Input v-model="form.cost" type="number" min="0.01" step="0.01" placeholder="e.g. 50000" required />
-                    <p v-if="form.errors.cost" class="mt-1 text-sm text-danger">{{ form.errors.cost }}</p>
-                </div>
-                <div v-if="registeringExisting">
-                    <div class="mb-1 flex items-center gap-1">
-                        <label class="block text-sm font-semibold text-text-base">Accumulated Depreciation So Far</label>
-                        <InfoTip text="Total depreciation already written off before this system." />
-                    </div>
-                    <Input v-model="form.accumulated_depreciation" type="number" min="0" step="0.01" placeholder="0.00" />
-                    <p v-if="form.errors.accumulated_depreciation" class="mt-1 text-sm text-danger">{{ form.errors.accumulated_depreciation }}</p>
-                </div>
-                <div v-else>
-                    <div class="mb-1 flex items-center gap-1">
-                        <label class="block text-sm font-semibold text-text-base">VAT Rate (%)</label>
-                        <InfoTip text="Leave blank if no VAT was charged." />
-                    </div>
-                    <Input v-model="form.vat_rate" type="number" min="0" max="100" step="0.01" placeholder="0.00" />
-                    <p v-if="form.errors.vat_rate" class="mt-1 text-sm text-danger">{{ form.errors.vat_rate }}</p>
-                </div>
-                <div>
-                    <div class="mb-1 flex items-center gap-1">
-                        <label class="block text-sm font-semibold text-text-base">Salvage Value</label>
-                        <InfoTip text="Expected value at the end of its life. Leave blank for 0." />
-                    </div>
-                    <Input v-model="form.salvage_value" type="number" min="0" step="0.01" placeholder="0.00" />
-                    <p v-if="form.errors.salvage_value" class="mt-1 text-sm text-danger">{{ form.errors.salvage_value }}</p>
-                </div>
-                <div>
-                    <div class="mb-1 flex items-center gap-1">
-                        <label class="block text-sm font-semibold text-text-base">Depreciation Method <span class="text-danger">*</span></label>
-                        <InfoTip text="Straight-Line writes off the same amount every year; Written-Down Value applies the rate to the remaining balance." />
-                    </div>
-                    <Select
-                        :model-value="form.depreciation_method"
-                        :options="methodOptions"
-                        @update:model-value="(v) => (form.depreciation_method = v)"
-                    />
-                    <p v-if="form.errors.depreciation_method" class="mt-1 text-sm text-danger">{{ form.errors.depreciation_method }}</p>
-                </div>
-                <div>
-                    <div class="mb-1 flex items-center gap-1">
-                        <label class="block text-sm font-semibold text-text-base">Depreciation Rate (%) <span class="text-danger">*</span></label>
-                        <InfoTip text="Yearly percentage. Pre-filled from the chosen pool; you can change it." />
-                    </div>
-                    <Input v-model="form.depreciation_rate" type="number" min="0" max="100" step="0.01" placeholder="e.g. 15" required />
-                    <p v-if="form.errors.depreciation_rate" class="mt-1 text-sm text-danger">{{ form.errors.depreciation_rate }}</p>
-                </div>
-                <template v-if="!registeringExisting">
+            <Card variant="panel" class="!p-4">
+                <div class="grid grid-cols-1 gap-4 md:grid-cols-3">
                     <div>
-                        <label class="mb-1 block text-sm font-semibold text-text-base">Payment Mode <span class="text-danger">*</span></label>
+                        <Label class="mb-1">Asset Name <span class="text-danger">*</span></Label>
+                        <Input v-model="form.asset_name" type="text" placeholder="e.g. Office Laptop" required />
+                        <p v-if="form.errors.asset_name" class="mt-1 text-sm text-danger">{{ form.errors.asset_name }}</p>
+                    </div>
+                    <div>
+                        <div class="mb-1 flex items-center gap-1">
+                            <Label>Depreciation Pool <span class="text-danger">*</span></Label>
+                            <InfoTip text="The tax group that sets the standard rate." />
+                        </div>
                         <Select
-                            :model-value="form.payment_mode"
-                            :options="paymentModeOptions"
-                            @update:model-value="(v) => (form.payment_mode = v)"
+                            :model-value="form.category"
+                            :options="poolOptions"
+                            placeholder="Select pool"
+                            @update:model-value="(v) => (form.category = v)"
                         />
+                        <p v-if="form.errors.category" class="mt-1 text-sm text-danger">{{ form.errors.category }}</p>
                     </div>
-                    <div v-if="showBankAccount">
-                        <label class="mb-1 block text-sm font-semibold text-text-base">Bank Account</label>
-                        <Combobox
-                            :model-value="form.bank_account_id"
-                            :options="accountOptions"
-                            placeholder="Select bank account"
-                            @update:model-value="(v) => (form.bank_account_id = v)"
+                    <div>
+                        <Label class="mb-1">Purchase Date <span class="text-danger">*</span></Label>
+                        <NepaliDateInput v-model="form.purchase_date" required />
+                        <p v-if="form.errors.purchase_date" class="mt-1 text-sm text-danger">{{ form.errors.purchase_date }}</p>
+                    </div>
+                    <div>
+                        <div class="mb-1 flex items-center gap-1">
+                            <Label>Cost <span class="text-danger">*</span></Label>
+                            <InfoTip text="Purchase cost before VAT, in rupees." />
+                        </div>
+                        <Input v-model="form.cost" type="number" min="0.01" step="0.01" placeholder="e.g. 50000" required />
+                        <p v-if="form.errors.cost" class="mt-1 text-sm text-danger">{{ form.errors.cost }}</p>
+                    </div>
+                    <div v-if="registeringExisting">
+                        <div class="mb-1 flex items-center gap-1">
+                            <Label>Accumulated Depreciation So Far</Label>
+                            <InfoTip text="Total depreciation already written off before this system." />
+                        </div>
+                        <Input v-model="form.accumulated_depreciation" type="number" min="0" step="0.01" placeholder="0.00" />
+                        <p v-if="form.errors.accumulated_depreciation" class="mt-1 text-sm text-danger">{{ form.errors.accumulated_depreciation }}</p>
+                    </div>
+                    <div v-else>
+                        <div class="mb-1 flex items-center gap-1">
+                            <Label>VAT Rate (%)</Label>
+                            <InfoTip text="Leave blank if no VAT was charged." />
+                        </div>
+                        <Input v-model="form.vat_rate" type="number" min="0" max="100" step="0.01" placeholder="0.00" />
+                        <p v-if="form.errors.vat_rate" class="mt-1 text-sm text-danger">{{ form.errors.vat_rate }}</p>
+                    </div>
+                    <div>
+                        <div class="mb-1 flex items-center gap-1">
+                            <Label>Salvage Value</Label>
+                            <InfoTip text="Expected value at the end of its life. Leave blank for 0." />
+                        </div>
+                        <Input v-model="form.salvage_value" type="number" min="0" step="0.01" placeholder="0.00" />
+                        <p v-if="form.errors.salvage_value" class="mt-1 text-sm text-danger">{{ form.errors.salvage_value }}</p>
+                    </div>
+                    <div>
+                        <div class="mb-1 flex items-center gap-1">
+                            <Label>Depreciation Method <span class="text-danger">*</span></Label>
+                            <InfoTip text="Straight-Line writes off the same amount every year; Written-Down Value applies the rate to the remaining balance." />
+                        </div>
+                        <Select
+                            :model-value="form.depreciation_method"
+                            :options="methodOptions"
+                            @update:model-value="(v) => (form.depreciation_method = v)"
                         />
-                        <p v-if="form.errors.bank_account_id" class="mt-1 text-sm text-danger">{{ form.errors.bank_account_id }}</p>
+                        <p v-if="form.errors.depreciation_method" class="mt-1 text-sm text-danger">{{ form.errors.depreciation_method }}</p>
                     </div>
-                    <div v-if="showSupplier">
-                        <label class="mb-1 block text-sm font-semibold text-text-base">Supplier</label>
-                        <Combobox
-                            :model-value="form.supplier_id"
-                            :options="supplierOptions"
-                            placeholder="Select supplier"
-                            @update:model-value="(v) => (form.supplier_id = v)"
-                        />
-                        <p v-if="form.errors.supplier_id" class="mt-1 text-sm text-danger">{{ form.errors.supplier_id }}</p>
+                    <div>
+                        <div class="mb-1 flex items-center gap-1">
+                            <Label>Depreciation Rate (%) <span class="text-danger">*</span></Label>
+                            <InfoTip text="Yearly percentage. Pre-filled from the chosen pool; you can change it." />
+                        </div>
+                        <Input v-model="form.depreciation_rate" type="number" min="0" max="100" step="0.01" placeholder="e.g. 15" required />
+                        <p v-if="form.errors.depreciation_rate" class="mt-1 text-sm text-danger">{{ form.errors.depreciation_rate }}</p>
                     </div>
-                </template>
-                <div class="md:col-span-3">
-                    <label class="mb-1 block text-sm font-semibold text-text-base">Narration</label>
-                    <Input v-model="form.narration" type="text" placeholder="Optional" />
+                    <template v-if="!registeringExisting">
+                        <div>
+                            <Label class="mb-1">Payment Mode <span class="text-danger">*</span></Label>
+                            <Select
+                                :model-value="form.payment_mode"
+                                :options="paymentModeOptions"
+                                @update:model-value="(v) => (form.payment_mode = v)"
+                            />
+                        </div>
+                        <div v-if="showBankAccount">
+                            <Label class="mb-1">Bank Account</Label>
+                            <Combobox
+                                :model-value="form.bank_account_id"
+                                :options="accountOptions"
+                                placeholder="Select bank account"
+                                @update:model-value="(v) => (form.bank_account_id = v)"
+                            />
+                            <p v-if="form.errors.bank_account_id" class="mt-1 text-sm text-danger">{{ form.errors.bank_account_id }}</p>
+                        </div>
+                        <div v-if="showSupplier">
+                            <Label class="mb-1">Supplier</Label>
+                            <Combobox
+                                :model-value="form.supplier_id"
+                                :options="supplierOptions"
+                                placeholder="Select supplier"
+                                @update:model-value="(v) => (form.supplier_id = v)"
+                            />
+                            <p v-if="form.errors.supplier_id" class="mt-1 text-sm text-danger">{{ form.errors.supplier_id }}</p>
+                        </div>
+                    </template>
+                    <div class="md:col-span-3">
+                        <Label class="mb-1">Narration</Label>
+                        <Input v-model="form.narration" type="text" placeholder="Optional" />
+                    </div>
                 </div>
-            </div>
+            </Card>
 
             <div class="flex items-center justify-end gap-2">
                 <Button variant="secondary" tone="purple" type="button" @click="emit('cancel')">Cancel</Button>
@@ -256,5 +259,5 @@ function submit() {
                 </Button>
             </div>
         </form>
-    </Card>
+    </div>
 </template>

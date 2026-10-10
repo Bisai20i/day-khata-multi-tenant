@@ -8,6 +8,7 @@ import Input from '@/components/ui/Input.vue';
 import Button from '@/components/ui/Button.vue';
 import Badge from '@/components/ui/Badge.vue';
 import PageHeader from '@/components/ui/PageHeader.vue';
+import Label from '@/components/ui/Label.vue';
 import { useToast } from '@/composables/useToast';
 
 defineOptions({ layout: AppLayout });
@@ -113,9 +114,9 @@ function downloadRecoveryCodes() {
 
                 <form class="flex max-w-xs flex-col gap-3" @submit.prevent="disable">
                     <div>
-                        <label for="disable-password" class="mb-1 block text-sm font-semibold text-text-base">
+                        <Label for="disable-password" class="mb-1">
                             Current password <span class="text-danger">*</span>
-                        </label>
+                        </Label>
                         <Input id="disable-password" v-model="disableForm.password" type="password" placeholder="Enter your password" required />
                         <p v-if="disableForm.errors.password" class="mt-1 text-sm text-danger">
                             {{ disableForm.errors.password }}
@@ -147,9 +148,9 @@ function downloadRecoveryCodes() {
 
                 <form class="flex max-w-xs flex-col gap-3" @submit.prevent="confirm">
                     <div>
-                        <label for="confirm-code" class="mb-1 block text-sm font-semibold text-text-base">
+                        <Label for="confirm-code" class="mb-1">
                             Code from your app <span class="text-danger">*</span>
-                        </label>
+                        </Label>
                         <Input id="confirm-code" v-model="confirmForm.code" type="text" placeholder="123456" autocomplete="one-time-code" inputmode="numeric" required />
                         <p v-if="confirmForm.errors.code" class="mt-1 text-sm text-danger">
                             {{ confirmForm.errors.code }}

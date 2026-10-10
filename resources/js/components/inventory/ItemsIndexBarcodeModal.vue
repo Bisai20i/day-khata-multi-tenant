@@ -3,6 +3,7 @@ import { ref } from 'vue';
 import Button from '@/components/ui/Button.vue';
 import Modal from '@/components/ui/Modal.vue';
 import Input from '@/components/ui/Input.vue';
+import Label from '@/components/ui/Label.vue';
 
 // --- Barcode label printing ---------------------------------------------
 // A small "how many labels" prompt before opening the print sheet in a new
@@ -62,13 +63,13 @@ defineExpose({ openBarcodeModal });
                 </p>
 
                 <div>
-                    <label for="barcode_quantity" class="mb-1 block text-sm font-semibold text-text-base">Quantity</label>
+                    <Label for="barcode_quantity" class="mb-1">Quantity</Label>
                     <Input id="barcode_quantity" v-model.number="barcodeQuantity" type="number" min="1" max="500" class="max-w-[160px]" />
                 </div>
             </div>
 
             <template #footer>
-                <Button variant="secondary" tone="purple" type="button" @click="closeBarcodeModal">Cancel</Button>
+                <Button variant="secondary" tone="neutral" type="button" @click="closeBarcodeModal">Cancel</Button>
                 <Button variant="primary" tone="purple" type="button" @click="printBarcodeLabels">Print</Button>
             </template>
         </Modal>

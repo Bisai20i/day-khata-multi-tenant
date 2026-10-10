@@ -9,6 +9,7 @@ import InfoTip from '@/components/ui/InfoTip.vue';
 import Select from '@/components/ui/Select.vue';
 import Combobox from '@/components/ui/Combobox.vue';
 import NepaliDateInput from '@/components/ui/NepaliDateInput.vue';
+import Label from '@/components/ui/Label.vue';
 import { addMoney, calculateDocument, formatMoney, moneyEquals, parseMoney } from '@/lib/money';
 import { todayInKathmandu } from '@/lib/format';
 
@@ -139,7 +140,7 @@ function submit() {
 </script>
 
 <template>
-    <Card variant="panel">
+    <div>
         <div class="mb-4 flex items-center justify-between">
             <div>
                 <h3 class="text-base font-bold text-text-strong">New capital sale</h3>
@@ -156,69 +157,76 @@ function submit() {
         </p>
 
         <form class="flex flex-col gap-4" @submit.prevent="submit">
-            <div class="grid grid-cols-3 gap-4">
-                <div>
-                    <label class="mb-1 block text-sm font-semibold text-text-base">Date <span class="text-danger">*</span></label>
-                    <NepaliDateInput v-model="form.date" required />
-                    <p v-if="form.errors.date" class="mt-1 text-sm text-danger">{{ form.errors.date }}</p>
+            <Card variant="panel" class="!p-4">
+                <div class="grid grid-cols-3 gap-4">
+                    <div>
+                        <Label class="mb-1">Date <span class="text-danger">*</span></Label>
+                        <NepaliDateInput v-model="form.date" required />
+                        <p v-if="form.errors.date" class="mt-1 text-sm text-danger">{{ form.errors.date }}</p>
+                    </div>
+                    <div>
+                        <Label class="mb-1">
+                            Customer <span v-if="customerRequired" class="text-danger">*</span>
+                        </Label>
+                        <Combobox
+                            :model-value="form.customer_id"
+                            :options="customerOptions"
+                            placeholder="Optional unless credit/partial"
+                            @update:model-value="(v) => (form.customer_id = v)"
+                        />
+                        <p v-if="form.errors.customer_id" class="mt-1 text-sm text-danger">{{ form.errors.customer_id }}</p>
+                    </div>
+                    <div>
+                        <Label class="mb-1">Store</Label>
+                        <Combobox
+                            :model-value="form.store_id"
+                            :options="storeOptions"
+                            placeholder="Default store"
+                            @update:model-value="(v) => (form.store_id = v)"
+                        />
+                        <p v-if="form.errors.store_id" class="mt-1 text-sm text-danger">{{ form.errors.store_id }}</p>
+                    </div>
                 </div>
-                <div>
-                    <label class="mb-1 block text-sm font-semibold text-text-base">
-                        Customer <span v-if="customerRequired" class="text-danger">*</span>
-                    </label>
-                    <Combobox
-                        :model-value="form.customer_id"
-                        :options="customerOptions"
-                        placeholder="Optional unless credit/partial"
-                        @update:model-value="(v) => (form.customer_id = v)"
-                    />
-                    <p v-if="form.errors.customer_id" class="mt-1 text-sm text-danger">{{ form.errors.customer_id }}</p>
-                </div>
-                <div>
-                    <label class="mb-1 block text-sm font-semibold text-text-base">Store</label>
-                    <Combobox
-                        :model-value="form.store_id"
-                        :options="storeOptions"
-                        placeholder="Default store"
-                        @update:model-value="(v) => (form.store_id = v)"
-                    />
-                    <p v-if="form.errors.store_id" class="mt-1 text-sm text-danger">{{ form.errors.store_id }}</p>
-                </div>
-                <div>
-                    <label class="mb-1 block text-sm font-semibold text-text-base">Payment mode <span class="text-danger">*</span></label>
-                    <Select
-                        :model-value="form.payment_mode"
-                        :options="paymentModeOptions"
-                        @update:model-value="(v) => (form.payment_mode = v)"
-                    />
-                </div>
-                <div v-if="showBankAccount">
-                    <label class="mb-1 block text-sm font-semibold text-text-base">Bank account <span class="text-danger">*</span></label>
-                    <Combobox
-                        :model-value="form.bank_account_id"
-                        :options="accountOptions"
-                        placeholder="Select bank account"
-                        @update:model-value="(v) => (form.bank_account_id = v)"
-                    />
-                    <p v-if="form.errors.bank_account_id" class="mt-1 text-sm text-danger">{{ form.errors.bank_account_id }}</p>
-                </div>
-            </div>
+            </Card>
 
-            <div v-if="showPartialSplit" class="grid grid-cols-2 gap-4">
-                <div>
-                    <label class="mb-1 block text-sm font-semibold text-text-base">Cash amount</label>
-                    <Input v-model="form.cash_amount" type="number" min="0" step="0.01" inputmode="decimal" placeholder="0.00" />
+            <Card variant="panel" title="Payment" class="!p-4">
+                <div class="grid grid-cols-3 gap-4">
+                    <div>
+                        <Label class="mb-1">Payment mode <span class="text-danger">*</span></Label>
+                        <Select
+                            :model-value="form.payment_mode"
+                            :options="paymentModeOptions"
+                            @update:model-value="(v) => (form.payment_mode = v)"
+                        />
+                    </div>
+                    <div v-if="showBankAccount">
+                        <Label class="mb-1">Bank account <span class="text-danger">*</span></Label>
+                        <Combobox
+                            :model-value="form.bank_account_id"
+                            :options="accountOptions"
+                            placeholder="Select bank account"
+                            @update:model-value="(v) => (form.bank_account_id = v)"
+                        />
+                        <p v-if="form.errors.bank_account_id" class="mt-1 text-sm text-danger">{{ form.errors.bank_account_id }}</p>
+                    </div>
                 </div>
-                <div>
-                    <label class="mb-1 block text-sm font-semibold text-text-base">Bank amount</label>
-                    <Input v-model="form.bank_amount" type="number" min="0" step="0.01" inputmode="decimal" placeholder="0.00" />
-                </div>
-                <p v-if="!splitIsExact" class="col-span-2 text-sm text-danger">
-                    Cash and bank must add up to the grand total exactly.
-                </p>
-            </div>
 
-            <div>
+                <div v-if="showPartialSplit" class="mt-4 grid grid-cols-2 gap-4">
+                    <div>
+                        <Label class="mb-1">Cash amount</Label>
+                        <Input v-model="form.cash_amount" type="number" min="0" step="0.01" inputmode="decimal" placeholder="0.00" />
+                    </div>
+                    <div>
+                        <Label class="mb-1">Bank amount</Label>
+                        <Input v-model="form.bank_amount" type="number" min="0" step="0.01" inputmode="decimal" placeholder="0.00" />
+                    </div>
+                    <p v-if="!splitIsExact" class="col-span-2 text-sm text-danger">
+                        Cash and bank must add up to the grand total exactly.
+                    </p>
+                </div>
+            </Card>
+
+            <Card variant="panel" title="Items" class="!p-4">
                 <div class="mb-2 grid grid-cols-[1fr_130px_70px_1fr_28px] gap-2 text-[10px] font-bold tracking-[.8px] text-text-muted uppercase">
                     <span>Asset account sold *</span>
                     <span>Sale amount *</span>
@@ -259,24 +267,26 @@ function submit() {
                 <Button variant="secondary" tone="purple" type="button" class="mt-1" @click="addLine">
                     <Plus class="h-3.5 w-3.5" /> Add line
                 </Button>
-            </div>
+            </Card>
 
-            <div class="grid grid-cols-3 gap-4 border-t-[1.5px] border-border pt-4">
-                <div>
-                    <div class="mb-1 flex items-center gap-1">
-                        <label class="block text-sm font-semibold text-text-base">VAT rate (%) <span class="text-danger">*</span></label>
-                        <InfoTip text="Applied to lines marked Taxable." />
+            <Card variant="panel" title="Charges &amp; notes" class="!p-4">
+                <div class="grid grid-cols-3 gap-4">
+                    <div>
+                        <div class="mb-1 flex items-center gap-1">
+                            <Label>VAT rate (%) <span class="text-danger">*</span></Label>
+                            <InfoTip text="Applied to lines marked Taxable." />
+                        </div>
+                        <Input v-model="form.vat_rate" type="number" min="0" max="100" step="0.01" inputmode="decimal" required />
+                        <p v-if="form.errors.vat_rate" class="mt-1 text-sm text-danger" role="alert">{{ form.errors.vat_rate }}</p>
                     </div>
-                    <Input v-model="form.vat_rate" type="number" min="0" max="100" step="0.01" inputmode="decimal" required />
-                    <p v-if="form.errors.vat_rate" class="mt-1 text-sm text-danger" role="alert">{{ form.errors.vat_rate }}</p>
+                    <div class="col-span-2">
+                        <Label class="mb-1">Narration</Label>
+                        <Input v-model="form.narration" type="text" placeholder="Optional" />
+                    </div>
                 </div>
-                <div class="col-span-2">
-                    <label class="mb-1 block text-sm font-semibold text-text-base">Narration</label>
-                    <Input v-model="form.narration" type="text" placeholder="Optional" />
-                </div>
-            </div>
+            </Card>
 
-            <div class="border-t-[1.5px] border-border pt-3 text-sm">
+            <Card variant="panel" title="Invoice summary" class="!p-4 text-sm">
                 <p v-if="previewError" class="border-[1.5px] border-danger bg-danger-bg px-3 py-2 text-sm text-danger">
                     {{ previewError }}
                 </p>
@@ -293,7 +303,7 @@ function submit() {
                     <span class="text-right font-bold text-text-strong">{{ formatMoney(totals.total) }}</span>
                 </div>
                 <p v-else class="text-text-muted">Add a line to see the invoice total.</p>
-            </div>
+            </Card>
 
             <div class="flex items-center justify-end gap-2">
                 <Button variant="secondary" tone="purple" type="button" @click="emit('cancel')">Cancel</Button>
@@ -302,5 +312,5 @@ function submit() {
                 </Button>
             </div>
         </form>
-    </Card>
+    </div>
 </template>

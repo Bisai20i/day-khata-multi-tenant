@@ -10,7 +10,7 @@ import Badge from '@/components/ui/Badge.vue';
 import DataTable from '@/components/ui/DataTable.vue';
 import RowActions from '@/components/ui/RowActions.vue';
 import DropdownMenuItem from '@/components/ui/DropdownMenuItem.vue';
-import { Barcode, BookOpen, Plus, Ruler } from '@lucide/vue';
+import { Barcode, BookOpen, Plus, Ruler, Upload } from '@lucide/vue';
 import ItemsIndexFormModal from '@/components/inventory/ItemsIndexFormModal.vue';
 import ItemsIndexImportModal from '@/components/inventory/ItemsIndexImportModal.vue';
 import ItemsIndexUnitsModal from '@/components/inventory/ItemsIndexUnitsModal.vue';
@@ -354,24 +354,41 @@ function moreActionsFor(item) {
 <template>
     <div>
         <PageHeader title="Items" description="Items: the products you buy and sell, with their unit, rates and stock level.">
-                <Button
-                    v-if="selectedItemIds.length > 0"
-                    variant="secondary"
-                    tone="purple"
-                    :disabled="markVatableForm.processing"
-                    @click="markSelectedVatable"
-                >
-                    Mark {{ selectedItemIds.length }} vatable
-                </Button>
-                <Button v-if="can('items.import')" variant="secondary" tone="purple" @click="openImport">Bulk import (CSV)</Button>
+            <Button v-if="can('items.create')" variant="primary" tone="purple" @click="openCreate">
+                <Plus class="size-4" />
+                New item
+            </Button>
+        </PageHeader>
+
+        <Card variant="panel" class="bg-white">
+            <div v-if="can('items.import') || selectedItemIds.length > 0" class="mb-3 flex flex-wrap items-center justify-between gap-2">
+                <div class="ml-auto flex items-center gap-2">
+                    <Button
+                        v-if="selectedItemIds.length > 0"
+                        variant="secondary"
+                        tone="neutral"
+                        type="button"
+                        :disabled="markVatableForm.processing"
+                        @click="markSelectedVatable"
+                    >
+                        Mark {{ selectedItemIds.length }} vatable
+                    </Button>
+                    <Button v-if="can('items.import')" variant="secondary" tone="neutral" type="button" @click="openImport">
+                        <Upload class="size-4" />
+                        Bulk import (CSV)
+                    </Button>
+                </div>
+            </div>
+
+            <div v-if="items.length === 0" class="flex flex-col items-center gap-3 py-10 text-center">
+                <p class="text-sm font-semibold text-text-strong">No items yet</p>
+                <p v-if="can('items.create')" class="text-xs text-text-muted">Add your first item, or bulk import a CSV, and it will be listed here.</p>
                 <Button v-if="can('items.create')" variant="primary" tone="purple" @click="openCreate">
                     <Plus class="size-4" />
                     New item
                 </Button>
-        </PageHeader>
-
-        <Card variant="panel">
-            <DataTable :columns="columns" :data="items" :page-size="10" empty-message="No items yet. Use 'New item' above to add one, or Bulk import (CSV)." />
+            </div>
+            <DataTable v-else :columns="columns" :data="items" :page-size="10" empty-message="No items" />
         </Card>
 
         <ItemsIndexFormModal

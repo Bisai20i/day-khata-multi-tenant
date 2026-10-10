@@ -13,6 +13,7 @@ import PageHeader from '@/components/ui/PageHeader.vue';
 import { Plus } from '@lucide/vue';
 import DataTable from '@/components/ui/DataTable.vue';
 import RowActions from '@/components/ui/RowActions.vue';
+import Label from '@/components/ui/Label.vue';
 import { useToast } from '@/composables/useToast';
 import { useConfirm } from '@/composables/useConfirm';
 import { usePermissions } from '@/composables/usePermissions';
@@ -169,7 +170,7 @@ const columns = [
             </Button>
         </PageHeader>
 
-        <Card variant="panel">
+        <Card variant="panel" class="bg-white">
             <div v-if="agents.length === 0" class="flex flex-col items-center gap-3 py-10 text-center">
                 <p class="text-sm font-semibold text-text-strong">No agents yet</p>
                 <p class="text-xs text-text-muted">Add your first sales agent to track commission on their sales.</p>
@@ -187,26 +188,26 @@ const columns = [
         <Modal :open="modalOpen" :title="editing ? 'Edit agent' : 'New agent'" @update:open="onModalOpenChange">
             <form id="agent-form" class="flex flex-col gap-4" @submit.prevent="submit">
                 <div>
-                    <label for="name" class="mb-1 block text-sm font-semibold text-text-base">Name <span class="text-danger">*</span></label>
+                    <Label for="name" class="mb-1">Name <span class="text-danger">*</span></Label>
                     <Input id="name" v-model="form.name" type="text" placeholder="e.g. Jane Doe" required />
                     <p v-if="form.errors.name" class="mt-1 text-sm text-danger">{{ form.errors.name }}</p>
                 </div>
 
                 <div>
-                    <label for="mobile_no" class="mb-1 block text-sm font-semibold text-text-base">Mobile No</label>
+                    <Label for="mobile_no" class="mb-1">Mobile No</Label>
                     <Input id="mobile_no" v-model="form.mobile_no" type="text" placeholder="98XXXXXXXX" />
                     <p v-if="form.errors.mobile_no" class="mt-1 text-sm text-danger" role="alert">{{ form.errors.mobile_no }}</p>
                 </div>
 
                 <div>
-                    <label for="address" class="mb-1 block text-sm font-semibold text-text-base">Address</label>
+                    <Label for="address" class="mb-1">Address</Label>
                     <Input id="address" v-model="form.address" type="text" placeholder="e.g. Kathmandu-10" />
                     <p v-if="form.errors.address" class="mt-1 text-sm text-danger">{{ form.errors.address }}</p>
                 </div>
 
                 <div>
                     <div class="mb-1 flex items-center gap-1">
-                        <label for="commission_rate" class="block text-sm font-semibold text-text-base">Default commission rate (%)</label>
+                        <Label for="commission_rate">Default commission rate (%)</Label>
                         <InfoTip text="Percentage of each sale this agent earns as commission (0 to 100). Leave blank for none." />
                     </div>
                     <Input id="commission_rate" v-model="form.commission_rate" type="number" min="0" max="100" step="0.01" placeholder="0.00" />
@@ -220,7 +221,7 @@ const columns = [
             </form>
 
             <template #footer>
-                <Button variant="secondary" tone="purple" type="button" @click="closeModal">Cancel</Button>
+                <Button variant="secondary" tone="neutral" type="button" @click="closeModal">Cancel</Button>
                 <Button variant="primary" tone="purple" type="submit" form="agent-form" :disabled="form.processing" :loading="form.processing">
                     {{ editing ? 'Save agent' : 'Add agent' }}
                 </Button>

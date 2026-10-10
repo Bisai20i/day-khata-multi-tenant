@@ -15,6 +15,7 @@ import RowActions from '@/components/ui/RowActions.vue';
 import DropdownMenu from '@/components/ui/DropdownMenu.vue';
 import DropdownMenuItem from '@/components/ui/DropdownMenuItem.vue';
 import PageHeader from '@/components/ui/PageHeader.vue';
+import Label from '@/components/ui/Label.vue';
 import { useConfirm } from '@/composables/useConfirm';
 import { useToast } from '@/composables/useToast';
 
@@ -246,7 +247,7 @@ const columns = [
         <Card variant="panel" class="bg-bg-surface p-0">
             <div class="flex flex-col gap-3 border-b border-border p-4 md:flex-row md:items-end">
                 <div class="min-w-0 md:flex-1">
-                    <label for="tenant-search" class="mb-1.5 block text-xs font-semibold text-text-muted">Search</label>
+                    <Label for="tenant-search" class="mb-1.5">Search</Label>
                     <Input
                         id="tenant-search"
                         v-model="search"
@@ -257,7 +258,7 @@ const columns = [
                     />
                 </div>
                 <div class="md:w-52">
-                    <label class="mb-1.5 block text-xs font-semibold text-text-muted">Status</label>
+                    <Label class="mb-1.5">Status</Label>
                     <Select v-model="status" :options="statusOptions" placeholder="All statuses" />
                 </div>
                 <div class="flex gap-2 [&>*]:flex-1 md:[&>*]:flex-none">
@@ -291,12 +292,16 @@ const columns = [
                 </div>
 
                 <template v-else>
+                    <div class="mb-3 flex flex-wrap items-center justify-between gap-2">
+                        <p class="text-xs text-text-muted" aria-live="polite">Showing {{ tenants.from }}–{{ tenants.to }} of {{ tenants.total }}</p>
+                    </div>
+
                     <div class="hidden md:block">
                         <DataTable :columns="columns" :data="tenants.data" :page-size="Math.max(tenants.data.length, 1)" hide-pagination />
                     </div>
 
                     <!-- Phones: one card per tenant instead of a sideways-scrolling table. -->
-                    <ul class="-mx-4 -mt-4 divide-y divide-border-soft md:hidden">
+                    <ul class="-mx-4 divide-y divide-border-soft border-t border-border-soft md:hidden">
                         <li v-for="tenant in tenants.data" :key="tenant.id" class="flex flex-col gap-2.5 px-4 py-4">
                             <div class="flex items-start justify-between gap-3">
                                 <div class="min-w-0">
@@ -343,8 +348,7 @@ const columns = [
                         </li>
                     </ul>
 
-                    <nav class="mt-4 flex flex-col gap-3 border-t border-border-soft pt-4 sm:flex-row sm:items-center sm:justify-between" aria-label="Tenants pagination">
-                        <p class="text-xs text-text-muted">Showing {{ tenants.from }}–{{ tenants.to }} of {{ tenants.total }}</p>
+                    <nav class="mt-4 flex flex-col gap-3 border-t border-border-soft pt-4 sm:flex-row sm:items-center sm:justify-end" aria-label="Tenants pagination">
                         <div class="flex items-center justify-between gap-2 sm:justify-end">
                             <Button
                                 v-if="tenants.prev_page_url"

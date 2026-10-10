@@ -1,6 +1,7 @@
 <script setup>
 import { computed } from 'vue';
 import InfoTip from '@/components/ui/InfoTip.vue';
+import Label from '@/components/ui/Label.vue';
 import { cn } from '@/lib/utils';
 
 /**
@@ -29,11 +30,11 @@ const describedBy = computed(() => (props.error ? errorId.value : props.help ? h
 <template>
     <div data-form-field :class="cn('flex min-w-0 flex-col', props.class)">
         <div class="mb-1.5 flex items-center gap-1">
-            <label :for="props.for || undefined" class="block text-[13px] font-semibold text-text-base">
+            <Label :for="props.for || undefined">
                 {{ label }}
                 <span v-if="required" class="text-danger" aria-hidden="true">*</span>
                 <slot name="label-suffix" />
-            </label>
+            </Label>
             <InfoTip v-if="help && helpAsTooltip" :text="help" />
         </div>
         <slot :describedBy="describedBy" />

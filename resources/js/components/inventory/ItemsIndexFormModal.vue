@@ -47,12 +47,12 @@ const { can } = usePermissions();
 const categoryOptions = computed(() => props.categories.map((category) => ({ value: category.id, label: category.name })));
 
 const brandOptions = computed(() => [
-    { value: '', label: 'None' },
+    { value: null, label: 'None' },
     ...props.brands.map((brand) => ({ value: brand.id, label: brand.name })),
 ]);
 
 const postingAccountOptions = computed(() => [
-    { value: '', label: 'Default (Purchases Account)' },
+    { value: null, label: 'Default (Purchases Account)' },
     ...props.postingAccounts.map((account) => ({ value: account.id, label: account.label })),
 ]);
 
@@ -69,9 +69,9 @@ function hasStock(item) {
 
 const form = useForm({
     item_category_id: '',
-    item_subcategory_id: '',
-    brand_id: '',
-    account_id: '',
+    item_subcategory_id: null,
+    brand_id: null,
+    account_id: null,
     name: '',
     description: '',
     unit: '',
@@ -90,9 +90,6 @@ const form = useForm({
 
 form.transform((data) => ({
     ...data,
-    item_subcategory_id: data.item_subcategory_id === '' ? null : data.item_subcategory_id,
-    brand_id: data.brand_id === '' ? null : data.brand_id,
-    account_id: data.account_id === '' ? null : data.account_id,
     description: data.description === '' ? null : data.description,
     hs_code: data.hs_code === '' ? null : data.hs_code,
     barcode: data.barcode === '' ? null : data.barcode,
@@ -136,9 +133,9 @@ const { showModal, editing, addAnother, savedNotice, isDirty, openCreate, openEd
     formId: 'item-form',
     fill: (item) => {
         form.item_category_id = item.item_category_id;
-        form.item_subcategory_id = item.item_subcategory_id ?? '';
-        form.brand_id = item.brand_id ?? '';
-        form.account_id = item.account_id ?? '';
+        form.item_subcategory_id = item.item_subcategory_id ?? null;
+        form.brand_id = item.brand_id ?? null;
+        form.account_id = item.account_id ?? null;
         form.name = item.name;
         form.description = item.description ?? '';
         form.unit = item.unit;
@@ -184,14 +181,14 @@ const { showModal, editing, addAnother, savedNotice, isDirty, openCreate, openEd
 
 const subcategoryOptions = computed(() => {
     const filtered = props.subcategories.filter((subcategory) => subcategory.item_category_id === form.item_category_id);
-    return [{ value: '', label: 'None' }, ...filtered.map((subcategory) => ({ value: subcategory.id, label: subcategory.name }))];
+    return [{ value: null, label: 'None' }, ...filtered.map((subcategory) => ({ value: subcategory.id, label: subcategory.name }))];
 });
 
 const selectedCategoryName = computed(() => props.categories.find((category) => category.id === form.item_category_id)?.name ?? '');
 
 function onCategoryChange(value) {
     form.item_category_id = value;
-    form.item_subcategory_id = '';
+    form.item_subcategory_id = null;
 }
 
 // Inline "+ New" for the three pickers: which one is open, or null.
@@ -452,7 +449,7 @@ defineExpose({ openCreate, openEdit });
                                     @keydown.enter.prevent
                                 />
                             </div>
-                            <Button variant="secondary" tone="purple" type="button" class="shrink-0 px-3" @click="generateBarcode">
+                            <Button variant="secondary" tone="neutral" type="button" class="shrink-0 px-3" @click="generateBarcode">
                                 <ScanBarcode class="h-3.5 w-3.5" />
                                 Generate
                             </Button>
@@ -572,7 +569,7 @@ defineExpose({ openCreate, openEdit });
                 <input v-model="addAnother" type="checkbox" class="size-4 border-[1.5px] border-border" />
                 Add another
             </label>
-            <Button variant="secondary" tone="purple" type="button" @click="closeModal">Cancel</Button>
+            <Button variant="secondary" tone="neutral" type="button" @click="closeModal">Cancel</Button>
             <Button variant="primary" tone="purple" type="submit" form="item-form" :disabled="form.processing">
                 {{ form.processing ? 'Saving...' : editing ? 'Save item' : 'Create item' }}
             </Button>

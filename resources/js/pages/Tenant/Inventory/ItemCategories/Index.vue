@@ -102,8 +102,16 @@ const columns = [
             </Button>
         </PageHeader>
 
-        <Card variant="panel">
-            <DataTable :columns="columns" :data="categories" :page-size="10" />
+        <Card variant="panel" class="bg-white">
+            <div v-if="categories.length === 0" class="flex flex-col items-center gap-3 py-10 text-center">
+                <p class="text-sm font-semibold text-text-strong">No categories yet</p>
+                <p v-if="can('item_categories.manage')" class="text-xs text-text-muted">Create your first category and it will be listed here.</p>
+                <Button v-if="can('item_categories.manage')" variant="primary" tone="purple" @click="openCreate">
+                    <Plus class="size-4" />
+                    New category
+                </Button>
+            </div>
+            <DataTable v-else :columns="columns" :data="categories" :page-size="10" empty-message="No categories" />
         </Card>
 
         <Modal
@@ -146,7 +154,7 @@ const columns = [
                     <input v-model="addAnother" type="checkbox" class="size-4 border-[1.5px] border-border" />
                     Add another
                 </label>
-                <Button variant="secondary" tone="purple" type="button" @click="closeModal">Cancel</Button>
+                <Button variant="secondary" tone="neutral" type="button" @click="closeModal">Cancel</Button>
                 <Button variant="primary" tone="purple" type="submit" form="item-category-form" :disabled="form.processing">
                     {{ form.processing ? 'Saving...' : editing ? 'Save category' : 'Create category' }}
                 </Button>

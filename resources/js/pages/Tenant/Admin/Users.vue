@@ -14,6 +14,7 @@ import Badge from '@/components/ui/Badge.vue';
 import Tooltip from '@/components/ui/Tooltip.vue';
 import InfoTip from '@/components/ui/InfoTip.vue';
 import PageHeader from '@/components/ui/PageHeader.vue';
+import Label from '@/components/ui/Label.vue';
 import { useToast } from '@/composables/useToast';
 import { useConfirm } from '@/composables/useConfirm';
 import { usePermissions } from '@/composables/usePermissions';
@@ -284,20 +285,20 @@ const columns = [
         <Modal :open="modalOpen" :title="editing ? 'Edit employee' : 'New employee'" @update:open="onModalOpenChange">
             <form class="flex flex-col gap-4" @submit.prevent="submit">
                 <div>
-                    <label for="name" class="mb-1 block text-sm font-semibold text-text-base">Name <span class="text-danger">*</span></label>
+                    <Label for="name" class="mb-1">Name <span class="text-danger">*</span></Label>
                     <Input id="name" v-model="form.name" type="text" placeholder="e.g. Jane Doe" required />
                     <p v-if="form.errors.name" class="mt-1 text-sm text-danger">{{ form.errors.name }}</p>
                 </div>
 
                 <div>
-                    <label for="email" class="mb-1 block text-sm font-semibold text-text-base">Email <span class="text-danger">*</span></label>
+                    <Label for="email" class="mb-1">Email <span class="text-danger">*</span></Label>
                     <Input id="email" v-model="form.email" type="email" placeholder="you@example.com" required />
                     <p v-if="form.errors.email" class="mt-1 text-sm text-danger">{{ form.errors.email }}</p>
                 </div>
 
                 <div>
                     <div class="mb-1 flex items-center gap-1">
-                        <label for="role_id" class="block text-sm font-semibold text-text-base">Role <span class="text-danger">*</span></label>
+                        <Label for="role_id">Role <span class="text-danger">*</span></Label>
                         <InfoTip
                             v-if="!roleAndStatusLocked"
                             text="The role decides which screens and actions this employee can use. You can only give roles whose permissions you hold yourself."
@@ -310,7 +311,7 @@ const columns = [
 
                 <div v-if="editing">
                     <div class="mb-1 flex items-center gap-1">
-                        <label for="is_active" class="block text-sm font-semibold text-text-base">Status <span class="text-danger">*</span></label>
+                        <Label for="is_active">Status <span class="text-danger">*</span></Label>
                         <InfoTip text="Inactive employees cannot sign in." />
                     </div>
                     <Select id="is_active" v-model="isActiveOption" :options="statusOptions" :disabled="roleAndStatusLocked" />
@@ -319,10 +320,10 @@ const columns = [
 
                 <div>
                     <div class="mb-1 flex items-center gap-1">
-                        <label for="password" class="block text-sm font-semibold text-text-base">
+                        <Label for="password">
                             {{ editing ? 'New password (leave blank to keep current)' : 'Password' }}
                             <span v-if="!editing" class="text-danger">*</span>
-                        </label>
+                        </Label>
                         <InfoTip text="At least 8 characters." />
                     </div>
                     <Input
@@ -336,10 +337,10 @@ const columns = [
                 </div>
 
                 <div>
-                    <label for="password_confirmation" class="mb-1 block text-sm font-semibold text-text-base">
+                    <Label for="password_confirmation" class="mb-1">
                         Confirm password
                         <span v-if="!editing" class="text-danger">*</span>
-                    </label>
+                    </Label>
                     <Input
                         id="password_confirmation"
                         v-model="form.password_confirmation"
@@ -368,7 +369,7 @@ const columns = [
                 </div>
 
                 <div>
-                    <label for="current_password" class="mb-1 block text-sm font-semibold text-text-base">Your password <span class="text-danger">*</span></label>
+                    <Label for="current_password" class="mb-1">Your password <span class="text-danger">*</span></Label>
                     <Input id="current_password" v-model="transferForm.current_password" type="password" autocomplete="current-password" placeholder="Enter your password to confirm" required />
                     <p v-if="transferForm.errors.current_password" class="mt-1 text-sm text-danger">{{ transferForm.errors.current_password }}</p>
                     <p v-if="transferForm.errors.transfer" class="mt-1 text-sm text-danger">{{ transferForm.errors.transfer }}</p>

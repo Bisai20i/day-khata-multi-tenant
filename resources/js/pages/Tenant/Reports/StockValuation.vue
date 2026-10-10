@@ -4,10 +4,12 @@ import { router } from '@inertiajs/vue3';
 import AppLayout from '@/layouts/AppLayout.vue';
 import { useLayoutChrome } from '@/composables/useLayoutChrome';
 import Card from '@/components/ui/Card.vue';
+import Button from '@/components/ui/Button.vue';
 import PageHeader from '@/components/ui/PageHeader.vue';
 import NepaliDateInput from '@/components/ui/NepaliDateInput.vue';
 import Select from '@/components/ui/Select.vue';
 import DataTable from '@/components/ui/DataTable.vue';
+import Label from '@/components/ui/Label.vue';
 import { formatMoney, formatQuantity, formatRate } from '@/lib/money';
 import { formatBsDate } from '@/lib/format';
 import { itemLedgerColumn } from '@/lib/itemLedger';
@@ -91,15 +93,15 @@ const columns = [
 
         <div class="mb-4 flex flex-wrap items-end gap-3">
             <div class="w-40">
-                <label class="mb-1 block text-[11px] font-semibold text-text-muted">As of date (BS)</label>
+                <Label class="mb-1 text-[11px]">As of date (BS)</Label>
                 <NepaliDateInput v-model="asOfInput" />
             </div>
             <div class="w-56">
-                <label class="mb-1 block text-[11px] font-semibold text-text-muted">Store</label>
+                <Label class="mb-1 text-[11px]">Store</Label>
                 <Select v-model="storeId" :options="storeOptions" />
             </div>
             <div class="w-40">
-                <label class="mb-1 block text-[11px] font-semibold text-text-muted">Stock status</label>
+                <Label class="mb-1 text-[11px]">Stock status</Label>
                 <Select v-model="stockStatus" :options="stockStatusOptions" />
             </div>
             <Button variant="primary" tone="purple" :loading="isLoading" @click="applyFilter">Generate report</Button>

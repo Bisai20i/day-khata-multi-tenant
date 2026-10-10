@@ -14,6 +14,7 @@ import Input from '@/components/ui/Input.vue';
 import Select from '@/components/ui/Select.vue';
 import InfoTip from '@/components/ui/InfoTip.vue';
 import RowActions from '@/components/ui/RowActions.vue';
+import Label from '@/components/ui/Label.vue';
 import { useToast } from '@/composables/useToast';
 import { formatMoney } from '@/lib/money';
 import { useConfirm } from '@/composables/useConfirm';
@@ -159,8 +160,16 @@ const columns = [
             </Button>
         </PageHeader>
 
-        <Card variant="panel">
-            <DataTable :columns="columns" :data="varieties" :page-size="10" />
+        <Card variant="panel" class="bg-white">
+            <div v-if="varieties.length === 0" class="flex flex-col items-center gap-3 py-10 text-center">
+                <p class="text-sm font-semibold text-text-strong">No varieties yet</p>
+                <p v-if="can('item_varieties.manage')" class="text-xs text-text-muted">Create your first variety and it will be listed here.</p>
+                <Button v-if="can('item_varieties.manage')" variant="primary" tone="purple" @click="openCreate">
+                    <Plus class="size-4" />
+                    New variety
+                </Button>
+            </div>
+            <DataTable v-else :columns="columns" :data="varieties" :page-size="10" empty-message="No varieties" />
         </Card>
 
         <Modal
@@ -171,20 +180,20 @@ const columns = [
         >
             <form id="item-variety-form" class="flex flex-col gap-4" @submit.prevent="submit">
                 <div>
-                    <label for="item_id" class="mb-1 block text-sm font-semibold text-text-base">Item <span class="text-danger">*</span></label>
+                    <Label for="item_id" class="mb-1">Item <span class="text-danger">*</span></Label>
                     <Select id="item_id" v-model="form.item_id" :options="itemOptions" placeholder="Select item" />
                     <p v-if="form.errors.item_id" class="mt-1 text-sm text-danger">{{ form.errors.item_id }}</p>
                 </div>
 
                 <div>
-                    <label for="name" class="mb-1 block text-sm font-semibold text-text-base">Name <span class="text-danger">*</span></label>
+                    <Label for="name" class="mb-1">Name <span class="text-danger">*</span></Label>
                     <Input id="name" v-model="form.name" type="text" placeholder="e.g. Red / Large" required />
                     <p v-if="form.errors.name" class="mt-1 text-sm text-danger">{{ form.errors.name }}</p>
                 </div>
 
                 <div>
                     <div class="mb-1 flex items-center gap-1">
-                        <label for="sku_suffix" class="block text-sm font-semibold text-text-base">SKU Suffix</label>
+                        <Label for="sku_suffix">SKU Suffix</Label>
                         <InfoTip text="Short code appended to the item's SKU to identify this variety." />
                     </div>
                     <Input id="sku_suffix" v-model="form.sku_suffix" type="text" placeholder="e.g. RED-L" />
@@ -193,9 +202,9 @@ const columns = [
 
                 <div>
                     <div class="mb-1 flex items-center gap-1">
-                        <label for="price_adjustment" class="block text-sm font-semibold text-text-base">
+                        <Label for="price_adjustment">
                             Price Adjustment
-                        </label>
+                        </Label>
                         <InfoTip text="Amount added to (or, if negative, subtracted from) the item's price for this variety." />
                     </div>
                     <Input id="price_adjustment" v-model="form.price_adjustment" type="number" step="0.01" placeholder="0.00" />
@@ -212,7 +221,7 @@ const columns = [
             </form>
 
             <template #footer>
-                <Button variant="secondary" tone="purple" type="button" @click="closeModal">Cancel</Button>
+                <Button variant="secondary" tone="neutral" type="button" @click="closeModal">Cancel</Button>
                 <Button
                     variant="primary"
                     tone="purple"

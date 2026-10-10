@@ -8,6 +8,7 @@ import Select from '@/components/ui/Select.vue';
 import Button from '@/components/ui/Button.vue';
 import PageHeader from '@/components/ui/PageHeader.vue';
 import NepaliDateInput from '@/components/ui/NepaliDateInput.vue';
+import Label from '@/components/ui/Label.vue';
 import { formatMoney, isZeroMoney } from '@/lib/money.js';
 import { formatBsDate } from '@/lib/format.js';
 import { usePermissions } from '@/composables/usePermissions';
@@ -87,11 +88,11 @@ function exportUrl() {
         <Card v-if="fiscalYearId !== null" variant="panel" class="mb-4">
             <div class="flex flex-wrap items-end gap-3">
                 <div class="w-56">
-                    <label class="mb-1 block text-xs font-semibold text-text-muted">Fiscal year</label>
+                    <Label class="mb-1">Fiscal year</Label>
                     <Select v-model="fiscalYear" :options="fiscalYearOptions" />
                 </div>
                 <div>
-                    <label class="mb-1 block text-xs font-semibold text-text-muted">As at date (BS)</label>
+                    <Label class="mb-1">As at date (BS)</Label>
                     <NepaliDateInput v-model="to" />
                 </div>
                 <Button variant="primary" tone="purple" @click="apply">Generate report</Button>

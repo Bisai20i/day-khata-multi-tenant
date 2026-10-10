@@ -16,6 +16,7 @@ import NepaliDateInput from '@/components/ui/NepaliDateInput.vue';
 import Combobox from '@/components/ui/Combobox.vue';
 import DropdownMenu from '@/components/ui/DropdownMenu.vue';
 import DropdownMenuItem from '@/components/ui/DropdownMenuItem.vue';
+import Label from '@/components/ui/Label.vue';
 import { useToast } from '@/composables/useToast';
 import { formatMoney, sumMoney } from '@/lib/money';
 import { formatBsDate } from '@/lib/format';
@@ -457,7 +458,7 @@ function iconAction(action) {
         <template v-else>
             <PageHeader title="Journal Vouchers" description="The record of every accounting entry. Post a journal voucher for general adjustments, or a cash/bank voucher for simple money in and out. Entries from sales and purchases also appear here.">
                 <template v-if="hasOpenFiscalYear">
-                    <Button v-if="canCreateCashBank" variant="secondary" tone="purple" @click="showCashBankForm = true">
+                    <Button v-if="canCreateCashBank" variant="secondary" tone="neutral" @click="showCashBankForm = true">
                         <Plus class="size-4" />
                         New cash/bank voucher
                     </Button>
@@ -478,19 +479,19 @@ function iconAction(action) {
                 </div>
                 <div :class="[showFilters ? 'mt-3 flex' : 'hidden', 'flex-wrap items-end gap-3 md:mt-0 md:flex']">
                     <div class="min-w-[160px]">
-                        <label class="mb-1 block text-xs font-semibold text-text-muted">From date (BS)</label>
+                        <Label class="mb-1">From date (BS)</Label>
                         <NepaliDateInput v-model="filterState.from" />
                     </div>
                     <div class="min-w-[160px]">
-                        <label class="mb-1 block text-xs font-semibold text-text-muted">To date (BS)</label>
+                        <Label class="mb-1">To date (BS)</Label>
                         <NepaliDateInput v-model="filterState.to" />
                     </div>
                     <div class="min-w-[200px]">
-                        <label class="mb-1 block text-xs font-semibold text-text-muted">Voucher type</label>
+                        <Label class="mb-1">Voucher type</Label>
                         <Combobox v-model="filterState.voucher_type" @update:model-value="applyFilters" :options="voucherTypeOptions" placeholder="All types" />
                     </div>
                     <div class="min-w-[200px] flex-1">
-                        <label class="mb-1 block text-xs font-semibold text-text-muted">Voucher # or narration</label>
+                        <Label class="mb-1">Voucher # or narration</Label>
                         <div class="relative">
                             <Search class="pointer-events-none absolute top-1/2 left-2.5 size-4 -translate-y-1/2 text-text-faint" />
                             <Input v-model="filterState.search" type="text" placeholder="e.g. JV-12 or rent" class="pl-8" @keydown.enter.prevent="applyFilters" />
@@ -521,6 +522,7 @@ function iconAction(action) {
 
             <Card variant="panel" class="bg-white">
                 <div class="mb-3 flex flex-wrap items-center justify-between gap-2">
+                    <p v-if="journalVouchers.data.length > 0" class="text-xs text-text-muted" aria-live="polite">Showing {{ journalVouchers.from }}–{{ journalVouchers.to }} of {{ journalVouchers.total }}</p>
                     <div class="ml-auto flex items-center gap-2">
                         <Button variant="secondary" tone="neutral" type="button" @click="printList">
                             <Printer class="size-4" />
@@ -559,7 +561,6 @@ function iconAction(action) {
                 </div>
                 <DataTable v-else :columns="columns" :data="journalVouchers.data" :page-size="Math.max(journalVouchers.data.length, 1)" empty-message="No vouchers" />
 
-                <p v-if="journalVouchers.data.length > 0" class="mt-3 text-xs text-text-muted" aria-live="polite">Showing {{ journalVouchers.from }}–{{ journalVouchers.to }} of {{ journalVouchers.total }}</p>
                 <nav v-if="journalVouchers.data.length > 0 && journalVouchers.last_page > 1" aria-label="Journal vouchers pagination" class="mt-3 flex items-center justify-end gap-2">
                     <Link
                         v-if="journalVouchers.prev_page_url"
@@ -646,7 +647,7 @@ function iconAction(action) {
                     Cancelling {{ cancelling ? voucherLabel(cancelling) : 'this voucher' }} posts a reversing entry that cancels out its effect on the ledger. The original stays on record and this cannot be undone.
                 </p>
                 <div>
-                    <label class="mb-1 block text-sm font-semibold text-text-base">Reason <span class="text-danger">*</span></label>
+                    <Label class="mb-1">Reason <span class="text-danger">*</span></Label>
                     <Input v-model="cancelForm.reason" type="text" placeholder="e.g. Entered wrong account" required />
                     <p v-if="cancelForm.errors.reason" class="mt-1 text-sm text-danger">{{ cancelForm.errors.reason }}</p>
                 </div>

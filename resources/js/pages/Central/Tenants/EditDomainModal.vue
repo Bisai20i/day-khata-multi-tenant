@@ -5,6 +5,7 @@ import { AlertTriangle } from '@lucide/vue';
 import Button from '@/components/ui/Button.vue';
 import Input from '@/components/ui/Input.vue';
 import Modal from '@/components/ui/Modal.vue';
+import Label from '@/components/ui/Label.vue';
 
 /**
  * Changes one of a tenant's domains in place. Rendered by Show.vue; the admin
@@ -58,7 +59,7 @@ function submit() {
             </div>
 
             <div>
-                <label for="edit_domain_new" class="mb-1.5 block text-[13px] font-semibold text-text-base">New domain</label>
+                <Label for="edit_domain_new" class="mb-1.5">New domain</Label>
                 <Input
                     id="edit_domain_new"
                     v-model="form.domain"
@@ -72,9 +73,9 @@ function submit() {
             </div>
 
             <div>
-                <label for="edit_domain_current" class="mb-1.5 block text-[13px] font-semibold text-text-base">
+                <Label for="edit_domain_current" class="mb-1.5">
                     Type the current domain to confirm
-                </label>
+                </Label>
                 <Input
                     id="edit_domain_current"
                     v-model="form.current_domain"

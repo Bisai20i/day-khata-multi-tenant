@@ -3,7 +3,7 @@ import { h, ref, watch } from 'vue';
 import { router, useForm, usePage } from '@inertiajs/vue3';
 import AppLayout from '@/layouts/AppLayout.vue';
 import { useLayoutChrome } from '@/composables/useLayoutChrome';
-import { Plus } from '@lucide/vue';
+import { Plus, Upload } from '@lucide/vue';
 import PageHeader from '@/components/ui/PageHeader.vue';
 import Card from '@/components/ui/Card.vue';
 import Button from '@/components/ui/Button.vue';
@@ -12,6 +12,7 @@ import InfoTip from '@/components/ui/InfoTip.vue';
 import Modal from '@/components/ui/Modal.vue';
 import DataTable from '@/components/ui/DataTable.vue';
 import RowActions from '@/components/ui/RowActions.vue';
+import Label from '@/components/ui/Label.vue';
 import { useToast } from '@/composables/useToast';
 import { useConfirm } from '@/composables/useConfirm';
 import { usePermissions } from '@/composables/usePermissions';
@@ -193,46 +194,62 @@ const columns = [
 <template>
     <div>
         <PageHeader title="Customers" description="People and businesses you sell to. Each customer gets its own ledger account, so you can track what they owe you.">
-            <Button v-if="can('customers.import')" variant="secondary" tone="purple" @click="openImport">Bulk import</Button>
             <Button v-if="can('customers.create')" variant="primary" tone="purple" @click="openCreate">
                 <Plus class="size-4" />
                 New customer
             </Button>
         </PageHeader>
 
-        <Card variant="panel">
-            <DataTable :columns="columns" :data="customers" :page-size="10" empty-message="No customers yet. Use New customer to add one, or Bulk import to upload a CSV." />
+        <Card variant="panel" class="bg-white">
+            <div v-if="can('customers.import')" class="mb-3 flex flex-wrap items-center justify-between gap-2">
+                <div class="ml-auto flex items-center gap-2">
+                    <Button variant="secondary" tone="neutral" type="button" @click="openImport">
+                        <Upload class="size-4" />
+                        Bulk import
+                    </Button>
+                </div>
+            </div>
+
+            <div v-if="customers.length === 0" class="flex flex-col items-center gap-3 py-10 text-center">
+                <p class="text-sm font-semibold text-text-strong">No customers yet</p>
+                <p class="text-xs text-text-muted">Use New customer to add one, or Bulk import to upload a CSV.</p>
+                <Button v-if="can('customers.create')" variant="primary" tone="purple" @click="openCreate">
+                    <Plus class="size-4" />
+                    New customer
+                </Button>
+            </div>
+            <DataTable v-else :columns="columns" :data="customers" :page-size="10" empty-message="No customers" />
         </Card>
 
         <Modal :open="modalOpen" :title="editing ? 'Edit customer' : 'New customer'" @update:open="onModalOpenChange">
             <form class="flex flex-col gap-4" @submit.prevent="submit">
                 <div>
-                    <label for="name" class="mb-1 block text-sm font-semibold text-text-base">Name <span class="text-danger">*</span></label>
+                    <Label for="name" class="mb-1">Name <span class="text-danger">*</span></Label>
                     <Input id="name" v-model="form.name" type="text" placeholder="e.g. Ram Sharma" required />
                     <p v-if="form.errors.name" class="mt-1 text-sm text-danger">{{ form.errors.name }}</p>
                 </div>
 
                 <div>
-                    <label for="address" class="mb-1 block text-sm font-semibold text-text-base">Address</label>
+                    <Label for="address" class="mb-1">Address</Label>
                     <Input id="address" v-model="form.address" type="text" placeholder="e.g. Kathmandu-10" />
                     <p v-if="form.errors.address" class="mt-1 text-sm text-danger">{{ form.errors.address }}</p>
                 </div>
 
                 <div>
-                    <label for="mobile_no" class="mb-1 block text-sm font-semibold text-text-base">Mobile No</label>
+                    <Label for="mobile_no" class="mb-1">Mobile No</Label>
                     <Input id="mobile_no" v-model="form.mobile_no" type="text" placeholder="98XXXXXXXX" />
                     <p v-if="form.errors.mobile_no" class="mt-1 text-sm text-danger">{{ form.errors.mobile_no }}</p>
                 </div>
 
                 <div>
-                    <label for="email" class="mb-1 block text-sm font-semibold text-text-base">Email</label>
+                    <Label for="email" class="mb-1">Email</Label>
                     <Input id="email" v-model="form.email" type="email" placeholder="name@example.com" />
                     <p v-if="form.errors.email" class="mt-1 text-sm text-danger">{{ form.errors.email }}</p>
                 </div>
 
                 <div>
                     <div class="mb-1 flex items-center gap-1">
-                        <label for="tpin" class="block text-sm font-semibold text-text-base">TPIN</label>
+                        <Label for="tpin">TPIN</Label>
                         <InfoTip text="Taxpayer PIN (PAN/VAT number). Needed only if the customer wants a tax invoice." />
                     </div>
                     <Input id="tpin" v-model="form.tpin" type="text" placeholder="e.g. 123456789" />
@@ -240,14 +257,14 @@ const columns = [
                 </div>
 
                 <div>
-                    <label for="citizenship" class="mb-1 block text-sm font-semibold text-text-base">Citizenship</label>
+                    <Label for="citizenship" class="mb-1">Citizenship</Label>
                     <Input id="citizenship" v-model="form.citizenship" type="text" placeholder="Citizenship number" />
                     <p v-if="form.errors.citizenship" class="mt-1 text-sm text-danger">{{ form.errors.citizenship }}</p>
                 </div>
             </form>
 
             <template #footer>
-                <Button variant="secondary" tone="purple" type="button" @click="closeModal">Cancel</Button>
+                <Button variant="secondary" tone="neutral" type="button" @click="closeModal">Cancel</Button>
                 <Button variant="primary" tone="purple" type="button" :disabled="form.processing" @click="submit">
                     {{ form.processing ? 'Saving...' : editing ? 'Save changes' : 'Save customer' }}
                 </Button>
@@ -268,9 +285,9 @@ const columns = [
                     Download CSV template
                 </a>
                 <div>
-                    <label for="customer-import-file" class="mb-1 block text-sm font-semibold text-text-base">
+                    <Label for="customer-import-file" class="mb-1">
                         CSV file <span class="text-danger">*</span>
-                    </label>
+                    </Label>
                     <input
                         id="customer-import-file"
                         type="file"
@@ -308,7 +325,7 @@ const columns = [
 
             <template #footer>
                 <template v-if="!importResult">
-                    <Button variant="secondary" tone="purple" type="button" @click="closeImportModal">Cancel</Button>
+                    <Button variant="secondary" tone="neutral" type="button" @click="closeImportModal">Cancel</Button>
                     <Button
                         variant="primary"
                         tone="purple"

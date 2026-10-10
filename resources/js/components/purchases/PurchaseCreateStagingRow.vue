@@ -5,6 +5,7 @@ import Button from '@/components/ui/Button.vue';
 import Input from '@/components/ui/Input.vue';
 import Select from '@/components/ui/Select.vue';
 import Combobox from '@/components/ui/Combobox.vue';
+import Label from '@/components/ui/Label.vue';
 import { formatQuantity } from '@/lib/money';
 import { toggleDiscountTypeOn, unitOptionsFor } from '@/lib/saleCreate';
 import { emptyPurchaseLine } from '@/lib/purchaseCreate';
@@ -152,7 +153,7 @@ defineExpose({ stage });
     <div>
         <div v-if="canScanBarcode" class="mb-3 flex flex-wrap items-end gap-2">
             <div class="w-full sm:w-72">
-                <label for="purchase-barcode" class="mb-1 block text-xs font-semibold text-text-muted">Scan barcode (incl. box / pack barcodes)</label>
+                <Label for="purchase-barcode" class="mb-1">Scan barcode (incl. box / pack barcodes)</Label>
                 <Input
                     id="purchase-barcode"
                     v-model="barcodeCode"
@@ -167,7 +168,7 @@ defineExpose({ stage });
 
         <div ref="stagingLineEl" class="grid grid-cols-[2.2fr_1fr_0.8fr_1fr_1.2fr] items-end gap-3">
             <div ref="stagingItemEl">
-                <label class="mb-1 block text-sm font-semibold text-text-base">Item</label>
+                <Label class="mb-1">Item</Label>
                 <Combobox
                     :model-value="stagingLine.item_id"
                     :options="itemOptions"
@@ -176,7 +177,7 @@ defineExpose({ stage });
                 />
             </div>
             <div>
-                <label class="mb-1 block text-sm font-semibold text-text-base">Unit</label>
+                <Label class="mb-1">Unit</Label>
                 <Select
                     v-if="stagingItem?.units?.length"
                     :model-value="stagingLine.item_unit_id"
@@ -186,7 +187,7 @@ defineExpose({ stage });
                 <span v-else class="block h-9 pt-2 text-xs text-text-muted">{{ stagingItem?.unit ?? '-' }}</span>
             </div>
             <div ref="stagingQuantityEl" data-staging-field="quantity">
-                <label class="mb-1 block text-sm font-semibold text-text-base">Quantity</label>
+                <Label class="mb-1">Quantity</Label>
                 <Input
                     v-model="stagingLine.quantity"
                     type="number"
@@ -197,7 +198,7 @@ defineExpose({ stage });
                 />
             </div>
             <div data-staging-field="rate">
-                <label class="mb-1 block text-sm font-semibold text-text-base">Rate</label>
+                <Label class="mb-1">Rate</Label>
                 <Input
                     v-model="stagingLine.rate"
                     type="number"
@@ -209,7 +210,7 @@ defineExpose({ stage });
             </div>
             <div class="flex items-end gap-2">
                 <div data-staging-field="discount" class="flex-1">
-                    <label class="mb-1 block text-sm font-semibold text-text-base">Discount</label>
+                    <Label class="mb-1">Discount</Label>
                     <Input
                         v-model="stagingLine.discount"
                         type="number"
@@ -241,7 +242,7 @@ defineExpose({ stage });
         <Transition name="extras">
             <div v-if="showLineExtras" class="mt-3 grid grid-cols-2 gap-3 sm:[grid-template-columns:2.2fr_1fr_0.8fr_2.2fr]">
                 <div class="sm:col-start-3">
-                    <label class="mb-1 block text-sm font-semibold text-text-base">Free qty</label>
+                    <Label class="mb-1">Free qty</Label>
                     <Input
                         v-model="stagingLine.bonus_quantity"
                         type="number"
@@ -252,7 +253,7 @@ defineExpose({ stage });
                     />
                 </div>
                 <div class="sm:col-start-4">
-                    <label class="mb-1 block text-sm font-semibold text-text-base">Note</label>
+                    <Label class="mb-1">Note</Label>
                     <Input v-model="stagingLine.note" type="text" placeholder="Note for this item (optional)" />
                 </div>
             </div>

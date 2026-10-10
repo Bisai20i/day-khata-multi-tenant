@@ -7,6 +7,7 @@ import Button from '@/components/ui/Button.vue';
 import Input from '@/components/ui/Input.vue';
 import Combobox from '@/components/ui/Combobox.vue';
 import NepaliDateInput from '@/components/ui/NepaliDateInput.vue';
+import Label from '@/components/ui/Label.vue';
 import { calculateDocument, formatMoney } from '@/lib/money';
 import { todayInKathmandu } from '@/lib/format';
 
@@ -128,7 +129,7 @@ function submit() {
 </script>
 
 <template>
-    <Card variant="panel">
+    <div>
         <div class="mb-4 flex items-center justify-between">
             <h3 class="text-base font-bold text-text-strong">{{ quotation ? 'Edit quotation' : 'New quotation' }}</h3>
             <Button variant="secondary" tone="purple" type="button" @click="emit('cancel')">Cancel</Button>
@@ -142,9 +143,9 @@ function submit() {
         </p>
 
         <form class="flex flex-col gap-4" @submit.prevent="submit">
-            <div class="grid grid-cols-3 gap-4">
+            <Card variant="panel" class="grid grid-cols-3 gap-4 !p-4">
                 <div>
-                    <label class="mb-1 block text-sm font-semibold text-text-base">Customer <span class="text-danger">*</span></label>
+                    <Label class="mb-1">Customer <span class="text-danger">*</span></Label>
                     <Combobox
                         :model-value="form.customer_id"
                         :options="customerOptions"
@@ -154,17 +155,17 @@ function submit() {
                     <p v-if="form.errors.customer_id" class="mt-1 text-sm text-danger">{{ form.errors.customer_id }}</p>
                 </div>
                 <div>
-                    <label class="mb-1 block text-sm font-semibold text-text-base">Date <span class="text-danger">*</span></label>
+                    <Label class="mb-1">Date <span class="text-danger">*</span></Label>
                     <NepaliDateInput v-model="form.date" required />
                     <p v-if="form.errors.date" class="mt-1 text-sm text-danger">{{ form.errors.date }}</p>
                 </div>
                 <div>
-                    <label class="mb-1 block text-sm font-semibold text-text-base">Reference #</label>
+                    <Label class="mb-1">Reference #</Label>
                     <Input v-model="form.reference_number" type="text" placeholder="Optional" />
                 </div>
-            </div>
+            </Card>
 
-            <div>
+            <Card variant="panel" title="Items" class="!p-4">
                 <div class="mb-2 grid grid-cols-[1fr_110px_110px_100px_28px] gap-2 text-[10px] font-bold tracking-[.8px] text-text-muted uppercase">
                     <span>Item</span>
                     <span>Quantity</span>
@@ -202,25 +203,25 @@ function submit() {
                 <Button variant="secondary" tone="purple" type="button" class="mt-1" @click="addLine">
                     <Plus class="h-3.5 w-3.5" /> Add line
                 </Button>
-            </div>
+            </Card>
 
-            <div class="grid grid-cols-2 gap-4 border-t-[1.5px] border-border pt-4">
+            <Card variant="panel" class="grid grid-cols-2 gap-4 !p-4">
                 <div>
-                    <label class="mb-1 block text-sm font-semibold text-text-base">Header discount</label>
+                    <Label class="mb-1">Header discount</Label>
                     <Input v-model="form.discount" type="number" min="0" step="0.01" inputmode="decimal" placeholder="0.00" />
                 </div>
                 <div>
-                    <label class="mb-1 block text-sm font-semibold text-text-base">VAT rate (%)</label>
+                    <Label class="mb-1">VAT rate (%)</Label>
                     <Input v-model="form.vat_rate" type="number" min="0" max="100" step="0.01" inputmode="decimal" required />
                 </div>
-            </div>
+            </Card>
 
-            <div>
-                <label class="mb-1 block text-sm font-semibold text-text-base">Narration</label>
+            <Card variant="panel" title="Notes" class="!p-4">
+                <Label class="mb-1">Narration</Label>
                 <Input v-model="form.narration" type="text" placeholder="Optional" />
-            </div>
+            </Card>
 
-            <div class="border-t-[1.5px] border-border pt-3 text-sm">
+            <Card variant="panel" class="!p-4 text-sm">
                 <p v-if="previewError" class="border-[1.5px] border-danger bg-danger-bg px-3 py-2 text-sm text-danger">
                     {{ previewError }}
                 </p>
@@ -241,7 +242,7 @@ function submit() {
                     <span class="text-right font-bold text-text-strong">{{ formatMoney(totals.total) }}</span>
                 </div>
                 <p v-else class="text-text-muted">Add a line to see the quotation total.</p>
-            </div>
+            </Card>
 
             <div class="flex items-center justify-end gap-2">
                 <Button variant="secondary" tone="purple" type="button" @click="emit('cancel')">Cancel</Button>
@@ -250,5 +251,5 @@ function submit() {
                 </Button>
             </div>
         </form>
-    </Card>
+    </div>
 </template>

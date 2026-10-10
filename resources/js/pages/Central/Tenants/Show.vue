@@ -27,6 +27,7 @@ import Input from '@/components/ui/Input.vue';
 import Modal from '@/components/ui/Modal.vue';
 import PageHeader from '@/components/ui/PageHeader.vue';
 import InfoTip from '@/components/ui/InfoTip.vue';
+import Label from '@/components/ui/Label.vue';
 import { useToast } from '@/composables/useToast';
 import { useConfirm } from '@/composables/useConfirm';
 import EditDomainModal from './EditDomainModal.vue';
@@ -385,7 +386,7 @@ function removeDomain(domain) {
                 <Card v-if="isOwner" variant="panel" title="Trial end date" class="bg-bg-surface p-4 sm:p-5">
                     <form @submit.prevent="updateTrial">
                         <div class="mb-1.5 flex items-center gap-1">
-                            <label for="trial_ends_at" class="block text-[13px] font-semibold text-text-base">Trial ends on</label>
+                            <Label for="trial_ends_at">Trial ends on</Label>
                             <InfoTip text="Leave blank to remove the trial expiry." />
                         </div>
                         <div class="flex flex-col gap-2 sm:flex-row lg:flex-col xl:flex-row">
@@ -434,7 +435,7 @@ function removeDomain(domain) {
                     </ul>
 
                     <form @submit.prevent="addDomain">
-                        <label for="new_domain" class="mb-1.5 block text-[13px] font-semibold text-text-base">Add another domain</label>
+                        <Label for="new_domain" class="mb-1.5">Add another domain</Label>
                         <div class="flex flex-col gap-2 sm:flex-row lg:flex-col xl:flex-row">
                             <Input
                                 id="new_domain"

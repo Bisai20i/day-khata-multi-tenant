@@ -2,6 +2,7 @@
 import Button from '@/components/ui/Button.vue';
 import Input from '@/components/ui/Input.vue';
 import Modal from '@/components/ui/Modal.vue';
+import Label from '@/components/ui/Label.vue';
 
 defineProps({
     open: { type: Boolean, default: false },
@@ -22,7 +23,7 @@ const emit = defineEmits(['close', 'confirm']);
                 {{ lines[lineIndex]?.quantity }}
             </p>
             <div>
-                <label class="mb-1 block text-sm font-semibold text-text-base">Quantity to move to a new cart</label>
+                <Label class="mb-1">Quantity to move to a new cart</Label>
                 <Input v-model="quantity" type="number" min="0" step="0.0001" placeholder="e.g. 1" />
             </div>
         </div>

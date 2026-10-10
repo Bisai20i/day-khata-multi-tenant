@@ -8,6 +8,7 @@ import NepaliDateInput from '@/components/ui/NepaliDateInput.vue';
 import Select from '@/components/ui/Select.vue';
 import Button from '@/components/ui/Button.vue';
 import PageHeader from '@/components/ui/PageHeader.vue';
+import Label from '@/components/ui/Label.vue';
 import { formatMoney, isZeroMoney } from '@/lib/money.js';
 import { formatBsDate } from '@/lib/format.js';
 import { usePermissions } from '@/composables/usePermissions';
@@ -40,7 +41,7 @@ const fiscalYearOptions = computed(() =>
 const fiscalYear = ref(props.fiscalYearId);
 const from = ref(props.from);
 const to = ref(props.to);
-const voucherType = ref(props.voucherType ?? '');
+const voucherType = ref(props.voucherType);
 
 // Kept per page rather than shared, matching this app's existing
 // per-page-file convention (mem.md gotcha #5).
@@ -79,7 +80,7 @@ watch(fiscalYear, (value) => {
 });
 
 const voucherTypeFilterOptions = computed(() => [
-    { value: '', label: 'All types' },
+    { value: null, label: 'All types' },
     ...props.voucherTypeOptions.map((type) => ({ value: type, label: voucherTypeLabels[type] ?? type })),
 ]);
 
@@ -133,19 +134,19 @@ function voucherLabel(voucher) {
         <Card variant="panel" class="mb-4">
             <div class="flex flex-wrap items-end gap-3">
                 <div class="w-56">
-                    <label class="mb-1 block text-xs font-semibold text-text-muted">Fiscal year</label>
+                    <Label class="mb-1">Fiscal year</Label>
                     <Select v-model="fiscalYear" :options="fiscalYearOptions" />
                 </div>
                 <div>
-                    <label class="mb-1 block text-xs font-semibold text-text-muted">From date (BS)</label>
+                    <Label class="mb-1">From date (BS)</Label>
                     <NepaliDateInput v-model="from" />
                 </div>
                 <div>
-                    <label class="mb-1 block text-xs font-semibold text-text-muted">To date (BS)</label>
+                    <Label class="mb-1">To date (BS)</Label>
                     <NepaliDateInput v-model="to" />
                 </div>
                 <div class="w-56">
-                    <label class="mb-1 block text-xs font-semibold text-text-muted">Voucher type</label>
+                    <Label class="mb-1">Voucher type</Label>
                     <Select v-model="voucherType" :options="voucherTypeFilterOptions" />
                 </div>
                 <Button variant="primary" tone="purple" @click="applyFilter">Generate report</Button>

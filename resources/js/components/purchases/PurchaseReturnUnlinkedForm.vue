@@ -2,12 +2,14 @@
 import { computed, onBeforeUnmount, ref, watch } from 'vue';
 import { useForm } from '@inertiajs/vue3';
 import { Plus, X } from '@lucide/vue';
+import Card from '@/components/ui/Card.vue';
 import Button from '@/components/ui/Button.vue';
 import Input from '@/components/ui/Input.vue';
 import Combobox from '@/components/ui/Combobox.vue';
 import InfoTip from '@/components/ui/InfoTip.vue';
 import Select from '@/components/ui/Select.vue';
 import NepaliDateInput from '@/components/ui/NepaliDateInput.vue';
+import Label from '@/components/ui/Label.vue';
 import { addMoney, formatMoney, formatQuantity, moneyEquals, parseMoney } from '@/lib/money';
 import { todayInKathmandu } from '@/lib/format';
 import {
@@ -265,42 +267,45 @@ function submit() {
             {{ form.errors.lines ?? form.errors.expected_total }}
         </p>
 
-        <h4 class="border-b-[1.5px] border-border pb-1 text-sm font-bold text-text-strong">Supplier &amp; date</h4>
+        <Card variant="panel" class="!p-4">
         <div class="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-5">
             <div>
-                <label class="mb-1 block text-sm font-semibold text-text-base">Return date (BS) <span class="text-danger">*</span></label>
+                <Label class="mb-1">Return date (BS) <span class="text-danger">*</span></Label>
                 <NepaliDateInput v-model="form.date" required />
                 <p v-if="form.errors.date" class="mt-1 text-sm text-danger">{{ form.errors.date }}</p>
             </div>
             <div>
-                <label class="mb-1 block text-sm font-semibold text-text-base">Supplier</label>
+                <Label class="mb-1">Supplier</Label>
                 <Combobox :model-value="form.supplier_id" :options="supplierOptions" placeholder="Optional" @update:model-value="(v) => (form.supplier_id = v)" />
                 <p v-if="form.errors.supplier_id" class="mt-1 text-sm text-danger">{{ form.errors.supplier_id }}</p>
             </div>
             <div>
-                <label class="mb-1 block text-sm font-semibold text-text-base">Store</label>
+                <Label class="mb-1">Store</Label>
                 <Combobox :model-value="form.store_id" :options="storeOptions" placeholder="Default store" @update:model-value="(v) => (form.store_id = v)" />
                 <p v-if="form.errors.store_id" class="mt-1 text-sm text-danger">{{ form.errors.store_id }}</p>
             </div>
             <div>
-                <label class="mb-1 block text-sm font-semibold text-text-base">VAT rate (%)</label>
+                <Label class="mb-1">VAT rate (%)</Label>
                 <Input v-model="form.vat_rate" type="number" min="0" max="100" step="0.01" />
                 <p v-if="form.errors.vat_rate" class="mt-1 text-sm text-danger">{{ form.errors.vat_rate }}</p>
             </div>
             <div>
-                <label class="mb-1 block text-sm font-semibold text-text-base">Reason for return <span class="text-danger">*</span></label>
+                <Label class="mb-1">Reason for return <span class="text-danger">*</span></Label>
                 <Input v-model="form.reason" type="text" maxlength="255" placeholder="e.g. Damaged goods" required />
                 <p v-if="form.errors.reason" class="mt-1 text-sm text-danger">{{ form.errors.reason }}</p>
             </div>
         </div>
+        </Card>
 
-        <div>
-            <div class="mb-2 flex items-center gap-1 border-b-[1.5px] border-border pb-1">
-                <h4 class="text-sm font-bold text-text-strong">Items to return <span class="text-danger">*</span></h4>
-                <InfoTip
-                    text="Leave the rate blank to value a line at the item's weighted average cost on the return date. Quantities are in the unit picked on that line."
-                />
-            </div>
+        <Card variant="panel" class="!p-4">
+            <template #title>
+                <div class="flex items-center gap-1">
+                    <span>Items to return <span class="text-danger">*</span></span>
+                    <InfoTip
+                        text="Leave the rate blank to value a line at the item's weighted average cost on the return date. Quantities are in the unit picked on that line."
+                    />
+                </div>
+            </template>
             <div class="mb-2 grid grid-cols-[1fr_180px_120px_140px_120px_40px] gap-2 text-[10px] font-bold tracking-[.8px] text-text-muted uppercase">
                 <span>Item</span>
                 <span>Unit</span>
@@ -345,20 +350,20 @@ function submit() {
                 <Plus class="size-4" aria-hidden="true" />
                 Add another item
             </Button>
-        </div>
+        </Card>
 
-        <h4 class="border-b-[1.5px] border-border pb-1 text-sm font-bold text-text-strong">Refund</h4>
+        <Card variant="panel" title="Refund" class="!p-4">
         <div class="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
             <div>
                 <div class="mb-1 flex items-center gap-1">
-                    <label class="block text-sm font-semibold text-text-base">Refund received as <span class="text-danger">*</span></label>
+                    <Label>Refund received as <span class="text-danger">*</span></Label>
                     <InfoTip v-if="form.payment_mode === 'credit'" text="Reduces what you owe this supplier. No money changes hands now." />
                 </div>
                 <Select :model-value="form.payment_mode" :options="refundModeOptions" @update:model-value="(v) => (form.payment_mode = v)" />
                 <p v-if="form.errors.payment_mode" class="mt-1 text-sm text-danger">{{ form.errors.payment_mode }}</p>
             </div>
             <div v-if="needsBank">
-                <label class="mb-1 block text-sm font-semibold text-text-base">Bank account <span class="text-danger">*</span></label>
+                <Label class="mb-1">Bank account <span class="text-danger">*</span></Label>
                 <Combobox
                     :model-value="form.bank_account_id"
                     :options="bankAccountOptions"
@@ -369,17 +374,18 @@ function submit() {
             </div>
             <template v-if="form.payment_mode === 'partial'">
                 <div>
-                    <label class="mb-1 block text-sm font-semibold text-text-base">Refunded in cash (Rs.)</label>
+                    <Label class="mb-1">Refunded in cash (Rs.)</Label>
                     <Input v-model="form.cash_amount" type="number" min="0" step="0.01" placeholder="0.00" />
                     <p v-if="form.errors.cash_amount" class="mt-1 text-sm text-danger">{{ form.errors.cash_amount }}</p>
                 </div>
                 <div>
-                    <label class="mb-1 block text-sm font-semibold text-text-base">Refunded to bank (Rs.)</label>
+                    <Label class="mb-1">Refunded to bank (Rs.)</Label>
                     <Input v-model="form.bank_amount" type="number" min="0" step="0.01" placeholder="0.00" />
                     <p v-if="form.errors.bank_amount" class="mt-1 text-sm text-danger">{{ form.errors.bank_amount }}</p>
                 </div>
             </template>
         </div>
+        </Card>
 
         <p v-if="splitError" class="border-[1.5px] border-danger bg-danger-bg px-3 py-2 text-sm text-danger">{{ splitError }}</p>
         <p v-if="quoteError" class="border-[1.5px] border-danger bg-danger-bg px-3 py-2 text-sm text-danger">{{ quoteError }}</p>

@@ -9,6 +9,7 @@ import Button from '@/components/ui/Button.vue';
 import PageHeader from '@/components/ui/PageHeader.vue';
 import Input from '@/components/ui/Input.vue';
 import InfoTip from '@/components/ui/InfoTip.vue';
+import Label from '@/components/ui/Label.vue';
 import { useToast } from '@/composables/useToast';
 
 defineOptions({ layout: AppLayout });
@@ -75,16 +76,16 @@ function submitPassword() {
                 <form class="flex flex-col gap-4" @submit.prevent="submitProfile">
                     <div class="grid grid-cols-1 gap-4 sm:grid-cols-2">
                         <div>
-                            <label for="name" class="mb-1 block text-sm font-semibold text-text-base">
+                            <Label for="name" class="mb-1">
                                 Name <span class="text-danger">*</span>
-                            </label>
+                            </Label>
                             <Input id="name" v-model="profileForm.name" type="text" autocomplete="name" placeholder="e.g. Jane Doe" required />
                             <p v-if="profileForm.errors.name" class="mt-1 text-sm text-danger">{{ profileForm.errors.name }}</p>
                         </div>
                         <div>
-                            <label for="email" class="mb-1 block text-sm font-semibold text-text-base">
+                            <Label for="email" class="mb-1">
                                 Email <span class="text-danger">*</span>
-                            </label>
+                            </Label>
                             <Input id="email" v-model="profileForm.email" type="email" autocomplete="username" placeholder="you@example.com" required />
                             <p v-if="profileForm.errors.email" class="mt-1 text-sm text-danger">{{ profileForm.errors.email }}</p>
                         </div>
@@ -107,9 +108,9 @@ function submitPassword() {
                 <form class="flex flex-col gap-4" @submit.prevent="submitPassword">
                     <div class="grid grid-cols-1 gap-4 sm:grid-cols-2">
                         <div class="sm:col-span-2">
-                            <label for="current_password" class="mb-1 block text-sm font-semibold text-text-base">
+                            <Label for="current_password" class="mb-1">
                                 Current password <span class="text-danger">*</span>
-                            </label>
+                            </Label>
                             <Input
                                 id="current_password"
                                 v-model="passwordForm.current_password"
@@ -123,9 +124,9 @@ function submitPassword() {
                             </p>
                         </div>
                         <div>
-                            <label for="password" class="mb-1 block text-sm font-semibold text-text-base">
+                            <Label for="password" class="mb-1">
                                 New password <span class="text-danger">*</span>
-                            </label>
+                            </Label>
                             <Input
                                 id="password"
                                 v-model="passwordForm.password"
@@ -137,9 +138,9 @@ function submitPassword() {
                             <p v-if="passwordForm.errors.password" class="mt-1 text-sm text-danger">{{ passwordForm.errors.password }}</p>
                         </div>
                         <div>
-                            <label for="password_confirmation" class="mb-1 block text-sm font-semibold text-text-base">
+                            <Label for="password_confirmation" class="mb-1">
                                 Confirm new password <span class="text-danger">*</span>
-                            </label>
+                            </Label>
                             <Input
                                 id="password_confirmation"
                                 v-model="passwordForm.password_confirmation"

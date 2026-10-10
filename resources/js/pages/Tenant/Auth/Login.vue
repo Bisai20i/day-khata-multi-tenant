@@ -4,6 +4,7 @@ import { Lock, Mail } from '@lucide/vue';
 import AuthLayout from '@/layouts/AuthLayout.vue';
 import Input from '@/components/ui/Input.vue';
 import Button from '@/components/ui/Button.vue';
+import Label from '@/components/ui/Label.vue';
 
 const form = useForm({
     email: '',
@@ -25,7 +26,7 @@ function submit() {
 
         <form class="flex flex-col gap-4" @submit.prevent="submit">
             <div>
-                <label for="email" class="mb-1 block text-sm font-semibold text-text-base">Email <span class="text-danger">*</span></label>
+                <Label for="email" class="mb-1">Email <span class="text-danger">*</span></Label>
                 <Input
                     id="email"
                     v-model="form.email"
@@ -40,7 +41,7 @@ function submit() {
             </div>
 
             <div>
-                <label for="password" class="mb-1 block text-sm font-semibold text-text-base">Password <span class="text-danger">*</span></label>
+                <Label for="password" class="mb-1">Password <span class="text-danger">*</span></Label>
                 <Input id="password" v-model="form.password" type="password" :icon="Lock" autocomplete="current-password" placeholder="Your password" required />
                 <p v-if="form.errors.password" class="mt-1 text-sm text-danger">{{ form.errors.password }}</p>
             </div>

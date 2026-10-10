@@ -1,16 +1,18 @@
 <script setup>
 import { h, ref, watch } from 'vue';
 import { Link, useForm, usePage } from '@inertiajs/vue3';
-import { Plus, Printer } from '@lucide/vue';
+import { Ban, Plus, Printer } from '@lucide/vue';
 import AppLayout from '@/layouts/AppLayout.vue';
 import { useLayoutChrome } from '@/composables/useLayoutChrome';
 import Card from '@/components/ui/Card.vue';
 import Button from '@/components/ui/Button.vue';
+import Tooltip from '@/components/ui/Tooltip.vue';
 import Input from '@/components/ui/Input.vue';
 import Modal from '@/components/ui/Modal.vue';
 import Badge from '@/components/ui/Badge.vue';
 import PageHeader from '@/components/ui/PageHeader.vue';
 import DataTable from '@/components/ui/DataTable.vue';
+import Label from '@/components/ui/Label.vue';
 import { useToast } from '@/composables/useToast';
 import { formatMoney, sumMoney } from '@/lib/money';
 import { formatBsDate } from '@/lib/format';
@@ -118,34 +120,39 @@ const columns = [
         header: 'Actions',
         numeric: false,
         cell: ({ row }) =>
-            h('div', { class: 'flex items-center gap-2' }, [
+            h('div', { class: 'flex items-center gap-1' }, [
                 // Every receipt prints, live or cancelled (flags G-07), for a
                 // user holding receipts.print.
                 can('receipts.print')
-                    ? h(
-                          'a',
-                          {
-                              href: `/receipts/${row.original.id}/print`,
-                              target: '_blank',
-                              rel: 'noopener',
-                              title: 'Print this receipt',
-                              class: 'flex h-[26px] w-[26px] items-center justify-center bg-bg-subtle text-text-faint transition-colors duration-150 hover:bg-primary-tint hover:text-primary',
-                              'aria-label': `Print receipt from ${row.original.customer?.name ?? 'customer'}`,
-                          },
-                          [h(Printer, { class: 'h-[13px] w-[13px]' })],
+                    ? h(Tooltip, { label: 'Print receipt' }, () =>
+                          h(
+                              'a',
+                              {
+                                  href: `/receipts/${row.original.id}/print`,
+                                  target: '_blank',
+                                  rel: 'noopener',
+                                  class: 'flex h-[26px] w-[26px] items-center justify-center bg-bg-subtle text-text-faint transition-colors duration-150 hover:bg-primary-tint hover:text-primary',
+                                  'aria-label': `Print receipt from ${row.original.customer?.name ?? 'customer'}`,
+                              },
+                              [h(Printer, { class: 'h-[13px] w-[13px]' })],
+                          ),
                       )
                     : null,
                 // Cancelling reverses money already collected, so the route
                 // needs receipts.cancel (C5): do not offer a button that would 403.
                 row.original.status === 'posted' && can('receipts.cancel')
-                    ? h(Button, {
-                          variant: 'secondary',
-                          tone: 'purple',
-                          type: 'button',
-                          title: 'Cancel this receipt (posts a reversing entry)',
-                          'aria-label': `Cancel receipt from ${row.original.customer?.name ?? 'customer'}`,
-                          onClick: () => openCancel(row.original),
-                      }, () => 'Cancel receipt')
+                    ? h(Tooltip, { label: 'Cancel receipt (posts a reversing entry)' }, () =>
+                          h(
+                              'button',
+                              {
+                                  type: 'button',
+                                  class: 'flex h-[26px] w-[26px] items-center justify-center bg-bg-subtle text-text-faint transition-colors duration-150 hover:bg-danger-bg hover:text-danger',
+                                  'aria-label': `Cancel receipt from ${row.original.customer?.name ?? 'customer'}`,
+                                  onClick: () => openCancel(row.original),
+                              },
+                              [h(Ban, { class: 'h-[13px] w-[13px]' })],
+                          ),
+                      )
                     : null,
             ]),
     },
@@ -175,7 +182,11 @@ const columns = [
                 </Button>
             </PageHeader>
 
-            <Card variant="panel">
+            <Card variant="panel" class="bg-white">
+                <div v-if="receipts.data.length > 0" class="mb-3 flex flex-wrap items-center justify-between gap-2">
+                    <p class="text-xs text-text-muted" aria-live="polite">Showing {{ receipts.from }}–{{ receipts.to }} of {{ receipts.total }}</p>
+                </div>
+
                 <div v-if="receipts.data.length === 0" class="flex flex-col items-center gap-3 py-10 text-center">
                     <p class="text-sm font-semibold text-text-strong">No receipts yet</p>
                     <p class="text-xs text-text-muted">Record money received from a customer and it will be listed here.</p>
@@ -192,7 +203,6 @@ const columns = [
                     empty-message="No receipts"
                 />
 
-                <p v-if="receipts.data.length > 0" class="mt-3 text-xs text-text-muted" aria-live="polite">Showing {{ receipts.from }}–{{ receipts.to }} of {{ receipts.total }}</p>
                 <nav v-if="receipts.data.length > 0 && receipts.last_page > 1" aria-label="Receipts pagination" class="mt-3 flex items-center justify-end gap-2">
                     <Link
                         v-if="receipts.prev_page_url"
@@ -227,14 +237,14 @@ const columns = [
                     This posts a reversing entry: the customer owes you this amount again and any bills it was matched to become unpaid. This cannot be undone.
                 </p>
                 <div>
-                    <label for="receipt-cancel-reason" class="mb-1 block text-sm font-semibold text-text-base">Reason <span class="text-danger">*</span></label>
+                    <Label for="receipt-cancel-reason" class="mb-1">Reason <span class="text-danger">*</span></Label>
                     <Input id="receipt-cancel-reason" v-model="cancelForm.reason" type="text" placeholder="e.g. Entered wrong amount" maxlength="500" required />
                     <p v-if="cancelForm.errors.reason" class="mt-1 text-sm text-danger" role="alert">{{ cancelForm.errors.reason }}</p>
                 </div>
             </form>
 
             <template #footer>
-                <Button variant="secondary" tone="purple" type="button" @click="cancelling = null">Keep receipt</Button>
+                <Button variant="secondary" tone="neutral" type="button" @click="cancelling = null">Keep receipt</Button>
                 <Button variant="primary" tone="purple" type="button" :disabled="cancelForm.processing" :loading="cancelForm.processing" @click="submitCancel">
                     Cancel receipt
                 </Button>
