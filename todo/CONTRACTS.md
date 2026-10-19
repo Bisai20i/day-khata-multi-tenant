@@ -205,6 +205,14 @@ Cancellable tables: `sales`, `sales_returns`, `receipts`, `purchases`, `purchase
   (`original VAT - VAT already reversed`).
 - Default store = the original document's store. Return date must be `>=` the original document date and
   inside the open fiscal year.
+- **SAL-07: returns pro-rate commission reversal; last return takes remainder (decided 2026-10-15).** A posted
+  linked sales return of a sale that posted an agent commission adds Dr agent payable / Cr EXE22 to its own
+  credit-note voucher (so return cancel reverses it with everything else). Amount, anchored cumulatively over
+  the sale's posted returns: `commission.multipliedByFraction(returnedTotal, sale.total) - alreadyReversed`,
+  floored at zero; the return that brings `returnedTotal` to the sale total takes `commission -
+  alreadyReversed` exactly, so the total reversed never exceeds the commission. `alreadyReversed` is read from
+  the EXE22 credits on the posted returns' vouchers (no stored column). Pending requests, unlinked returns
+  and sales without a posted commission reverse nothing. Sale cancel stays blocked while any return is live.
 
 ## C7. Invoice numbers and snapshots (T03 numbering, T04/T05/T06 columns)
 

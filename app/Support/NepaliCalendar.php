@@ -44,6 +44,12 @@ final class NepaliCalendar
      * rather than recomputed, since a wrong day-count here would silently
      * produce wrong dates.
      *
+     * Rows 2050-2086 verified 2026-10-17 against nepalicalendar.rat32.com,
+     * hamropatro.com, sbmdkl/nepali-date-converter and medic/bikram-sambat (2083
+     * corrected). Rows 2087+ are projections: re-verify each Chaitra. Keep in
+     * lockstep with public/date-picker/nepaliDate-picker.js (BS_DATA) and the
+     * legacy Nepali_Calendar table.
+     *
      * @var array<int, array<int, int>>
      */
     private const BS_MONTH_DAYS = [
@@ -130,7 +136,7 @@ final class NepaliCalendar
         2080 => [31, 32, 31, 32, 31, 30, 30, 30, 29, 29, 30, 30],
         2081 => [31, 32, 31, 32, 31, 30, 30, 30, 29, 30, 29, 31],
         2082 => [31, 31, 32, 31, 31, 31, 30, 29, 30, 29, 30, 30],
-        2083 => [31, 31, 32, 31, 31, 30, 30, 30, 29, 30, 30, 30],
+        2083 => [31, 31, 32, 31, 31, 31, 30, 29, 30, 29, 30, 30],
         2084 => [31, 31, 32, 31, 31, 30, 30, 30, 29, 30, 30, 30],
         2085 => [31, 32, 31, 32, 30, 31, 30, 30, 29, 30, 30, 30],
         2086 => [30, 32, 31, 32, 31, 30, 30, 30, 29, 30, 30, 30],

@@ -105,7 +105,9 @@ function submit() {
 async function destroy(subgroup) {
     if (!(await confirm({ message: `Delete account subgroup "${subgroup.name}"? This cannot be undone, and it will be refused if accounts still use it.`, tone: 'danger', confirmLabel: 'Delete' }))) return;
     router.delete(`/account-subgroups/${subgroup.id}`, {
+        preserveScroll: true,
         onSuccess: () => toast({ message: 'Account subgroup deleted', variant: 'success' }),
+        onError: (errors) => toast({ message: errors.account_subgroup ?? Object.values(errors)[0] ?? 'Could not delete the subgroup.', variant: 'danger' }),
     });
 }
 

@@ -3,6 +3,7 @@ import { computed, nextTick, ref, watch } from 'vue';
 import { Calendar, ChevronLeft, ChevronRight } from '@lucide/vue';
 import { PopoverAnchor, PopoverContent, PopoverPortal, PopoverRoot, PopoverTrigger } from 'reka-ui';
 import { adToBs, bsToAd, bsToAdString, daysInBsMonth, MAX_BS_YEAR, MIN_BS_YEAR, NEPALI_MONTH_NAMES } from '@/lib/nepali-calendar';
+import { todayInKathmandu } from '@/lib/format';
 import { cn } from '@/lib/utils';
 
 /**
@@ -38,7 +39,9 @@ const navButtonClass =
 const headerButtonClass =
     'flex-1 truncate px-2 py-1 text-center text-[13px] font-semibold text-text-strong transition-colors duration-150 hover:text-primary';
 
-const todayBs = adToBs(new Date());
+// Nepal's calendar day (not the browser's), re-read whenever the picker opens so a
+// page left open past midnight does not highlight yesterday.
+const todayBs = ref(adToBs(todayInKathmandu()));
 
 const isOpen = ref(false);
 const view = ref('day'); // 'day' | 'month' | 'year'
@@ -51,8 +54,8 @@ const bsDay = ref(null);
 // The year/month currently shown in the day/month grids - independent of the
 // selected date so navigating around doesn't change the selection until the
 // user actually picks a day.
-const viewYear = ref(todayBs.year);
-const viewMonth = ref(todayBs.month);
+const viewYear = ref(todayBs.value.year);
+const viewMonth = ref(todayBs.value.month);
 
 const yearGridEl = ref(null);
 
@@ -111,9 +114,10 @@ watch(isOpen, (open) => {
         return;
     }
 
+    todayBs.value = adToBs(todayInKathmandu());
     view.value = 'day';
-    viewYear.value = bsYear.value ?? todayBs.year;
-    viewMonth.value = bsMonth.value ?? todayBs.month;
+    viewYear.value = bsYear.value ?? todayBs.value.year;
+    viewMonth.value = bsMonth.value ?? todayBs.value.month;
 });
 
 watch(view, async (value) => {
@@ -233,7 +237,7 @@ const daysInView = computed(() => {
 const dayCells = computed(() => [...Array(leadingBlanks.value).fill(null), ...Array.from({ length: daysInView.value }, (_, index) => index + 1)]);
 
 function isToday(day) {
-    return day === todayBs.day && viewMonth.value === todayBs.month && viewYear.value === todayBs.year;
+    return day === todayBs.value.day && viewMonth.value === todayBs.value.month && viewYear.value === todayBs.value.year;
 }
 
 function isSelectedDay(day) {

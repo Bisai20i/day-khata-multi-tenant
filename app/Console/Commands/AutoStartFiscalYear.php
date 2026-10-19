@@ -57,7 +57,7 @@ class AutoStartFiscalYear extends Command
 
     public function handle(): int
     {
-        $today = NepaliCalendar::adToBs(Carbon::today());
+        $today = NepaliCalendar::adToBs(Carbon::now('Asia/Kathmandu')->startOfDay());
 
         Tenant::query()
             ->where('status', TenantStatus::Active)

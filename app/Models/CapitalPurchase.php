@@ -289,8 +289,13 @@ class CapitalPurchase extends Model
                 throw new InvalidArgumentException('No active store is configured.');
             }
 
+            // Supplier before the bill-number guard and the fiscal year, the
+            // posting lock order (Item::lockForStockOut()): the
+            // capital_purchases insert's foreign-key check would otherwise
+            // take this row only after the fiscal year, against a purchase
+            // that holds it and waits on the fiscal year (flags PUR-20).
             $supplierId = $data['supplier_id'] ?? null;
-            $supplier = $supplierId ? Supplier::findOrFail($supplierId) : null;
+            $supplier = $supplierId ? Supplier::whereKey($supplierId)->lockForUpdate()->firstOrFail() : null;
 
             $paymentAccountId = ! empty($data['bank_account_id']) ? (int) $data['bank_account_id'] : null;
             if ($paymentAccountId !== null) {

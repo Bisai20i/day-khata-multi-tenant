@@ -4,8 +4,8 @@ Audited 2026-09-21 by read-only agents. Severities were assigned by each agent w
 
 | File | Flags | P0/P1 status | P2 status |
 |---|---|---|---|
-| sales.md | SAL-01..12 | SAL-01..04 FIXED | SAL-05, SAL-06, SAL-08..11 FIXED; SAL-12 FIXED; SAL-07 deferred |
-| purchases.md | PUR-01..12 | PUR-01..03 FIXED | PUR-04..08, PUR-09..12 FIXED |
+| sales.md | SAL-01..12 | SAL-01..04 FIXED | SAL-05, SAL-06, SAL-08..11 FIXED; SAL-12 FIXED; SAL-07 FIXED (2026-10-15) |
+| purchases.md | PUR-01..21 | PUR-01..03 FIXED | PUR-04..08, PUR-09..12 FIXED; PUR-13..19 (P3, price-update prompt) FIXED 2026-10-15; PUR-20..21 (lock-order deadlocks) FIXED 2026-10-15 |
 | journal-entries.md | JE-01..11 | JE-01..04 FIXED | JE-05..11 FIXED |
 | capital-and-services.md | CS-01..11 | CS-01..03 FIXED (CS-05 also); CS-08 (P0) FIXED | CS-04, CS-06, CS-07, CS-09..11 FIXED |
 

@@ -440,24 +440,28 @@ class StockAdjustment extends Model
     }
 
     /**
-     * Locks the items being taken out of stock and refuses the whole
-     * document if any of them would go below zero **at this store**.
+     * Locks every item on the adjustment and refuses the whole document if
+     * any item being taken out would go below zero **at this store**.
      *
      * The lock is taken on the `items` rows in ascending id order before any
      * stock is read, which is what stops two terminals from both passing the
      * check on the last unit (CONTRACTS C10); `lockForUpdate()` is a no-op on
-     * SQLite, so this is verified by review rather than by a test.
+     * SQLite, so this is verified by review rather than by a test. The 'in'
+     * lines' items are locked too: left to the line and stock-movement
+     * inserts, InnoDB's foreign-key checks would take them in line order
+     * while this adjustment already holds its 'out' items, against a bill
+     * that holds them in id order (flags PUR-21).
      *
      * @param  array<int, Quantity>  $requestedOut  required quantity per item, already aggregated
-     * @param  Collection<int, Item>  $items
+     * @param  Collection<int, Item>  $items  every item on the adjustment, keyed by id
      */
     private static function assertStockAvailable(array $requestedOut, Collection $items, int $storeId): void
     {
+        Item::lockForStockOut($items->keys()->all());
+
         if ($requestedOut === []) {
             return;
         }
-
-        Item::lockForStockOut(array_keys($requestedOut));
 
         $available = Item::currentStockByItem(array_keys($requestedOut), $storeId);
 

@@ -115,6 +115,92 @@ C3, C4, C5, C6, C10 rather than line by line.
 - Evidence: PurchaseController::index passes no canCancel flag. A non-admin can fill the reason dialog and submit; the 403 is not a validation error, so reasonForm.errors stays empty and Inertia shows a bare error page instead of a message in the dialog.
 - Fix: pass canCancel (as CapitalPurchaseController.php:48 does) and hide the button for non-admins.
 
+### Purchase price update prompt: deferred low-risk items (PUR-13..PUR-19)
+
+Found 2026-10-15 by read-only reviews of the uncommitted "update saved purchase price?" feature (Purchases/Create.vue,
+resources/js/lib/purchasePriceUpdate.js, resources/js/composables/usePurchasePriceConfirm.js, useConfirm.js,
+ConfirmDialog.vue, app/Support/Inventory/ItemPurchasePriceUpdater.php). All P3; fixed 2026-10-15.
+
+### PUR-13 (P3) Changing an existing line's unit or item never prompts
+- **FIXED** (2026-10-15): changing a bill line's unit or item re-runs the price check (Create.vue changeLineUnit/changeLineItem -> confirmLine).
+- Where: usePurchasePriceConfirm.js (only the rate blur prompts); Create.vue `clearPrefill` (C4) only affects a later rate blur.
+- Wrong: switching a line already on the bill to another unit (or item) keeps the carried-over rate and asks nothing,
+  even when the new unit has a different or no saved price. The staging row does prompt on add.
+- Fix: also run the price check when an inline line's unit or item changes.
+
+### PUR-14 (P3) A "Yes" is keyed by item+unit+rate, not by line, so it can come back silently
+- **FIXED** (2026-10-15, decision: answers belong to the line): each line carries `price_check {prefilled, confirmed, declined[]}` keyed by item|unit|rate; a Yes counts only while the line keeps that key, removing a line drops it, and `pricePayload(lines)` builds price_updates from lines (last line per item wins, as on the server).
+- Where: purchasePriceUpdate.js `pendingFor` / `pricePayload` (newest Yes whose item+unit+rate is on the bill).
+- Wrong: Yes at 10, edit to 11 and say No, edit back to 10: no prompt and 10 is sent. Yes at 12, remove that line, add
+  a new line at 12: no prompt and 12 is sent.
+- Fix (if wanted): tie answers to the line, or ask again when a line returns to an earlier answered rate.
+
+### PUR-15 (P3) A replacing confirm request doesn't re-run dialog focus
+- **FIXED** (2026-10-15): ConfirmDialog keeps the first request's returnFocus and re-focuses the safe button when a request replaces an open one.
+- Where: useConfirm.js (C5: an open request is answered false before a new one replaces it), ConfirmDialog.vue.
+- Wrong: `:open` stays true, so `open-auto-focus` doesn't run again. A replacing `safeDefault` request doesn't get focus
+  on "No", and the replaced request's `returnFocus` is dropped (`pendingReturnFocus` is overwritten).
+- Fix: re-focus the safe button when the request object changes; keep the first request's return-focus target.
+
+### PUR-16 (P3) Client and server disagree when the chosen unit's conversion factor is null
+- **FIXED** (2026-10-15): ItemPurchasePriceUpdater treats a null conversion factor like 0 (only the chosen unit updates), matching the client.
+- Where: purchasePriceUpdate.js `rescalePlan` vs ItemPurchasePriceUpdater.php `applyToItem`/`plannedRates`.
+- Wrong: with a null factor the dialog says "only this unit changes", but the server returns 0 and changes nothing.
+  A factor of 0 behaves the same on both sides.
+- Fix: make both sides treat null like 0 (update only the chosen unit), or both refuse.
+
+### PUR-17 (P3) A click on Save or Remove right after an inline rate edit is swallowed
+- **FIXED** (2026-10-15): the rate blur remembers a pointer-pressed Save/Remove button (relatedTarget in the same form) and re-clicks it after the answer. Tab focus is never re-clicked; touch and Safari keep the old behaviour.
+- Where: PurchaseCreateLinesTable.vue rate blur → usePurchasePriceConfirm.js `onLineRateBlur`.
+- Wrong: the blur opens the prompt before the click lands, so the user has to click Save or Remove again.
+- Fix: remember the clicked control (the blur's relatedTarget) and re-trigger it after the answer, or prompt on Save instead.
+
+### PUR-18 (P3) A barcode scan while the prompt is open answers "No"
+- **FIXED** (2026-10-15): while the prompt is open, the staging row detects a scanner burst (>=3 keys, <=50 ms apart), swallows its Enter and scans the code once the dialog closes. A typed Enter still answers.
+- Where: the barcode input path on Create.vue while ConfirmDialog is open (Enter from the scanner).
+- Wrong: the scanner's trailing Enter closes the dialog with the safe default (No), and the scanned code is lost.
+- Fix: ignore Enter for a short time after the dialog opens, or buffer scans until the dialog closes.
+
+### PUR-19 (P3) "No" answers and prefill memory are thin and lost on the draft round trip
+- **FIXED** (2026-10-15): declines are a per-line set stored on the line, so they survive the quick-add draft round trip; `roundRate2` removed.
+- Where: usePurchasePriceConfirm.js `declinedRates` and the prefill WeakMap; the "+ New item" quick-add draft round trip.
+- Wrong: only the last declined rate per item+unit is kept, so switching between two declined rates asks again; declines
+  and prefills aren't saved in the draft, so one extra prompt can appear after the quick-add bounce. Yes answers do survive.
+- Fix: keep a set of declined rates per item+unit and store declines in the draft next to `price_updates`.
+- Nitpick: `roundRate2` in purchasePriceUpdate.js is exported but used only by tests.
+
+### Lock-order deadlock risks found while fixing the price update (PUR-20..PUR-21)
+
+Found 2026-10-15 by read-only review; these existed before the price-update feature. Verified by code reading only:
+`lockForUpdate()` does nothing on SQLite, so no test can show them. On InnoDB a deadlock rolls one transaction back,
+so one clerk's save fails with a 500 and has to be retried; no data is corrupted. The purchase-vs-sale case was fixed
+in the same change: PurchaseController::store now calls `lockStockItems()` before Purchase::post(), locking the bill's
+stockable items first, as Sale::assertStockAvailable() does.
+
+### PUR-20 (P2) A supplier payment and a purchase for the same supplier can deadlock
+- **FIXED** (2026-10-15): Payment::post locks the supplier first; the same inversion was fixed in the unlinked purchase return, CapitalPurchase::post and CapitalPurchaseSettlement. One global posting lock order is documented on Item::lockForStockOut(): supplier, documents (asc id), stockable items (asc id), fiscal year. Tests (query-log order only, SQLite ignores FOR UPDATE): tests/Feature/Tenant/Purchases/PostingLockOrderTest.php.
+- Where: app/Models/Payment.php `post()` (around :113-151); app/Models/Purchase.php `post()` (supplier lockForUpdate
+  around :314, then JournalVoucher::post around :435); JournalVoucher::post locks the open fiscal_years row FOR UPDATE.
+- Wrong: the purchase X-locks the supplier and then waits for the fiscal year. The payment reads the supplier without a
+  lock and holds the fiscal year (JournalVoucher::post); its `payments` insert then takes an FK shared lock on the
+  supplier row. Purchase waits on the payment's fiscal-year lock, the payment waits on the purchase's supplier lock.
+- Fix: in Payment::post, lock the supplier (`Supplier::whereKey(...)->lockForUpdate()`) before JournalVoucher::post,
+  so both take supplier, then fiscal year. Check the purchase-return and capital-purchase paths for the same pattern.
+
+### PUR-21 (P2) Stock adjustment vs a multi-item bill when negative stock is allowed
+- **FIXED** (2026-10-15): sales, purchases (lock moved into Purchase::post after the supplier; controller lockStockItems() removed), purchase returns and sales returns (post, approve, unlinked) lock stockable items in ascending id in both negative-stock modes, only the check stays conditional. StockAdjustment and StockConversion now lock stock-in items as well as stock-out. Tests: tests/Feature/Tenant/Purchases/PostingLockOrderTest.php.
+- Where: app/Models/StockAdjustment.php `post()` → `assertStockAvailable()` (around :241, :454-460) always X-locks the
+  items going out, in ascending id order (`Item::lockForStockOut`). With `allow_negative_stock` on, Sale::post and
+  PurchaseController::store (`lockStockItems()`) take no item lock up front; their line and stock-movement inserts take
+  FK shared locks on `items` rows in line order, not id order.
+- Wrong: a bill with lines for items 2 then 1 holds a shared lock on 2 and needs 1; an adjustment of items 1 and 2 holds
+  the X lock on 1 and waits for 2. Deadlock. (A stock adjustment never locks the fiscal year, so this isn't a
+  fiscal-year inversion.) With negative stock off, sales and purchases lock stockable items in id order first, so this
+  can't happen there.
+- Fix: lock the bill's stockable items in id order up front in both modes (drop the `allow_negative_stock` early
+  return in Sale::assertStockAvailable's lock and in `lockStockItems()`, keeping only the stock check conditional),
+  or sort lines by item id before inserting.
+
 ## Checked and fine
 - Purchase voucher balances: expense debits (net of line and header discount, grouped by account) plus input VAT (ASA23)
   equal the supplier credit of total; TDS is a separate credit TDS-payable and debit supplier pair; settlement debits the

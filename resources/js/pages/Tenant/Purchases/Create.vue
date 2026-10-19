@@ -17,6 +17,7 @@ import { useConfirm } from '@/composables/useConfirm';
 import { usePermissions } from '@/composables/usePermissions';
 import { usePurchaseCreatePreview } from '@/composables/usePurchaseCreatePreview';
 import { usePurchaseCreateQuickAdd } from '@/composables/usePurchaseCreateQuickAdd';
+import { usePurchasePriceConfirm } from '@/composables/usePurchasePriceConfirm';
 import { emptyPurchaseLine, restorePurchaseDraft } from '@/lib/purchaseCreate';
 import { todayInKathmandu } from '@/lib/format';
 
@@ -104,7 +105,9 @@ function defaultFormData() {
         fiscal_year_id: null,
         reason: '',
         // Items only ever enter the bill through the "Add item" staging row
-        // (PurchaseCreateStagingRow) - no starter blank row here.
+        // (PurchaseCreateStagingRow) - no starter blank row here. Each line
+        // also carries its own "update saved price?" answers (`price_check`,
+        // see usePurchasePriceConfirm()), so they travel with it.
         lines: [],
     };
 }
@@ -130,6 +133,7 @@ const itemOptions = computed(() =>
     })),
 );
 const itemsById = computed(() => new Map(props.items.map((i) => [i.id, i])));
+const priceConfirm = usePurchasePriceConfirm(form, itemsById);
 const suppliersById = computed(() => new Map(props.suppliers.map((s) => [s.id, s])));
 
 // Selecting an alternate unit auto-fills the rate from that unit's own
@@ -139,18 +143,15 @@ function selectLineUnit(line, unitId) {
     line.item_unit_id = unitId;
 
     const item = itemsById.value.get(line.item_id);
+    const savedRate = unitId === '' || unitId === null ? item?.purchase_rate : item?.units?.find((u) => u.id === unitId)?.purchase_rate;
 
-    if (unitId === '' || unitId === null) {
-        if (item?.purchase_rate != null) {
-            line.rate = String(item.purchase_rate);
-        }
-
-        return;
-    }
-
-    const unit = item?.units?.find((u) => u.id === unitId);
-    if (unit?.purchase_rate != null) {
-        line.rate = String(unit.purchase_rate);
+    // A saved price put into the rate is the prefill: adding the line at that
+    // rate never asks about the saved price. A unit with none keeps the rate
+    // already typed, which is not this unit's saved price, so adding the line
+    // asks ("not set -> X", No by default).
+    if (savedRate != null) {
+        line.rate = String(savedRate);
+        priceConfirm.notePrefill(line);
     }
 }
 
@@ -163,6 +164,20 @@ function selectLineItem(line, itemId) {
 
     const item = itemsById.value.get(itemId);
     line.rate = item?.purchase_rate != null ? String(item.purchase_rate) : '';
+    priceConfirm.notePrefill(line);
+}
+
+// A line already on the bill is re-checked against the saved price when its
+// unit or item changes, as when its rate is edited. The staging row asks
+// only when its line is added.
+function changeLineUnit(line, unitId) {
+    selectLineUnit(line, unitId);
+    priceConfirm.confirmLine(line);
+}
+
+function changeLineItem(line, itemId) {
+    selectLineItem(line, itemId);
+    priceConfirm.confirmLine(line);
 }
 
 // Picking a supplier re-defaults the PAN / non-VAT toggle from that
@@ -176,6 +191,14 @@ function selectSupplier(supplierId) {
 }
 
 const stagingRow = ref(null);
+
+// A line goes on the bill at the typed rate whatever the answer; the prompt
+// only decides whether the item's saved price follows it. Focus then goes
+// back to the Item search, where adding a line always leaves it.
+function addLine(line) {
+    form.lines.push(line);
+    priceConfirm.confirmLine(line, { returnFocus: () => stagingRow.value?.focusItem() });
+}
 
 const { totals, previewError, partialSplitError, canSubmit, preview, toggleLineDiscountType, toggleHeaderDiscountType } =
     usePurchaseCreatePreview(form, itemsById, isCorrectionSelected);
@@ -236,7 +259,9 @@ async function requestCancel() {
 // decimal:0,N rules exist precisely to reject over-precise input rather than
 // let MySQL round it away (audit P0-5).
 function submit(print = false) {
-    if (!canSubmit.value) {
+    // Not while a saved-price question is still open: its answer would miss
+    // this save.
+    if (!canSubmit.value || priceConfirm.asking.value) {
         return;
     }
 
@@ -266,6 +291,9 @@ function submit(print = false) {
             discount_type: line.discount_type,
             note: line.note === '' ? null : line.note,
         })),
+        // One per item: a line's Yes, while the line still has the item,
+        // unit and rate it was given for.
+        price_updates: priceConfirm.payload(data.lines),
     })).post('/purchases', {
         preserveScroll: true,
         onSuccess: (page) => {
@@ -363,7 +391,8 @@ function submit(print = false) {
                 :show-line-extras="showLineExtras"
                 :select-item="selectLineItem"
                 :select-unit="selectLineUnit"
-                @add="(line) => form.lines.push(line)"
+                :hold-scans="priceConfirm.asking.value"
+                @add="addLine"
             />
 
             <PurchaseCreateLinesTable
@@ -375,9 +404,11 @@ function submit(print = false) {
                 :vat-rate="String(form.vat_rate)"
                 :force-non-taxable="form.force_non_taxable"
                 :totals="totals"
-                :select-item="selectLineItem"
-                :select-unit="selectLineUnit"
+                :select-item="changeLineItem"
+                :select-unit="changeLineUnit"
                 @remove="(index) => form.lines.splice(index, 1)"
+                @rate-focus="priceConfirm.onLineRateFocus"
+                @rate-blur="priceConfirm.onLineRateBlur"
                 @toggle-discount-type="toggleLineDiscountType"
             />
 

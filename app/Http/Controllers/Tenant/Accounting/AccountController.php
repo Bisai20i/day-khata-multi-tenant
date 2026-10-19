@@ -8,6 +8,7 @@ use App\Exports\AccountBookExport;
 use App\Http\Controllers\Concerns\ImportsCsv;
 use App\Http\Controllers\Controller;
 use App\Models\Account;
+use App\Models\ActivityLog;
 use App\Models\AccountGroup;
 use App\Models\AccountSubgroup;
 use App\Models\CapitalPurchase;
@@ -152,8 +153,28 @@ class AccountController extends Controller
 
     public function destroy(Account $account): RedirectResponse
     {
+        // The usage check is re-run under a row lock inside the transaction
+        // so a posting that lands between the click and the delete cannot
+        // slip through; the model's deleting hook is the final backstop.
         try {
-            $account->delete();
+            DB::transaction(function () use ($account): void {
+                $locked = Account::query()->whereKey($account->getKey())->lockForUpdate()->firstOrFail();
+
+                if ($blocker = $locked->deletionBlocker()) {
+                    throw new InvalidArgumentException($blocker);
+                }
+
+                $locked->delete();
+
+                ActivityLog::create([
+                    'user_id' => auth('web')->id(),
+                    'action' => 'deleted',
+                    'subject_type' => $locked->getMorphClass(),
+                    'subject_id' => $locked->getKey(),
+                    'description' => sprintf('Account #%s "%s" deleted', $locked->getKey(), $locked->name),
+                    'changes' => null,
+                ]);
+            });
         } catch (InvalidArgumentException $e) {
             throw ValidationException::withMessages(['account' => $e->getMessage()]);
         }

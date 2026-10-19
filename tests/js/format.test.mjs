@@ -12,7 +12,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { bsToAdString } from '../../resources/js/lib/nepali-calendar.js';
+import { adToBs, bsToAd, bsToAdString, daysInBsMonth } from '../../resources/js/lib/nepali-calendar.js';
 import { formatBsDate, todayInKathmandu } from '../../resources/js/lib/format.js';
 
 test('todayInKathmandu returns a plain YYYY-MM-DD AD date', () => {
@@ -78,4 +78,48 @@ test('formatBsDate stays blank rather than showing a wrong date', () => {
     assert.equal(formatBsDate(new Date('nonsense')), '');
     assert.equal(formatBsDate('1800-01-01'), ''); // before the supported BS range
     assert.equal(formatBsDate('2500-01-01'), ''); // after it
+});
+
+// Regression: the BS 2083 row was once wrong, shifting dates from Ashoj onwards by a day.
+const BS_2083_BOUNDARIES = [
+    ['2026-10-17', 2083, 6, 31],
+    ['2026-10-18', 2083, 7, 1],
+    ['2026-11-16', 2083, 7, 30],
+    ['2026-11-17', 2083, 8, 1],
+    ['2027-01-14', 2083, 9, 30],
+    ['2027-01-15', 2083, 10, 1],
+    ['2027-04-13', 2083, 12, 30],
+    ['2027-04-14', 2084, 1, 1],
+];
+
+test('adToBs and bsToAd agree on the BS 2083 boundary dates', () => {
+    for (const [ad, year, month, day] of BS_2083_BOUNDARIES) {
+        assert.deepEqual(adToBs(ad), { year, month, day }, `adToBs(${ad})`);
+        assert.equal(bsToAdString(year, month, day), ad, `bsToAdString(${year}-${month}-${day})`);
+    }
+});
+
+test('bsToAd rejects day 32 of Ashoj 2083 (a 31 day month)', () => {
+    assert.throws(() => bsToAd(2083, 6, 32), RangeError);
+});
+
+test('every day of BS 2083 round-trips and is consecutive', () => {
+    const monthDays = [31, 31, 32, 31, 31, 31, 30, 29, 30, 29, 30, 30];
+    let previous = null;
+
+    monthDays.forEach((days, index) => {
+        const month = index + 1;
+        assert.equal(daysInBsMonth(2083, month), days);
+
+        for (let day = 1; day <= days; day++) {
+            const ad = bsToAd(2083, month, day);
+            assert.deepEqual(adToBs(ad), { year: 2083, month, day });
+
+            const utc = Date.UTC(ad.year, ad.month - 1, ad.day);
+            if (previous !== null) {
+                assert.equal(utc - previous, 86400000);
+            }
+            previous = utc;
+        }
+    });
 });

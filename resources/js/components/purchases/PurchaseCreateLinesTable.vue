@@ -10,7 +10,7 @@ import { unitOptionsFor } from '@/lib/saleCreate';
 // The lines already committed to the bill - same layout as
 // SaleCreateLinesTable. `lines` and `errors` are the parent form's own,
 // edited in place; selectItem/selectUnit are Purchases/Create.vue's line
-// actions.
+// actions (which also re-ask about the item's saved purchase price).
 const props = defineProps({
     lines: { type: Array, default: () => [] },
     errors: { type: Object, default: () => ({}) },
@@ -24,7 +24,12 @@ const props = defineProps({
     selectUnit: { type: Function, required: true },
 });
 
-defineEmits(['remove', 'toggle-discount-type']);
+// rate-focus/rate-blur let the page ask about the item's saved purchase
+// price once the clerk leaves a rate they changed (usePurchasePriceConfirm).
+// rate-blur carries the native blur event: its relatedTarget is where focus
+// was going, which the page restores once the question is answered (and a
+// button pressed with the mouse, e.g. Save or Remove, is clicked then).
+defineEmits(['remove', 'toggle-discount-type', 'rate-focus', 'rate-blur']);
 
 const lineGridColumns = computed(() =>
     props.showLineExtras ? '1fr 80px 90px 80px 100px 120px 96px 28px' : '1fr 80px 90px 100px 120px 96px 28px',
@@ -161,6 +166,8 @@ function onLineEnter(index, field) {
                         step="0.0001"
                         placeholder="0.00"
                         required
+                        @focus="$emit('rate-focus', line)"
+                        @blur="$emit('rate-blur', line, $event)"
                         @keydown.enter.prevent="onLineEnter(index, 'rate')"
                     />
                     <p v-if="errors[`lines.${index}.rate`]" class="mt-1 text-xs text-danger">{{ errors[`lines.${index}.rate`] }}</p>

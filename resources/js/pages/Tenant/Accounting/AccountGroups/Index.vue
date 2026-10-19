@@ -105,7 +105,9 @@ function submit() {
 async function destroy(group) {
     if (!(await confirm({ message: `Delete account group "${group.name}"? This cannot be undone, and it will be refused if subgroups or accounts still use it.`, tone: 'danger', confirmLabel: 'Delete' }))) return;
     router.delete(`/account-groups/${group.id}`, {
+        preserveScroll: true,
         onSuccess: () => toast({ message: 'Account group deleted', variant: 'success' }),
+        onError: (errors) => toast({ message: errors.account_group ?? Object.values(errors)[0] ?? 'Could not delete the group.', variant: 'danger' }),
     });
 }
 

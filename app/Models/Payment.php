@@ -113,7 +113,13 @@ class Payment extends Model
     public static function post(array $data, User $actor): self
     {
         return DB::transaction(function () use ($data, $actor) {
-            $supplier = Supplier::findOrFail($data['supplier_id']);
+            // Supplier, then the bills, then (inside JournalVoucher::post())
+            // the fiscal year: the posting lock order (Item::lockForStockOut()).
+            // Read without a lock, this payment held the fiscal year and then
+            // waited on the supplier row - the payments insert's foreign-key
+            // check takes a shared lock on it - while a purchase for the same
+            // supplier held that row and waited on the fiscal year (PUR-20).
+            $supplier = Supplier::whereKey($data['supplier_id'])->lockForUpdate()->firstOrFail();
             $amount = Money::of($data['amount']);
 
             if (! $amount->isPositive()) {

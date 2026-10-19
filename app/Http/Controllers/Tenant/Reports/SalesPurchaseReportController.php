@@ -22,6 +22,7 @@ use App\Models\Sale;
 use App\Models\SalesReturn;
 use App\Models\Store;
 use App\Models\Supplier;
+use App\Support\AsOfDate;
 use App\Support\Money\Money;
 use Brick\Math\BigDecimal;
 use Brick\Math\RoundingMode;
@@ -735,7 +736,7 @@ class SalesPurchaseReportController extends Controller
 
             $key = $sale->customer_id;
             $byParty[$key] ??= $this->emptyAgingRow($sale->customer?->name ?? 'Unknown');
-            $bucket = $this->agingBucket((int) $sale->date->diffInDays(Carbon::parse($asOf)));
+            $bucket = $this->agingBucket((int) abs($sale->date->copy()->startOfDay()->diffInDays(Carbon::parse($asOf)->startOfDay())));
 
             $byParty[$key][$bucket] = Money::of($byParty[$key][$bucket])->plus($outstanding)->toString();
             $byParty[$key]['invoiced'] = Money::of($byParty[$key]['invoiced'])->plus($outstanding)->toString();
@@ -787,7 +788,7 @@ class SalesPurchaseReportController extends Controller
 
             $key = $purchase->supplier_id;
             $byParty[$key] ??= $this->emptyAgingRow($purchase->supplier?->name ?? 'Unknown');
-            $bucket = $this->agingBucket((int) $purchase->date->diffInDays(Carbon::parse($asOf)));
+            $bucket = $this->agingBucket((int) abs($purchase->date->copy()->startOfDay()->diffInDays(Carbon::parse($asOf)->startOfDay())));
 
             $byParty[$key][$bucket] = Money::of($byParty[$key][$bucket])->plus($outstanding)->toString();
             $byParty[$key]['invoiced'] = Money::of($byParty[$key]['invoiced'])->plus($outstanding)->toString();
@@ -920,14 +921,22 @@ class SalesPurchaseReportController extends Controller
                 }
             }
 
+            // The year containing $asOf (open or closed). An as-of date past
+            // the last year falls back to the latest year that has started;
+            // before the first year there is no ledger to explain, so the
+            // opening bucket is skipped rather than showing -invoiced.
             $fiscalYearId = FiscalYear::query()
                 ->whereDate('start_date', '<=', $asOf)
                 ->whereDate('end_date', '>=', $asOf)
-                ->value('id');
+                ->value('id')
+                ?? FiscalYear::query()
+                    ->whereDate('start_date', '<=', $asOf)
+                    ->orderByDesc('start_date')
+                    ->value('id');
 
             $balances = $this->ledgerBalances(array_values($accountIds), $fiscalYearId, $asOf, $creditNormal);
 
-            foreach ($accountIds as $partyId => $accountId) {
+            foreach ($fiscalYearId === null ? [] : $accountIds as $partyId => $accountId) {
                 $balance = $balances[$accountId] ?? Money::zero();
                 $invoiced = Money::of($byParty[$partyId]['invoiced'] ?? '0.00');
                 $opening = $balance->minus($invoiced);
@@ -1155,11 +1164,7 @@ class SalesPurchaseReportController extends Controller
 
     private function resolveAsOf(Request $request): string
     {
-        $asOf = $request->string('as_of')->toString();
-
-        return $asOf !== ''
-            ? Carbon::parse($asOf)->toDateString()
-            : Carbon::now()->toDateString();
+        return AsOfDate::resolve($request->input('as_of'));
     }
 
     /**

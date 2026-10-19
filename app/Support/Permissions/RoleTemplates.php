@@ -212,6 +212,7 @@ final class RoleTemplates
         'stock_reports.print',
         'stock_reports.export',
         'stock_valuation.view',
+        'stock_ageing.view',
     ];
 
     /**

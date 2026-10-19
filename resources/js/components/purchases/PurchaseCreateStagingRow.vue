@@ -1,5 +1,5 @@
 <script setup>
-import { computed, nextTick, ref } from 'vue';
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import { Plus } from '@lucide/vue';
 import Button from '@/components/ui/Button.vue';
 import Input from '@/components/ui/Input.vue';
@@ -22,6 +22,9 @@ const props = defineProps({
     showLineExtras: { type: Boolean, default: false },
     selectItem: { type: Function, required: true },
     selectUnit: { type: Function, required: true },
+    // True while the page's "update saved price?" question is open: a
+    // barcode scanned meanwhile is held until it is answered (see below).
+    holdScans: { type: Boolean, default: false },
 });
 
 const emit = defineEmits(['add']);
@@ -59,8 +62,16 @@ function addStagingLine() {
         return;
     }
 
-    emit('add', { ...stagingLine.value });
+    // The staging object itself rather than a copy (a fresh one replaces it
+    // right below), so per-line state the page keeps on it - the rate it
+    // was prefilled with (`price_check`) - follows the line onto the bill.
+    emit('add', stagingLine.value);
     stagingLine.value = emptyPurchaseLine();
+    focusStagingField(stagingItemEl);
+}
+
+/** Back to the Item search, where adding a line leaves the cursor. */
+function focusItem() {
     focusStagingField(stagingItemEl);
 }
 
@@ -130,6 +141,59 @@ async function scanBarcode() {
     }
 }
 
+// --- Scans while the saved-price question is open --------------------------
+// A scanner types the code and an Enter a few milliseconds apart. With the
+// question open those keys land on its focused "No" button: the code is lost
+// and the Enter answers No. So while `holdScans` is on, the Enter that ends
+// such a burst is kept off the dialog, and the code waits in the scan box
+// until the question is answered. A person types far slower than
+// SCAN_KEY_GAP_MS, so their own Enter still answers the dialog.
+const SCAN_KEY_GAP_MS = 50;
+const SCAN_MIN_LENGTH = 3;
+let burst = '';
+let lastKeyAt = 0;
+let scanHeld = false;
+
+function holdScannerBurst(event) {
+    // Browser autofill sends keydowns without a key; Shift arrives between
+    // the characters of an upper-case code.
+    const key = event.key ?? '';
+    if (!props.holdScans || key === '' || key === 'Shift') return;
+
+    const quick = event.timeStamp - lastKeyAt <= SCAN_KEY_GAP_MS;
+    lastKeyAt = event.timeStamp;
+
+    if (key.length === 1 && !event.ctrlKey && !event.altKey && !event.metaKey) {
+        burst = quick ? burst + key : key;
+        return;
+    }
+
+    if (key === 'Enter' && quick && burst.length >= SCAN_MIN_LENGTH) {
+        event.preventDefault();
+        event.stopPropagation();
+        if (canScanBarcode.value) {
+            barcodeCode.value = burst;
+            scanHeld = true;
+        }
+    }
+    burst = '';
+}
+
+watch(
+    () => props.holdScans,
+    (holding) => {
+        burst = '';
+        if (holding || !scanHeld) return;
+
+        scanHeld = false;
+        scanBarcode();
+    },
+);
+
+// Capture phase on window: runs before the dialog's own Enter handling.
+onMounted(() => window.addEventListener('keydown', holdScannerBurst, true));
+onBeforeUnmount(() => window.removeEventListener('keydown', holdScannerBurst, true));
+
 // --- Enter key: advance, never submit --------------------------------------
 // Same as SaleCreateStagingRow: Enter walks Qty -> Rate -> Discount and then
 // commits the line, instead of submitting the whole bill from the Qty field.
@@ -146,7 +210,7 @@ function onStagingEnter(field) {
     addStagingLine();
 }
 
-defineExpose({ stage });
+defineExpose({ stage, focusItem });
 </script>
 
 <template>

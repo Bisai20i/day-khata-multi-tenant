@@ -7,7 +7,7 @@ Do not build these as part of `start`. Ask the user when the plan is finished.
 | In-place editing of posted documents | Immutability by design; posted bills are corrected by cancel or return. Editing would need a versioned-document design for IRD. |
 | POS cross-terminal stock reservation | Needs a reservation model and expiry rules. Phase 2 adds row locks, which already stop two terminals selling the last unit at posting time. |
 | Item gallery (multiple images) | Low business value, storage decisions per tenant. |
-| Sales agent commission statement, multiple agents per line, commission reversal on returns | Needs commission policy decisions (when earned, clawback rules). |
+| Sales agent commission statement, multiple agents per line (commission reversal on returns: built 2026-10-15, SAL-07) | Needs commission policy decisions (when earned, clawback rules). |
 | Unified capital sales/purchases cross-report | Low priority once capital documents are in the VAT books (T10). |
 | Forced first-login password change for new employees | Security policy decision. |
 | Quotation partial fulfilment across several sales | Scoped already in `mem.md`; changes Quotation's 1:1 conversion model. |

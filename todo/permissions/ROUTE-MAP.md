@@ -322,6 +322,7 @@ Decisions and justifications:
 | tenant-reports-inventory | tenant.reports.stock-summary | GET /reports/stock-summary | InventoryReportController@stockSummary | any auth | stock_reports.view |
 | tenant-reports-tds | tenant.reports.tds | GET /reports/tds | TdsReportController@index | any auth | tax_reports.view |
 | tenant-reports-stock-valuation | tenant.reports.stock-valuation | GET /reports/stock-valuation | StockValuationReportController@index | any auth | stock_valuation.view |
+| tenant-reports-stock-ageing | tenant.reports.stock-ageing | GET /reports/stock-ageing | StockAgeingReportController@index | any auth | stock_ageing.view |
 | tenant-reports-item-wise-sales | tenant.reports.item-wise-sales | GET /reports/item-wise-sales | ItemWiseSalesReportController@index | any auth | sales_reports.view |
 | tenant-reports-item-wise-purchase | tenant.reports.item-wise-purchase | GET /reports/item-wise-purchase | ItemWisePurchaseReportController@index | any auth | purchase_reports.view |
 | tenant-reports-category-wise | tenant.reports.sales-by-category | GET /reports/sales-by-category | CategoryWiseReportController@salesByCategory | any auth | sales_reports.view |

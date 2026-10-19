@@ -115,7 +115,7 @@ class StockConversion extends Model
      * Input items are guarded against being consumed beyond what the
      * conversion's store actually holds: requested quantity is aggregated
      * per item first (an item can legitimately appear on more than one input
-     * line), the items are locked with Item::lockForStockOut(), and the
+     * line), every input and output item is locked with Item::lockForStockOut(), and the
      * comparison is exact Quantity arithmetic against a store-scoped SQL
      * sum. The old version rounded a float difference to 4 decimals, which
      * is the comparison audit P1 flagged.
@@ -187,7 +187,11 @@ class StockConversion extends Model
                 $requestedOut[$itemId] = ($requestedOut[$itemId] ?? Quantity::zero())->plus($line['quantity']);
             }
 
-            Item::lockForStockOut(array_keys($requestedOut));
+            // Output items too, in the same ascending-id query: left to the
+            // line and stock-movement inserts, they would be taken after the
+            // input items in line order, against a bill holding them in id
+            // order (flags PUR-21).
+            Item::lockForStockOut($items->keys()->all());
 
             $available = Item::currentStockByItem(array_keys($requestedOut), $storeId);
 

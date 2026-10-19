@@ -64,6 +64,7 @@ postRefund() and Receipt::post() balances by construction, and JournalVoucher::v
 - Fix: reject (or force to 0) when `commission_amount > 0` and `agent_id` is null.
 
 ### SAL-07 (P2) Commission is not reversed by returns
+- **FIXED** (2026-10-15): a posted return reverses its pro-rated share of the agent commission (Dr agent payable / Cr EXE22) inside its own credit-note voucher, so return cancel reverses it too. The share is anchored cumulatively (commission x returned value / sale total, minus EXE22 already credited by posted returns), so the running total never exceeds the commission and a full return reverses it exactly. Decision recorded in todo/CONTRACTS.md C6. Tests: tests/Feature/Tenant/Sales/SalesReturnCommissionTest.php.
 - File: app/Models/SalesReturn.php:1303-1359 (postCreditNote)
 - Wrong: a full or partial return posts no adjustment to EXE22 or the agent payable, so the agent keeps commission on
   returned goods. Cancelling the whole sale does reverse it (mirrored voucher). Not confirmed against legacy; decide

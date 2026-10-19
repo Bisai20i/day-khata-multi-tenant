@@ -35,6 +35,7 @@ dataset('reports and admin routes', [
     'aged payables' => ['/reports/aged-payables', 'payables_reports.view', 'reports'],
     'stock summary' => ['/reports/stock-summary', 'stock_reports.view', 'reports'],
     'stock valuation' => ['/reports/stock-valuation', 'stock_valuation.view', 'reports'],
+    'stock ageing' => ['/reports/stock-ageing', 'stock_ageing.view', 'reports'],
     'print log' => ['/reports/print-log', 'print_log.view', 'admin'],
     'activity log' => ['/activity-log', 'activity_log.view', 'admin'],
     'notices' => ['/notices', 'notices.manage', 'admin'],

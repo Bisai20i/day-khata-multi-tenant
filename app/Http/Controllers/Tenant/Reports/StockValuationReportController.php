@@ -4,10 +4,10 @@ namespace App\Http\Controllers\Tenant\Reports;
 
 use App\Http\Controllers\Controller;
 use App\Models\Store;
+use App\Support\AsOfDate;
 use App\Support\Inventory\StockCosting;
 use App\Support\Money\Money;
 use Illuminate\Http\Request;
-use Illuminate\Support\Carbon;
 use Inertia\Inertia;
 use Inertia\Response;
 
@@ -61,9 +61,7 @@ class StockValuationReportController extends Controller
 
     private function resolveAsOf(Request $request): string
     {
-        $asOf = $request->string('as_of')->toString();
-
-        return $asOf !== '' ? Carbon::parse($asOf)->toDateString() : Carbon::now()->toDateString();
+        return AsOfDate::resolve($request->input('as_of'));
     }
 
     /**

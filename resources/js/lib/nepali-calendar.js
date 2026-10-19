@@ -5,7 +5,11 @@
  * same day-count table (BS 2000-2090, ported verbatim from the legacy day_khata app's
  * `App\Models\Nepali_Calendar`) and the same epoch anchor (BS 2000-01-01 == AD 1943-04-14),
  * so conversions match exactly between server and client. Keep this table in sync with the
- * PHP version if it's ever changed.
+ * PHP version if it's ever changed (lockstep with app/Support/NepaliCalendar.php).
+ *
+ * Correction: the BS 2083 row was wrong in the ported table (it put Kartik 1 on Ashoj 31);
+ * it is now 31,31,32,31,31,31,30,29,30,29,30,30, matching the day_khata engine fix
+ * (plans/nepali-date-engine-fix.md).
  *
  * AD dates are handled as plain {year, month, day} integers (month 1-12) rather than JS
  * `Date` objects throughout, to sidestep `Date`'s local-timezone/DST parsing footguns for
@@ -102,7 +106,7 @@ const BS_MONTH_DAYS = {
     2080: [31, 32, 31, 32, 31, 30, 30, 30, 29, 29, 30, 30],
     2081: [31, 32, 31, 32, 31, 30, 30, 30, 29, 30, 29, 31],
     2082: [31, 31, 32, 31, 31, 31, 30, 29, 30, 29, 30, 30],
-    2083: [31, 31, 32, 31, 31, 30, 30, 30, 29, 30, 30, 30],
+    2083: [31, 31, 32, 31, 31, 31, 30, 29, 30, 29, 30, 30],
     2084: [31, 31, 32, 31, 31, 30, 30, 30, 29, 30, 30, 30],
     2085: [31, 32, 31, 32, 30, 31, 30, 30, 29, 30, 30, 30],
     2086: [30, 32, 31, 32, 31, 30, 30, 30, 29, 30, 30, 30],

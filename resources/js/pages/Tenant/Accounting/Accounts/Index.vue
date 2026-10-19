@@ -209,7 +209,11 @@ async function clearOpeningBalanceImport(entry) {
 async function destroy(account) {
     if (!(await confirm({ message: `Delete account "${account.name}"? This cannot be undone, and it will be refused if the account already has ledger entries.`, tone: 'danger', confirmLabel: 'Delete account' }))) return;
     router.delete(`/accounts/${account.id}`, {
+        preserveScroll: true,
         onSuccess: () => toast({ message: 'Account deleted', variant: 'success' }),
+        // The server refuses an in-use account with a field error; surface it
+        // since this row action has no form to render errors in.
+        onError: (errors) => toast({ message: errors.account ?? Object.values(errors)[0] ?? 'Could not delete the account.', variant: 'danger' }),
     });
 }
 

@@ -100,8 +100,13 @@ const columns = [
 
             <p class="mt-3 text-[11.5px] text-text-faint">
                 The ageing buckets cover open credit invoices. Anything else the customer's ledger carries -
-                a migrated opening due, a receipt on account, a manual journal voucher - sits in
-                "Opening / unallocated", so this report always adds up to the customer's ledger balance.
+                a migrated opening due, an advance or receipt on account (shown as a negative amount), a manual
+                journal voucher - sits in "Opening / unallocated". With All stores, the total equals the customer's
+                ledger balance as of the chosen date, so it matches the Debtors report only when that report is run for the
+                same fiscal year and the date is today (the list shows closing balances). Invoice balances use
+                every payment recorded so far, so for a past date part of the difference lands in Opening / unallocated.
+                When a store is selected the ledger balance cannot be split by store, so the total covers
+                open invoices only.
             </p>
         </Card>
     </div>

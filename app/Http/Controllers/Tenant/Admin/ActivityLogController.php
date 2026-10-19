@@ -8,6 +8,7 @@ use App\Models\CapitalPurchase;
 use App\Models\CapitalSale;
 use App\Models\FiscalYear;
 use App\Models\FixedAsset;
+use App\Models\Item;
 use App\Models\JournalVoucher;
 use App\Models\Payment;
 use App\Models\Purchase;
@@ -56,6 +57,9 @@ class ActivityLogController extends Controller
             User::class,
             FiscalYear::class,
             Role::class,
+            // Saved purchase price changes made from a purchase bill
+            // (ItemPurchasePriceUpdater) - logged by hand, not by the observer.
+            Item::class,
         ];
 
         return collect($models)

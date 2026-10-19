@@ -5,7 +5,9 @@ namespace App\Http\Controllers\Tenant\Accounting;
 use App\Http\Controllers\Controller;
 use App\Models\AccountGroup;
 use App\Models\AccountHead;
+use App\Models\ActivityLog;
 use App\Models\JournalVoucherLine;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Validation\Rule;
@@ -43,7 +45,24 @@ class AccountGroupController extends Controller
 
     public function destroy(AccountGroup $accountGroup): RedirectResponse
     {
-        $accountGroup->delete();
+        DB::transaction(function () use ($accountGroup): void {
+            $locked = AccountGroup::query()->whereKey($accountGroup->getKey())->lockForUpdate()->firstOrFail();
+
+            if ($blocker = $locked->deletionBlocker()) {
+                throw ValidationException::withMessages(['account_group' => $blocker]);
+            }
+
+            $locked->delete();
+
+            ActivityLog::create([
+                'user_id' => auth('web')->id(),
+                'action' => 'deleted',
+                'subject_type' => $locked->getMorphClass(),
+                'subject_id' => $locked->getKey(),
+                'description' => sprintf('Account group #%s "%s" deleted', $locked->getKey(), $locked->name),
+                'changes' => null,
+            ]);
+        });
 
         return redirect()->route('tenant.account-groups.index')->with('status', 'Account group deleted.');
     }

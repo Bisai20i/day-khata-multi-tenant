@@ -312,6 +312,20 @@ class Item extends Model
      * each other. `lockForUpdate()` is a no-op on SQLite, so this is
      * verified by review, not by a test.
      *
+     * Posting lock order (flags PUR-20, PUR-21), one order for every writer:
+     *
+     * 1. the supplier row (Purchase, Payment, unlinked PurchaseReturn,
+     *    CapitalPurchase and its settlements);
+     * 2. the document rows being settled, returned or cancelled, ascending id;
+     * 3. every stockable item the document writes a line or stock movement
+     *    for - stock in as well as stock out, and whether or not negative
+     *    stock is allowed - through this method, ascending id;
+     * 4. the fiscal year (JournalVoucher::post()/reverse()).
+     *
+     * A path skips the steps it has no rows for, never reorders them. Rows
+     * reached only after the fiscal year (foreign-key shared locks on a
+     * customer or a non-stockable item) are ones no posting locks before it.
+     *
      * @param  array<int, int|string>  $itemIds
      * @return Collection<int, static>
      */

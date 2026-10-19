@@ -276,7 +276,10 @@ class SalesReturn extends Model
      * - debit Sales Account (INI20) with the returned net value,
      * - debit VAT Payable (LIA20) with the reversed VAT,
      * - credit the customer with `total - tdsShare`,
-     * - credit the TDS account with `tdsShare`.
+     * - credit the TDS account with `tdsShare`,
+     * - if the sale posted an agent commission, debit the agent and credit
+     *   Sales Commission (EXE22) with this return's pro-rated share of it
+     *   (SAL-07, see commissionReversalLines()).
      * At sale time TDS was booked as `[debit tds_account, credit customer]`,
      * netting the receivable down to `total - tds`; reversing a share of it
      * the same way keeps the customer's ledger and `Sale::outstandingAmount()`
@@ -350,6 +353,15 @@ class SalesReturn extends Model
             if (isset($data['expected_total']) && $data['expected_total'] !== ''
                 && ! $prepared['total']->isEqualTo(Money::of($data['expected_total']))) {
                 throw new InvalidArgumentException('The credit note total changed. Please review it before saving.');
+            }
+
+            // A pending request takes no fiscal year and moves no stock, so
+            // only a posting needs its items ahead of the fiscal year.
+            if ($post) {
+                static::lockReturnedItems(array_map(
+                    static fn (array $line): int => (int) $line['sale_line']->item_id,
+                    array_filter($prepared['lines'], static fn (array $line): bool => $line['moves_stock'])
+                ));
             }
 
             $voucher = $post ? static::postCreditNote($sale, $prepared, $date, $data['reason'] ?? null, $actor) : null;
@@ -438,6 +450,7 @@ class SalesReturn extends Model
 
             $settings = CompanySetting::current();
             $items = Item::with('units')->whereIn('id', collect($lines)->pluck('item_id'))->get()->keyBy('id');
+            static::lockReturnedItems($items->filter(fn (Item $item): bool => (bool) $item->is_stockable)->keys()->all());
 
             [$calculatorLines, $preparedLines] = static::prepareUnlinkedLines($lines, $items);
 
@@ -699,6 +712,12 @@ class SalesReturn extends Model
                 ])->all(),
             ];
 
+            $movedStock = static::saleLinesThatMovedStock($storedLines->pluck('sale_line_id')->all());
+            static::lockReturnedItems($storedLines
+                ->filter(fn (SaleReturnLine $line): bool => in_array($line->sale_line_id, $movedStock, true))
+                ->map(fn (SaleReturnLine $line): int => (int) $line->saleLine->item_id)
+                ->all());
+
             $voucher = static::postCreditNote($sale, $prepared, $date, $salesReturn->reason, $actor);
 
             $salesReturn->update([
@@ -707,8 +726,6 @@ class SalesReturn extends Model
                 'credit_note_number' => static::creditNoteNumberFor($voucher),
                 'status' => 'posted',
             ]);
-
-            $movedStock = static::saleLinesThatMovedStock($storedLines->pluck('sale_line_id')->all());
 
             foreach ($storedLines as $line) {
                 if (! in_array($line->sale_line_id, $movedStock, true)) {
@@ -1221,6 +1238,21 @@ class SalesReturn extends Model
     }
 
     /**
+     * Locks the items this return puts back into stock, ascending id, before
+     * the credit note takes the fiscal year: the posting lock order
+     * (Item::lockForStockOut()). Left to the stock-movement inserts, InnoDB's
+     * foreign-key checks would take these rows only after the fiscal year,
+     * against a sale or purchase that holds them and waits on the fiscal year
+     * (flags PUR-21). Taken whether or not negative stock is allowed.
+     *
+     * @param  array<int, int>  $itemIds
+     */
+    private static function lockReturnedItems(array $itemIds): void
+    {
+        Item::lockForStockOut($itemIds);
+    }
+
+    /**
      * Which of these sale lines actually moved stock when the sale posted.
      *
      * Stockability is read from the movement the sale wrote, not from the
@@ -1351,6 +1383,11 @@ class SalesReturn extends Model
             ];
         }
 
+        // Same voucher as the credit note, so the clawback posts atomically
+        // with the return and cancel() reverses it along with everything
+        // else (JournalVoucher::reverse() mirrors every line).
+        array_push($voucherLines, ...static::commissionReversalLines($sale, $prepared['total']));
+
         return JournalVoucher::post(
             [
                 'voucher_type' => VoucherType::SaleReturn->value,
@@ -1365,6 +1402,116 @@ class SalesReturn extends Model
             // "{number} - Credit" (SettlementNarration::forMode(null)).
             lineNarration: fn (JournalVoucher $voucher): string => SettlementNarration::line(static::creditNoteNumberFor($voucher), null),
         );
+    }
+
+    /**
+     * The agent's commission on the returned goods, clawed back (SAL-07):
+     * debit the agent's payable, credit Sales Commission (EXE22) - the exact
+     * mirror of the pair Sale::voucherLines() posted.
+     *
+     * Pro-rated by value, anchored cumulatively so rounding never drifts:
+     * after this return, the commission reversed across every posted return
+     * of the sale must be `commission x returned / sale total` (one HalfUp
+     * rounding), so this return reverses that target minus what the other
+     * posted returns already reversed. The return that brings the returned
+     * value up to the sale total takes exactly the remainder (C6's
+     * last-quantity rule, applied to the commission), so a sale returned in
+     * full reverses its commission to the paisa, and the running total can
+     * never exceed the commission. A cancelled return drops out of both sums,
+     * so the next return re-anchors on what is still live. The target is
+     * floored at zero: the reversal is never a fresh commission charge.
+     *
+     * "Already reversed" is read from the EXE22 credits on the posted
+     * returns' own vouchers rather than a stored column: the ledger is the
+     * single source of truth, a cancelled return's share disappears with its
+     * status, and returns posted before this rule simply count as zero (the
+     * next return catches their share up).
+     *
+     * Callers hold the sale row lock (record(), approve()), so two returns of
+     * the same sale cannot both read the same "already reversed".
+     *
+     * @return list<array{account_id: int, debit: string, credit: string, narration: string}>
+     */
+    private static function commissionReversalLines(Sale $sale, Money $returnTotal): array
+    {
+        $commission = Money::of($sale->commission_amount ?? '0');
+
+        if (! $commission->isPositive()) {
+            return [];
+        }
+
+        $agentAccountId = static::commissionPayableAccountId($sale);
+
+        // A commission saved without an agent (before flags G-15) was never
+        // posted by Sale::voucherLines(), so there is nothing to claw back.
+        if ($agentAccountId === null) {
+            return [];
+        }
+
+        $commissionExpenseId = Account::where('code', 'EXE22')->firstOrFail()->id;
+
+        $postedReturns = static::query()
+            ->where('sale_id', $sale->id)
+            ->where('status', 'posted')
+            ->get(['id', 'total', 'journal_voucher_id']);
+
+        $returnedValue = Money::sum($postedReturns->map(fn (self $salesReturn): Money => Money::of($salesReturn->total)))
+            ->plus($returnTotal);
+
+        $alreadyReversed = Money::sum(
+            JournalVoucherLine::query()
+                ->whereIn('journal_voucher_id', $postedReturns->pluck('journal_voucher_id')->filter()->all())
+                ->where('account_id', $commissionExpenseId)
+                ->get(['credit'])
+                ->map(fn (JournalVoucherLine $line): Money => Money::of($line->credit))
+        );
+
+        // A sale total is always positive (C3 step 7), but a non-positive
+        // one cannot be divided by: any return then counts as completing it.
+        $saleTotal = Money::of($sale->total);
+        $target = $returnedValue->isGreaterThanOrEqualTo($saleTotal)
+            ? $commission
+            : $commission->multipliedByFraction($returnedValue, $saleTotal);
+
+        $reversal = Money::max(Money::zero(), $target->minus($alreadyReversed));
+
+        if ($reversal->isZero()) {
+            return [];
+        }
+
+        return [
+            ['account_id' => $agentAccountId, 'debit' => $reversal->toString(), 'credit' => '0', 'narration' => 'Commission reversed'],
+            ['account_id' => $commissionExpenseId, 'debit' => '0', 'credit' => $reversal->toString(), 'narration' => 'Commission reversed'],
+        ];
+    }
+
+    /**
+     * The ledger account the sale credited its commission to. Normally the
+     * agent's own account; an agent row can be deleted after the sale
+     * (`sales.agent_id` is nullOnDelete) while its ledger account, which has
+     * postings, stays - so it is then read off the sale's own voucher. An
+     * inactive agent is still the party owed (or owing) the commission and
+     * is used as is. Null means the sale never posted a commission.
+     */
+    private static function commissionPayableAccountId(Sale $sale): ?int
+    {
+        $sale->loadMissing('agent:id,account_id');
+
+        if ($sale->agent?->account_id) {
+            return (int) $sale->agent->account_id;
+        }
+
+        if (! $sale->journal_voucher_id) {
+            return null;
+        }
+
+        $accountId = JournalVoucherLine::query()
+            ->where('journal_voucher_id', $sale->journal_voucher_id)
+            ->where('credit', '>', 0)
+            ->whereHas('account.subgroup', fn (Builder $query) => $query->where('name', 'Sales Agents'))
+            ->value('account_id');
+
+        return $accountId === null ? null : (int) $accountId;
     }
 
     /**

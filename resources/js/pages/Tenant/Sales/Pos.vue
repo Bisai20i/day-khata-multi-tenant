@@ -78,6 +78,7 @@ const props = defineProps({
     walkInCustomerId: { type: Number, default: null },
     // Legacy's top bar shows "FY: <label>" (new-pos.blade.php) - display only.
     currentFiscalYear: { type: String, default: '' },
+    companyName: { type: String, default: '' },
     invoiceSettings: {
         type: Object,
         default: () => ({
@@ -531,6 +532,7 @@ onUnmounted(() => {
     <div class="pos-root flex h-full min-h-0 flex-col overflow-y-auto lg:overflow-hidden">
         <PosTopBar
             v-model:date="form.date"
+            :company-name="companyName"
             :current-fiscal-year="currentFiscalYear"
             :is-pan-invoice="isPanInvoice"
             :is-fullscreen="isFullscreen"

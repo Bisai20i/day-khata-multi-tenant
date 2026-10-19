@@ -24,7 +24,7 @@ const props = defineProps({
     class: { type: [String, Array, Object], default: '' },
 });
 
-const emit = defineEmits(['update:open']);
+const emit = defineEmits(['update:open', 'close-auto-focus']);
 
 const { confirm } = useConfirm();
 
@@ -36,6 +36,7 @@ const sizeClasses = {
 };
 
 const body = ref(null);
+const footer = ref(null);
 let isConfirmingDiscard = false;
 
 async function onOpenChange(value) {
@@ -62,10 +63,12 @@ async function onOpenChange(value) {
 
 // The dialog would otherwise focus its first focusable element, which is the
 // [x] button in the header. Start in the form instead: the field marked
-// `data-autofocus`, else the first text control in the body.
+// `data-autofocus` (a footer button may carry it too, e.g. a confirmation's
+// safe "No"), else the first text control in the body.
 function onOpenAutoFocus(event) {
     const target =
         body.value?.querySelector('[data-autofocus]') ??
+        footer.value?.querySelector('[data-autofocus]') ??
         body.value?.querySelector('input:not([type="hidden"]):not([type="checkbox"]):not([type="file"]):not([disabled]), textarea:not([disabled])');
     if (!target) return;
 
@@ -85,6 +88,7 @@ function onOpenAutoFocus(event) {
                         props.class,
                     )"
                     @open-auto-focus="onOpenAutoFocus"
+                    @close-auto-focus="(event) => emit('close-auto-focus', event)"
                 >
                     <div class="flex shrink-0 items-start justify-between gap-4 border-b border-border px-5 py-3.5">
                         <div class="min-w-0">
@@ -105,6 +109,7 @@ function onOpenAutoFocus(event) {
                     </div>
                     <div
                         v-if="$slots.footer"
+                        ref="footer"
                         class="flex shrink-0 flex-wrap items-center justify-end gap-2 border-t border-border bg-bg-subtle px-5 py-3"
                     >
                         <slot name="footer" />

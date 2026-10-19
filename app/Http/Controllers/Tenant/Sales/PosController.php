@@ -74,6 +74,8 @@ class PosController extends Controller
             // (appropriate for a posting path, not for this purely cosmetic
             // badge) - a tenant with no open fiscal year would 404 the whole
             // POS screen instead of just showing no badge.
+            // Company Information name, shown centred in the POS header.
+            'companyName' => $settings->company_name,
             'currentFiscalYear' => FiscalYear::where('status', FiscalYearStatus::Open)->first()?->name,
             'invoiceSettings' => [
                 'default_vat_rate' => $settings->default_vat_rate,

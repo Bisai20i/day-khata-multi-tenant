@@ -506,6 +506,15 @@ class PurchaseReturn extends Model
             $date = CarbonImmutable::parse($data['date'])->startOfDay()->toDateString();
             ClosedFiscalYearGuard::assertDateInOpenYear($date, $actor);
 
+            // Supplier before the items and the fiscal year, the posting lock
+            // order (Item::lockForStockOut()): the purchase_returns insert's
+            // foreign-key check would otherwise take this row only after the
+            // fiscal year, against a purchase that holds it and waits on the
+            // fiscal year (flags PUR-20).
+            $supplier = ! empty($data['supplier_id'])
+                ? Supplier::whereKey($data['supplier_id'])->lockForUpdate()->first()
+                : null;
+
             $storeId = static::resolveUnlinkedStoreId($data['store_id'] ?? null);
             $company = CompanySetting::current();
             $vatRate = $data['vat_rate'] ?? $company->default_vat_rate ?? '13';
@@ -536,7 +545,6 @@ class PurchaseReturn extends Model
                 ];
             }
 
-            $supplier = ! empty($data['supplier_id']) ? Supplier::find($data['supplier_id']) : null;
             $creditToSupplier = ($data['payment_mode'] ?? 'cash') === 'credit';
 
             if ($creditToSupplier && ! $supplier) {
@@ -931,14 +939,14 @@ class PurchaseReturn extends Model
      * locked in ascending id first, so the reads below cannot move underneath
      * this transaction (CONTRACTS C10).
      *
+     * The lock is taken even when negative stock is allowed and only the
+     * check is skipped: it keeps the returned items ahead of the fiscal year
+     * in the posting lock order (Item::lockForStockOut(), flags PUR-21).
+     *
      * @param  list<array{purchaseLine: PurchaseLine, baseQuantity: Quantity}>  $prepared
      */
     private static function assertStockAvailable(array $prepared, int $storeId): void
     {
-        if (CompanySetting::current()->allow_negative_stock) {
-            return;
-        }
-
         /** @var array<int, Quantity> $required */
         $required = [];
 
@@ -957,6 +965,10 @@ class PurchaseReturn extends Model
 
         ksort($required);
         $items = Item::lockForStockOut(array_keys($required))->keyBy('id');
+
+        if (CompanySetting::current()->allow_negative_stock) {
+            return;
+        }
 
         foreach ($required as $itemId => $quantity) {
             $item = $items[$itemId];
@@ -1054,16 +1066,13 @@ class PurchaseReturn extends Model
      * Refuses to send back more of an item than an unlinked return's store
      * actually holds - mirrors assertStockAvailable()'s linked-return
      * equivalent, adapted to work off items directly rather than purchase
-     * lines.
+     * lines. Like it, the items are locked even when negative stock is
+     * allowed; only the check is skipped (flags PUR-21).
      *
      * @param  list<array{item: Item, baseQuantity: Quantity}>  $prepared
      */
     private static function assertUnlinkedStockAvailable(array $prepared, int $storeId): void
     {
-        if (CompanySetting::current()->allow_negative_stock) {
-            return;
-        }
-
         /** @var array<int, Quantity> $required */
         $required = [];
 
@@ -1078,6 +1087,10 @@ class PurchaseReturn extends Model
 
         ksort($required);
         $items = Item::lockForStockOut(array_keys($required))->keyBy('id');
+
+        if (CompanySetting::current()->allow_negative_stock) {
+            return;
+        }
 
         foreach ($required as $itemId => $quantity) {
             $item = $items[$itemId];

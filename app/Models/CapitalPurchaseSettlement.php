@@ -85,6 +85,17 @@ class CapitalPurchaseSettlement extends Model
     public static function settle(CapitalPurchase $capitalPurchase, array $data, User $actor): self
     {
         return DB::transaction(function () use ($capitalPurchase, $data, $actor) {
+            // Supplier, then the bill, then (inside JournalVoucher::post())
+            // the fiscal year: the posting lock order (Item::lockForStockOut()).
+            // The settlements insert's foreign-key check would otherwise take
+            // the supplier row only after the fiscal year, against a purchase
+            // that holds it and waits on the fiscal year (flags PUR-20). A
+            // capital purchase's supplier_id is written once at posting, so
+            // reading it before the bill's own lock is safe.
+            $supplier = $capitalPurchase->supplier_id
+                ? Supplier::whereKey($capitalPurchase->supplier_id)->lockForUpdate()->first()
+                : null;
+
             /** @var CapitalPurchase $locked */
             $locked = CapitalPurchase::query()->whereKey($capitalPurchase->getKey())->lockForUpdate()->firstOrFail();
 
@@ -92,7 +103,6 @@ class CapitalPurchaseSettlement extends Model
                 throw new InvalidArgumentException('Only a posted capital purchase can be settled.');
             }
 
-            $supplier = $locked->supplier_id ? Supplier::findOrFail($locked->supplier_id) : null;
             if (! $supplier) {
                 throw new InvalidArgumentException('This capital purchase has no supplier, so there is nothing to settle.');
             }

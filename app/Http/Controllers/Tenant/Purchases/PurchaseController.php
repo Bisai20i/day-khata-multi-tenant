@@ -17,6 +17,7 @@ use App\Models\Supplier;
 use App\Rules\AccountUnderHead;
 use App\Support\AmountInWords;
 use App\Support\Billing\BillingException;
+use App\Support\Inventory\ItemPurchasePriceUpdater;
 use App\Support\Money\Money;
 use App\Support\NepaliCalendar;
 use Barryvdh\DomPDF\Facade\Pdf;
@@ -26,6 +27,7 @@ use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\Response as HttpResponse;
 use Illuminate\Support\Collection;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\Rule;
 use Illuminate\Validation\ValidationException;
 use Inertia\Inertia;
@@ -108,7 +110,7 @@ class PurchaseController extends Controller
         ]);
     }
 
-    public function store(Request $request): RedirectResponse
+    public function store(Request $request, ItemPurchasePriceUpdater $priceUpdater): RedirectResponse
     {
         $data = $request->validate([
             'supplier_id' => ['required', 'exists:suppliers,id'],
@@ -173,13 +175,31 @@ class PurchaseController extends Controller
             'lines.*.discount' => ['nullable', 'numeric', 'min:0', 'decimal:0,2'],
             'lines.*.discount_type' => ['nullable', 'in:percentage,flat'],
             'lines.*.note' => ['nullable', 'string', 'max:255'],
+            // "Yes, update saved price" answers from the form, one per item:
+            // {item_id, item_unit_id, rate}. Only the list itself is checked
+            // here: it must be an array of at most 500 entries (the form sends
+            // one per item on the bill), or the bill is refused. Deliberately
+            // no per-entry rules - an entry that is malformed or not on this
+            // bill is skipped by ItemPurchasePriceUpdater, never a reason to
+            // reject the bill.
+            'price_updates' => ['nullable', 'array', 'max:500'],
         ], [
             'bill_number.unique' => 'This bill number has already been entered for this supplier. '
                 .'Cancel that purchase first if this one replaces it.',
         ]);
 
         try {
-            $purchase = Purchase::post($data, $data['lines'], $request->user());
+            // One transaction around both, so the saved prices change only
+            // when this bill really posts: a rejected, failed or duplicate
+            // bill rolls the price updates back with it. Purchase::post()
+            // locks the supplier, then the bill's stock items, then the
+            // fiscal year, so the updater's item locks are re-locks.
+            $purchase = DB::transaction(function () use ($data, $request, $priceUpdater): Purchase {
+                $purchase = Purchase::post($data, $data['lines'], $request->user());
+                $priceUpdater->apply($purchase, $data['price_updates'] ?? []);
+
+                return $purchase;
+            });
         } catch (BillingException $e) {
             // The browser sent the total it showed the user; anything else here
             // means the bill on screen was not the bill about to be saved

@@ -654,24 +654,24 @@ class Sale extends Model
     }
 
     /**
-     * Negative-stock enforcement, skipped entirely when the tenant has opted
-     * into overselling via CompanySetting::allow_negative_stock.
+     * Locks the bill's stockable items and enforces negative stock; only the
+     * check is skipped when the tenant has opted into overselling via
+     * CompanySetting::allow_negative_stock.
      *
      * Item::lockForStockOut() locks the item rows in ascending id order before
      * anything is read (C10), so two terminals selling the last unit at the
      * same moment serialise instead of both passing the check (audit P1
-     * "Negative-stock check reads without a lock"). Quantities are compared
-     * exactly as Quantity values: the old float comparison rejected valid
-     * operations and printed errors like "0.19999999999999998".
+     * "Negative-stock check reads without a lock"). The lock is taken with
+     * negative stock allowed too: it is what keeps this sale's items ahead
+     * of the fiscal year in the posting lock order, instead of being taken
+     * in line order by the line inserts (flags PUR-21). Quantities are
+     * compared exactly as Quantity values: the old float comparison rejected
+     * valid operations and printed errors like "0.19999999999999998".
      *
      * @param  array<int, array<string, mixed>>  $preparedLines
      */
     private static function assertStockAvailable(array $preparedLines, DocumentTotals $totals, int $storeId, CompanySetting $settings, string $saleDate): void
     {
-        if ($settings->allow_negative_stock) {
-            return;
-        }
-
         $requestedByItem = [];
 
         foreach ($preparedLines as $index => $prepared) {
@@ -698,6 +698,11 @@ class Sale extends Model
         }
 
         $locked = Item::lockForStockOut(array_keys($requestedByItem))->keyBy('id');
+
+        if ($settings->allow_negative_stock) {
+            return;
+        }
+
         $shortages = [];
 
         foreach ($requestedByItem as $itemId => $requested) {

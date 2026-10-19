@@ -219,6 +219,7 @@ export function navGroups() {
                     items: [
                         { label: 'Stock Summary', href: '/reports/stock-summary', icon: Boxes, permission: 'stock_reports.view' },
                         { label: 'Stock Valuation', href: '/reports/stock-valuation', icon: Boxes, permission: 'stock_valuation.view' },
+                        { label: 'Stock Ageing', href: '/reports/stock-ageing', icon: Boxes, permission: 'stock_ageing.view' },
                         { label: 'Stock by Category', href: '/reports/stock-by-category', icon: Boxes, permission: 'stock_reports.view' },
                         { label: 'Stock Movement Register', href: '/reports/stock-movement-register', icon: Boxes, permission: 'stock_reports.view' },
                         { label: 'Damage & Lost Stock', href: '/reports/damage-lost-stock', icon: Boxes, permission: 'stock_reports.view' },

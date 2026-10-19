@@ -15,6 +15,7 @@ import NepaliDateInput from '@/components/ui/NepaliDateInput.vue';
  * watcher keep working unchanged.
  */
 defineProps({
+    companyName: { type: String, default: '' },
     currentFiscalYear: { type: String, default: '' },
     isPanInvoice: { type: Boolean, default: false },
     isFullscreen: { type: Boolean, default: false },
@@ -40,6 +41,10 @@ const bindScroller = (element) => emit('scroller', element);
 </script>
 
 <template>
+    <!-- Company name (Company Information), centred in its own row so the bar's layout is untouched -->
+    <div v-if="companyName" class="pos-company shrink-0 truncate px-3.5 py-1 text-center text-sm font-bold" :title="companyName">
+        {{ companyName }}
+    </div>
     <!-- Top bar: always-visible dashboard exit, FY, help, date, invoice type, hints -->
     <div class="pos-bar flex shrink-0 flex-col lg:flex-row">
       <div class="pos-bar-section pos-bar-section--products flex items-center gap-2.5 overflow-x-auto">
@@ -118,6 +123,12 @@ const bindScroller = (element) => emit('scroller', element);
 </template>
 
 <style scoped>
+.pos-company {
+    background: var(--color-primary);
+    color: white;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.25);
+}
+
 .pos-bar {
     background: var(--color-primary);
     color: white;

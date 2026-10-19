@@ -179,6 +179,7 @@ return [
         'stock_reports.print' => ['module' => 'reports', 'group' => 'Stock reports', 'label' => 'Print item ledgers'],
         'stock_reports.export' => ['module' => 'reports', 'group' => 'Stock reports', 'label' => 'Export item ledgers'],
         'stock_valuation.view' => ['module' => 'reports', 'group' => 'Stock reports', 'label' => 'View stock valuation'],
+        'stock_ageing.view' => ['module' => 'reports', 'group' => 'Stock reports', 'label' => 'View stock ageing'],
         'activity_log.view' => ['module' => 'admin', 'group' => 'Audit', 'label' => 'View activity log'],
         'print_log.view' => ['module' => 'admin', 'group' => 'Audit', 'label' => 'View print log'],
         'backups.manage' => ['module' => 'admin', 'group' => 'Backups', 'label' => 'Manage backups', 'owner_only' => true],

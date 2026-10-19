@@ -315,6 +315,8 @@ class Purchase extends Model
             $billNumber = static::normalisedBillNumber($data['bill_number'] ?? null);
             static::assertBillNumberUnused($supplier, $billNumber, $targetFiscalYear->id);
 
+            static::lockStockItems($lines);
+
             $company = CompanySetting::current();
             $storeId = static::resolveStoreId($data['store_id'] ?? null, $company);
 
@@ -607,6 +609,30 @@ class Purchase extends Model
 
             $this->setRawAttributes($purchase->getAttributes(), true);
         });
+    }
+
+    /**
+     * Locks the bill's stockable items, ascending id, after the supplier and
+     * before the fiscal year (the posting lock order, Item::lockForStockOut()).
+     *
+     * Taken whether or not the tenant allows negative stock: the lock is about
+     * ordering, not the stock check. Left to the line and stock-movement
+     * inserts (InnoDB's foreign-key check takes a shared lock on each items
+     * row) or to ItemPurchasePriceUpdater on a Yes, these rows would be taken
+     * in line order while this bill holds the fiscal year, against a sale,
+     * return or stock adjustment that holds them in id order (flags PUR-21).
+     * Non-stockable items are left to be taken after the fiscal year: no
+     * posting locks them before it.
+     *
+     * @param  array<int, array{item_id: int|string}>  $lines
+     */
+    private static function lockStockItems(array $lines): void
+    {
+        Item::lockForStockOut(Item::query()
+            ->whereIn('id', array_column($lines, 'item_id'))
+            ->where('is_stockable', true)
+            ->pluck('id')
+            ->all());
     }
 
     /**

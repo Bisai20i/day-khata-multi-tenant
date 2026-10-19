@@ -133,3 +133,52 @@ test('fiscalYearStartBsYear places Baishakh-Ashad in the previous BS year\'s fis
         ->and(NepaliCalendar::fiscalYearStartBsYear('2025-07-17'))->toBe(2082)
         ->and(NepaliCalendar::fiscalYearStartBsYear('2026-04-14'))->toBe(2082);
 });
+
+/**
+ * Regression: the BS 2083 row was once wrong, shifting every date from Ashoj
+ * onwards by a day. Month lengths are 31,31,32,31,31,31,30,29,30,29,30,30.
+ */
+dataset('bs_2083_boundary_pairs', [
+    'last day of Ashoj 2083' => ['2026-10-17', 2083, 6, 31],
+    'first day of Kartik 2083' => ['2026-10-18', 2083, 7, 1],
+    'last day of Kartik 2083' => ['2026-11-16', 2083, 7, 30],
+    'first day of Mangsir 2083' => ['2026-11-17', 2083, 8, 1],
+    'last day of Poush 2083' => ['2027-01-14', 2083, 9, 30],
+    'first day of Magh 2083' => ['2027-01-15', 2083, 10, 1],
+    'last day of Chaitra 2083' => ['2027-04-13', 2083, 12, 30],
+    'Nepali new year 2084' => ['2027-04-14', 2084, 1, 1],
+]);
+
+test('adToBs converts BS 2083 boundary dates correctly', function (string $ad, int $bsYear, int $bsMonth, int $bsDay) {
+    expect(NepaliCalendar::adToBs($ad))->toBe(['year' => $bsYear, 'month' => $bsMonth, 'day' => $bsDay]);
+})->with('bs_2083_boundary_pairs');
+
+test('bsToAd converts BS 2083 boundary dates correctly', function (string $ad, int $bsYear, int $bsMonth, int $bsDay) {
+    expect(NepaliCalendar::bsToAd($bsYear, $bsMonth, $bsDay)->toDateString())->toBe($ad);
+})->with('bs_2083_boundary_pairs');
+
+test('bsToAd rejects day 32 of Ashoj 2083 (a 31 day month)', function () {
+    NepaliCalendar::bsToAd(2083, 6, 32);
+})->throws(InvalidArgumentException::class);
+
+test('every day of BS 2083 round-trips through bsToAd and adToBs', function () {
+    $monthDays = [31, 31, 32, 31, 31, 31, 30, 29, 30, 29, 30, 30];
+    $previous = null;
+
+    foreach ($monthDays as $index => $days) {
+        $month = $index + 1;
+
+        for ($day = 1; $day <= $days; $day++) {
+            $ad = NepaliCalendar::bsToAd(2083, $month, $day);
+
+            expect(NepaliCalendar::adToBs($ad))->toBe(['year' => 2083, 'month' => $month, 'day' => $day]);
+
+            if ($previous !== null) {
+                expect($previous->copy()->addDay()->toDateString())->toBe($ad->toDateString());
+            }
+            $previous = $ad;
+        }
+    }
+
+    expect(array_sum($monthDays))->toBe(365);
+});
