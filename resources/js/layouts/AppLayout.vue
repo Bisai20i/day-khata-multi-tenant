@@ -77,6 +77,12 @@ const sections = computed(() => {
 
 const isPlatformAdmin = computed(() => Boolean(page.props.auth?.platformAdmin));
 
+const canManageSettings = computed(() => {
+    if (!page.props.auth?.user) return false;
+    if (page.props.auth.isOwner) return true;
+    return Boolean(page.props.auth?.can?.['settings.manage']);
+});
+
 function isActive(href, exact = false) {
     const path = page.url.split('?')[0];
     return path === href || (!exact && href !== '/' && path.startsWith(`${href}/`));
@@ -287,6 +293,9 @@ function selectCommand(command) {
 }
 
 function selectActiveCommand() {
+    if (!filteredCommands.value.length || activeIndex.value < 0 || activeIndex.value >= filteredCommands.value.length) {
+        return;
+    }
     const command = filteredCommands.value[activeIndex.value];
     if (command) selectCommand(command);
 }
@@ -461,7 +470,7 @@ function selectActiveCommand() {
                                     aria-controls="command-results"
                                     :aria-expanded="searchOpen"
                                     :aria-activedescendant="searchOpen && filteredCommands.length ? `command-option-${activeIndex}` : undefined"
-                                    placeholder="Search pages and actions (Ctrl K)"
+                                    placeholder="Navigate pages and actions (Ctrl K)"
                                     class="w-full border border-border bg-bg-subtle py-1.5 pr-3 pl-8 text-[12.5px] text-text-base placeholder:text-text-faint focus:border-primary focus:bg-white focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
                                     @input="onSearchInput"
                                     @focus="() => { if (searchQuery.trim() !== '') searchOpen = true; }"
@@ -556,6 +565,9 @@ function selectActiveCommand() {
 
                         <DropdownMenuItem v-if="page.props.auth?.user" @select="() => router.visit('/profile')">
                             My Profile
+                        </DropdownMenuItem>
+                        <DropdownMenuItem v-if="canManageSettings" @select="() => router.visit('/settings')">
+                            Company Setup
                         </DropdownMenuItem>
                         <DropdownMenuItem v-if="page.props.auth?.platformAdmin" @select="() => router.visit('/two-factor')">
                             Security (two-factor)

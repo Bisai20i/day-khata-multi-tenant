@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Tenant\Accounting;
 use App\Enums\FiscalYearStatus;
 use App\Enums\VoucherType;
 use App\Exports\AccountBookExport;
+use App\Exports\Samples\OpeningBalanceSampleExport;
 use App\Http\Controllers\Concerns\ImportsCsv;
 use App\Http\Controllers\Controller;
 use App\Models\Account;
@@ -490,6 +491,10 @@ class AccountController extends Controller
      * plus two example rows that balance (a real import's debit/credit
      * totals must match exactly - see importOpeningBalances()).
      */
+        public function openingBalanceSampleExcel()
+    {
+        return Excel::download(new OpeningBalanceSampleExport(), 'opening-balance-import-sample.xlsx');
+    }
     public function openingBalanceTemplate(): StreamedResponse
     {
         return response()->streamDownload(function (): void {
@@ -523,7 +528,7 @@ class AccountController extends Controller
     public function importOpeningBalances(Request $request): RedirectResponse
     {
         $data = $request->validate([
-            'file' => ['required', 'file', 'mimes:csv,txt'],
+            'file' => ['required', 'file', 'mimes:csv,txt,xlsx,xls'],
             'date' => ['required', 'date'],
         ]);
 

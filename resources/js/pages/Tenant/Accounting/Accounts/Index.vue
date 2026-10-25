@@ -411,12 +411,20 @@ const columns = [
                     total debit must equal its total credit. If any row can't be resolved, nothing is imported
                     and every problem row is reported below - fix them and re-upload.
                 </p>
-                <a
-                    href="/accounts/opening-balances/template"
-                    class="inline-flex w-fit items-center gap-1.5 text-[13px] font-bold text-primary hover:underline"
-                >
-                    Download CSV template
-                </a>
+                <div class="flex flex-wrap items-center gap-3">
+                    <a
+                        href="/accounts/opening-balances/sample-excel"
+                        class="inline-flex items-center gap-1.5 rounded border border-primary bg-primary px-3 py-1.5 text-[12.5px] font-bold text-white shadow-sm hover:bg-primary/90 transition-colors"
+                    >
+                        Download Sample Excel (.xlsx)
+                    </a>
+                    <a
+                        href="/accounts/opening-balances/template"
+                        class="inline-flex items-center gap-1.5 text-[12.5px] font-bold text-text-muted hover:text-primary hover:underline"
+                    >
+                        Download CSV template
+                    </a>
+                </div>
                 <div>
                     <Label class="mb-1">Date <span class="text-danger">*</span></Label>
                     <NepaliDateInput v-model="importForm.date" required />
@@ -424,12 +432,12 @@ const columns = [
                 </div>
                 <div>
                     <Label for="opening-balance-import-file" class="mb-1">
-                        CSV file <span class="text-danger">*</span>
+                        Excel or CSV file <span class="text-danger">*</span>
                     </Label>
                     <input
                         id="opening-balance-import-file"
                         type="file"
-                        accept=".csv,text/csv"
+                        accept=".csv,.xlsx,.xls,text/csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
                         class="w-full border-[1.5px] border-border bg-bg-subtle px-3 py-2 text-[13px] text-text-base outline-none file:mr-3 file:cursor-pointer file:border-0 file:bg-primary-tint file:px-3 file:py-1.5 file:text-[12px] file:font-bold file:text-primary"
                         @change="onImportFileChange"
                     />

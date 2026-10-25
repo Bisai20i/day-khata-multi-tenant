@@ -101,6 +101,7 @@ export function usePosCheckout({
 
         form.transform((data) => ({
             ...toSalePayload(data, resolvedPaymentMode.value),
+            ...(data.invoice_type ? { invoice_type: data.invoice_type } : {}),
             // C8: the total the cashier was looking at. The server refuses the
             // save if it arrives at anything else.
             expected_total: expectedTotal,

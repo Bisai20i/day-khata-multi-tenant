@@ -7,11 +7,13 @@ import { stockStatus } from '@/lib/saleCreate';
  * The actions are written against whatever `line` object is passed in, so the
  * staging row and every committed row share them.
  */
-export function useSaleCreateItems(props) {
-    // The invoice type is never a form field - it's fixed per tenant by the
-    // platform admin (TenantCompanySettingController), so this just reads the
-    // value the server already applies to every sale (see Sale::post()).
-    const isPanInvoice = computed(() => props.invoiceSettings.active_invoice_type === 'pan');
+export function useSaleCreateItems(props, activeInvoiceType = null) {
+    const isPanInvoice = computed(() => {
+        if (activeInvoiceType && activeInvoiceType.value) {
+            return activeInvoiceType.value === 'pan';
+        }
+        return props.invoiceSettings?.active_invoice_type === 'pan';
+    });
 
     // A PAN invoice carries no VAT at all; every other type uses the tenant's
     // configured rate. The rate is never editable here - the server ignores any

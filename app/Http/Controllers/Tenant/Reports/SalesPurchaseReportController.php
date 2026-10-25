@@ -75,6 +75,7 @@ class SalesPurchaseReportController extends Controller
         $customerId = $request->integer('customer_id') ?: null;
         $storeId = $request->integer('store_id') ?: null;
         $paymentMode = $this->resolvePaymentMode($request);
+        $search = $request->string('search')->trim()->toString();
 
         $sales = Sale::query()
             ->with(['customer:id,name', 'journalVoucher:id,voucher_type,voucher_number'])
@@ -83,29 +84,42 @@ class SalesPurchaseReportController extends Controller
             ->when($customerId, fn (Builder $query) => $query->where('customer_id', $customerId))
             ->when($storeId, fn (Builder $query) => $query->where('store_id', $storeId))
             ->when($paymentMode, fn (Builder $query) => $query->where('payment_mode', $paymentMode))
+            ->when($search !== '', function (Builder $query) use ($search) {
+                $query->where(function (Builder $q) use ($search) {
+                    $q->where('invoice_number', 'like', "%{$search}%")
+                        ->orWhere('buyer_name', 'like', "%{$search}%")
+                        ->orWhereHas('customer', fn ($cq) => $cq->where('name', 'like', "%{$search}%"));
+                });
+            })
             ->orderBy('date')
             ->orderBy('id')
             ->get();
 
-        $rows = $sales->map(fn (Sale $sale) => [
-            'id' => $sale->id,
-            'date' => $sale->date->toDateString(),
-            'invoice_number' => $sale->invoice_number,
-            'invoice_type' => $sale->invoice_type,
-            'customer' => $sale->buyer_name ?? $sale->customer?->name,
-            'taxable_amount' => $sale->taxable_amount,
-            'nontaxable_amount' => $sale->nontaxable_amount,
-            'vat_amount' => $sale->vat_amount,
-            'total' => $sale->total,
-            'payment_mode' => $sale->payment_mode,
-            'status' => $sale->status,
-        ])->values();
+        $rows = $sales->map(function (Sale $sale) {
+            $subtotal = Money::of($sale->taxable_amount)->plus(Money::of($sale->nontaxable_amount))->toString();
+
+            return [
+                'id' => $sale->id,
+                'date' => $sale->date->toDateString(),
+                'invoice_number' => $sale->invoice_number,
+                'invoice_type' => $sale->invoice_type,
+                'customer' => $sale->buyer_name ?? $sale->customer?->name,
+                'subtotal' => $subtotal,
+                'nontaxable_amount' => $sale->nontaxable_amount,
+                'taxable_amount' => $sale->taxable_amount,
+                'vat_amount' => $sale->vat_amount,
+                'total' => $sale->total,
+                'payment_mode' => $sale->payment_mode,
+                'status' => $sale->status,
+            ];
+        })->values();
 
         $posted = $rows->filter(fn (array $row) => $row['status'] === 'posted')->values();
 
         return Inertia::render('Tenant/Reports/SalesRegister', [
             'sales' => $rows,
-            'totals' => $this->totalsFor($posted, ['taxable_amount', 'nontaxable_amount', 'vat_amount', 'total']),
+            'totals' => $this->totalsFor($posted, ['subtotal', 'nontaxable_amount', 'taxable_amount', 'vat_amount', 'total']),
+            'search' => $search,
             'customers' => Customer::query()->orderBy('name')->get(['id', 'name']),
             'stores' => Store::where('is_active', true)->orderBy('name')->get(['id', 'name']),
             'from' => $from,
@@ -131,6 +145,7 @@ class SalesPurchaseReportController extends Controller
         $supplierId = $request->integer('supplier_id') ?: null;
         $storeId = $request->integer('store_id') ?: null;
         $paymentMode = $this->resolvePaymentMode($request);
+        $search = $request->string('search')->trim()->toString();
 
         $purchases = Purchase::query()
             ->with(['supplier:id,name,tpin', 'journalVoucher:id,voucher_type,voucher_number'])
@@ -139,30 +154,42 @@ class SalesPurchaseReportController extends Controller
             ->when($supplierId, fn (Builder $query) => $query->where('supplier_id', $supplierId))
             ->when($storeId, fn (Builder $query) => $query->where('store_id', $storeId))
             ->when($paymentMode, fn (Builder $query) => $query->where('payment_mode', $paymentMode))
+            ->when($search !== '', function (Builder $query) use ($search) {
+                $query->where(function (Builder $q) use ($search) {
+                    $q->where('bill_number', 'like', "%{$search}%")
+                        ->orWhereHas('supplier', fn ($sq) => $sq->where('name', 'like', "%{$search}%"));
+                });
+            })
             ->orderBy('date')
             ->orderBy('id')
             ->get();
 
-        $rows = $purchases->map(fn (Purchase $purchase) => [
-            'id' => $purchase->id,
-            'date' => $purchase->date->toDateString(),
-            'voucher_number' => $purchase->journalVoucher?->voucher_number,
-            'bill_number' => $purchase->bill_number,
-            'pan_number' => $purchase->pan_number ?: $purchase->supplier?->tpin,
-            'supplier' => $purchase->supplier?->name,
-            'taxable_amount' => $purchase->taxable_amount,
-            'nontaxable_amount' => $purchase->nontaxable_amount,
-            'vat_amount' => $purchase->vat_amount,
-            'total' => $purchase->total,
-            'payment_mode' => $purchase->payment_mode,
-            'status' => $purchase->status,
-        ])->values();
+        $rows = $purchases->map(function (Purchase $purchase) {
+            $subtotal = Money::of($purchase->taxable_amount)->plus(Money::of($purchase->nontaxable_amount))->toString();
+
+            return [
+                'id' => $purchase->id,
+                'date' => $purchase->date->toDateString(),
+                'voucher_number' => $purchase->journalVoucher?->voucher_number,
+                'bill_number' => $purchase->bill_number,
+                'pan_number' => $purchase->pan_number ?: $purchase->supplier?->tpin,
+                'supplier' => $purchase->supplier?->name,
+                'subtotal' => $subtotal,
+                'nontaxable_amount' => $purchase->nontaxable_amount,
+                'taxable_amount' => $purchase->taxable_amount,
+                'vat_amount' => $purchase->vat_amount,
+                'total' => $purchase->total,
+                'payment_mode' => $purchase->payment_mode,
+                'status' => $purchase->status,
+            ];
+        })->values();
 
         $posted = $rows->filter(fn (array $row) => $row['status'] === 'posted')->values();
 
         return Inertia::render('Tenant/Reports/PurchaseRegister', [
             'purchases' => $rows,
-            'totals' => $this->totalsFor($posted, ['taxable_amount', 'nontaxable_amount', 'vat_amount', 'total']),
+            'totals' => $this->totalsFor($posted, ['subtotal', 'nontaxable_amount', 'taxable_amount', 'vat_amount', 'total']),
+            'search' => $search,
             'suppliers' => Supplier::query()->orderBy('name')->get(['id', 'name']),
             'stores' => Store::where('is_active', true)->orderBy('name')->get(['id', 'name']),
             'from' => $from,
@@ -290,7 +317,7 @@ class SalesPurchaseReportController extends Controller
         return [
             'rows' => $rows,
             'totals' => [
-                ...$this->totalsFor($rows, ['taxable_amount', 'nontaxable_amount', 'vat_amount', 'capital_amount', 'total']),
+                ...$this->totalsFor($rows, ['subtotal', 'nontaxable_amount', 'taxable_amount', 'vat_amount', 'capital_amount', 'total']),
                 'count' => $rows->count(),
             ],
             'from' => $from,
@@ -309,7 +336,7 @@ class SalesPurchaseReportController extends Controller
         return [
             'rows' => $rows,
             'totals' => [
-                ...$this->totalsFor($rows, ['taxable_amount', 'nontaxable_amount', 'vat_amount', 'capital_amount', 'fixed_asset_vat_amount', 'total']),
+                ...$this->totalsFor($rows, ['subtotal', 'nontaxable_amount', 'taxable_amount', 'vat_amount', 'capital_amount', 'fixed_asset_vat_amount', 'total']),
                 'count' => $rows->count(),
             ],
             'from' => $from,
@@ -328,7 +355,7 @@ class SalesPurchaseReportController extends Controller
         return [
             'rows' => $rows,
             'totals' => [
-                ...$this->totalsFor($rows, ['taxable_amount', 'nontaxable_amount', 'vat_amount', 'total']),
+                ...$this->totalsFor($rows, ['subtotal', 'nontaxable_amount', 'taxable_amount', 'vat_amount', 'total']),
                 'count' => $rows->count(),
             ],
             'from' => $from,
@@ -347,7 +374,7 @@ class SalesPurchaseReportController extends Controller
         return [
             'rows' => $rows,
             'totals' => [
-                ...$this->totalsFor($rows, ['taxable_amount', 'nontaxable_amount', 'vat_amount', 'total']),
+                ...$this->totalsFor($rows, ['subtotal', 'nontaxable_amount', 'taxable_amount', 'vat_amount', 'total']),
                 'count' => $rows->count(),
             ],
             'from' => $from,
@@ -402,6 +429,9 @@ class SalesPurchaseReportController extends Controller
     private function saleVatRow(Sale $sale, string $date, string $entry): array
     {
         $sign = $entry === 'cancelled' ? -1 : 1;
+        $taxable = $this->signed($sale->taxable_amount, $sign);
+        $nontaxable = $this->signed($sale->nontaxable_amount, $sign);
+        $subtotal = Money::of($taxable)->plus(Money::of($nontaxable))->toString();
 
         return [
             'kind' => 'sale',
@@ -413,8 +443,9 @@ class SalesPurchaseReportController extends Controller
             'invoice_type' => $sale->invoice_type,
             'buyer_name' => $sale->buyer_name ?? $sale->customer?->name,
             'buyer_pan' => $sale->buyer_pan ?? $sale->customer?->tpin,
-            'taxable_amount' => $this->signed($sale->taxable_amount, $sign),
-            'nontaxable_amount' => $this->signed($sale->nontaxable_amount, $sign),
+            'subtotal' => $subtotal,
+            'nontaxable_amount' => $nontaxable,
+            'taxable_amount' => $taxable,
             'vat_amount' => $this->signed($sale->vat_amount, $sign),
             'capital_amount' => Money::zero()->toString(),
             'total' => $this->signed($sale->total, $sign),
@@ -428,6 +459,9 @@ class SalesPurchaseReportController extends Controller
     private function capitalSaleVatRow(CapitalSale $sale, string $date, string $entry): array
     {
         $sign = $entry === 'cancelled' ? -1 : 1;
+        $taxable = $this->signed($sale->taxable_amount, $sign);
+        $nontaxable = $this->signed($sale->nontaxable_amount, $sign);
+        $subtotal = Money::of($taxable)->plus(Money::of($nontaxable))->toString();
 
         return [
             'kind' => 'capital_sale',
@@ -439,8 +473,9 @@ class SalesPurchaseReportController extends Controller
             'invoice_type' => 'capital',
             'buyer_name' => $sale->buyer_name ?? $sale->customer?->name,
             'buyer_pan' => $sale->buyer_pan ?? $sale->customer?->tpin,
-            'taxable_amount' => $this->signed($sale->taxable_amount, $sign),
-            'nontaxable_amount' => $this->signed($sale->nontaxable_amount, $sign),
+            'subtotal' => $subtotal,
+            'nontaxable_amount' => $nontaxable,
+            'taxable_amount' => $taxable,
             'vat_amount' => $this->signed($sale->vat_amount, $sign),
             'capital_amount' => $this->signed($sale->taxable_amount, $sign),
             'total' => $this->signed($sale->total, $sign),
@@ -500,6 +535,9 @@ class SalesPurchaseReportController extends Controller
     private function purchaseVatRow(Purchase $purchase, string $date, string $entry): array
     {
         $sign = $entry === 'cancelled' ? -1 : 1;
+        $taxable = $this->signed($purchase->taxable_amount, $sign);
+        $nontaxable = $this->signed($purchase->nontaxable_amount, $sign);
+        $subtotal = Money::of($taxable)->plus(Money::of($nontaxable))->toString();
 
         return [
             'kind' => 'purchase',
@@ -510,8 +548,9 @@ class SalesPurchaseReportController extends Controller
             'bill_number' => $purchase->bill_number,
             'supplier' => $purchase->supplier?->name,
             'supplier_pan' => $purchase->pan_number ?: $purchase->supplier?->tpin,
-            'taxable_amount' => $this->signed($purchase->taxable_amount, $sign),
-            'nontaxable_amount' => $this->signed($purchase->nontaxable_amount, $sign),
+            'subtotal' => $subtotal,
+            'nontaxable_amount' => $nontaxable,
+            'taxable_amount' => $taxable,
             'vat_amount' => $this->signed($purchase->vat_amount, $sign),
             'capital_amount' => Money::zero()->toString(),
             // T15-3: the slice of the vat_amount above that sits on a line
@@ -557,6 +596,9 @@ class SalesPurchaseReportController extends Controller
     private function capitalPurchaseVatRow(CapitalPurchase $purchase, string $date, string $entry): array
     {
         $sign = $entry === 'cancelled' ? -1 : 1;
+        $taxable = $this->signed($purchase->taxable_amount, $sign);
+        $nontaxable = $this->signed($purchase->nontaxable_amount, $sign);
+        $subtotal = Money::of($taxable)->plus(Money::of($nontaxable))->toString();
 
         return [
             'kind' => 'capital_purchase',
@@ -567,16 +609,17 @@ class SalesPurchaseReportController extends Controller
             'bill_number' => $purchase->bill_number,
             'supplier' => $purchase->supplier?->name,
             'supplier_pan' => $purchase->supplier_pan ?: $purchase->supplier?->tpin,
-            'taxable_amount' => $this->signed($purchase->taxable_amount, $sign),
-            'nontaxable_amount' => $this->signed($purchase->nontaxable_amount, $sign),
+            'subtotal' => $subtotal,
+            'nontaxable_amount' => $nontaxable,
+            'taxable_amount' => $taxable,
             'vat_amount' => $this->signed($purchase->vat_amount, $sign),
-            'capital_amount' => $this->signed($purchase->taxable_amount, $sign),
+            'capital_amount' => $purchase->type === 'capital' ? $this->signed($purchase->taxable_amount, $sign) : Money::zero()->toString(),
             // A whole CapitalPurchase document is already its own "capital"
             // bucket above, so it never contributes to the fixed-asset
             // breakdown of an ordinary Purchase's vat_amount.
             'fixed_asset_vat_amount' => Money::zero()->toString(),
             'total' => $this->signed($purchase->total, $sign),
-            'capital' => true,
+            'capital' => $purchase->type === 'capital',
         ];
     }
 
@@ -620,6 +663,9 @@ class SalesPurchaseReportController extends Controller
     private function salesReturnRow(SalesReturn $return, string $date, string $entry): array
     {
         $sign = $entry === 'cancelled' ? -1 : 1;
+        $taxable = $this->signed($return->taxable_amount, $sign);
+        $nontaxable = $this->signed($return->nontaxable_amount, $sign);
+        $subtotal = Money::of($taxable)->plus(Money::of($nontaxable))->toString();
 
         return [
             'kind' => 'sales_return',
@@ -631,8 +677,9 @@ class SalesPurchaseReportController extends Controller
             'invoice_number' => $return->sale?->invoice_number,
             'buyer_name' => $return->sale?->buyer_name ?? $return->sale?->customer?->name,
             'buyer_pan' => $return->sale?->buyer_pan ?? $return->sale?->customer?->tpin,
-            'taxable_amount' => $this->signed($return->taxable_amount, $sign),
-            'nontaxable_amount' => $this->signed($return->nontaxable_amount, $sign),
+            'subtotal' => $subtotal,
+            'nontaxable_amount' => $nontaxable,
+            'taxable_amount' => $taxable,
             'vat_amount' => $this->signed($return->vat_amount, $sign),
             'tds_amount' => $this->signed($return->tds_amount, $sign),
             'total' => $this->signed($return->total, $sign),
@@ -674,6 +721,9 @@ class SalesPurchaseReportController extends Controller
     private function purchaseReturnRow(PurchaseReturn $return, string $date, string $entry): array
     {
         $sign = $entry === 'cancelled' ? -1 : 1;
+        $taxable = $this->signed($return->taxable_amount, $sign);
+        $nontaxable = $this->signed($return->nontaxable_amount, $sign);
+        $subtotal = Money::of($taxable)->plus(Money::of($nontaxable))->toString();
 
         return [
             'kind' => 'purchase_return',
@@ -685,8 +735,9 @@ class SalesPurchaseReportController extends Controller
             'bill_number' => $return->purchase?->bill_number,
             'supplier' => $return->purchase?->supplier?->name,
             'supplier_pan' => $return->purchase?->pan_number ?: $return->purchase?->supplier?->tpin,
-            'taxable_amount' => $this->signed($return->taxable_amount, $sign),
-            'nontaxable_amount' => $this->signed($return->nontaxable_amount, $sign),
+            'subtotal' => $subtotal,
+            'nontaxable_amount' => $nontaxable,
+            'taxable_amount' => $taxable,
             'vat_amount' => $this->signed($return->vat_amount, $sign),
             'tds_amount' => $this->signed($return->tds_amount, $sign),
             'total' => $this->signed($return->total, $sign),
@@ -1146,7 +1197,7 @@ class SalesPurchaseReportController extends Controller
         $totals = [];
 
         foreach ($keys as $key) {
-            $totals[$key] = Money::sum($rows->map(fn (array $row) => Money::of($row[$key])))->toString();
+            $totals[$key] = Money::sum($rows->map(fn (array $row) => Money::of($row[$key] ?? '0')))->toString();
         }
 
         return $totals;

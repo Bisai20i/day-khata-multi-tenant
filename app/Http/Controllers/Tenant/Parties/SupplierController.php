@@ -2,7 +2,9 @@
 
 namespace App\Http\Controllers\Tenant\Parties;
 
+use App\Exports\Samples\SupplierSampleExport;
 use App\Http\Controllers\Concerns\ImportsCsv;
+use Maatwebsite\Excel\Facades\Excel;
 use App\Http\Controllers\Controller;
 use App\Models\Supplier;
 use Illuminate\Http\RedirectResponse;
@@ -59,6 +61,10 @@ class SupplierController extends Controller
      * Downloads a blank CSV template with the exact header this app's import
      * expects, plus one example row.
      */
+        public function importSampleExcel()
+    {
+        return Excel::download(new SupplierSampleExport(), 'supplier-import-sample.xlsx');
+    }
     public function importTemplate(): StreamedResponse
     {
         return response()->streamDownload(function (): void {
@@ -81,7 +87,7 @@ class SupplierController extends Controller
     public function import(Request $request): RedirectResponse
     {
         $request->validate([
-            'file' => ['required', 'file', 'mimes:csv,txt'],
+            'file' => ['required', 'file', 'mimes:csv,txt,xlsx,xls'],
         ]);
 
         $rows = $this->parseCsvRows($request->file('file'));

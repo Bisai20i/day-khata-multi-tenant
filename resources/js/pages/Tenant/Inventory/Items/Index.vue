@@ -1,5 +1,5 @@
 <script setup>
-import { h, ref, watch } from 'vue';
+import { computed, h, ref, watch } from 'vue';
 import { router, useForm, usePage } from '@inertiajs/vue3';
 import AppLayout from '@/layouts/AppLayout.vue';
 import { useLayoutChrome } from '@/composables/useLayoutChrome';
@@ -8,9 +8,10 @@ import Card from '@/components/ui/Card.vue';
 import Button from '@/components/ui/Button.vue';
 import Badge from '@/components/ui/Badge.vue';
 import DataTable from '@/components/ui/DataTable.vue';
-import RowActions from '@/components/ui/RowActions.vue';
+import DropdownMenu from '@/components/ui/DropdownMenu.vue';
 import DropdownMenuItem from '@/components/ui/DropdownMenuItem.vue';
-import { Barcode, BookOpen, Plus, Ruler, Upload } from '@lucide/vue';
+import Tooltip from '@/components/ui/Tooltip.vue';
+import { Barcode, BookOpen, Ellipsis, Info, Pencil, Plus, Power, RotateCcw, Ruler, Upload } from '@lucide/vue';
 import ItemsIndexFormModal from '@/components/inventory/ItemsIndexFormModal.vue';
 import ItemsIndexImportModal from '@/components/inventory/ItemsIndexImportModal.vue';
 import ItemsIndexUnitsModal from '@/components/inventory/ItemsIndexUnitsModal.vue';
@@ -59,7 +60,7 @@ const { toast } = useToast();
 const { confirm } = useConfirm();
 useLayoutChrome('Items');
 
-// Create/edit/delete all redirect back to this same route/component - Inertia
+// Create/edit/toggle-active all redirect back to this same route/component - Inertia
 // patches the already-mounted instance rather than remounting it, so a plain
 // onMounted only ever catches the very first page load, not any subsequent
 // in-place action. Watching the flash prop directly (with immediate: true to
@@ -72,6 +73,11 @@ watch(
     { immediate: true },
 );
 
+const activeTab = ref('active'); // 'active' | 'inactive'
+
+const activeItems = computed(() => props.items.filter((item) => item.is_active));
+const inactiveItems = computed(() => props.items.filter((item) => !item.is_active));
+const displayedItems = computed(() => (activeTab.value === 'active' ? activeItems.value : inactiveItems.value));
 
 const formModal = ref(null);
 const importModal = ref(null);
@@ -104,16 +110,61 @@ function stockOnHand(item) {
     return props.stockByItem[item.id] ?? '0.0000';
 }
 
-async function destroy(item) {
-    if (!(await confirm({ message: `Delete item "${item.name}"? Items already used in invoices or stock cannot be deleted; deactivate them instead. This cannot be undone.`, tone: 'danger', confirmLabel: 'Delete item' }))) return;
-    router.delete(`/items/${item.id}`, {
-        // The server refuses to delete an item any document references and
-        // returns a field error instead of a raw SQL page - surface it here,
-        // since this row action has no form of its own to render errors in.
-        onError: (errors) => {
-            if (errors.item) toast({ message: errors.item, variant: 'danger' });
-        },
+async function markInactive(item) {
+    const onHand = Number(stockOnHand(item));
+    if (onHand !== 0) {
+        toast({
+            message: `"${item.name}" still has ${formatQuantity(stockOnHand(item))} ${item.unit} in stock. Clear the stock first, or leave the item active.`,
+            variant: 'danger',
+        });
+        return;
+    }
+
+    const confirmed = await confirm({
+        title: 'Mark Item Inactive?',
+        message: `Mark "${item.name}" as inactive? Inactive items are hidden from sales, purchase, and stock entry forms. Historical reports and ledger data remain preserved.`,
+        tone: 'danger',
+        confirmLabel: 'Mark Inactive',
     });
+
+    if (!confirmed) return;
+
+    router.patch(
+        `/items/${item.id}/toggle-active`,
+        {},
+        {
+            preserveScroll: true,
+            onError: (errors) => {
+                if (errors.item) {
+                    toast({ message: errors.item, variant: 'danger' });
+                }
+            },
+        },
+    );
+}
+
+async function reactivate(item) {
+    const confirmed = await confirm({
+        title: 'Reactivate Item?',
+        message: `Reactivate "${item.name}"? This item will be restored to sales, purchase, and stock entry forms.`,
+        tone: 'purple',
+        confirmLabel: 'Reactivate',
+    });
+
+    if (!confirmed) return;
+
+    router.patch(
+        `/items/${item.id}/toggle-active`,
+        {},
+        {
+            preserveScroll: true,
+            onError: (errors) => {
+                if (errors.item) {
+                    toast({ message: errors.item, variant: 'danger' });
+                }
+            },
+        },
+    );
 }
 
 // Client-side only - mirrors Item::scopeExpired()/scopeExpiringSoon()'s
@@ -147,6 +198,10 @@ function expiryStatus(item) {
 // straight into the request body with no extra conversion.
 const selectedItemIds = ref([]);
 
+watch(activeTab, () => {
+    selectedItemIds.value = [];
+});
+
 function isSelected(item) {
     return selectedItemIds.value.includes(item.id);
 }
@@ -158,7 +213,15 @@ function toggleSelected(item) {
 }
 
 function toggleSelectAll() {
-    selectedItemIds.value = selectedItemIds.value.length === props.items.length ? [] : props.items.map((item) => item.id);
+    const currentList = displayedItems.value;
+    const allSelected = currentList.length > 0 && currentList.every((item) => selectedItemIds.value.includes(item.id));
+    if (allSelected) {
+        const currentIds = new Set(currentList.map((i) => i.id));
+        selectedItemIds.value = selectedItemIds.value.filter((id) => !currentIds.has(id));
+    } else {
+        const set = new Set([...selectedItemIds.value, ...currentList.map((i) => i.id)]);
+        selectedItemIds.value = Array.from(set);
+    }
 }
 
 const markVatableForm = useForm({ item_ids: [] });
@@ -180,13 +243,16 @@ const { can } = usePermissions();
 // Only offered with items.edit: the bulk action posts to /items/mark-vatable.
 const selectColumn = {
     id: 'select',
-    header: () =>
-        h('input', {
+    header: () => {
+        const currentList = displayedItems.value;
+        const isAllChecked = currentList.length > 0 && currentList.every((item) => selectedItemIds.value.includes(item.id));
+        return h('input', {
             type: 'checkbox',
             class: 'size-4 border-[1.5px] border-border',
-            checked: props.items.length > 0 && selectedItemIds.value.length === props.items.length,
+            checked: isAllChecked,
             onChange: toggleSelectAll,
-        }),
+        });
+    },
     numeric: false,
     cell: ({ row }) =>
         h('input', {
@@ -305,34 +371,103 @@ const columns = [
         header: '',
         numeric: false,
         cell: ({ row }) => {
-            const moreActions = moreActionsFor(row.original);
+            const item = row.original;
+            const moreActions = moreActionsFor(item);
 
-            if (!can('items.edit') && !can('items.delete') && moreActions.length === 0) {
+            if (!can('items.edit') && moreActions.length === 0) {
                 return null;
             }
 
-            return h('div', { class: 'flex items-center justify-end' }, [
-                h(
-                    RowActions,
-                    {
-                        canEdit: can('items.edit'),
-                        canDelete: can('items.delete'),
-                        onEdit: () => openEdit(row.original),
-                        onDelete: () => destroy(row.original),
-                    },
-                    moreActions.length > 0
-                        ? {
-                              more: () =>
-                                  moreActions.map((action) =>
-                                      h(DropdownMenuItem, { key: action.label, onSelect: action.run }, () => [
-                                          h(action.icon, { class: 'size-3.5', 'aria-hidden': 'true' }),
-                                          action.label,
-                                      ]),
-                                  ),
-                          }
-                        : {},
-                ),
-            ]);
+            const buttons = [];
+
+            if (can('items.edit')) {
+                buttons.push(
+                    h(
+                        Tooltip,
+                        { label: 'Edit' },
+                        () =>
+                            h(
+                                'button',
+                                {
+                                    type: 'button',
+                                    class: 'flex h-[26px] w-[26px] items-center justify-center bg-primary-tint text-primary transition-[filter] duration-150 ease-out hover:brightness-95',
+                                    'aria-label': 'Edit',
+                                    onClick: () => openEdit(item),
+                                },
+                                [h(Pencil, { class: 'h-[13px] w-[13px]', 'aria-hidden': 'true' })],
+                            ),
+                    ),
+                );
+
+                if (item.is_active) {
+                    buttons.push(
+                        h(
+                            Tooltip,
+                            { label: 'Mark Inactive' },
+                            () =>
+                                h(
+                                    'button',
+                                    {
+                                        type: 'button',
+                                        class: 'flex h-[26px] w-[26px] items-center justify-center bg-bg-subtle text-text-faint transition-colors duration-150 ease-out hover:bg-danger-bg hover:text-danger',
+                                        'aria-label': 'Mark Inactive',
+                                        onClick: () => markInactive(item),
+                                    },
+                                    [h(Power, { class: 'h-[13px] w-[13px]', 'aria-hidden': 'true' })],
+                                ),
+                        ),
+                    );
+                } else {
+                    buttons.push(
+                        h(
+                            Tooltip,
+                            { label: 'Reactivate' },
+                            () =>
+                                h(
+                                    'button',
+                                    {
+                                        type: 'button',
+                                        class: 'inline-flex h-[26px] items-center gap-1 border-[1.5px] border-[#BBF7D0] bg-[#F0FDF4] px-2 text-xs font-semibold text-success transition-colors hover:bg-success-bg',
+                                        'aria-label': 'Reactivate',
+                                        onClick: () => reactivate(item),
+                                    },
+                                    [h(RotateCcw, { class: 'size-3.5', 'aria-hidden': 'true' }), 'Reactivate'],
+                                ),
+                        ),
+                    );
+                }
+            }
+
+            if (moreActions.length > 0) {
+                buttons.push(
+                    h(
+                        DropdownMenu,
+                        { align: 'end' },
+                        {
+                            trigger: () =>
+                                h(
+                                    'button',
+                                    {
+                                        type: 'button',
+                                        class: 'flex h-[26px] w-[26px] items-center justify-center bg-bg-subtle text-text-faint transition-colors duration-150 ease-out hover:bg-primary-tint hover:text-primary data-[state=open]:bg-primary-tint data-[state=open]:text-primary',
+                                        'aria-label': 'More actions',
+                                        title: 'More actions',
+                                    },
+                                    [h(Ellipsis, { class: 'h-[13px] w-[13px]', 'aria-hidden': 'true' })],
+                                ),
+                            default: () =>
+                                moreActions.map((action) =>
+                                    h(DropdownMenuItem, { key: action.label, onSelect: action.run }, () => [
+                                        h(action.icon, { class: 'size-3.5', 'aria-hidden': 'true' }),
+                                        action.label,
+                                    ]),
+                                ),
+                        },
+                    ),
+                );
+            }
+
+            return h('div', { class: 'flex items-center justify-end gap-2' }, buttons);
         },
     },
 ];
@@ -361,8 +496,35 @@ function moreActionsFor(item) {
         </PageHeader>
 
         <Card variant="panel" class="bg-white">
-            <div v-if="can('items.import') || selectedItemIds.length > 0" class="mb-3 flex flex-wrap items-center justify-between gap-2">
-                <div class="ml-auto flex items-center gap-2">
+            <div class="mb-3 flex flex-wrap items-center justify-between gap-2 border-b-[1.5px] border-border pb-2">
+                <div class="flex items-center gap-1">
+                    <button
+                        type="button"
+                        :class="[
+                            'px-3 py-1.5 text-xs font-bold border-b-2 transition-colors',
+                            activeTab === 'active'
+                                ? 'border-primary text-primary'
+                                : 'border-transparent text-text-muted hover:text-text-base',
+                        ]"
+                        @click="activeTab = 'active'"
+                    >
+                        Active Items ({{ activeItems.length }})
+                    </button>
+                    <button
+                        type="button"
+                        :class="[
+                            'px-3 py-1.5 text-xs font-bold border-b-2 transition-colors',
+                            activeTab === 'inactive'
+                                ? 'border-primary text-primary'
+                                : 'border-transparent text-text-muted hover:text-text-base',
+                        ]"
+                        @click="activeTab = 'inactive'"
+                    >
+                        Inactive Items ({{ inactiveItems.length }})
+                    </button>
+                </div>
+
+                <div v-if="can('items.import') || selectedItemIds.length > 0" class="ml-auto flex items-center gap-2">
                     <Button
                         v-if="selectedItemIds.length > 0"
                         variant="secondary"
@@ -380,6 +542,15 @@ function moreActionsFor(item) {
                 </div>
             </div>
 
+            <!-- Inactive tab informative banner -->
+            <div
+                v-if="activeTab === 'inactive'"
+                class="mb-3 flex items-center gap-2 border-[1.5px] border-border bg-bg-subtle px-3 py-2.5 text-xs text-text-muted"
+            >
+                <Info class="size-4 shrink-0 text-text-faint" />
+                <span>Inactive items are hidden from sales, purchase, and stock entry forms. Historical reports and ledger data remain preserved.</span>
+            </div>
+
             <div v-if="items.length === 0" class="flex flex-col items-center gap-3 py-10 text-center">
                 <p class="text-sm font-semibold text-text-strong">No items yet</p>
                 <p v-if="can('items.create')" class="text-xs text-text-muted">Add your first item, or bulk import a CSV, and it will be listed here.</p>
@@ -388,7 +559,13 @@ function moreActionsFor(item) {
                     New item
                 </Button>
             </div>
-            <DataTable v-else :columns="columns" :data="items" :page-size="10" empty-message="No items" />
+            <DataTable
+                v-else
+                :columns="columns"
+                :data="displayedItems"
+                :page-size="10"
+                :empty-message="activeTab === 'active' ? 'No active items' : 'No inactive items'"
+            />
         </Card>
 
         <ItemsIndexFormModal

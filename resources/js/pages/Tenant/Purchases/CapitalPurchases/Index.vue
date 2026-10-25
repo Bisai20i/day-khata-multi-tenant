@@ -48,7 +48,7 @@ const props = defineProps({
 
 const page = usePage();
 const { toast } = useToast();
-useLayoutChrome('Capital Purchases');
+useLayoutChrome('Capital & Service Purchases');
 
 // UI mirrors of routes/tenant-purchase.php (bill cancel comes from the
 // server's canCancel prop); each route still enforces its own key.
@@ -72,6 +72,13 @@ watch(
 );
 
 const showCreateForm = ref(false);
+const activeTypeFilter = ref('all');
+const capitalCount = computed(() => props.capitalPurchases.filter((p) => p.type === 'capital').length);
+const serviceCount = computed(() => props.capitalPurchases.filter((p) => p.type === 'service').length);
+const filteredCapitalPurchases = computed(() => {
+    if (activeTypeFilter.value === 'all') return props.capitalPurchases;
+    return props.capitalPurchases.filter((p) => p.type === activeTypeFilter.value);
+});
 
 const typeLabels = {
     capital: 'Capital',
@@ -325,16 +332,39 @@ function moreActionsFor(purchase) {
         </template>
 
         <template v-else>
-            <PageHeader title="Capital purchases" description="Long-term assets and services you bought, such as equipment or furniture. Cancel one that was posted in error.">
+            <PageHeader title="Capital & Service Purchases" description="Long-term assets and service expenses you bought. Cancel one that was posted in error.">
                 <Button v-if="hasOpenFiscalYear && canCreateCapitalPurchase" variant="primary" tone="purple" @click="showCreateForm = true">
                     <Plus class="size-4" aria-hidden="true" />
-                    New capital purchase
+                    New capital / service purchase
                 </Button>
             </PageHeader>
 
             <Card variant="panel" class="bg-white">
-                <div v-if="canExportCapitalPurchases" class="mb-3 flex flex-wrap items-center justify-between gap-2">
-                    <div class="ml-auto flex items-center gap-2">
+                <div class="mb-3 flex flex-wrap items-center justify-between gap-2 border-b-[1.5px] border-border pb-2">
+                    <div class="flex items-center gap-1">
+                        <button
+                            type="button"
+                            :class="['px-3 py-1.5 text-xs font-bold border-b-2 transition-colors', activeTypeFilter === 'all' ? 'border-primary text-primary' : 'border-transparent text-text-muted hover:text-text-base']"
+                            @click="activeTypeFilter = 'all'"
+                        >
+                            All Types ({{ capitalPurchases.length }})
+                        </button>
+                        <button
+                            type="button"
+                            :class="['px-3 py-1.5 text-xs font-bold border-b-2 transition-colors', activeTypeFilter === 'capital' ? 'border-primary text-primary' : 'border-transparent text-text-muted hover:text-text-base']"
+                            @click="activeTypeFilter = 'capital'"
+                        >
+                            Capital ({{ capitalCount }})
+                        </button>
+                        <button
+                            type="button"
+                            :class="['px-3 py-1.5 text-xs font-bold border-b-2 transition-colors', activeTypeFilter === 'service' ? 'border-primary text-primary' : 'border-transparent text-text-muted hover:text-text-base']"
+                            @click="activeTypeFilter = 'service'"
+                        >
+                            Service ({{ serviceCount }})
+                        </button>
+                    </div>
+                    <div v-if="canExportCapitalPurchases" class="flex items-center gap-2">
                         <a href="/capital-purchases/export">
                             <Button variant="secondary" tone="neutral" type="button">
                                 <Download class="size-4" />
@@ -349,15 +379,15 @@ function moreActionsFor(purchase) {
                     <p v-if="hasOpenFiscalYear && canCreateCapitalPurchase" class="text-xs text-text-muted">Record the first asset or service bill you received and it will be listed here.</p>
                     <Button v-if="hasOpenFiscalYear && canCreateCapitalPurchase" variant="primary" tone="purple" @click="showCreateForm = true">
                         <Plus class="size-4" aria-hidden="true" />
-                        New capital purchase
+                        New capital / service purchase
                     </Button>
                 </div>
-                <DataTable v-else :columns="columns" :data="capitalPurchases" :page-size="10" empty-message="No capital purchases yet" />
+                <DataTable v-else :columns="columns" :data="filteredCapitalPurchases" :page-size="10" empty-message="No capital purchases yet" />
 
                 <!-- Server-computed SQL sum over every capital purchase
                      (item 8, "totals row"). -->
                 <div class="mt-3 border-t-[1.5px] border-border pt-3 text-sm">
-                    <p class="text-[10px] font-bold tracking-[.8px] text-text-muted uppercase">Total of all capital purchases (Rs.)</p>
+                    <p class="text-[10px] font-bold tracking-[.8px] text-text-muted uppercase">Total of all capital & service purchases (Rs.)</p>
                     <p class="font-bold text-text-strong">{{ formatMoney(totals.total) }}</p>
                 </div>
             </Card>

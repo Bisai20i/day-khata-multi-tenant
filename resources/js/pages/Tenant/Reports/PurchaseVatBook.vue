@@ -103,8 +103,9 @@ const columns = [
                 ? h('span', { class: 'text-danger font-semibold' }, 'Cancelled')
                 : 'Issued',
     },
+    { id: 'subtotal', header: 'Sub Total', numeric: true, cell: ({ row }) => formatMoney(row.original.subtotal) },
+    { id: 'nontaxable_amount', header: 'Non-Taxable', numeric: true, cell: ({ row }) => formatMoney(row.original.nontaxable_amount) },
     { id: 'taxable_amount', header: 'Taxable amount', numeric: true, cell: ({ row }) => formatMoney(row.original.taxable_amount) },
-    { id: 'nontaxable_amount', header: 'Exempt amount', numeric: true, cell: ({ row }) => formatMoney(row.original.nontaxable_amount) },
     { id: 'vat_amount', header: 'VAT', numeric: true, cell: ({ row }) => formatMoney(row.original.vat_amount) },
     { id: 'capital_amount', header: 'Capital purchase amount', numeric: true, cell: ({ row }) => formatMoney(row.original.capital_amount) },
     {
@@ -157,8 +158,9 @@ const columns = [
 
             <div class="mt-3 flex flex-wrap items-center justify-end gap-6 border-t-[1.5px] border-border pt-3 text-[12.5px]">
                 <div class="font-bold text-text-strong">Total</div>
+                <div><span class="text-text-muted">Sub Total:</span> <span class="font-semibold">{{ formatMoney(totals.subtotal) }}</span></div>
+                <div><span class="text-text-muted">Non-Taxable:</span> <span class="font-semibold">{{ formatMoney(totals.nontaxable_amount) }}</span></div>
                 <div><span class="text-text-muted">Taxable amount:</span> <span class="font-semibold">{{ formatMoney(totals.taxable_amount) }}</span></div>
-                <div><span class="text-text-muted">Exempt amount:</span> <span class="font-semibold">{{ formatMoney(totals.nontaxable_amount) }}</span></div>
                 <div><span class="text-text-muted">VAT:</span> <span class="font-semibold">{{ formatMoney(totals.vat_amount) }}</span></div>
                 <div><span class="text-text-muted">Capital purchases:</span> <span class="font-semibold">{{ formatMoney(totals.capital_amount) }}</span></div>
                 <div><span class="text-text-muted">Fixed-asset VAT (of which):</span> <span class="font-semibold">{{ formatMoney(totals.fixed_asset_vat_amount) }}</span></div>

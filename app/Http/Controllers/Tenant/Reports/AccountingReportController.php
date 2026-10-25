@@ -82,6 +82,61 @@ class AccountingReportController extends Controller
         'to' => ['nullable', 'date', 'after_or_equal:from'],
     ];
 
+    public function ledger(Request $request): Response
+    {
+        $fiscalYear = $this->resolveFiscalYear($request);
+        $accountId = $request->integer('account_id') ?: null;
+        $accounts = Account::orderBy('name')->get(['id', 'code', 'name', 'type', 'group']);
+
+        $data = $this->emptyAccountBook();
+        $account = null;
+        [$from, $to] = [null, null];
+
+        if ($fiscalYear !== null) {
+            [$from, $to] = $this->resolveWindow($request, $fiscalYear);
+
+            if ($accountId) {
+                $account = Account::find($accountId);
+                if ($account) {
+                    $data = $this->accountBook($account, $fiscalYear, $from, $to);
+                }
+            }
+        }
+
+        return Inertia::render('Tenant/Reports/Ledger', [
+            'fiscalYears' => $this->fiscalYearOptions(),
+            'fiscalYearId' => $fiscalYear?->id,
+            'accounts' => $accounts,
+            'accountId' => $accountId,
+            'account' => $account ? [
+                'id' => $account->id,
+                'name' => $account->name,
+                'code' => $account->code,
+                'type' => $account->type,
+                'group' => $account->group,
+            ] : null,
+            'from' => $from,
+            'to' => $to,
+            'openingBalance' => $data['openingBalance'],
+            'closingBalance' => $data['closingBalance'],
+            'entries' => $data['entries'],
+        ]);
+    }
+
+    public function ledgerPdf(Request $request)
+    {
+        $account = Account::findOrFail($request->integer('account_id'));
+
+        return $this->accountBookPdf($request, $account, 'Ledger');
+    }
+
+    public function ledgerExport(Request $request)
+    {
+        $account = Account::findOrFail($request->integer('account_id'));
+
+        return $this->accountBookExport($request, $account, 'ledger');
+    }
+
     public function trialBalance(Request $request): Response
     {
         $fiscalYear = $this->resolveFiscalYear($request);

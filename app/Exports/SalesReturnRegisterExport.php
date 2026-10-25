@@ -45,8 +45,9 @@ class SalesReturnRegisterExport implements FromCollection, WithColumnFormatting,
             'buyer_name' => 'Total',
             'buyer_pan' => null,
             'entry' => null,
-            'taxable_amount' => $this->totals['taxable_amount'],
+            'subtotal' => $this->totals['subtotal'] ?? '0.00',
             'nontaxable_amount' => $this->totals['nontaxable_amount'],
+            'taxable_amount' => $this->totals['taxable_amount'],
             'vat_amount' => $this->totals['vat_amount'],
             'total' => $this->totals['total'],
         ]);
@@ -57,7 +58,7 @@ class SalesReturnRegisterExport implements FromCollection, WithColumnFormatting,
      */
     public function headings(): array
     {
-        return ['SN', 'Date (BS)', 'Date (AD)', 'Credit Note #', 'Against Invoice #', 'Buyer', 'Buyer PAN', 'Entry', 'Taxable', 'Exempt', 'VAT', 'Total'];
+        return ['SN', 'Date (BS)', 'Date (AD)', 'Credit Note #', 'Against Invoice #', 'Buyer', 'Buyer PAN', 'Entry', 'Sub Total', 'Non-Taxable', 'Taxable', 'VAT', 'Total'];
     }
 
     /**
@@ -70,6 +71,7 @@ class SalesReturnRegisterExport implements FromCollection, WithColumnFormatting,
             'J' => NumberFormat::FORMAT_NUMBER_00,
             'K' => NumberFormat::FORMAT_NUMBER_00,
             'L' => NumberFormat::FORMAT_NUMBER_00,
+            'M' => NumberFormat::FORMAT_NUMBER_00,
         ];
     }
 
@@ -88,8 +90,9 @@ class SalesReturnRegisterExport implements FromCollection, WithColumnFormatting,
             $row['buyer_name'] ?? '',
             $row['buyer_pan'] ?? '',
             $row['entry'] ?? '',
-            Money::of($row['taxable_amount'])->toFloat(),
+            Money::of($row['subtotal'] ?? '0')->toFloat(),
             Money::of($row['nontaxable_amount'])->toFloat(),
+            Money::of($row['taxable_amount'])->toFloat(),
             Money::of($row['vat_amount'])->toFloat(),
             Money::of($row['total'])->toFloat(),
         ];

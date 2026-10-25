@@ -289,7 +289,7 @@ class Sale extends Model
             // requires a business to issue exactly the type it is
             // registered under, set only by the platform admin from the
             // central panel (TenantCompanySettingController::update()).
-            $invoiceType = $settings->active_invoice_type ?? 'full';
+            $invoiceType = $data['invoice_type'] ?? $settings->active_invoice_type ?? 'full';
             $storeId = static::resolveStoreId($data, $settings);
 
             $items = Item::with('units')->whereIn('id', collect($lines)->pluck('item_id'))->get()->keyBy('id');
@@ -395,7 +395,7 @@ class Sale extends Model
     {
         $settings = CompanySetting::current();
         $customer = Customer::findOrFail($data['customer_id']);
-        $invoiceType = $settings->active_invoice_type ?? 'full';
+        $invoiceType = $data['invoice_type'] ?? $settings->active_invoice_type ?? 'full';
 
         $items = Item::with('units')->whereIn('id', collect($lines)->pluck('item_id'))->get()->keyBy('id');
 

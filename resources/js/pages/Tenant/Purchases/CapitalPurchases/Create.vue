@@ -199,7 +199,7 @@ function submit() {
 
 <template>
     <div>
-        <PageHeader title="New capital purchase" description="Record a long-term asset or service bill, such as equipment or furniture. Fields marked * are required.">
+        <PageHeader title="New capital / service purchase" description="Record a long-term asset or service bill, such as equipment, furniture, rent or professional fees. Fields marked * are required.">
             <Button variant="secondary" tone="purple" type="button" @click="emit('cancel')">Cancel</Button>
         </PageHeader>
 
@@ -435,7 +435,7 @@ function submit() {
             <div class="flex items-center justify-end gap-2">
                 <Button variant="secondary" tone="purple" type="button" @click="emit('cancel')">Cancel</Button>
                 <Button variant="primary" tone="purple" type="submit" :loading="form.processing" :disabled="!canSubmit">
-                    Create capital purchase
+                    {{ form.type === 'service' ? 'Create service purchase' : 'Create capital purchase' }}
                 </Button>
             </div>
         </form>

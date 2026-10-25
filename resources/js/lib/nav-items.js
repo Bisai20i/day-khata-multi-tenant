@@ -99,7 +99,7 @@ export function navGroups() {
                     label: 'Buying',
                     items: [
                         { label: 'Purchases', href: '/purchases', icon: PackageSearch, permission: 'purchases.view' },
-                        { label: 'Capital Purchases', href: '/capital-purchases', icon: Landmark, permission: 'capital_purchases.view' },
+                        { label: 'Capital & Service', href: '/capital-purchases', icon: Landmark, permission: 'capital_purchases.view' },
                         { label: 'Purchase Returns', href: '/purchase-returns', icon: Undo2, permission: 'purchase_returns.view' },
                     ],
                 },
@@ -174,6 +174,7 @@ export function navGroups() {
                 {
                     label: 'Account Reports',
                     items: [
+                        { label: 'Ledger', href: '/reports/ledger', icon: BookOpen, permission: 'account_ledger.view' },
                         { label: 'Trial Balance', href: '/reports/trial-balance', icon: Calculator, permission: 'financial_statements.view' },
                         { label: 'Income Statement', href: '/reports/income-statement', icon: Calculator, permission: 'financial_statements.view' },
                         { label: 'Balance Sheet', href: '/reports/balance-sheet', icon: Calculator, permission: 'financial_statements.view' },
@@ -231,6 +232,12 @@ export function navGroups() {
         {
             label: 'ADMIN',
             categories: [
+                {
+                    label: 'Company',
+                    items: [
+                        { label: 'Company Setup', href: '/settings', icon: Settings, permission: 'settings.manage' },
+                    ],
+                },
                 {
                     label: 'Users & Access',
                     items: [

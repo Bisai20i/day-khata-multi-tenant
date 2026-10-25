@@ -28,6 +28,7 @@ Route::name('tenant.')->group(function () {
             ->name('cancel');
         Route::get('/{stock_adjustment}/print', [StockAdjustmentController::class, 'print'])->middleware('can:stock_adjustments.print')->name('print');
         Route::get('/opening-stock/template', [StockAdjustmentController::class, 'openingStockTemplate'])->middleware('can:opening_stock.import')->name('opening-stock.template');
+        Route::get('/opening-stock/sample-excel', [StockAdjustmentController::class, 'openingStockSampleExcel'])->middleware('can:opening_stock.import')->name('opening-stock.sample-excel');
         Route::post('/opening-stock/import', [StockAdjustmentController::class, 'importOpeningStock'])->middleware('can:opening_stock.import')->name('opening-stock.import');
     });
 });

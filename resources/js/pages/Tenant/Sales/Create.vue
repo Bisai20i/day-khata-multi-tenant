@@ -1,5 +1,5 @@
 <script setup>
-import { ref } from 'vue';
+import { ref, computed } from 'vue';
 import { useForm, usePage } from '@inertiajs/vue3';
 import Card from '@/components/ui/Card.vue';
 import Button from '@/components/ui/Button.vue';
@@ -115,7 +115,11 @@ function defaultFormData() {
 const form = useForm(props.initialDraft ?? defaultFormData());
 
 const { isPanInvoice, effectiveVatRate, itemOptions, itemsById, selectLineUnit, selectLineItem, applyLineMrp } =
-    useSaleCreateItems(props);
+    useSaleCreateItems(props, computed(() => form.invoice_type));
+const isAbitOverCeiling = computed(() => {
+    return form.invoice_type === 'abbreviated' && totals.value && Number(totals.value.total) > 10000;
+});
+
 const { totals, previewError, toggleHeaderDiscountType, showBankField, showPartialFields, partialBalanced, canSubmit } =
     useSaleCreatePreview(form, { itemsById, isPanInvoice, effectiveVatRate });
 const { customerModalOpen, customerForm, openCustomerModal, closeCustomerModal, submitCustomer } = useSaleCreateCustomer(form, props);
@@ -190,6 +194,47 @@ function submit(print = false, copies = 1) {
     </p>
 
     <form class="flex flex-col gap-4 pb-4" @submit.prevent="submit(false)">
+        <!-- Invoice Type Selector (Tasks 02, 03, 04) -->
+        <div class="flex flex-wrap items-center justify-between gap-3 border-[1.5px] border-border bg-white px-4 py-2.5">
+            <div class="flex items-center gap-2">
+                <span class="text-xs font-bold uppercase tracking-wider text-text-muted">Invoice Type:</span>
+                <div class="inline-flex rounded-md border border-neutral-300 bg-neutral-100 p-0.5 text-xs font-semibold">
+                    <button
+                        type="button"
+                        class="rounded px-3 py-1 transition-colors"
+                        :class="form.invoice_type === 'full' ? 'bg-primary text-white shadow-sm' : 'text-text-muted hover:text-text-strong'"
+                        @click="form.invoice_type = 'full'"
+                    >
+                        VAT Invoice (Full Tax)
+                    </button>
+                    <button
+                        type="button"
+                        class="rounded px-3 py-1 transition-colors"
+                        :class="form.invoice_type === 'abbreviated' ? 'bg-primary text-white shadow-sm' : 'text-text-muted hover:text-text-strong'"
+                        @click="form.invoice_type = 'abbreviated'"
+                    >
+                        ABIT Bill (Abbreviated)
+                    </button>
+                    <button
+                        type="button"
+                        class="rounded px-3 py-1 transition-colors"
+                        :class="form.invoice_type === 'pan' ? 'bg-primary text-white shadow-sm' : 'text-text-muted hover:text-text-strong'"
+                        @click="form.invoice_type = 'pan'"
+                    >
+                        PAN Invoice
+                    </button>
+                </div>
+            </div>
+            <div class="text-xs">
+                <span v-if="form.invoice_type === 'full'" class="font-medium text-primary">Standard VAT invoice ({{ props.invoiceSettings.default_vat_rate }}% Tax on vatable items)</span>
+                <span v-else-if="form.invoice_type === 'abbreviated'" class="font-medium text-amber-700">IRD Abbreviated Bill (Max NPR 10,000.00 ceiling)</span>
+                <span v-else-if="form.invoice_type === 'pan'" class="font-medium text-emerald-700">Non-VAT PAN invoice (0.00% Tax enforced)</span>
+            </div>
+        </div>
+
+        <div v-if="isAbitOverCeiling" class="border-[1.5px] border-danger bg-danger-bg px-4 py-3 text-sm text-danger">
+            <strong>ABIT Bill Exceeds Statutory Limit:</strong> Abbreviated tax invoices cannot exceed NPR 10,000.00 under IRD Rule 18. Current total is NPR {{ totals?.total }}. Please switch to VAT Invoice or reduce quantities before posting.
+        </div>
             <SaleCreateCustomerCard :form="form" :customers="customers" @add-customer="openCustomerModal" />
 
             <!-- Items: staging row + the bill's committed lines, merged into
@@ -262,9 +307,10 @@ function submit(print = false, copies = 1) {
                 :totals="totals"
                 :show-partial-fields="showPartialFields"
                 :partial-balanced="partialBalanced"
-                :can-submit="canSubmit"
+                :can-submit="canSubmit && !isAbitOverCeiling"
+                :is-pan="form.invoice_type === 'pan'"
                 :processing="form.processing"
-                :can-estimate="form.lines.length > 0"
+                :can-estimate="form.lines.length > 0 && !isAbitOverCeiling"
                 @cancel="requestCancel"
                 @estimate="openEstimate"
                 @print="(copies) => submit(true, copies)"

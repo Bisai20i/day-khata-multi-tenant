@@ -404,6 +404,7 @@ class SaleController extends Controller
 
         return [
             'customer_id' => ['required', 'exists:customers,id'],
+            'invoice_type' => ['nullable', 'string', 'in:full,abbreviated,pan'],
             // invoice_type is deliberately absent: it is never a cashier
             // choice (see Sale::post(), which always reads
             // CompanySetting::active_invoice_type - set only by the
@@ -533,7 +534,7 @@ class SaleController extends Controller
     public function estimate(Request $request): HttpResponse
     {
         $data = $request->validate(Arr::only($this->storeRules(), [
-            'customer_id', 'chalani_number', 'date', 'discount', 'discount_type',
+            'customer_id', 'invoice_type', 'chalani_number', 'date', 'discount', 'discount_type',
             'cash_amount', 'bank_amount', 'tds_amount', 'narration',
             'lines', 'lines.*.item_id', 'lines.*.item_unit_id', 'lines.*.quantity', 'lines.*.rate',
             'lines.*.discount', 'lines.*.discount_type', 'lines.*.bonus_quantity',

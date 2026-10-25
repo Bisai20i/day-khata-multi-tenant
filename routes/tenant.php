@@ -95,5 +95,6 @@ Route::middleware([
         require base_path('routes/tenant-pos.php');
         require base_path('routes/tenant-fiscal-year-archive.php');
         require base_path('routes/tenant-agents.php');
+        require base_path('routes/tenant-settings.php');
     });
 });

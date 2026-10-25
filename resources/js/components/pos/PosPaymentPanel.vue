@@ -182,12 +182,14 @@ const { can } = usePermissions();
                     <dt class="text-text-muted">Discount</dt>
                     <dd class="text-right font-medium text-text-strong tabular-nums">− {{ formatMoney(totals.header_discount) }}</dd>
                 </template>
-                <dt class="text-text-muted">Taxable amount</dt>
-                <dd class="text-right font-medium text-text-strong tabular-nums">{{ formatMoney(totals.taxable_amount) }}</dd>
-                <dt class="text-text-muted">Non-taxable amount</dt>
-                <dd class="text-right font-medium text-text-strong tabular-nums">{{ formatMoney(totals.nontaxable_amount) }}</dd>
-                <dt class="text-text-muted">VAT ({{ Number(totals.vat_rate) }}%)</dt>
-                <dd class="text-right font-medium text-text-strong tabular-nums">{{ formatMoney(totals.vat_amount) }}</dd>
+                <template v-if="Number(totals.vat_rate) > 0 || Number(totals.vat_amount) > 0">
+                    <dt class="text-text-muted">Taxable amount</dt>
+                    <dd class="text-right font-medium text-text-strong tabular-nums">{{ formatMoney(totals.taxable_amount) }}</dd>
+                    <dt class="text-text-muted">Non-taxable amount</dt>
+                    <dd class="text-right font-medium text-text-strong tabular-nums">{{ formatMoney(totals.nontaxable_amount) }}</dd>
+                    <dt class="text-text-muted">VAT ({{ Number(totals.vat_rate) }}%)</dt>
+                    <dd class="text-right font-medium text-text-strong tabular-nums">{{ formatMoney(totals.vat_amount) }}</dd>
+                </template>
                 <dt class="pos-grand mt-1 border-t border-border pt-2">Grand total</dt>
                 <dd class="pos-grand-amt mt-1 border-t border-border pt-2 text-right tabular-nums">{{ formatMoney(totals.total) }}</dd>
             </dl>

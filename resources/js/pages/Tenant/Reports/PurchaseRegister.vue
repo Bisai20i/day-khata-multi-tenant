@@ -6,6 +6,7 @@ import { useLayoutChrome } from '@/composables/useLayoutChrome';
 import Card from '@/components/ui/Card.vue';
 import PageHeader from '@/components/ui/PageHeader.vue';
 import NepaliDateInput from '@/components/ui/NepaliDateInput.vue';
+import Input from '@/components/ui/Input.vue';
 import Select from '@/components/ui/Select.vue';
 import Button from '@/components/ui/Button.vue';
 import DataTable from '@/components/ui/DataTable.vue';
@@ -28,6 +29,7 @@ const props = defineProps({
     supplierId: { type: [Number, null], default: null },
     storeId: { type: [Number, null], default: null },
     paymentMode: { type: [String, null], default: null },
+    search: { type: String, default: '' },
 });
 
 useLayoutChrome('Purchase Register');
@@ -37,6 +39,7 @@ const to = ref(props.to);
 const supplierId = ref(props.supplierId);
 const storeId = ref(props.storeId);
 const paymentMode = ref(props.paymentMode);
+const search = ref(props.search);
 
 const supplierOptions = computed(() => [
     { value: null, label: 'All suppliers' },
@@ -62,12 +65,13 @@ const rangeLabel = computed(
 
 const isLoading = ref(false);
 
-const hasActiveFilter = computed(() => supplierId.value !== null || storeId.value !== null || paymentMode.value !== null);
+const hasActiveFilter = computed(() => supplierId.value !== null || storeId.value !== null || paymentMode.value !== null || search.value !== '');
 
 function resetFilters() {
     supplierId.value = null;
     storeId.value = null;
     paymentMode.value = null;
+    search.value = '';
     applyFilter();
 }
 
@@ -80,6 +84,7 @@ function applyFilter() {
             supplier_id: supplierId.value ?? undefined,
             store_id: storeId.value ?? undefined,
             payment_mode: paymentMode.value ?? undefined,
+            search: search.value || undefined,
         },
         {
             preserveState: true,
@@ -106,8 +111,9 @@ const columns = [
     { id: 'bill_number', header: 'Bill #', numeric: false, cell: ({ row }) => h('span', { class: cellClasses(row) }, row.original.bill_number ?? '-') },
     { id: 'supplier', header: 'Supplier', numeric: false, cell: ({ row }) => h('span', { class: cellClasses(row) }, row.original.supplier ?? '-') },
     { id: 'pan_number', header: 'PAN', numeric: false, cell: ({ row }) => h('span', { class: cellClasses(row) }, row.original.pan_number ?? '-') },
-    { id: 'taxable_amount', header: 'Taxable amount', numeric: true, cell: ({ row }) => h('span', { class: cellClasses(row) }, formatMoney(row.original.taxable_amount)) },
-    { id: 'nontaxable_amount', header: 'Non-taxable amount', numeric: true, cell: ({ row }) => h('span', { class: cellClasses(row) }, formatMoney(row.original.nontaxable_amount)) },
+    { id: 'subtotal', header: 'Sub Total', numeric: true, cell: ({ row }) => h('span', { class: cellClasses(row) }, formatMoney(row.original.subtotal)) },
+    { id: 'nontaxable_amount', header: 'Non-Taxable', numeric: true, cell: ({ row }) => h('span', { class: cellClasses(row) }, formatMoney(row.original.nontaxable_amount)) },
+    { id: 'taxable_amount', header: 'Taxable', numeric: true, cell: ({ row }) => h('span', { class: cellClasses(row) }, formatMoney(row.original.taxable_amount)) },
     { id: 'vat_amount', header: 'VAT', numeric: true, cell: ({ row }) => h('span', { class: cellClasses(row) }, formatMoney(row.original.vat_amount)) },
     { id: 'total', header: 'Total amount', numeric: true, cell: ({ row }) => h('span', { class: cellClasses(row) }, formatMoney(row.original.total)) },
     {
@@ -158,6 +164,10 @@ const columns = [
                     <Label class="mb-1">Payment mode</Label>
                     <Select v-model="paymentMode" :options="paymentModeOptions" />
                 </div>
+                <div class="w-56">
+                    <Label class="mb-1">Search</Label>
+                    <Input v-model="search" placeholder="Bill # or supplier..." @keydown.enter.prevent="applyFilter" />
+                </div>
                 <Button variant="primary" tone="purple" :loading="isLoading" @click="applyFilter">Generate report</Button>
                 <Button v-if="hasActiveFilter" variant="secondary" tone="purple" :disabled="isLoading" @click="resetFilters">Reset</Button>
             </div>
@@ -168,10 +178,11 @@ const columns = [
 
             <div class="mt-3 flex flex-wrap items-center justify-end gap-6 border-t-[1.5px] border-border pt-3 text-[12.5px]">
                 <div class="font-bold text-text-strong">Total</div>
-                <div><span class="text-text-muted">Taxable amount:</span> <span class="font-semibold">{{ formatMoney(totals.taxable_amount) }}</span></div>
-                <div><span class="text-text-muted">Non-taxable amount:</span> <span class="font-semibold">{{ formatMoney(totals.nontaxable_amount) }}</span></div>
+                <div><span class="text-text-muted">Sub Total:</span> <span class="font-semibold">{{ formatMoney(totals.subtotal) }}</span></div>
+                <div><span class="text-text-muted">Non-Taxable:</span> <span class="font-semibold">{{ formatMoney(totals.nontaxable_amount) }}</span></div>
+                <div><span class="text-text-muted">Taxable:</span> <span class="font-semibold">{{ formatMoney(totals.taxable_amount) }}</span></div>
                 <div><span class="text-text-muted">VAT:</span> <span class="font-semibold">{{ formatMoney(totals.vat_amount) }}</span></div>
-                <div><span class="text-text-muted">Total amount:</span> <span class="font-bold">{{ formatMoney(totals.total) }}</span></div>
+                <div><span class="text-text-muted">Total amount:</span> <span class="font-bold text-primary">{{ formatMoney(totals.total) }}</span></div>
             </div>
 
             <p class="mt-3 text-[11.5px] text-text-faint">

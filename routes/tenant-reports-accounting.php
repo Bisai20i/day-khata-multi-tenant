@@ -24,6 +24,10 @@ use Illuminate\Support\Facades\Route;
 // margins, capital, every bank balance - which is a different sensitivity
 // class from the operational sales/stock reports a counter user needs.
 Route::name('tenant.reports.')->prefix('reports')->group(function () {
+    Route::get('/ledger', [AccountingReportController::class, 'ledger'])->middleware('can:account_ledger.view')->name('ledger');
+    Route::get('/ledger/print', [AccountingReportController::class, 'ledgerPdf'])->middleware('can:account_ledger.print')->name('ledger.print');
+    Route::get('/ledger/export', [AccountingReportController::class, 'ledgerExport'])->middleware('can:account_ledger.export')->name('ledger.export');
+
     Route::get('/trial-balance', [AccountingReportController::class, 'trialBalance'])->middleware('can:financial_statements.view')->name('trial-balance');
     Route::get('/trial-balance/print', [AccountingReportController::class, 'trialBalancePdf'])->middleware('can:financial_statements.print')->name('trial-balance.print');
     Route::get('/trial-balance/export', [AccountingReportController::class, 'trialBalanceExport'])->middleware('can:financial_statements.export')->name('trial-balance.export');

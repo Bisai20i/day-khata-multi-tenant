@@ -16,6 +16,7 @@ defineProps({
     processing: { type: Boolean, default: false },
     // True once the bill has a line: there is something to estimate.
     canEstimate: { type: Boolean, default: false },
+    isPan: { type: Boolean, default: false },
 });
 
 const emit = defineEmits(['update:showMoreOptions', 'cancel', 'print', 'estimate']);
@@ -56,7 +57,7 @@ function submitAndPrint(copies) {
                         <th class="px-3 py-1.5 text-left text-[10px] font-bold tracking-[.8px] text-text-muted uppercase">Discount</th>
                         <th class="px-3 py-1.5 text-left text-[10px] font-bold tracking-[.8px] text-text-muted uppercase" title="Amount on which VAT is charged">Taxable amount</th>
                         <th class="px-3 py-1.5 text-left text-[10px] font-bold tracking-[.8px] text-text-muted uppercase" title="Amount with no VAT">Non-taxable amount</th>
-                        <th class="px-3 py-1.5 text-left text-[10px] font-bold tracking-[.8px] text-text-muted uppercase" title="Value Added Tax">VAT</th>
+                        <th class="px-3 py-1.5 text-left text-[10px] font-bold tracking-[.8px] text-text-muted uppercase" title="Value Added Tax">VAT {{ isPan ? '(0% PAN)' : '' }}</th>
                         <th class="bg-primary-tint px-3 py-1.5 text-left text-[10px] font-bold tracking-[.8px] text-primary uppercase">Total to pay</th>
                     </tr>
                 </thead>

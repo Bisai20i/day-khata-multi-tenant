@@ -17,11 +17,13 @@ import { addMoney, calculateDocument, compareMoney, moneyEquals, parseMoney, sub
  * @param {object} options.form The active cart's form.
  * @param {import('vue').ComputedRef<Record<number, object>>} options.itemsById
  */
-export function usePosTotals({ props, form, itemsById }) {
-    // The invoice type is never a form field - it's fixed per tenant by the
-    // platform admin (TenantCompanySettingController), so this just reads the
-    // value the server already applies to every sale (see Sale::post()).
-    const isPanInvoice = computed(() => props.invoiceSettings.active_invoice_type === 'pan');
+export function usePosTotals({ props, form, itemsById, activeInvoiceType = null }) {
+    const isPanInvoice = computed(() => {
+        if (activeInvoiceType && activeInvoiceType.value) {
+            return activeInvoiceType.value === 'pan';
+        }
+        return props.invoiceSettings?.active_invoice_type === 'pan';
+    });
 
     // Never editable and never sent: the server always uses the tenant's
     // configured rate, and a PAN invoice carries no VAT at all.

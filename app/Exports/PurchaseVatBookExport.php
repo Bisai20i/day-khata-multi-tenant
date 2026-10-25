@@ -44,8 +44,9 @@ class PurchaseVatBookExport implements FromCollection, WithColumnFormatting, Wit
             'supplier' => 'Total',
             'supplier_pan' => null,
             'entry' => null,
-            'taxable_amount' => $this->totals['taxable_amount'],
+            'subtotal' => $this->totals['subtotal'] ?? '0.00',
             'nontaxable_amount' => $this->totals['nontaxable_amount'],
+            'taxable_amount' => $this->totals['taxable_amount'],
             'vat_amount' => $this->totals['vat_amount'],
             'capital_amount' => $this->totals['capital_amount'],
             'total' => $this->totals['total'],
@@ -57,7 +58,7 @@ class PurchaseVatBookExport implements FromCollection, WithColumnFormatting, Wit
      */
     public function headings(): array
     {
-        return ['SN', 'Date (BS)', 'Date (AD)', 'Bill #', 'Supplier', 'Supplier PAN', 'Entry', 'Taxable', 'Exempt', 'VAT', 'Capital', 'Total'];
+        return ['SN', 'Date (BS)', 'Date (AD)', 'Bill #', 'Supplier', 'Supplier PAN', 'Entry', 'Sub Total', 'Non-Taxable', 'Taxable', 'VAT', 'Capital', 'Total'];
     }
 
     /**
@@ -71,6 +72,7 @@ class PurchaseVatBookExport implements FromCollection, WithColumnFormatting, Wit
             'J' => NumberFormat::FORMAT_NUMBER_00,
             'K' => NumberFormat::FORMAT_NUMBER_00,
             'L' => NumberFormat::FORMAT_NUMBER_00,
+            'M' => NumberFormat::FORMAT_NUMBER_00,
         ];
     }
 
@@ -88,8 +90,9 @@ class PurchaseVatBookExport implements FromCollection, WithColumnFormatting, Wit
             $row['supplier'] ?? '',
             $row['supplier_pan'] ?? '',
             $row['entry'] ?? '',
-            Money::of($row['taxable_amount'])->toFloat(),
+            Money::of($row['subtotal'] ?? '0')->toFloat(),
             Money::of($row['nontaxable_amount'])->toFloat(),
+            Money::of($row['taxable_amount'])->toFloat(),
             Money::of($row['vat_amount'])->toFloat(),
             Money::of($row['capital_amount'])->toFloat(),
             Money::of($row['total'])->toFloat(),

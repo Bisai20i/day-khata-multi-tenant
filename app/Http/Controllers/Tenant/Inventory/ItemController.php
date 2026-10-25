@@ -2,7 +2,9 @@
 
 namespace App\Http\Controllers\Tenant\Inventory;
 
+use App\Exports\Samples\ItemSampleExport;
 use App\Http\Controllers\Concerns\ImportsCsv;
+use Maatwebsite\Excel\Facades\Excel;
 use App\Http\Controllers\Controller;
 use App\Models\Account;
 use App\Models\Brand;
@@ -141,6 +143,32 @@ class ItemController extends Controller
     }
 
     /**
+     * Flip an item between active and inactive. Inactive items are hidden from
+     * sales, purchase, and stock entry forms. Marking an item inactive requires
+     * its closing stock on hand to be zero so inventory cannot be orphaned.
+     */
+    public function toggleActive(Item $item): RedirectResponse
+    {
+        if ($item->is_active) {
+            $onHand = $item->currentStock();
+
+            if (! $onHand->isZero()) {
+                return back()->withErrors([
+                    'item' => "\"{$item->name}\" still has {$onHand->formatQuantity()} {$item->unit} in stock. Clear the stock first, or leave the item active.",
+                ]);
+            }
+
+            $item->update(['is_active' => false]);
+
+            return back()->with('status', "\"{$item->name}\" marked as inactive.");
+        }
+
+        $item->update(['is_active' => true]);
+
+        return back()->with('status', "\"{$item->name}\" reactivated successfully.");
+    }
+
+    /**
      * Nested under an item's own edit screen (Items/Index.vue's "Units"
      * panel) rather than a separate top-level resource - mirrors how
      * ItemVarietyController manages ItemVariety, except varieties get their
@@ -209,6 +237,10 @@ class ItemController extends Controller
      * Downloads a blank CSV template with the exact header this app's import
      * expects, plus one example row.
      */
+        public function importSampleExcel()
+    {
+        return Excel::download(new ItemSampleExport(), 'item-import-sample.xlsx');
+    }
     public function importTemplate(): StreamedResponse
     {
         return response()->streamDownload(function (): void {
@@ -233,7 +265,7 @@ class ItemController extends Controller
     public function import(Request $request): RedirectResponse
     {
         $request->validate([
-            'file' => ['required', 'file', 'mimes:csv,txt'],
+            'file' => ['required', 'file', 'mimes:csv,txt,xlsx,xls'],
         ]);
 
         $rows = $this->parseCsvRows($request->file('file'));

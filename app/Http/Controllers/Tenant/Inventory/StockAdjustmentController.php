@@ -3,7 +3,9 @@
 namespace App\Http\Controllers\Tenant\Inventory;
 
 use App\Enums\FiscalYearStatus;
+use App\Exports\Samples\OpeningStockSampleExport;
 use App\Http\Controllers\Concerns\ImportsCsv;
+use Maatwebsite\Excel\Facades\Excel;
 use App\Http\Controllers\Controller;
 use App\Models\CompanySetting;
 use App\Models\FiscalYear;
@@ -173,6 +175,10 @@ class StockAdjustmentController extends Controller
      * Downloads a blank CSV template for the opening-stock bulk import, plus
      * one example row.
      */
+        public function openingStockSampleExcel()
+    {
+        return Excel::download(new OpeningStockSampleExport(), 'opening-stock-import-sample.xlsx');
+    }
     public function openingStockTemplate(): StreamedResponse
     {
         return response()->streamDownload(function (): void {
@@ -209,7 +215,7 @@ class StockAdjustmentController extends Controller
     public function importOpeningStock(Request $request): RedirectResponse
     {
         $request->validate([
-            'file' => ['required', 'file', 'mimes:csv,txt'],
+            'file' => ['required', 'file', 'mimes:csv,txt,xlsx,xls'],
             'date' => ['required', 'date'],
             'store_id' => ['nullable', 'integer', 'exists:stores,id'],
             'fiscal_year_id' => ['nullable', 'integer', 'exists:fiscal_years,id'],

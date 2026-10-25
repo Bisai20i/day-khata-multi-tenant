@@ -47,8 +47,9 @@ class SalesVatBookExport implements FromCollection, WithColumnFormatting, WithHe
             'buyer_pan' => null,
             'invoice_type' => null,
             'entry' => null,
-            'taxable_amount' => $this->totals['taxable_amount'],
+            'subtotal' => $this->totals['subtotal'] ?? '0.00',
             'nontaxable_amount' => $this->totals['nontaxable_amount'],
+            'taxable_amount' => $this->totals['taxable_amount'],
             'vat_amount' => $this->totals['vat_amount'],
             'capital_amount' => $this->totals['capital_amount'],
             'total' => $this->totals['total'],
@@ -60,7 +61,7 @@ class SalesVatBookExport implements FromCollection, WithColumnFormatting, WithHe
      */
     public function headings(): array
     {
-        return ['SN', 'Date (BS)', 'Date (AD)', 'Invoice #', 'Buyer', 'Buyer PAN', 'Type', 'Entry', 'Taxable', 'Exempt', 'VAT', 'Capital', 'Total'];
+        return ['SN', 'Date (BS)', 'Date (AD)', 'Invoice #', 'Buyer', 'Buyer PAN', 'Type', 'Entry', 'Sub Total', 'Non-Taxable', 'Taxable', 'VAT', 'Capital', 'Total'];
     }
 
     /**
@@ -74,6 +75,7 @@ class SalesVatBookExport implements FromCollection, WithColumnFormatting, WithHe
             'K' => NumberFormat::FORMAT_NUMBER_00,
             'L' => NumberFormat::FORMAT_NUMBER_00,
             'M' => NumberFormat::FORMAT_NUMBER_00,
+            'N' => NumberFormat::FORMAT_NUMBER_00,
         ];
     }
 
@@ -92,8 +94,9 @@ class SalesVatBookExport implements FromCollection, WithColumnFormatting, WithHe
             $row['buyer_pan'] ?? '',
             $row['invoice_type'] ?? '',
             $row['entry'] ?? '',
-            Money::of($row['taxable_amount'])->toFloat(),
+            Money::of($row['subtotal'] ?? '0')->toFloat(),
             Money::of($row['nontaxable_amount'])->toFloat(),
+            Money::of($row['taxable_amount'])->toFloat(),
             Money::of($row['vat_amount'])->toFloat(),
             Money::of($row['capital_amount'])->toFloat(),
             Money::of($row['total'])->toFloat(),

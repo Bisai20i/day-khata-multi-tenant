@@ -53,7 +53,7 @@ class PurchaseReturnRegisterExport implements FromCollection, WithColumnFormatti
      */
     public function headings(): array
     {
-        return ['SN', 'Date (BS)', 'Date (AD)', 'Debit Note #', 'Against Bill #', 'Supplier', 'Supplier PAN', 'Entry', 'Taxable', 'Exempt', 'VAT', 'Total'];
+        return ['SN', 'Date (BS)', 'Date (AD)', 'Debit Note #', 'Against Bill #', 'Supplier', 'Supplier PAN', 'Entry', 'Sub Total', 'Non-Taxable', 'Taxable', 'VAT', 'Total'];
     }
 
     /**
@@ -66,6 +66,7 @@ class PurchaseReturnRegisterExport implements FromCollection, WithColumnFormatti
             'J' => NumberFormat::FORMAT_NUMBER_00,
             'K' => NumberFormat::FORMAT_NUMBER_00,
             'L' => NumberFormat::FORMAT_NUMBER_00,
+            'M' => NumberFormat::FORMAT_NUMBER_00,
         ];
     }
 
@@ -84,8 +85,9 @@ class PurchaseReturnRegisterExport implements FromCollection, WithColumnFormatti
             $row['supplier'] ?? '',
             $row['supplier_pan'] ?? '',
             $row['entry'] ?? '',
-            Money::of($row['taxable_amount'])->toFloat(),
+            Money::of($row['subtotal'] ?? '0')->toFloat(),
             Money::of($row['nontaxable_amount'])->toFloat(),
+            Money::of($row['taxable_amount'])->toFloat(),
             Money::of($row['vat_amount'])->toFloat(),
             Money::of($row['total'])->toFloat(),
         ];

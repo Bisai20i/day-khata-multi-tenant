@@ -56,6 +56,7 @@ Route::name('tenant.')->group(function () {
     Route::prefix('accounts')->name('accounts.')->group(function () {
         Route::get('/', [AccountController::class, 'index'])->middleware('can:accounts.view')->name('index');
         Route::get('/opening-balances/template', [AccountController::class, 'openingBalanceTemplate'])->middleware('can:accounts.view')->name('opening-balances.template');
+        Route::get('/opening-balances/sample-excel', [AccountController::class, 'openingBalanceSampleExcel'])->middleware('can:accounts.view')->name('opening-balances.sample-excel');
 
         Route::post('/', [AccountController::class, 'store'])->middleware('can:accounts.create')->name('store');
         Route::put('/{account}', [AccountController::class, 'update'])->middleware('can:accounts.edit')->name('update');
@@ -70,6 +71,7 @@ Route::name('tenant.')->group(function () {
         Route::put('/{customer}', [CustomerController::class, 'update'])->middleware('can:customers.edit')->name('update');
         Route::delete('/{customer}', [CustomerController::class, 'destroy'])->middleware('can:customers.delete')->name('destroy');
         Route::get('/import/template', [CustomerController::class, 'importTemplate'])->middleware('can:customers.import')->name('import.template');
+        Route::get('/import/sample-excel', [CustomerController::class, 'importSampleExcel'])->middleware('can:customers.import')->name('import.sample-excel');
         Route::post('/import', [CustomerController::class, 'import'])->middleware('can:customers.import')->name('import');
     });
 
@@ -79,6 +81,7 @@ Route::name('tenant.')->group(function () {
         Route::put('/{supplier}', [SupplierController::class, 'update'])->middleware('can:suppliers.edit')->name('update');
         Route::delete('/{supplier}', [SupplierController::class, 'destroy'])->middleware('can:suppliers.delete')->name('destroy');
         Route::get('/import/template', [SupplierController::class, 'importTemplate'])->middleware('can:suppliers.import')->name('import.template');
+        Route::get('/import/sample-excel', [SupplierController::class, 'importSampleExcel'])->middleware('can:suppliers.import')->name('import.sample-excel');
         Route::post('/import', [SupplierController::class, 'import'])->middleware('can:suppliers.import')->name('import');
     });
 
@@ -107,8 +110,10 @@ Route::name('tenant.')->group(function () {
         Route::get('/', [ItemController::class, 'index'])->middleware('can:items.view')->name('index');
         Route::post('/', [ItemController::class, 'store'])->middleware('can:items.create')->name('store');
         Route::put('/{item}', [ItemController::class, 'update'])->middleware('can:items.edit')->name('update');
+        Route::patch('/{item}/toggle-active', [ItemController::class, 'toggleActive'])->middleware('can:items.edit')->name('toggle-active');
         Route::delete('/{item}', [ItemController::class, 'destroy'])->middleware('can:items.delete')->name('destroy');
         Route::get('/import/template', [ItemController::class, 'importTemplate'])->middleware('can:items.import')->name('import.template');
+        Route::get('/import/sample-excel', [ItemController::class, 'importSampleExcel'])->middleware('can:items.import')->name('import.sample-excel');
         Route::post('/import', [ItemController::class, 'import'])->middleware('can:items.import')->name('import');
         // See BarcodeLabelController's docblock - not nested under a single
         // {item} since one print request can cover several items at once.

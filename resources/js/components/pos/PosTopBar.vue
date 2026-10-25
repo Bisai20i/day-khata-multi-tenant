@@ -18,6 +18,7 @@ defineProps({
     companyName: { type: String, default: '' },
     currentFiscalYear: { type: String, default: '' },
     isPanInvoice: { type: Boolean, default: false },
+    activeInvoiceType: { type: String, default: 'full' },
     isFullscreen: { type: Boolean, default: false },
     date: { type: String, default: '' },
     carts: { type: Array, default: () => [] },
@@ -28,6 +29,7 @@ defineProps({
 
 const emit = defineEmits([
     'update:date',
+    'set-invoice-type',
     'open-shortcuts',
     'toggle-fullscreen',
     'switch-cart',
@@ -68,9 +70,47 @@ const bindScroller = (element) => emit('scroller', element);
             <NepaliDateInput :model-value="date" required class="pos-date-input" @update:model-value="(v) => emit('update:date', v)" />
         </div>
         <div class="pos-bar-divider" />
-        <span class="pos-bill-badge" :title="isPanInvoice ? 'PAN invoices (no VAT) - set by your admin' : 'Tax invoices (VAT) - set by your admin'">
-            {{ isPanInvoice ? 'PAN' : 'TAX' }} invoice
-        </span>
+        <div class="flex items-center gap-1">
+            <button
+                type="button"
+                :class="[
+                    'px-2 py-1 text-[11px] font-bold border transition-colors',
+                    activeInvoiceType === 'full'
+                        ? 'bg-primary text-white border-primary'
+                        : 'bg-white text-text-muted border-border hover:text-text-base',
+                ]"
+                title="Full Tax Invoice (कर बिजक) - 13% VAT"
+                @click="emit('set-invoice-type', 'full')"
+            >
+                TAX
+            </button>
+            <button
+                type="button"
+                :class="[
+                    'px-2 py-1 text-[11px] font-bold border transition-colors',
+                    activeInvoiceType === 'abbreviated'
+                        ? 'bg-primary text-white border-primary'
+                        : 'bg-white text-text-muted border-border hover:text-text-base',
+                ]"
+                title="Abbreviated Tax Invoice (संक्षिप्त कर बिजक) - max NPR 10,000"
+                @click="emit('set-invoice-type', 'abbreviated')"
+            >
+                ABIT
+            </button>
+            <button
+                type="button"
+                :class="[
+                    'px-2 py-1 text-[11px] font-bold border transition-colors',
+                    activeInvoiceType === 'pan'
+                        ? 'bg-primary text-white border-primary'
+                        : 'bg-white text-text-muted border-border hover:text-text-base',
+                ]"
+                title="PAN Invoice (पान बिजक) - 0% VAT"
+                @click="emit('set-invoice-type', 'pan')"
+            >
+                PAN
+            </button>
+        </div>
 
         <Tooltip :label="isFullscreen ? 'Exit full screen' : 'Full screen'">
             <button type="button" :aria-label="isFullscreen ? 'Exit full screen' : 'Full screen'" class="pos-bar-btn pos-bar-btn--icon" @click="emit('toggle-fullscreen')">

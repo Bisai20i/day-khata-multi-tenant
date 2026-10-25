@@ -108,6 +108,13 @@ const tdsAccountOptions = computed(() =>
 );
 const itemsById = computed(() => Object.fromEntries(props.items.map((i) => [i.id, i])));
 
+const activeInvoiceType = ref(props.invoiceSettings?.active_invoice_type ?? 'full');
+
+function setInvoiceType(type) {
+    activeInvoiceType.value = type;
+    form.invoice_type = type;
+}
+
 const searchQuery = ref('');
 
 const {
@@ -329,7 +336,7 @@ const {
     resolvedPaymentMode,
     showBankAccountField,
     paymentBalanced,
-} = usePosTotals({ props, form, itemsById });
+} = usePosTotals({ props, form, itemsById, activeInvoiceType });
 
 /**
  * Switching a discount between % and Rs.
@@ -436,6 +443,9 @@ const { estimateOpen, estimateUrl, estimateLoading, openEstimate, closeEstimate 
 
 /** Plain-words reason Complete sale is disabled, or '' when it can proceed. */
 const submitBlockedReason = computed(() => {
+    if (activeInvoiceType.value === 'abbreviated' && totals.value && Number(totals.value.total) > 10000) {
+        return 'ABIT bills cannot exceed NPR 10,000.00 per IRD regulations. Please switch to TAX invoice.';
+    }
     if (form.processing) return '';
     if (!hasOpenFiscalYear.value) return 'No open fiscal year. Set up a fiscal year before completing sales.';
     if (!can('sales.create')) return 'Your role cannot post sales. Ask the owner for the Create sales permission.';
@@ -535,7 +545,9 @@ onUnmounted(() => {
             :company-name="companyName"
             :current-fiscal-year="currentFiscalYear"
             :is-pan-invoice="isPanInvoice"
+            :active-invoice-type="activeInvoiceType"
             :is-fullscreen="isFullscreen"
+            @set-invoice-type="setInvoiceType"
             :carts="carts"
             :active-cart-index="activeCartIndex"
             :cart-label="cartLabel"
