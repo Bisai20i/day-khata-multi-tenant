@@ -10,6 +10,7 @@ use App\Models\CompanySetting;
 use App\Models\FiscalYear;
 use App\Models\JournalVoucher;
 use App\Models\PrintLog;
+use App\Support\Manufacturing\ManufacturingAccounts;
 use App\Support\Money\Money;
 use App\Support\NepaliCalendar;
 use Barryvdh\DomPDF\Facade\Pdf;
@@ -163,6 +164,8 @@ class JournalVoucherController extends Controller
         ]);
 
         try {
+            ManufacturingAccounts::assertNotControlAccounts(array_column($data['lines'], 'account_id'));
+
             $voucher = JournalVoucher::post(
                 Arr::only($data, ['fiscal_year_id', 'reason', 'date', 'narration']),
                 $data['lines'],
@@ -209,6 +212,13 @@ class JournalVoucherController extends Controller
         ]);
 
         try {
+            ManufacturingAccounts::assertNotControlAccounts([
+                $data['bank_account_id'] ?? null,
+                $data['from_account_id'] ?? null,
+                $data['to_account_id'] ?? null,
+                ...array_column($data['lines'] ?? [], 'account_id'),
+            ]);
+
             $voucher = JournalVoucher::postCashBank($data, $request->user());
         } catch (InvalidArgumentException|AuthorizationException $e) {
             return back()->withErrors(['lines' => $e->getMessage()])->withInput();

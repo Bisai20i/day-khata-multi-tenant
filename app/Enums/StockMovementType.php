@@ -9,6 +9,11 @@ namespace App\Enums;
  * StockAdjustmentController - see day-khata-multi-tenant mem.md's Sales/
  * Purchase module section. direction() encodes which side of the ledger
  * (in/out of stock) each type represents, so callers never hardcode signs.
+ *
+ * MaterialIssue, MaterialReturn and ProductionReceipt belong to the hybrid
+ * perpetual manufacturing flow: they only ever occur on raw-material and
+ * finished-good items, are priced with item_stock_movements.cost_value, and
+ * post to the GL in real time (see InventoryClass).
  */
 enum StockMovementType: string
 {
@@ -27,14 +32,17 @@ enum StockMovementType: string
     case RefiningOut = 'refining_out';
     case RepackagingIn = 'repackaging_in';
     case RepackagingOut = 'repackaging_out';
+    case MaterialIssue = 'material_issue';
+    case MaterialReturn = 'material_return';
+    case ProductionReceipt = 'production_receipt';
 
     public function direction(): int
     {
         return match ($this) {
             self::Purchase, self::SaleReturn, self::Opening, self::AdjustmentIn, self::TransferIn,
-            self::ProductionIn, self::RefiningIn, self::RepackagingIn => 1,
+            self::ProductionIn, self::RefiningIn, self::RepackagingIn, self::MaterialReturn, self::ProductionReceipt => 1,
             self::Sale, self::PurchaseReturn, self::AdjustmentOut, self::TransferOut,
-            self::ProductionOut, self::RefiningOut, self::RepackagingOut => -1,
+            self::ProductionOut, self::RefiningOut, self::RepackagingOut, self::MaterialIssue => -1,
         };
     }
 }

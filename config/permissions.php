@@ -32,6 +32,7 @@ return [
         'inventory' => ['label' => 'Inventory', 'requires' => []],
         'accounting' => ['label' => 'Accounting', 'requires' => []],
         'reports' => ['label' => 'Reports', 'requires' => []],
+        'manufacturing' => ['label' => 'Manufacturing', 'requires' => ['inventory', 'accounting']],
         'admin' => ['label' => 'Administration', 'requires' => []],
     ],
 
@@ -139,6 +140,18 @@ return [
         'stock_conversions.create' => ['module' => 'inventory', 'group' => 'Stock', 'label' => 'Create production and refining entries'],
         'stock_conversions.print' => ['module' => 'inventory', 'group' => 'Stock', 'label' => 'Print production and refining entries'],
         'stock_conversions.cancel' => ['module' => 'inventory', 'group' => 'Stock', 'label' => 'Cancel production and refining entries'],
+
+        'material_issues.view' => ['module' => 'manufacturing', 'group' => 'Manufacturing', 'label' => 'View material issue notes'],
+        'material_issues.create' => ['module' => 'manufacturing', 'group' => 'Manufacturing', 'label' => 'Issue materials to production'],
+        'material_issues.cancel' => ['module' => 'manufacturing', 'group' => 'Manufacturing', 'label' => 'Cancel material issue notes'],
+        'material_issues.print' => ['module' => 'manufacturing', 'group' => 'Manufacturing', 'label' => 'Print material issue notes'],
+        'production_entries.view' => ['module' => 'manufacturing', 'group' => 'Manufacturing', 'label' => 'View production entries'],
+        'production_entries.create' => ['module' => 'manufacturing', 'group' => 'Manufacturing', 'label' => 'Create production entries'],
+        'production_entries.edit' => ['module' => 'manufacturing', 'group' => 'Manufacturing', 'label' => 'Post direct costs, returns and completions'],
+        'production_entries.cancel' => ['module' => 'manufacturing', 'group' => 'Manufacturing', 'label' => 'Cancel or abandon production entries'],
+        'production_entries.print' => ['module' => 'manufacturing', 'group' => 'Manufacturing', 'label' => 'Print production cost sheets'],
+        'manufacturing_reports.view' => ['module' => 'manufacturing', 'group' => 'Manufacturing', 'label' => 'View manufacturing reports'],
+        'manufacturing_reports.export' => ['module' => 'manufacturing', 'group' => 'Manufacturing', 'label' => 'Export manufacturing reports'],
         'stores.view' => ['module' => 'inventory', 'group' => 'Stores and varieties', 'label' => 'View stores'],
         'stores.manage' => ['module' => 'inventory', 'group' => 'Stores and varieties', 'label' => 'Add, edit and delete stores'],
         'item_varieties.view' => ['module' => 'inventory', 'group' => 'Stores and varieties', 'label' => 'View item varieties'],
@@ -189,6 +202,6 @@ return [
 
     'default_modules' => [
         'sales', 'pos', 'agents', 'quotations', 'purchases',
-        'inventory', 'accounting', 'reports', 'admin',
+        'inventory', 'accounting', 'reports', 'manufacturing', 'admin',
     ],
 ];

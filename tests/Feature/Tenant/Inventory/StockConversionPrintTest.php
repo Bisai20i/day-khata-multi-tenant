@@ -139,7 +139,7 @@ test('the stock conversion print route is rejected for an unauthenticated reques
         $raw->recordStockMovement(StockMovementType::Opening, 10, '2026-06-01', $store->id);
 
         $conversionId = StockConversion::post(
-            ['type' => 'production', 'date' => '2026-06-02'],
+            ['type' => 'refining', 'date' => '2026-06-02'],
             [['item_id' => $raw->id, 'quantity' => 10]],
             [['item_id' => $finished->id, 'quantity' => 5]],
             $admin,

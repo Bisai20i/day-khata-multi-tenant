@@ -155,7 +155,7 @@ function submit(print = false) {
 </script>
 
 <template>
-    <div>
+    <div class="flex min-h-full flex-col">
     <div class="mb-4 flex items-center justify-between">
         <div>
             <h3 class="text-base font-bold text-text-strong">New journal voucher</h3>
@@ -168,7 +168,7 @@ function submit(print = false) {
         {{ form.errors.lines }}
     </p>
 
-    <form class="flex flex-col gap-4 pb-4" @submit.prevent="submit(false)">
+    <form class="flex flex-1 flex-col gap-4" @submit.prevent="submit(false)">
         <Card variant="panel" class="!p-4">
             <div class="grid grid-cols-1 gap-4 sm:grid-cols-3">
                 <div>

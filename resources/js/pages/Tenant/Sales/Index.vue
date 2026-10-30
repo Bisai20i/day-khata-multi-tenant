@@ -408,7 +408,7 @@ const columns = [
 </script>
 
 <template>
-    <div>
+    <div class="flex min-h-full flex-col">
         <template v-if="showCreateForm">
             <Create
                 :customers="customers"

@@ -60,6 +60,12 @@ use ValueError;
  * Because nothing here goes through JournalVoucher::post(), this class calls
  * ClosedFiscalYearGuard::assertDateInOpenYear() itself (CONTRACTS C4, audit
  * P0-11: stock documents bypassed the fiscal-year guard entirely).
+ *
+ * Since manufacturing (contract MC8) this document is kept for refining and
+ * repackaging of trading items only: the `production` type is refused for new
+ * entries (old rows still load) and raw materials / finished goods are refused
+ * outright, because a typed output rate cannot keep their perpetual value
+ * equal to the GL.
  */
 #[Fillable(['type', 'date', 'store_id', 'note', 'total_value', 'status', 'cancelled_by', 'cancelled_at', 'cancel_reason', 'created_by'])]
 class StockConversion extends Model
@@ -138,7 +144,18 @@ class StockConversion extends Model
             try {
                 $type = StockConversionType::from($data['type']);
             } catch (ValueError) {
-                throw new InvalidArgumentException('Type must be "production", "refining", or "repackaging".');
+                throw new InvalidArgumentException('Type must be "refining" or "repackaging".');
+            }
+
+            // Production now runs through Material Issue Notes and Production
+            // Entries, which carry the perpetual cost of raw materials into
+            // finished goods (manufacturing contract MC8). The case stays on
+            // the enum so old production rows still load and display; it is
+            // only refused for new entries.
+            if ($type === StockConversionType::Production) {
+                throw new InvalidArgumentException(
+                    'Production is no longer posted as a stock conversion. Use a Material Issue Note and a Production Entry instead.'
+                );
             }
 
             ClosedFiscalYearGuard::assertDateInOpenYear($data['date'], $actor);
@@ -150,6 +167,20 @@ class StockConversion extends Model
             }
 
             $items = Item::whereIn('id', collect([...$inputLines, ...$outputLines])->pluck('item_id'))->get()->keyBy('id');
+
+            // A conversion values its output at a typed rate, not at the cost
+            // that actually left its inputs, so it cannot keep a raw material
+            // or finished good's moving average equal to its GL account
+            // (invariant P1). Those items move only through the manufacturing
+            // documents.
+            $perpetualItem = $items->first(fn (Item $item): bool => $item->isPerpetual());
+
+            if ($perpetualItem !== null) {
+                throw new InvalidArgumentException(
+                    "\"{$perpetualItem->name}\" is a {$perpetualItem->inventory_class->label()} item and cannot be used in a stock conversion. "
+                    .'Use a Material Issue Note or a Production Entry instead.'
+                );
+            }
 
             $prepareLine = function (array $line, string $direction) use ($items): array {
                 if (! $items->has($line['item_id'])) {

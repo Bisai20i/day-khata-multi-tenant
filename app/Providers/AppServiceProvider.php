@@ -9,8 +9,12 @@ use App\Models\CapitalSale;
 use App\Models\FiscalYear;
 use App\Models\FixedAsset;
 use App\Models\JournalVoucher;
+use App\Models\MaterialIssueNote;
 use App\Models\Payment;
 use App\Models\PlatformAdmin;
+use App\Models\ProductionCompletion;
+use App\Models\ProductionDirectCost;
+use App\Models\ProductionEntry;
 use App\Models\Purchase;
 use App\Models\PurchaseReturn;
 use App\Models\Quotation;
@@ -58,6 +62,10 @@ class AppServiceProvider extends ServiceProvider
         CapitalSale::observe(ActivityLogObserver::class);
         CapitalPurchase::observe(ActivityLogObserver::class);
         CapitalPurchaseSettlement::observe(ActivityLogObserver::class);
+        MaterialIssueNote::observe(ActivityLogObserver::class);
+        ProductionEntry::observe(ActivityLogObserver::class);
+        ProductionDirectCost::observe(ActivityLogObserver::class);
+        ProductionCompletion::observe(ActivityLogObserver::class);
         User::observe(ActivityLogObserver::class);
         // Covers close()/reopen()/relock() - each is a plain field-setting
         // update() under the hood, so the generic observer's 'updated'

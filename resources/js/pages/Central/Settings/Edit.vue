@@ -73,13 +73,15 @@ function sendTestEmail() {
 </script>
 
 <template>
-    <div>
+    <!-- Fills the layout's full-height column; the form stretches and its footer
+         is pushed to the very bottom, however short the content is. -->
+    <div class="flex flex-1 flex-col">
         <PageHeader
             title="Platform settings"
             description="Branding, default trial and grace periods for new tenants, and the email account the platform sends from."
         />
 
-        <form class="flex flex-col gap-8" @submit.prevent="submit">
+        <form class="flex flex-1 flex-col gap-8" @submit.prevent="submit">
             <FormSection title="Branding" description="How the platform introduces itself in emails and page titles.">
                 <div class="grid grid-cols-1 gap-4 sm:grid-cols-2">
                     <FormField v-slot="{ describedBy }" label="Platform name" for="platform_name" help="Shown in emails and page titles." :error="form.errors.platform_name">
@@ -150,7 +152,7 @@ function sendTestEmail() {
                 </div>
             </FormSection>
 
-            <FormActions :status="form.isDirty ? 'Unsaved changes' : 'All changes saved'" :emphasize="form.isDirty">
+            <FormActions class="mt-auto" :status="form.isDirty ? 'Unsaved changes' : 'All changes saved'" :emphasize="form.isDirty">
                 <Button variant="secondary" tone="neutral" type="button" :disabled="!form.isDirty || form.processing" @click="discard">Discard</Button>
                 <Button variant="primary" tone="purple" type="submit" :loading="form.processing" :disabled="!form.isDirty">
                     <Check class="size-4" />

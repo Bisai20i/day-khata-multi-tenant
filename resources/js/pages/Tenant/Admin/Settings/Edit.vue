@@ -180,13 +180,15 @@ async function deleteLogo() {
 </script>
 
 <template>
-    <div>
+    <!-- Fills the scrolling <main> so the footer below is pushed to its very
+         bottom on every tab, however short that tab's content is. -->
+    <div class="flex min-h-full flex-col">
         <PageHeader
             title="Company Setup"
             description="Manage company details, branding, invoice numbering rules, and default store policies."
         />
 
-        <Tabs v-model="activeTab" :tabs="settingsTabs">
+        <Tabs v-model="activeTab" :tabs="settingsTabs" class="flex-1">
             <!-- Tab 1: Company Profile -->
             <template #company>
                 <div class="flex flex-col gap-4">

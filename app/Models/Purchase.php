@@ -8,6 +8,7 @@ use App\Enums\VoucherType;
 use App\Support\Billing\DocumentCalculator;
 use App\Support\Billing\DocumentTotals;
 use App\Support\ClosedFiscalYearGuard;
+use App\Support\Inventory\PerpetualStockGuard;
 use App\Support\Money\Money;
 use App\Support\Money\Quantity;
 use App\Support\SettlementNarration;
@@ -42,6 +43,12 @@ use InvalidArgumentException;
  * decides which accounts the calculated amounts land on, and it records what
  * each line cost per base unit so stock valuation has a truthful basis
  * (CONTRACTS C3, C10; audit P0-1, P0-4, P0-17).
+ *
+ * The one exception to "money side only" is a perpetual line (a raw material
+ * or finished good, manufacturing contract MC8): it debits the class's
+ * inventory account (AS12 / AS14) instead of item.account_id, and its stock
+ * movement carries that same net value as `cost_value`. It rides in the same
+ * voucher as the trading lines, so cancel() reverses it with everything else.
  */
 #[Fillable([
     'supplier_id', 'store_id', 'journal_voucher_id', 'fiscal_year_id', 'purchase_number', 'bill_number', 'bill_number_key', 'pan_number',
@@ -326,6 +333,14 @@ class Purchase extends Model
 
             foreach ($lines as $line) {
                 $item = Item::with('units')->findOrFail($line['item_id']);
+
+                // A perpetual line debits the inventory account, so it must
+                // also bring the stock in; a non-stockable one would leave
+                // value in AS12 / AS14 with no quantity behind it (MC1).
+                if ($item->isPerpetual() && ! $item->is_stockable) {
+                    throw new InvalidArgumentException("\"{$item->name}\" is a {$item->inventory_class->label()} item and must be stockable.");
+                }
+
                 [$itemUnitId, $conversionFactor] = static::resolveItemUnit($item, $line['item_unit_id'] ?? null);
 
                 $context[] = [
@@ -397,9 +412,16 @@ class Purchase extends Model
             ));
             $tdsShares = static::sharesOf($totals->tdsAmount, $netValues);
 
+            // A raw material or finished good is perpetual (manufacturing
+            // contract MC8): its line debits the class's inventory account
+            // (AS12 / AS14) instead of item.account_id / EXE8, so the value
+            // sits on the balance sheet from the moment it arrives. Trading
+            // lines are untouched, and a mixed bill still posts one voucher.
             $fallbackAccountId = Account::where('code', 'EXE8')->firstOrFail()->id;
             $accountIds = array_map(
-                static fn (array $line): int => $line['item']->account_id ?? $fallbackAccountId,
+                static fn (array $line): int => $line['item']->isPerpetual()
+                    ? $line['item']->inventoryAccountId()
+                    : ($line['item']->account_id ?? $fallbackAccountId),
                 $context
             );
 
@@ -520,15 +542,31 @@ class Purchase extends Model
                     // identically and correctly lower (item 3).
                     $stockBaseQuantity = $line->quantity->plus($bonusQuantity)->multipliedBy($line->conversionFactor);
 
-                    $item->recordStockMovement(
-                        StockMovementType::Purchase,
-                        $stockBaseQuantity,
-                        $data['date'],
-                        $storeId,
-                        $purchaseLine,
-                        null,
-                        $netValues[$index],
-                    );
+                    if ($item->isPerpetual()) {
+                        // cost_value is exactly the net value just debited to
+                        // the class account above, so the item's subledger
+                        // and the GL move by the same figure (invariant P1).
+                        $item->recordStockMovement(
+                            StockMovementType::Purchase,
+                            $stockBaseQuantity,
+                            $data['date'],
+                            $storeId,
+                            $purchaseLine,
+                            null,
+                            $netValues[$index],
+                            costValue: $netValues[$index],
+                        );
+                    } else {
+                        $item->recordStockMovement(
+                            StockMovementType::Purchase,
+                            $stockBaseQuantity,
+                            $data['date'],
+                            $storeId,
+                            $purchaseLine,
+                            null,
+                            $netValues[$index],
+                        );
+                    }
                 }
             }
 
@@ -550,7 +588,8 @@ class Purchase extends Model
      * bill, and refused when the stock it brought in has already been sold on:
      * cancelling then would drive the store negative and corrupt every
      * valuation after it. `allow_negative_stock` tenants opt out of that last
-     * check, the same setting the rest of the app honours.
+     * check for trading items, the same setting the rest of the app honours;
+     * raw material and finished goods are always checked (M08b).
      */
     public function cancel(User $actor, string $reason): void
     {
@@ -642,16 +681,38 @@ class Purchase extends Model
      * keeps two concurrent stock-out postings from deadlocking), so the stock
      * read below cannot change underneath this transaction.
      *
+     * Raw material and finished goods are checked even when the tenant
+     * allows negative stock (M08b): the stock must still be there on every
+     * day from the purchase date on, or the moving average breaks. Only
+     * those items are locked then, so a trading-only bill cancels exactly as
+     * before.
+     *
      * @param  Collection<int, ItemStockMovement>  $movements
      */
     private static function assertStockRemovable(Collection $movements): void
     {
-        if ($movements->isEmpty() || CompanySetting::current()->allow_negative_stock) {
+        if ($movements->isEmpty()) {
             return;
         }
 
+        $allowNegative = CompanySetting::current()->allow_negative_stock;
         $itemIds = $movements->pluck('item_id')->unique()->sort()->values()->all();
+
+        if ($allowNegative) {
+            $itemIds = PerpetualStockGuard::perpetualItemIds($itemIds);
+
+            if ($itemIds === []) {
+                return;
+            }
+        }
+
         $items = Item::lockForStockOut($itemIds)->keyBy('id');
+
+        PerpetualStockGuard::assertCanRemove($movements, $items, 'Cannot cancel this purchase');
+
+        if ($allowNegative) {
+            return;
+        }
 
         foreach ($movements->groupBy(['item_id', 'store_id']) as $itemId => $byStore) {
             /** @var Collection<int, Collection<int, ItemStockMovement>> $byStore */

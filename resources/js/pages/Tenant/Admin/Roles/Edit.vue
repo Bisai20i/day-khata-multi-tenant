@@ -148,7 +148,7 @@ function reloadLatest() {
 </script>
 
 <template>
-    <div>
+    <div class="flex min-h-full flex-col">
         <PageHeader
             :title="isEditing ? role.name : 'New role'"
             description="Tick what people with this role may see and do. Only modules enabled for your company are listed."
@@ -199,9 +199,13 @@ function reloadLatest() {
             </ul>
         </div>
 
-        <PermissionMatrix v-model="form.permissions" :modules="modules" :original="original" :disabled="form.processing" />
+        <div class="mb-4">
+            <PermissionMatrix v-model="form.permissions" :modules="modules" :original="original" :disabled="form.processing" />
+        </div>
 
-        <div class="sticky bottom-0 mt-4 flex flex-wrap items-center justify-end gap-3 border-t-[1.5px] border-border bg-white py-3">
+        <div
+            class="sticky -bottom-4 z-10 -mx-4 -mb-4 mt-auto flex flex-wrap items-center justify-end gap-3 border-t-[1.5px] border-border bg-white px-4 py-3 sm:-bottom-6 sm:-mx-6 sm:-mb-6 sm:px-6"
+        >
             <span v-if="changeCount" class="mr-auto text-sm font-semibold text-warning-text">
                 {{ changeCount }} unsaved {{ changeCount === 1 ? 'permission change' : 'permission changes' }}
             </span>

@@ -44,6 +44,11 @@ const fiscalYear = ref(props.fiscalYearId);
 const from = ref(props.from);
 const to = ref(props.to);
 
+const cogsScheduleUrl = computed(() => {
+    const params = new URLSearchParams({ from: props.from ?? '', to: props.to ?? '' });
+    return `/reports/manufacturing/cogs-schedule?${params.toString()}`;
+});
+
 watch(fiscalYear, (value) => {
     const chosen = props.fiscalYears.find((year) => year.id === value);
     from.value = chosen?.startDate ?? null;
@@ -136,6 +141,11 @@ function exportUrl() {
                 <p v-if="!stock.posted" class="mt-2 text-[12px] text-text-muted">
                     This fiscal year has not been closed yet, so the stock figures above are valued live from stock
                     movements rather than read from posted entries. Closing the year posts exactly these amounts.
+                </p>
+                <p v-if="can('manufacturing_reports.view')" class="mt-2 text-[12px]">
+                    Opening and closing stock above cover trading items only. Manufactured goods reach this statement
+                    through Cost of Goods Sold:
+                    <a :href="cogsScheduleUrl" class="font-semibold text-primary hover:underline">COGM and COGS schedule</a>
                 </p>
             </Card>
 

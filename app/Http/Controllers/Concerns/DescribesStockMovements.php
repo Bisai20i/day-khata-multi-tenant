@@ -4,6 +4,9 @@ namespace App\Http\Controllers\Concerns;
 
 use App\Enums\StockMovementType;
 use App\Models\ItemStockMovement;
+use App\Models\MaterialIssueItem;
+use App\Models\ProductionCompletion;
+use App\Models\ProductionEntry;
 use App\Models\PurchaseLine;
 use App\Models\PurchaseReturnLine;
 use App\Models\SaleLine;
@@ -74,6 +77,9 @@ trait DescribesStockMovements
             StockMovementType::RefiningOut => 'Refining Out',
             StockMovementType::RepackagingIn => 'Repackaging In',
             StockMovementType::RepackagingOut => 'Repackaging Out',
+            StockMovementType::MaterialIssue => 'Material Issue',
+            StockMovementType::MaterialReturn => 'Material Return',
+            StockMovementType::ProductionReceipt => 'Production Receipt',
         };
     }
 
@@ -96,6 +102,9 @@ trait DescribesStockMovements
             $reference instanceof StockAdjustmentLine => 'Stock Adjustment #'.$reference->stock_adjustment_id,
             $reference instanceof StockTransferLine => 'Stock Transfer #'.$reference->stock_transfer_id
                 .($reference->stockTransfer ? ' ('.$reference->stockTransfer->fromStore?->name.' → '.$reference->stockTransfer->toStore?->name.')' : ''),
+            $reference instanceof MaterialIssueItem => 'Material Issue #'.($reference->materialIssueNote?->number ?? $reference->material_issue_note_id),
+            $reference instanceof ProductionCompletion => 'Production Entry #'.($reference->productionEntry?->number ?? $reference->production_entry_id),
+            $reference instanceof ProductionEntry => 'Production Entry #'.$reference->number,
             default => $narration ?: '-',
         };
     }

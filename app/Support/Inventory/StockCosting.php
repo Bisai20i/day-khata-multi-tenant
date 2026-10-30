@@ -2,6 +2,7 @@
 
 namespace App\Support\Inventory;
 
+use App\Enums\InventoryClass;
 use App\Enums\StockMovementType;
 use App\Models\Item;
 use App\Models\ItemStockMovement;
@@ -122,6 +123,21 @@ class StockCosting
     }
 
     /**
+     * Total closing value of the **periodic** (trading) stock only - the
+     * figure the year-end trading entries (AS11 / EXE9 / INI22) are about
+     * (manufacturing MC3, MC9). Raw material and finished good items are
+     * already in AS12 / AS14 through their own real-time journals, so
+     * counting them here as well would value them twice.
+     */
+    public static function totalPeriodicClosingValue(string $asOf, ?int $storeId = null): Money
+    {
+        return Money::sum(
+            static::valuationRows($asOf, $storeId, ['inventory_class' => InventoryClass::Trading->value])
+                ->map(fn (array $row) => $row['value'])
+        );
+    }
+
+    /**
      * One row per stockable item: `item_id`, `quantity` (Quantity),
      * `average_cost` (a 4-decimal display string) and `value` (Money).
      *
@@ -141,8 +157,16 @@ class StockCosting
      * the rows they always have - only `StockValuationReportController`
      * threads the request param through.
      *
+     * Perpetual items (manufacturing MC3) stay in the list but are valued at
+     * their PerpetualCosting::valueBalance() - the figure their class account
+     * holds - not at this class's periodic average, so a stock report shows
+     * one consistent figure per item. Their `average_cost` is that value over
+     * the quantity shown. Every row carries `inventory_class` (the enum's
+     * string value), and the `inventory_class` filter (a value or a list of
+     * values) narrows the list to those classes.
+     *
      * @param  array<string, mixed>  $filters
-     * @return Collection<int, array{item_id: int, name: string, unit: string, hs_code: ?string, quantity: Quantity, average_cost: string, value: Money}>
+     * @return Collection<int, array{item_id: int, name: string, unit: string, hs_code: ?string, inventory_class: string, quantity: Quantity, average_cost: string, value: Money}>
      */
     public static function valuationRows(string $asOf, ?int $storeId = null, array $filters = []): Collection
     {
@@ -152,8 +176,9 @@ class StockCosting
             ->when(($filters['item_subcategory_id'] ?? null) !== null, fn (Builder $q) => $q->where('item_subcategory_id', $filters['item_subcategory_id']))
             ->when(($filters['brand_id'] ?? null) !== null, fn (Builder $q) => $q->where('brand_id', $filters['brand_id']))
             ->when(($filters['search'] ?? null) !== null, fn (Builder $q) => $q->where('name', 'like', '%'.$filters['search'].'%'))
+            ->when(($filters['inventory_class'] ?? null) !== null, fn (Builder $q) => $q->whereIn('inventory_class', (array) $filters['inventory_class']))
             ->orderBy('name')
-            ->get(['id', 'name', 'unit', 'purchase_rate', 'hs_code']);
+            ->get(['id', 'name', 'unit', 'purchase_rate', 'hs_code', 'inventory_class']);
 
         if ($items->isEmpty()) {
             return new Collection;
@@ -162,10 +187,30 @@ class StockCosting
         $includeEmpty = (bool) ($filters['include_empty'] ?? false);
         $stockStatus = $filters['stock_status'] ?? 'all';
         $quantities = Item::currentStockByItem($items->modelKeys(), $storeId, $asOf);
-        $bases = static::basisByItem($items->modelKeys(), $asOf);
+        [$perpetualItems, $periodicItems] = $items->partition(fn (Item $item) => $item->isPerpetual());
+        $bases = static::basisByItem($periodicItems->modelKeys(), $asOf);
+        $perpetualValues = PerpetualCosting::valueBalanceByItem($perpetualItems->modelKeys(), $asOf, $storeId);
 
-        return $items->map(function (Item $item) use ($quantities, $bases): array {
+        return $items->map(function (Item $item) use ($quantities, $bases, $perpetualValues): array {
             $quantity = $quantities[$item->getKey()] ?? Quantity::zero();
+
+            if ($item->isPerpetual()) {
+                $value = $perpetualValues[$item->getKey()] ?? Money::zero();
+
+                return [
+                    'item_id' => $item->getKey(),
+                    'name' => $item->name,
+                    'unit' => $item->unit,
+                    'hs_code' => $item->hs_code,
+                    'inventory_class' => $item->inventory_class->value,
+                    'quantity' => $quantity,
+                    'average_cost' => $quantity->isZero()
+                        ? Quantity::zero()->toString()
+                        : Quantity::round($value->toBigDecimal()->dividedBy($quantity->toBigDecimal(), self::AVERAGE_COST_SCALE, RoundingMode::HalfUp))->toString(),
+                    'value' => $value,
+                ];
+            }
+
             $basis = $bases[$item->getKey()] ?? null;
 
             $cost = $basis !== null && ! $basis['quantity']->isZero()
@@ -181,6 +226,7 @@ class StockCosting
                 'name' => $item->name,
                 'unit' => $item->unit,
                 'hs_code' => $item->hs_code,
+                'inventory_class' => ($item->inventory_class ?? InventoryClass::Trading)->value,
                 'quantity' => $quantity,
                 // 4 decimals is what the rate columns show everywhere else;
                 // the full-precision figure only ever exists inside $value.

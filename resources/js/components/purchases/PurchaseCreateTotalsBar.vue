@@ -23,7 +23,7 @@ const hasTds = computed(() => !!props.totals && !isZeroMoney(props.totals.tds_am
 </script>
 
 <template>
-    <div class="sticky bottom-0 z-10 flex flex-col gap-3 border-[1.5px] border-border bg-white px-4 py-3 shadow-[0_-4px_16px_rgba(0,0,0,.08)]">
+    <div class="sticky -bottom-4 z-10 -mx-4 -mb-4 mt-auto flex flex-col gap-3 border-t-[1.5px] border-border bg-white px-4 py-3 shadow-[0_-4px_16px_rgba(0,0,0,.08)] sm:-bottom-6 sm:-mx-6 sm:-mb-6 sm:px-6">
         <div v-if="totals" class="overflow-x-auto border-[1.5px] border-border">
             <table class="w-full table-auto border-collapse text-sm">
                 <thead>

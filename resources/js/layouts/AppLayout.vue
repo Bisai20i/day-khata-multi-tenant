@@ -1,16 +1,18 @@
 <script setup>
-import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue';
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import { Head, Link, router, usePage } from '@inertiajs/vue3';
-import { ChevronDown, ChevronRight, FileSignature, Menu, Package, PackageSearch, Plus, ScanBarcode, Search, ShoppingCart, Users, X } from '@lucide/vue';
+import { ChevronDown, FileSignature, FileText, Menu, Package, PackageSearch, Plus, ScanBarcode, Search, ShoppingCart, Users, X } from '@lucide/vue';
 import { PopoverAnchor, PopoverContent, PopoverPortal, PopoverRoot } from 'reka-ui';
 import DropdownMenu from '@/components/ui/DropdownMenu.vue';
 import DropdownMenuItem from '@/components/ui/DropdownMenuItem.vue';
 import Tooltip from '@/components/ui/Tooltip.vue';
 import Toaster from '@/components/ui/Toaster.vue';
 import ConfirmDialog from '@/components/ui/ConfirmDialog.vue';
+import SidebarNav from '@/components/layout/SidebarNav.vue';
 import logoMark from '@/assets/brand/logo-mark.png';
 import { navGroups, centralNavItems } from '@/lib/nav-items';
 import { filterNavByPermission } from '@/lib/filterNavByPermission';
+import { reportCategories } from '@/lib/report-catalog';
 import { createPermissionChecker } from '@/lib/permissions';
 import { QUICK_CREATE_ACTIONS, POS_PERMISSIONS, allowedActions, holdsAll } from '@/lib/quickActions';
 import { useLayoutChrome } from '@/composables/useLayoutChrome';
@@ -88,56 +90,6 @@ function isActive(href, exact = false) {
     return path === href || (!exact && href !== '/' && path.startsWith(`${href}/`));
 }
 
-// A category is a toggleable accordion only once it has something worth
-// hiding; a single-item category stays a plain link.
-function isCollapsible(category) {
-    return Boolean(category.label) && category.items.length > 1;
-}
-
-function categoryHasActiveItem(category) {
-    return category.items.some((item) => isActive(item.href, item.exact));
-}
-
-const OPEN_CATEGORIES_STORAGE_KEY = 'day-khata:sidebar-open-categories';
-
-function readStoredOpenCategories() {
-    try {
-        return JSON.parse(localStorage.getItem(OPEN_CATEGORIES_STORAGE_KEY)) ?? {};
-    } catch {
-        return {};
-    }
-}
-
-/**
- * Open/closed state per collapsible category, keyed by
- * `${section.label}::${category.label}` (categories can share a label across
- * different sections, e.g. none today but this keeps them independent).
- * Seeded once here at module-level mount: a category the user previously
- * left open stays open across navigations via localStorage, and any
- * category not yet in storage defaults to open only if it contains the page
- * currently being viewed. Sections with flat `items` (no categories) have
- * nothing to seed.
- */
-const storedOpenCategories = readStoredOpenCategories();
-const openCategories = reactive({});
-for (const section of sections.value) {
-    for (const category of section.categories ?? []) {
-        const key = `${section.label}::${category.label}`;
-        openCategories[key] = key in storedOpenCategories ? storedOpenCategories[key] : categoryHasActiveItem(category);
-    }
-}
-
-watch(
-    () => page.url,
-    () => {
-        for (const section of sections.value) {
-            for (const category of section.categories ?? []) {
-                if (categoryHasActiveItem(category)) openCategories[`${section.label}::${category.label}`] = true;
-            }
-        }
-    },
-);
-
 function toTitleCase(text) {
     return text.toLowerCase().replace(/\b\w/g, (character) => character.toUpperCase());
 }
@@ -152,6 +104,8 @@ const sectionPrefix = computed(() => {
         const items = section.categories ? section.categories.flatMap((category) => category.items) : section.items;
         if (section.label && items.some((item) => isActive(item.href, item.exact))) return toTitleCase(section.label);
     }
+    // Reports without a sidebar link of their own still belong under Reports.
+    if (page.url.split('?')[0].startsWith('/reports')) return 'Reports';
     return null;
 });
 
@@ -186,24 +140,6 @@ function onGlobalKeydown(event) {
 onMounted(() => window.addEventListener('keydown', onGlobalKeydown));
 onBeforeUnmount(() => window.removeEventListener('keydown', onGlobalKeydown));
 
-function isCategoryOpen(section, category) {
-    return !isCollapsible(category) || Boolean(openCategories[`${section.label}::${category.label}`]);
-}
-
-function categoryPanelId(section, category) {
-    return `nav-${`${section.label}-${category.label}`.toLowerCase().replace(/[^a-z0-9]+/g, '-')}`;
-}
-
-function toggleCategory(section, category) {
-    const key = `${section.label}::${category.label}`;
-    openCategories[key] = !openCategories[key];
-    try {
-        localStorage.setItem(OPEN_CATEGORIES_STORAGE_KEY, JSON.stringify(openCategories));
-    } catch {
-        // Storage unavailable (private browsing, disabled) - state just won't persist.
-    }
-}
-
 function logout() {
     router.post('/logout');
 }
@@ -215,6 +151,7 @@ function logout() {
  * to pages/actions rather than searching customer/item records, so matching
  * happens in-memory against a static command list - no backend round trip.
  */
+const ReportIcon = FileText;
 const QUICK_ACTION_ICONS = { sale: ShoppingCart, purchase: PackageSearch, quotation: FileSignature, customer: Users, item: Package };
 
 const layoutPermissions = computed(() => createPermissionChecker(page.props.auth?.can, page.props.auth?.isOwner));
@@ -234,18 +171,33 @@ const quickActions = computed(() =>
 const canOpenPos = computed(() => holdsAll(POS_PERMISSIONS, layoutPermissions.value.can));
 
 // Every sidebar destination, flattened out of `sections` (already normalized
-// and admin-filtered by the page that built the `navItems` prop) into the
-// same { label, href, icon, group } shape as the quick actions above. Each
-// command's `group` is its category label when the section has categories,
-// falling back to the section label for flat sections - so search results
-// keep a sensible, specific group heading either way.
-const navCommands = computed(() =>
-    sections.value.flatMap((section) =>
+// and permission-filtered) into the same { label, href, icon, group } shape as
+// the quick actions above. Each command's `group` is its category label when
+// the section has categories, falling back to the section label for flat
+// sections. Every report in the catalog is added too (the sidebar only links
+// a few), filtered by the same permissions and de-duplicated by href.
+const navCommands = computed(() => {
+    const commands = sections.value.flatMap((section) =>
         (section.categories ?? [{ label: section.label, items: section.items }]).flatMap((category) =>
-            category.items.map((item) => ({ label: item.label, href: item.href, icon: item.icon, group: category.label ?? 'Navigate' })),
+            category.items.map((item) => ({
+                label: item.label,
+                href: item.href,
+                icon: item.icon,
+                group: category.label ? (section.categories ? category.label : toTitleCase(category.label)) : 'Navigate',
+            })),
         ),
-    ),
-);
+    );
+
+    if (!page.props.auth?.user || isPlatformAdmin.value) return commands;
+
+    const known = new Set(commands.map((command) => command.href));
+    const reports = filterNavByPermission(reportCategories(), layoutPermissions.value.can)
+        .flatMap((category) => category.items)
+        .filter((item) => !known.has(item.href))
+        .map((item) => ({ label: item.label, href: item.href, icon: ReportIcon, group: 'Reports' }));
+
+    return [...commands, ...reports];
+});
 
 const allCommands = computed(() => [...quickActions.value, ...navCommands.value]);
 
@@ -343,75 +295,7 @@ function selectActiveCommand() {
                 </button>
             </div>
 
-            <nav class="flex min-h-0 flex-1 flex-col gap-[18px] overflow-y-auto px-3 py-4">
-                <div v-for="(section, index) in sections" :key="section.label ?? index" class="flex flex-col gap-1">
-                    <p v-if="section.label" class="px-2.5 pb-1 text-[10px] font-bold tracking-wide text-text-faint uppercase">
-                        {{ section.label }}
-                    </p>
-
-                    <!-- Sections with a `categories` middle tier: each category is its
-                         own collapsible accordion (the 3rd tier legacy had). -->
-                    <template v-if="section.categories">
-                        <div v-for="category in section.categories" :key="category.label" class="flex flex-col gap-1">
-                            <button
-                                v-if="isCollapsible(category)"
-                                type="button"
-                                :aria-expanded="Boolean(openCategories[`${section.label}::${category.label}`])"
-                                :aria-controls="categoryPanelId(section, category)"
-                                class="flex cursor-pointer items-center justify-between px-2.5 pt-1 pb-1 focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-primary text-[11.5px] font-semibold text-text-muted transition-colors hover:text-text-strong"
-                                @click="toggleCategory(section, category)"
-                            >
-                                <span>{{ category.label }}</span>
-                                <ChevronRight
-                                    class="size-3 shrink-0 transition-transform duration-150"
-                                    :class="{ 'rotate-90': openCategories[`${section.label}::${category.label}`] }"
-                                />
-                            </button>
-                            <p v-else-if="category.label" class="px-2.5 pt-1 pb-1 text-[11.5px] font-semibold text-text-muted">
-                                {{ category.label }}
-                            </p>
-
-                            <div v-if="isCategoryOpen(section, category)" :id="categoryPanelId(section, category)" class="flex flex-col gap-1">
-                                <Link
-                                    v-for="item in category.items"
-                                    :key="item.href"
-                                    :href="item.href"
-                                    :aria-current="isActive(item.href, item.exact) ? 'page' : undefined"
-                                    class="flex cursor-pointer items-center gap-2.5 py-2.5 pr-2.5 pl-4 text-sm font-semibold transition-colors focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-primary"
-                                    :class="
-                                        isActive(item.href, item.exact)
-                                            ? 'bg-primary-tint text-primary'
-                                            : 'text-text-muted hover:bg-bg-subtle hover:text-text-strong'
-                                    "
-                                >
-                                    <component :is="item.icon" v-if="item.icon" class="size-[17px] shrink-0" />
-                                    {{ item.label }}
-                                </Link>
-                            </div>
-                        </div>
-                    </template>
-
-                    <!-- Flat sections (too small to be worth a category tier): pages
-                         listed directly under the section label. -->
-                    <template v-else>
-                        <Link
-                            v-for="item in section.items"
-                            :key="item.href"
-                            :href="item.href"
-                            :aria-current="isActive(item.href, item.exact) ? 'page' : undefined"
-                            class="flex cursor-pointer items-center gap-2.5 px-2.5 py-2.5 text-sm font-semibold transition-colors focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-primary"
-                            :class="
-                                isActive(item.href, item.exact)
-                                    ? 'bg-primary-tint text-primary'
-                                    : 'text-text-muted hover:bg-bg-subtle hover:text-text-strong'
-                            "
-                        >
-                            <component :is="item.icon" v-if="item.icon" class="size-[17px] shrink-0" />
-                            {{ item.label }}
-                        </Link>
-                    </template>
-                </div>
-            </nav>
+            <SidebarNav :sections="sections" :accordion="!isPlatformAdmin" />
 
             <div class="flex shrink-0 items-center gap-2.5 border-t border-border px-4 py-4">
                 <div class="flex size-8 shrink-0 items-center justify-center rounded-full bg-primary-tint text-sm font-bold text-primary">
@@ -589,7 +473,7 @@ function selectActiveCommand() {
                 <!-- Central pages are read-and-form screens, not wide data grids, so
                      they get a centred max width instead of stretching edge to edge
                      on large monitors. Tenant pages (POS, ledgers) keep full width. -->
-                <div v-if="isPlatformAdmin" class="mx-auto w-full max-w-7xl">
+                <div v-if="isPlatformAdmin" class="mx-auto flex min-h-full w-full max-w-7xl flex-col">
                     <slot />
                 </div>
                 <slot v-else />

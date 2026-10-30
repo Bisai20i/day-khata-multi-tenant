@@ -3,7 +3,10 @@
 namespace App\Models;
 
 use App\Casts\Decimal;
+use App\Enums\InventoryClass;
 use App\Enums\StockMovementType;
+use App\Support\Inventory\PerpetualCosting;
+use App\Support\Manufacturing\ManufacturingAccounts;
 use App\Support\Money\Money;
 use App\Support\Money\Quantity;
 use Brick\Math\BigDecimal;
@@ -15,6 +18,7 @@ use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
+use InvalidArgumentException;
 
 #[Fillable([
     'item_category_id',
@@ -35,6 +39,7 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
     'is_vatable',
     'is_stockable',
     'is_active',
+    'inventory_class',
 ])]
 class Item extends Model
 {
@@ -56,7 +61,32 @@ class Item extends Model
             'is_vatable' => 'boolean',
             'is_stockable' => 'boolean',
             'is_active' => 'boolean',
+            'inventory_class' => InventoryClass::class,
         ];
+    }
+
+    /**
+     * Whether this item is valued and posted to the GL in real time (raw
+     * material or finished good) rather than handled by the periodic
+     * year-end trading entries. A row loaded before the column existed
+     * (null) is a trading item.
+     */
+    public function isPerpetual(): bool
+    {
+        return $this->inventory_class?->isPerpetual() ?? false;
+    }
+
+    /**
+     * Id of the balance-sheet account holding this item's perpetual value
+     * (AS12 raw material / AS14 finished goods), null for a trading item.
+     *
+     * @throws \RuntimeException when the account is missing (tenant migrations not run)
+     */
+    public function inventoryAccountId(): ?int
+    {
+        $code = $this->inventory_class?->inventoryAccountCode();
+
+        return $code === null ? null : ManufacturingAccounts::id($code);
     }
 
     /**
@@ -153,6 +183,22 @@ class Item extends Model
      * `$reference` is nullable purely so a bare quantity movement can be
      * seeded (report tests and fixtures do this); every real posting passes
      * the document line it came from.
+     *
+     * `$costValue` (manufacturing MC3) only matters for a perpetual item (raw
+     * material / finished good), whose every movement must carry a
+     * `cost_value`; it is always left null for a trading item:
+     *
+     * - in-direction: `$costValue`, else `$value` (a purchase's net value is
+     *   its cost). Neither given throws, because an unpriced in-movement
+     *   would add quantity without value and break the GL/subledger match.
+     * - out-direction: `$costValue`, else PerpetualCosting::issueCost() as of
+     *   `$date`. Lock the item first (Item::lockForStockOut()), so the
+     *   balance being costed cannot change underneath.
+     *
+     * The created movement comes back with `cost_value` set (a 2-decimal
+     * string), and the caller posts exactly that figure to the GL.
+     *
+     * @throws InvalidArgumentException for an unpriced perpetual in-movement, a negative cost, or no cost basis
      */
     public function recordStockMovement(
         StockMovementType $type,
@@ -163,6 +209,7 @@ class Item extends Model
         Quantity|BigDecimal|string|int|float|null $unitCostRate = null,
         Money|BigDecimal|string|int|null $value = null,
         ?string $narration = null,
+        Money|string|null $costValue = null,
     ): ItemStockMovement {
         $quantity = Quantity::of($quantity);
         $value = $value === null ? null : Money::of($value);
@@ -173,7 +220,7 @@ class Item extends Model
             );
         }
 
-        return $this->stockMovements()->create([
+        $movement = $this->stockMovements()->make([
             'store_id' => $storeId,
             'movement_type' => $type,
             'quantity' => $quantity,
@@ -184,6 +231,66 @@ class Item extends Model
             'reference_type' => $reference ? $reference->getMorphClass() : null,
             'reference_id' => $reference?->getKey(),
         ]);
+
+        // forceFill rather than the fillable list: it is the one column only
+        // this method may set, and this method alone decides its value.
+        $movement->forceFill([
+            'cost_value' => $this->resolvedInventoryClass()->isPerpetual()
+                ? $this->perpetualCostValue($type, $quantity, $date, $value, $costValue)->toString()
+                : null,
+        ]);
+
+        $movement->save();
+
+        return $movement;
+    }
+
+    /**
+     * The cost_value of one perpetual movement, per recordStockMovement()'s
+     * docblock.
+     */
+    private function perpetualCostValue(
+        StockMovementType $type,
+        Quantity $quantity,
+        string $date,
+        ?Money $value,
+        Money|string|null $costValue,
+    ): Money {
+        if ($costValue !== null) {
+            $cost = Money::of($costValue);
+        } elseif ($type->direction() === 1) {
+            $cost = $value ?? throw new InvalidArgumentException(
+                "\"{$this->name}\" is a {$this->resolvedInventoryClass()->label()} item, so every stock-in must carry its cost. No cost was given for this {$type->value} movement."
+            );
+        } else {
+            $cost = PerpetualCosting::issueCost($this, $quantity, $date);
+        }
+
+        if ($cost->isNegative()) {
+            throw new InvalidArgumentException("The cost of a stock movement of \"{$this->name}\" cannot be negative.");
+        }
+
+        return $cost;
+    }
+
+    /**
+     * This item's class, read from the database when the loaded row does not
+     * carry the column (an Item::create() that left it to the column default,
+     * or a query that selected a subset of columns). Treating a missing
+     * attribute as Trading would write an unpriced movement for a perpetual
+     * item and silently break invariant P1.
+     */
+    private function resolvedInventoryClass(): InventoryClass
+    {
+        if (! array_key_exists('inventory_class', $this->getAttributes()) && $this->exists) {
+            // Raw attribute plus synced original, so the lookup never shows
+            // up as a pending change on a later save().
+            $this->attributes['inventory_class'] = static::query()->whereKey($this->getKey())->toBase()->value('inventory_class')
+                ?? InventoryClass::Trading->value;
+            $this->syncOriginalAttribute('inventory_class');
+        }
+
+        return $this->inventory_class ?? InventoryClass::Trading;
     }
 
     /**

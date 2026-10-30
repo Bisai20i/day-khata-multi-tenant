@@ -47,7 +47,9 @@ function submit() {
 </script>
 
 <template>
-    <div>
+    <!-- Fills the layout's full-height column; the form stretches and its footer
+         is pushed to the very bottom, however short the content is. -->
+    <div class="flex flex-1 flex-col">
         <PageHeader
             title="New tenant"
             description="Create a company workspace with its own web address and first admin user. Fields marked * are required."
@@ -55,7 +57,7 @@ function submit() {
             back-label="All tenants"
         />
 
-        <form class="flex flex-col gap-8" @submit.prevent="submit">
+        <form class="flex flex-1 flex-col gap-8" @submit.prevent="submit">
             <FormSection title="Company" description="The business this workspace is for. The name appears on the tenant's screens and invoices.">
                 <div class="grid grid-cols-1 gap-4 sm:grid-cols-2">
                     <FormField v-slot="{ describedBy }" label="Company name" for="company_name" required :error="form.errors.company_name">
@@ -153,7 +155,7 @@ function submit() {
                 <ModuleSelector v-model="form.enabled_modules" :catalog="moduleCatalog" id-prefix="create-module" :error="modulesError" />
             </FormSection>
 
-            <FormActions status="The workspace is set up in the background; it shows as Provisioning until ready.">
+            <FormActions class="mt-auto" status="The workspace is set up in the background; it shows as Provisioning until ready.">
                 <Button :as="Link" href="/tenants" variant="secondary" tone="neutral">Cancel</Button>
                 <Button type="submit" variant="primary" tone="purple" :loading="form.processing">
                     <Plus class="size-4" />

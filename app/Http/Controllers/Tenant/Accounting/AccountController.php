@@ -9,9 +9,9 @@ use App\Exports\Samples\OpeningBalanceSampleExport;
 use App\Http\Controllers\Concerns\ImportsCsv;
 use App\Http\Controllers\Controller;
 use App\Models\Account;
-use App\Models\ActivityLog;
 use App\Models\AccountGroup;
 use App\Models\AccountSubgroup;
+use App\Models\ActivityLog;
 use App\Models\CapitalPurchase;
 use App\Models\CapitalSale;
 use App\Models\CompanySetting;
@@ -86,7 +86,13 @@ class AccountController extends Controller
      * profit-and-loss account has no opening balance by definition (it starts
      * every year at zero), and giving it one restates last year's result.
      */
-    private const OPENING_BALANCE_BLOCKED_CODES = ['AS11'];
+    /**
+     * Stock accounts valued by the opening stock import rather than here:
+     * trading Stock in Hand plus the perpetual inventory control accounts
+     * (ManufacturingAccounts::CONTROL_CODES), whose balance must equal the
+     * stock ledger. Frozen as literals like the rest of this list.
+     */
+    private const OPENING_BALANCE_BLOCKED_CODES = ['AS11', 'AS12', 'AS13', 'AS14'];
 
     public function index(): Response
     {
@@ -491,10 +497,11 @@ class AccountController extends Controller
      * plus two example rows that balance (a real import's debit/credit
      * totals must match exactly - see importOpeningBalances()).
      */
-        public function openingBalanceSampleExcel()
+    public function openingBalanceSampleExcel()
     {
-        return Excel::download(new OpeningBalanceSampleExport(), 'opening-balance-import-sample.xlsx');
+        return Excel::download(new OpeningBalanceSampleExport, 'opening-balance-import-sample.xlsx');
     }
+
     public function openingBalanceTemplate(): StreamedResponse
     {
         return response()->streamDownload(function (): void {

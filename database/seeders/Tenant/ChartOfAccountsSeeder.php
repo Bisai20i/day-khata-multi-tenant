@@ -101,12 +101,16 @@ class ChartOfAccountsSeeder extends Seeder
             ['subgroup' => 'Cash-In-Hand', 'code' => 'AS1', 'name' => 'Cash In Hand'],
             ['subgroup' => 'Reserve Surplus', 'code' => 'CA2', 'name' => 'Profit & Loss'],
             ['subgroup' => 'Stock', 'code' => 'AS11', 'name' => 'Stock in Hand'],
+            ['subgroup' => 'Stock', 'code' => 'AS12', 'name' => 'Raw Material Inventory'],
+            ['subgroup' => 'Stock', 'code' => 'AS13', 'name' => 'Work in Process'],
+            ['subgroup' => 'Stock', 'code' => 'AS14', 'name' => 'Finished Goods Inventory'],
             ['group' => 'Sales Accounts', 'code' => 'INI20', 'name' => 'Sales Account'],
             ['group' => 'Sales Accounts', 'code' => 'INI21', 'name' => 'Sales Return'],
             ['group' => 'Sales Accounts', 'code' => 'INI22', 'name' => 'Closing Stock'],
             ['group' => 'Purchase Accounts', 'code' => 'EXE8', 'name' => 'Purchases Account'],
             ['group' => 'Purchase Accounts', 'code' => 'EXE81', 'name' => 'Purchase Return'],
             ['group' => 'Purchase Accounts', 'code' => 'EXE9', 'name' => 'Opening Stock'],
+            ['group' => 'Purchase Accounts', 'code' => 'EXE10', 'name' => 'Cost of Goods Sold'],
             ['group' => 'Current Liabilities', 'code' => 'LIA20', 'name' => 'Vat Payable'],
             ['group' => 'Current Liabilities', 'code' => 'LIA21', 'name' => 'TDS Payable'],
             ['group' => 'Current Assets', 'code' => 'ASA23', 'name' => 'Vat Receivable'],
@@ -115,6 +119,8 @@ class ChartOfAccountsSeeder extends Seeder
             ['group' => 'Indirect Expenses', 'code' => 'EXE21', 'name' => 'Loss on Asset Disposal'],
             ['group' => 'Indirect Income', 'code' => 'INI30', 'name' => 'Gain on Asset Disposal'],
             ['group' => 'Indirect Expenses', 'code' => 'EXE22', 'name' => 'Sales Commission Expense'],
+            ['group' => 'Indirect Expenses', 'code' => 'EXE23', 'name' => 'Inventory Adjustment'],
+            ['group' => 'Indirect Expenses', 'code' => 'EXE24', 'name' => 'Production Loss'],
         ];
 
         foreach ($defaultAccounts as $account) {

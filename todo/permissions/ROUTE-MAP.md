@@ -53,6 +53,7 @@ Group-level `role:admin` (applies to every child): `tenant-fixed-assets`, `tenan
 | inventory | Inventory | no | none | stock adjustments, opening stock import, transfers, conversions, stores, item varieties |
 | accounting | Accounting | no | none | journal and cash/bank vouchers, full account ledger, fixed assets |
 | reports | Reports | no | none | accounting, sales, purchase, tax, receivables/payables and stock reports (incl. item ledger) |
+| manufacturing | Manufacturing | no | inventory, accounting | material issue notes, production entries, manufacturing reports (added 2026-10-25, opt-in: not in default_modules) |
 | admin | Administration | no | none | activity log, print log, backups, notices |
 
 Decisions and justifications:
@@ -87,6 +88,7 @@ Decisions and justifications:
 | tenant.login.store | POST /login | AuthenticatedSessionController@store | guest (+throttle:5,1) | allowlist |
 | tenant.logout | POST /logout | AuthenticatedSessionController@destroy | any auth | allowlist |
 | tenant.dashboard | GET /dashboard | DashboardController@index | any auth | allowlist |
+| tenant.reports.index | GET /reports | ReportIndexController | any auth | allowlist (sends no data; links filtered per report key) |
 
 ### routes/tenant-impersonation.php (1)
 
@@ -268,6 +270,37 @@ Decisions and justifications:
 | tenant.stock-conversions.store | POST /stock-conversions | StockConversionController@store | any auth | stock_conversions.create |
 | tenant.stock-conversions.cancel | POST /stock-conversions/{stock_conversion}/cancel | StockConversionController@cancel | admin | stock_conversions.cancel |
 | tenant.stock-conversions.print | GET /stock-conversions/{stock_conversion}/print | StockConversionController@print | any auth | stock_conversions.print |
+
+### routes/tenant-manufacturing.php (26)
+
+| route name | method + URI | controller@method | gated today | proposed key |
+|---|---|---|---|---|
+| tenant.material-issues.index | GET /material-issues | MaterialIssueNoteController@index | new | material_issues.view |
+| tenant.material-issues.create | GET /material-issues/create | MaterialIssueNoteController@create | new | material_issues.create |
+| tenant.material-issues.store | POST /material-issues | MaterialIssueNoteController@store | new | material_issues.create |
+| tenant.material-issues.show | GET /material-issues/{material_issue} | MaterialIssueNoteController@show | new | material_issues.view |
+| tenant.material-issues.cancel | POST /material-issues/{material_issue}/cancel | MaterialIssueNoteController@cancel | new | material_issues.cancel |
+| tenant.material-issues.print | GET /material-issues/{material_issue}/print | MaterialIssueNoteController@print | new | material_issues.print |
+| tenant.production-entries.index | GET /production-entries | ProductionEntryController@index | new | production_entries.view |
+| tenant.production-entries.create | GET /production-entries/create | ProductionEntryController@create | new | production_entries.create |
+| tenant.production-entries.store | POST /production-entries | ProductionEntryController@store | new | production_entries.create |
+| tenant.production-entries.show | GET /production-entries/{production_entry} | ProductionEntryController@show | new | production_entries.view |
+| tenant.production-entries.attach-notes | POST /production-entries/{production_entry}/attach-notes | ProductionEntryController@attachNotes | new | production_entries.edit |
+| tenant.production-entries.direct-costs.store | POST /production-entries/{production_entry}/direct-costs | ProductionEntryController@addDirectCost | new | production_entries.edit |
+| tenant.production-entries.direct-costs.cancel | POST /production-entries/{production_entry}/direct-costs/{direct_cost}/cancel | ProductionEntryController@cancelDirectCost | new | production_entries.edit |
+| tenant.production-entries.return-material | POST /production-entries/{production_entry}/return-material | ProductionEntryController@returnMaterial | new | production_entries.edit |
+| tenant.production-entries.complete | POST /production-entries/{production_entry}/complete | ProductionEntryController@complete | new | production_entries.edit |
+| tenant.production-entries.completions.cancel | POST /production-entries/{production_entry}/completions/{completion}/cancel | ProductionEntryController@cancelCompletion | new | production_entries.cancel |
+| tenant.production-entries.returns.cancel | POST /production-entries/{production_entry}/returns/{return_voucher}/cancel | ProductionEntryController@cancelReturn | new | production_entries.edit |
+| tenant.production-entries.abandon | POST /production-entries/{production_entry}/abandon | ProductionEntryController@abandon | new | production_entries.cancel |
+| tenant.production-entries.cancel | POST /production-entries/{production_entry}/cancel | ProductionEntryController@cancel | new | production_entries.cancel |
+| tenant.production-entries.print | GET /production-entries/{production_entry}/print | ProductionEntryController@print | new | production_entries.print |
+| tenant.reports.manufacturing.stock-ledger | GET /reports/manufacturing/stock-ledger | ManufacturingReportController@stockLedger | new | manufacturing_reports.view |
+| tenant.reports.manufacturing.inventory-schedule | GET /reports/manufacturing/inventory-schedule | ManufacturingReportController@inventorySchedule | new | manufacturing_reports.view |
+| tenant.reports.manufacturing.cogs-schedule | GET /reports/manufacturing/cogs-schedule | ManufacturingReportController@cogsSchedule | new | manufacturing_reports.view |
+| tenant.reports.manufacturing.reconciliation | GET /reports/manufacturing/reconciliation | ManufacturingReportController@reconciliation | new | manufacturing_reports.view |
+| tenant.reports.manufacturing.print | GET /reports/manufacturing/{report}/print | ManufacturingReportController@print | new | manufacturing_reports.export |
+| tenant.reports.manufacturing.export | GET /reports/manufacturing/{report}/export | ManufacturingReportController@export | new | manufacturing_reports.export |
 
 ### routes/tenant-reports-accounting.php (20, group `role:admin`)
 

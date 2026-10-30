@@ -14,6 +14,7 @@ use Stancl\Tenancy\Middleware\InitializeTenancyByDomain;
  */
 const ROUTE_AUDIT_ALLOWLIST = [
     'tenant.dashboard' => 'Landing page for every signed-in user.',
+    'tenant.reports.index' => 'Reports hub: sends no data, links are filtered per report permission and each report keeps its own can: gate.',
     'tenant.logout' => 'Every user must be able to end their own session.',
     'tenant.profile.edit' => 'A user editing their own profile.',
     'tenant.profile.update' => 'A user editing their own profile.',

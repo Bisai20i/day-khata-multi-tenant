@@ -5,6 +5,7 @@ namespace App\Models;
 use App\Enums\FiscalYearStatus;
 use App\Enums\VoucherType;
 use App\Support\Inventory\StockCosting;
+use App\Support\Manufacturing\InventoryReconciliation;
 use App\Support\Money\Money;
 use App\Support\NepaliCalendar;
 use Brick\Math\BigDecimal;
@@ -118,6 +119,16 @@ class FiscalYear extends Model
     public function journalVouchers(): HasMany
     {
         return $this->hasMany(JournalVoucher::class);
+    }
+
+    /**
+     * Verified closing inventory written by close()/relock() (MC9).
+     *
+     * @return HasMany<FiscalYearInventorySnapshot, $this>
+     */
+    public function inventorySnapshots(): HasMany
+    {
+        return $this->hasMany(FiscalYearInventorySnapshot::class);
     }
 
     /**
@@ -286,6 +297,11 @@ class FiscalYear extends Model
      * corrections had no profit-and-loss effect at all: netBalance() then
      * reports zero for every account and postClosingEntries() writes
      * nothing.
+     *
+     * Relocking is also the "re-close" for inventory: the perpetual classes
+     * are reconciled again (refusing the relock on a difference, so the year
+     * stays open for the fix) and fiscal_year_inventory_snapshots is
+     * rewritten from the corrected figures.
      */
     public function relock(User $actor): void
     {
@@ -294,7 +310,16 @@ class FiscalYear extends Model
         }
 
         DB::transaction(function () use ($actor) {
+            // A correction (purchase, stock adjustment) may have moved
+            // perpetual stock, so the year is reconciled again and its
+            // snapshots rewritten from the corrected figures. Until this
+            // runs, reopen() leaves the previous snapshots in place.
+            $endDate = $this->end_date->toDateString();
+            $reconciled = InventoryReconciliation::assertReconciled($this, $endDate, 'relocked');
+
             $this->postClosingEntries($actor, "Supplementary year-end closing entries for {$this->name} (corrections posted while reopened)");
+
+            FiscalYearInventorySnapshot::rewriteFor($this, $endDate, $reconciled);
 
             $this->relocked_at = now();
             $this->save();
@@ -316,6 +341,21 @@ class FiscalYear extends Model
      *    "Profit & Loss".
      * 4. Every balance-sheet account's ending balance as $next's opening
      *    balances - which is what carries the closing stock value forward.
+     *    That includes the perpetual inventory accounts (AS12 Raw Material,
+     *    AS13 WIP, AS14 Finished Goods): they are ordinary balance-sheet
+     *    accounts whose balance already IS the stock value, so they are
+     *    carried forward here like any other asset and are deliberately not
+     *    touched by the trading pair in step 2 (MANUFACTURING MC9).
+     *
+     * Before any of that, InventoryReconciliation proves each perpetual
+     * class's GL balance equals its subledger (cost_value balances for RM/FG,
+     * production_wip_entries for WIP) and refuses the close, naming the class
+     * and the difference, when one does not. After the postings, the verified
+     * per-item / per-production-entry closing figures are written to
+     * fiscal_year_inventory_snapshots, which next year's reports read as the
+     * opening RM/WIP/FG. Reads inside one transaction share one consistent
+     * snapshot on MySQL (REPEATABLE READ), so the reconciliation and the
+     * snapshot rows see the same data.
      *
      * Both fiscal year rows are re-read under lockForUpdate() and every
      * blocker is re-checked inside the transaction, so two simultaneous
@@ -384,10 +424,19 @@ class FiscalYear extends Model
                 }
             }
 
+            // Perpetual inventory first: nothing below posts to AS12/AS13/
+            // AS14, so checking before any posting fails fast and leaves no
+            // half-written close behind (the transaction would roll it back
+            // anyway, but there is no reason to do the work).
+            $endDate = $year->end_date->toDateString();
+            $reconciled = InventoryReconciliation::assertReconciled($year, $endDate);
+
             FixedAsset::postDepreciationForFiscalYear($year, $actor);
             $year->postStockTradingEntries($actor);
             $year->postClosingEntries($actor);
             $year->postOpeningBalances($nextYear, $actor);
+
+            FiscalYearInventorySnapshot::rewriteFor($year, $endDate, $reconciled);
 
             $year->status = FiscalYearStatus::Closed;
             $year->closed_by = $actor->id;
@@ -422,6 +471,13 @@ class FiscalYear extends Model
      * AccountingReportController uses to tell these two apart from the P&L
      * sweep (the sweep only ever touches profit-and-loss accounts plus
      * "Profit & Loss" itself) - see its isSweepVoucher() docblock.
+     *
+     * Trading items only: the closing value is
+     * StockCosting::totalPeriodicClosingValue(), which leaves out Raw
+     * Material and Finished Good items. Their value is already in AS12/AS14
+     * through real-time journals, so counting them here as well would put
+     * the same stock on the balance sheet twice and overstate gross profit
+     * by its value (MANUFACTURING MC9).
      *
      * Both directions are handled rather than assuming a debit balance: a
      * tenant running on allow_negative_stock can hold a negative stock
@@ -468,7 +524,7 @@ class FiscalYear extends Model
             );
         }
 
-        $closingStock = StockCosting::totalClosingValue($endDate);
+        $closingStock = StockCosting::totalPeriodicClosingValue($endDate);
 
         if ($closingStock->isZero()) {
             return;

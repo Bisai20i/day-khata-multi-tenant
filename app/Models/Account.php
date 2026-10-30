@@ -20,12 +20,14 @@ class Account extends Model
      * also looked up by that name). They cannot be deleted, recoded, renamed
      * or moved (audit JE-02). EXE9 and INI22 are the opening and closing stock
      * accounts FiscalYear's year-end stock entry resolves by code (confirmed
-     * list, flags D3).
+     * list, flags D3). AS12-AS14, EXE10, EXE23 and EXE24 are the perpetual
+     * manufacturing inventory accounts (ManufacturingAccounts).
      *
      * @var list<string>
      */
     public const SYSTEM_CODES = [
-        'AS1', 'AS11', 'AS31', 'ASA23', 'CA2', 'EXE8', 'EXE9', 'EXE20', 'EXE21', 'EXE22',
+        'AS1', 'AS11', 'AS12', 'AS13', 'AS14', 'AS31', 'ASA23', 'CA2', 'EXE8', 'EXE9', 'EXE10',
+        'EXE20', 'EXE21', 'EXE22', 'EXE23', 'EXE24',
         'INI20', 'INI22', 'INI30', 'LIA20', 'LIA21',
     ];
 

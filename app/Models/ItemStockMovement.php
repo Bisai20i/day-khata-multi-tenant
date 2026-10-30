@@ -22,8 +22,14 @@ use Illuminate\Database\Eloquent\Relations\MorphTo;
  * derived convenience (`value / quantity`, rounded once); `value` is the
  * authoritative figure App\Support\Inventory\StockCosting reads. See
  * CONTRACTS C10 and Item::recordStockMovement().
+ *
+ * `cost_value` is the perpetual cost of the movement for Raw Material and
+ * Finished Good items (todo/manufacturing CONTRACTS MC3), always positive with
+ * the sign taken from the movement type, and always null for trading items.
+ * Unlike `value` it is never a selling price, so its signed sum per class
+ * equals the class's inventory account balance.
  */
-#[Fillable(['item_id', 'store_id', 'movement_type', 'quantity', 'unit_cost_rate', 'value', 'reference_type', 'reference_id', 'date', 'cancelled', 'narration'])]
+#[Fillable(['item_id', 'store_id', 'movement_type', 'quantity', 'unit_cost_rate', 'value', 'cost_value', 'reference_type', 'reference_id', 'date', 'cancelled', 'narration'])]
 class ItemStockMovement extends Model
 {
     /**
@@ -36,6 +42,7 @@ class ItemStockMovement extends Model
             'quantity' => Decimal::class.':4',
             'unit_cost_rate' => Decimal::class.':4',
             'value' => Decimal::class.':2',
+            'cost_value' => Decimal::class.':2',
             'date' => 'date:Y-m-d',
             'cancelled' => 'boolean',
         ];

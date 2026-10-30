@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers\Tenant\Inventory;
 
+use App\Enums\InventoryClass;
 use App\Enums\StockConversionType;
 use App\Http\Controllers\Controller;
 use App\Models\CompanySetting;
@@ -29,7 +30,12 @@ class StockConversionController extends Controller
                 ->orderByDesc('date')
                 ->orderByDesc('id')
                 ->get(),
-            'items' => Item::query()->where('is_stockable', true)->orderBy('name')->get(['id', 'name', 'unit']),
+            // Raw materials and finished goods are refused by
+            // StockConversion::post() (manufacturing contract MC8), so the
+            // picker never offers them.
+            'items' => Item::query()->where('is_stockable', true)
+                ->where('inventory_class', InventoryClass::Trading->value)
+                ->orderBy('name')->get(['id', 'name', 'unit']),
             'stores' => Store::where('is_active', true)->orderBy('name')->get(['id', 'name']),
         ]);
     }
@@ -37,7 +43,9 @@ class StockConversionController extends Controller
     public function store(Request $request): RedirectResponse
     {
         $data = $request->validate([
-            'type' => ['required', 'in:production,refining,repackaging'],
+            // `production` is no longer offered for new entries (old rows
+            // still display); StockConversion::post() refuses it too.
+            'type' => ['required', 'in:refining,repackaging'],
             'date' => ['required', 'date'],
             'note' => ['nullable', 'string', 'max:255'],
             'store_id' => ['nullable', 'integer', 'exists:stores,id'],

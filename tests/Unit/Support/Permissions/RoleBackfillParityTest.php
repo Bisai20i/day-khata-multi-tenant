@@ -30,9 +30,10 @@ test('the frozen admin list contains no owner-only key and only catalog keys', f
     }
 });
 
-test('the frozen admin list equals the grantable catalog keys at rollout', function () {
-    // Expected to break when the catalog grows (a new grantable key): the
-    // frozen list must NOT change then. Replace this with a subset assertion
-    // (frozen list is a subset of PermissionCatalog::grantable()).
-    expect(RoleBackfill::GRANTABLE_AT_ROLLOUT)->toEqualCanonicalizing(PermissionCatalog::grantable());
+test('the frozen admin list is a subset of the grantable catalog keys', function () {
+    // The catalog has grown since rollout (settings.manage, stock_ageing.view,
+    // the manufacturing keys), so equality no longer holds by design. The
+    // frozen list must never change; it only has to stay inside the catalog's
+    // grantable keys so the backfill never grants something unknown.
+    expect(array_values(array_diff(RoleBackfill::GRANTABLE_AT_ROLLOUT, PermissionCatalog::grantable())))->toBe([]);
 });

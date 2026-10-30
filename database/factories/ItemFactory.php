@@ -2,6 +2,7 @@
 
 namespace Database\Factories;
 
+use App\Enums\InventoryClass;
 use App\Models\Item;
 use App\Models\ItemCategory;
 use Illuminate\Database\Eloquent\Factories\Factory;
@@ -35,5 +36,21 @@ class ItemFactory extends Factory
             'is_stockable' => true,
             'is_active' => true,
         ];
+    }
+
+    /**
+     * A perpetual raw material item (posts to AS12).
+     */
+    public function rawMaterial(): static
+    {
+        return $this->state(fn () => ['inventory_class' => InventoryClass::RawMaterial, 'is_stockable' => true]);
+    }
+
+    /**
+     * A perpetual finished good item (posts to AS14).
+     */
+    public function finishedGood(): static
+    {
+        return $this->state(fn () => ['inventory_class' => InventoryClass::FinishedGood, 'is_stockable' => true]);
     }
 }

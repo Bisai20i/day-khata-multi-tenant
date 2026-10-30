@@ -169,7 +169,9 @@ function submitLogo() {
 </script>
 
 <template>
-    <div>
+    <!-- Fills the layout's full-height column so the footer below sits at the
+         very bottom on every tab, however short that tab's content is. -->
+    <div class="flex flex-1 flex-col">
         <PageHeader
             :title="`${tenant.company_name} - Settings`"
             description="Company details, invoice rules and stock policy for this tenant. Changes apply to this tenant only."
@@ -177,7 +179,7 @@ function submitLogo() {
             :back-label="`Back to ${tenant.company_name}`"
         />
 
-        <Tabs v-model="activeTab" :tabs="settingsTabs">
+        <Tabs v-model="activeTab" :tabs="settingsTabs" class="flex-1">
             <template #company>
                 <div class="flex flex-col gap-4">
                     <Card variant="panel" title="Company info" class="bg-bg-surface p-4 sm:p-5">

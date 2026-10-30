@@ -9,6 +9,9 @@ use App\Support\Billing\BillingException;
 use App\Support\Billing\DocumentCalculator;
 use App\Support\Billing\DocumentTotals;
 use App\Support\Billing\LineTotals;
+use App\Support\Inventory\PerpetualCosting;
+use App\Support\Inventory\PerpetualStockGuard;
+use App\Support\Manufacturing\ManufacturingAccounts;
 use App\Support\Money\Money;
 use App\Support\Money\Quantity;
 use App\Support\SettlementNarration;
@@ -30,6 +33,14 @@ use InvalidArgumentException;
  * separately through Item::recordStockMovement(), fully decoupled from
  * the ledger. See day-khata-multi-tenant mem.md for the full research
  * this was built from.
+ *
+ * The one exception is a perpetual item (MC1: Raw Material or Finished Good,
+ * MC8). Its line also relieves inventory at cost inside the SAME voucher:
+ * Dr Cost of Goods Sold (EXE10) / Cr the item's class account (AS12/AS14),
+ * at exactly the `cost_value` written on that line's stock movement, so the
+ * GL and the perpetual subledger can never disagree (P1) and cancel() undoes
+ * both through the voucher reversal and the cancelled movement. Trading
+ * items post no inventory line at all, exactly as before.
  *
  * Every rupee on this document is computed by App\Support\Billing\
  * DocumentCalculator (CONTRACTS C3) and held as App\Support\Money\Money.
@@ -311,7 +322,16 @@ class Sale extends Model
             $agentId = $data['agent_id'] ?? null;
             $agent = $agentId ? Agent::findOrFail($agentId) : null;
 
-            static::assertStockAvailable($preparedLines, $totals, $storeId, $settings, CarbonImmutable::parse($data['date'])->toDateString());
+            $saleDate = CarbonImmutable::parse($data['date'])->toDateString();
+
+            static::assertStockAvailable($preparedLines, $totals, $storeId, $settings, $saleDate);
+
+            // Costed only now, after assertStockAvailable() has locked the
+            // items (MC3: issueCost() is called under the item lock) and
+            // before the voucher takes the fiscal year, so the COGS lines
+            // below and the movements persistLines() writes carry the very
+            // same figures.
+            $perpetualCosts = static::perpetualCostByLine($preparedLines, $totals, $saleDate);
 
             $tdsAccountId = $data['tds_account_id'] ?? null;
 
@@ -327,7 +347,7 @@ class Sale extends Model
                     'date' => $data['date'],
                     'narration' => $data['narration'] ?? "Sale to {$customer->name}",
                 ],
-                static::voucherLines($customer, $totals, $preparedLines, $paymentMode, $cashAmount, $bankAmount, $bankAccountId, $tdsAccountId, $agent, $commissionAmount),
+                static::voucherLines($customer, $totals, $preparedLines, $paymentMode, $cashAmount, $bankAmount, $bankAccountId, $tdsAccountId, $agent, $commissionAmount, $perpetualCosts),
                 $actor,
                 // Every line of this voucher carries the same compact
                 // narration (audit section 3 "Sales", "ledger narrations"), so
@@ -371,7 +391,7 @@ class Sale extends Model
                 'created_by' => $actor->id,
             ]);
 
-            static::persistLines($sale, $preparedLines, $totals, $storeId, $data['date']);
+            static::persistLines($sale, $preparedLines, $totals, $storeId, $data['date'], $perpetualCosts);
 
             return $sale;
         });
@@ -533,9 +553,14 @@ class Sale extends Model
      * of 12 moves 24 base units while the money side keeps using the
      * as-entered quantity and rate.
      *
+     * A perpetual line's movement is written with the cost perpetualCostByLine()
+     * already computed (and voucherLines() already posted), never re-costed
+     * here: re-costing would let the movement and the COGS line drift apart.
+     *
      * @param  array<int, array<string, mixed>>  $preparedLines
+     * @param  array<int, Money>  $perpetualCosts  Keyed by line index, perpetual lines only.
      */
-    private static function persistLines(self $sale, array $preparedLines, DocumentTotals $totals, int $storeId, string $date): void
+    private static function persistLines(self $sale, array $preparedLines, DocumentTotals $totals, int $storeId, string $date, array $perpetualCosts = []): void
     {
         foreach ($preparedLines as $index => $prepared) {
             /** @var LineTotals $line */
@@ -564,6 +589,19 @@ class Sale extends Model
                 // units by the same factor (audit section 3 "Sales").
                 $bonusBaseQuantity = $bonusQuantity->multipliedBy($line->conversionFactor);
 
+                if (isset($perpetualCosts[$index])) {
+                    $item->recordStockMovement(
+                        StockMovementType::Sale,
+                        $line->baseQuantity->plus($bonusBaseQuantity),
+                        $date,
+                        $storeId,
+                        $saleLine,
+                        costValue: $perpetualCosts[$index],
+                    );
+
+                    continue;
+                }
+
                 $item->recordStockMovement(
                     StockMovementType::Sale,
                     $line->baseQuantity->plus($bonusBaseQuantity),
@@ -573,6 +611,119 @@ class Sale extends Model
                 );
             }
         }
+    }
+
+    /**
+     * The cost each perpetual line relieves from inventory (MC3/MC8), keyed by
+     * line index. Trading and non-stockable lines get no entry at all, which
+     * is what keeps a trading-only invoice's voucher byte-for-byte unchanged.
+     *
+     * Lines are costed per ITEM, not per line: the whole bill's quantity of
+     * an item goes through PerpetualCosting::issueCost() once and the result
+     * is split back across that item's lines by quantity with
+     * Money::allocate(). Costing line by line against the same pre-sale
+     * balance would miss issueCost()'s "selling the whole balance takes the
+     * whole value" rule whenever two lines together empty the shelf, leaving
+     * a stranded paisa of value against zero quantity. Bonus units leave the
+     * shelf, so they are costed like the paid ones.
+     *
+     * A negative-quantity line (an in-bill adjustment) is refused for a
+     * perpetual item: goods coming back must be costed at what they left at,
+     * which only a sales return against the original bill knows.
+     *
+     * @param  array<int, array<string, mixed>>  $preparedLines
+     * @return array<int, Money>
+     */
+    private static function perpetualCostByLine(array $preparedLines, DocumentTotals $totals, string $date): array
+    {
+        /** @var array<int, array{item: Item, quantity: Quantity, lines: array<int, Quantity>}> $byItem */
+        $byItem = [];
+
+        foreach ($preparedLines as $index => $prepared) {
+            /** @var Item $item */
+            $item = $prepared['item'];
+
+            if (! $item->is_stockable || ! $item->isPerpetual()) {
+                continue;
+            }
+
+            /** @var LineTotals $line */
+            $line = $totals->lines[$index];
+            $baseQuantity = $line->baseQuantity->plus($prepared['bonus_quantity']->multipliedBy($line->conversionFactor));
+
+            if ($baseQuantity->isNegative()) {
+                throw new InvalidArgumentException("{$item->name} cannot be sold with a negative quantity. Record a sales return against the original bill instead.");
+            }
+
+            $byItem[$item->id] ??= ['item' => $item, 'quantity' => Quantity::zero(), 'lines' => []];
+            $byItem[$item->id]['quantity'] = $byItem[$item->id]['quantity']->plus($baseQuantity);
+            $byItem[$item->id]['lines'][$index] = $baseQuantity;
+        }
+
+        $costs = [];
+
+        foreach ($byItem as $entry) {
+            if (! $entry['quantity']->isPositive()) {
+                foreach (array_keys($entry['lines']) as $index) {
+                    $costs[$index] = Money::zero();
+                }
+
+                continue;
+            }
+
+            $itemCost = PerpetualCosting::issueCost($entry['item'], $entry['quantity'], $date);
+            $shares = count($entry['lines']) === 1 ? [$itemCost] : $itemCost->allocate(array_values($entry['lines']));
+
+            foreach (array_keys($entry['lines']) as $position => $index) {
+                $costs[$index] = $shares[$position];
+            }
+        }
+
+        ksort($costs);
+
+        return $costs;
+    }
+
+    /**
+     * The inventory-relief half of a sale's voucher (MC8): one Dr Cost of
+     * Goods Sold (EXE10) for the whole perpetual cost, and one credit per
+     * class account (AS12 Raw Material, AS14 Finished Goods) for its share.
+     * Empty for a bill with no perpetual line, so nothing changes for trading
+     * items and EXE10 is never even looked up for a tenant that does not
+     * manufacture.
+     *
+     * @param  array<int, array<string, mixed>>  $preparedLines
+     * @param  array<int, Money>  $perpetualCosts
+     * @return list<array{account_id: int, debit: string, credit: string, narration: string}>
+     */
+    private static function costOfGoodsSoldLines(array $preparedLines, array $perpetualCosts): array
+    {
+        $byAccount = [];
+
+        foreach ($perpetualCosts as $index => $cost) {
+            $accountId = $preparedLines[$index]['item']->inventoryAccountId();
+            $byAccount[$accountId] = ($byAccount[$accountId] ?? Money::zero())->plus($cost);
+        }
+
+        $byAccount = array_filter($byAccount, static fn (Money $amount): bool => $amount->isPositive());
+
+        if ($byAccount === []) {
+            return [];
+        }
+
+        $zero = Money::zero()->toString();
+        $lines = [[
+            'account_id' => ManufacturingAccounts::id(ManufacturingAccounts::COGS),
+            'debit' => Money::sum($byAccount)->toString(),
+            'credit' => $zero,
+            'narration' => 'Cost of goods sold',
+        ]];
+
+        foreach ($byAccount as $accountId => $amount) {
+            $lines[] = ['account_id' => $accountId, 'debit' => $zero, 'credit' => $amount->toString(), 'narration' => 'Cost of goods sold'];
+        }
+
+        return $lines;
     }
 
     /**
@@ -656,7 +807,9 @@ class Sale extends Model
     /**
      * Locks the bill's stockable items and enforces negative stock; only the
      * check is skipped when the tenant has opted into overselling via
-     * CompanySetting::allow_negative_stock.
+     * CompanySetting::allow_negative_stock. That opt-out covers trading items
+     * only: raw material and finished goods are always checked, store-scoped
+     * and aggregated per item, by PerpetualStockGuard (M08b).
      *
      * Item::lockForStockOut() locks the item rows in ascending id order before
      * anything is read (C10), so two terminals selling the last unit at the
@@ -698,6 +851,11 @@ class Sale extends Model
         }
 
         $locked = Item::lockForStockOut(array_keys($requestedByItem))->keyBy('id');
+
+        // Raw material and finished goods never go negative, whatever the
+        // overselling setting says: their moving average is meaningless at
+        // zero or below (M08b). Trading items are skipped by the guard.
+        PerpetualStockGuard::assertCanTakeOut($locked, $requestedByItem, $storeId, $saleDate);
 
         if ($settings->allow_negative_stock) {
             return;
@@ -851,8 +1009,11 @@ class Sale extends Model
      * The money side of the sale, unchanged in structure from before this
      * rewrite (the audit verified the account choices as correct) - only the
      * amounts differ, now exact Money strings rather than rounded floats.
+     * Perpetual lines append the COGS pair last (costOfGoodsSoldLines()), so
+     * the money-side lines keep their order.
      *
      * @param  array<int, array<string, mixed>>  $preparedLines
+     * @param  array<int, Money>  $perpetualCosts
      * @return array<int, array{account_id: int, debit: string, credit: string, narration: string}>
      */
     private static function voucherLines(
@@ -866,6 +1027,7 @@ class Sale extends Model
         ?int $tdsAccountId,
         ?Agent $agent,
         Money $commissionAmount,
+        array $perpetualCosts = [],
     ): array {
         $zero = Money::zero()->toString();
         $voucherLines = [];
@@ -918,6 +1080,8 @@ class Sale extends Model
             $voucherLines[] = ['account_id' => $customer->account_id, 'debit' => $zero, 'credit' => $settlementDue->toString(), 'narration' => 'Settlement'];
         }
 
+        array_push($voucherLines, ...static::costOfGoodsSoldLines($preparedLines, $perpetualCosts));
+
         return $voucherLines;
     }
 
@@ -961,6 +1125,11 @@ class Sale extends Model
      * Stock movements this sale generated are flagged cancelled rather than
      * reversed with inverse rows, matching how every other module in this app
      * undoes a stock effect.
+     *
+     * A perpetual line needs nothing extra (MC8): its COGS pair sits in the
+     * sale's own voucher, so the reversal mirrors it (Dr AS12/AS14, Cr EXE10)
+     * and the cancelled movement drops its `cost_value` out of the
+     * subledger, keeping P1 intact.
      */
     public function cancel(User $actor, string $reason): void
     {

@@ -177,7 +177,7 @@ function submit(print = false, copies = 1) {
 </script>
 
 <template>
-    <div>
+    <div class="flex flex-1 flex-col">
     <div class="mb-4 flex items-center justify-between">
         <div>
             <h3 class="text-base font-bold text-text-strong">New sale</h3>
@@ -193,7 +193,7 @@ function submit(print = false, copies = 1) {
         {{ form.errors.expected_total }}
     </p>
 
-    <form class="flex flex-col gap-4 pb-4" @submit.prevent="submit(false)">
+    <form class="flex flex-1 flex-col gap-4" @submit.prevent="submit(false)">
         <!-- Invoice Type Selector (Tasks 02, 03, 04) -->
         <div class="flex flex-wrap items-center justify-between gap-3 border-[1.5px] border-border bg-white px-4 py-2.5">
             <div class="flex items-center gap-2">

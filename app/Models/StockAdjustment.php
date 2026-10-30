@@ -8,8 +8,12 @@ use App\Enums\StockAdjustmentReason;
 use App\Enums\StockMovementType;
 use App\Enums\VoucherType;
 use App\Support\ClosedFiscalYearGuard;
+use App\Support\Inventory\PerpetualCosting;
+use App\Support\Inventory\PerpetualStockGuard;
+use App\Support\Manufacturing\ManufacturingAccounts;
 use App\Support\Money\Money;
 use App\Support\Money\Quantity;
+use Brick\Math\RoundingMode;
 use Illuminate\Auth\Access\AuthorizationException;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Collection;
@@ -38,6 +42,17 @@ use ValueError;
  * ClosedFiscalYearGuard::assertDateInOpenYear() itself (CONTRACTS C4). Audit
  * P0-11 found stock documents bypassing the fiscal-year guard entirely, so a
  * stock adjustment could be dated into a closed, already-filed year.
+ *
+ * Perpetual items (raw materials and finished goods, manufacturing contract
+ * MC8) are the second exception: their value lives in a GL account (AS12 /
+ * AS14) that must always equal their subledger (invariant P1), so an
+ * adjustment of one is always valued and always posted. In at the entered
+ * rate (required, greater than zero), out at PerpetualCosting::issueCost(),
+ * damage and loss included - a write-off still removes real cost. They post
+ * one voucher of type InventoryCost per adjustment: Dr/Cr the class account
+ * against EXE23 Inventory Adjustment, or against the "Profit & Loss" equity
+ * account for an opening line, the same counter-account the opening-stock
+ * import uses. Trading lines on the same document stay exactly as above.
  */
 #[Fillable([
     'date',
@@ -220,6 +235,17 @@ class StockAdjustment extends Model
                         : Money::round($baseQuantity->toBigDecimal()->multipliedBy($unitCostRate->toBigDecimal()));
                 }
 
+                // A perpetual item cannot come in at no cost: its moving
+                // average would fall toward a price nobody paid, and the GL
+                // would never see the value. Its out lines are costed below,
+                // at posting time, whatever rate the client sent.
+                if ($item->isPerpetual() && $direction === 'in'
+                    && ($reason->isZeroValue() || $unitCostRate === null || ! $unitCostRate->isPositive())) {
+                    throw new InvalidArgumentException(
+                        "\"{$item->name}\" is a {$item->inventory_class->label()} item: bringing it in needs a unit cost rate greater than zero."
+                    );
+                }
+
                 if ($direction === 'out') {
                     $requestedOut[$item->id] = ($requestedOut[$item->id] ?? Quantity::zero())->plus($baseQuantity);
                 }
@@ -238,9 +264,11 @@ class StockAdjustment extends Model
                 ];
             }
 
-            static::assertStockAvailable($requestedOut, $items, $storeId);
+            static::assertStockAvailable($requestedOut, $items, $storeId, $data['date']);
 
             $totalValue = Money::sum(array_map(fn (array $line) => $line['line_value'], $preparedLines));
+
+            $postedLineValues = [];
 
             $adjustment = static::create([
                 'date' => $data['date'],
@@ -252,7 +280,22 @@ class StockAdjustment extends Model
                 'created_by' => $actor->id,
             ]);
 
+            /** @var list<array{item: Item, direction: string, reason: StockAdjustmentReason, value: Money}> $perpetualPostings */
+            $perpetualPostings = [];
+
             foreach ($preparedLines as $line) {
+                $isPerpetual = $line['item']->isPerpetual();
+
+                if ($isPerpetual && $line['direction'] === 'out') {
+                    // Costed here, after assertStockAvailable() locked the
+                    // item and line by line, so a second out line of the same
+                    // item sees the first one's movement (MC3).
+                    $line['line_value'] = PerpetualCosting::issueCost($line['item'], $line['base_quantity'], $data['date']);
+                    $line['unit_cost_rate'] = Quantity::of($line['line_value']->toBigDecimal()->dividedBy(
+                        $line['base_quantity']->toBigDecimal(), 4, RoundingMode::HalfUp
+                    ));
+                }
+
                 $adjustmentLine = $adjustment->lines()->create([
                     'item_id' => $line['item']->id,
                     'item_unit_id' => $line['item_unit_id'],
@@ -285,15 +328,54 @@ class StockAdjustment extends Model
                         ? $line['line_value']
                         : null;
 
-                $line['item']->recordStockMovement(
-                    $movementType,
-                    $line['base_quantity'],
-                    $data['date'],
-                    $storeId,
-                    $adjustmentLine,
-                    $value === null ? null : $line['unit_cost_rate'],
-                    $value,
-                );
+                if ($isPerpetual) {
+                    // cost_value is the exact figure the InventoryCost voucher
+                    // below posts for this line, in and out alike.
+                    $line['item']->recordStockMovement(
+                        $movementType,
+                        $line['base_quantity'],
+                        $data['date'],
+                        $storeId,
+                        $adjustmentLine,
+                        $value === null ? null : $line['unit_cost_rate'],
+                        $value,
+                        costValue: $line['line_value'],
+                    );
+
+                    $perpetualPostings[] = [
+                        'item' => $line['item'],
+                        'direction' => $line['direction'],
+                        'reason' => $line['reason'],
+                        'value' => $line['line_value'],
+                    ];
+                } else {
+                    $line['item']->recordStockMovement(
+                        $movementType,
+                        $line['base_quantity'],
+                        $data['date'],
+                        $storeId,
+                        $adjustmentLine,
+                        $value === null ? null : $line['unit_cost_rate'],
+                        $value,
+                    );
+                }
+
+                $postedLineValues[] = $line['line_value'];
+            }
+
+            if ($perpetualPostings !== []) {
+                // Perpetual out lines were costed only inside the loop.
+                $adjustment->update(['total_value' => Money::sum($postedLineValues)]);
+            }
+
+            // The opening-stock import posts its own single voucher that
+            // already carries the perpetual lines (postOpeningImport()).
+            if ($perpetualPostings !== [] && ! $adjustment->is_opening_import) {
+                $voucher = static::postPerpetualVoucher($adjustment, $perpetualPostings, $fiscalYear, $correctionReason, $actor);
+
+                if ($voucher !== null) {
+                    $adjustment->update(['journal_voucher_id' => $voucher->id]);
+                }
             }
 
             if ($isCorrection) {
@@ -352,6 +434,22 @@ class StockAdjustment extends Model
                 $openingStock = Account::where('code', 'AS11')->firstOrFail();
                 $equity = Account::where('name', 'Profit & Loss')->firstOrFail();
 
+                // Perpetual lines are debited to their class account (AS12 /
+                // AS14) rather than AS11 (MC8); the trading remainder stays
+                // on AS11 exactly as before. A trading-only import therefore
+                // still posts the one Dr AS11 / Cr Profit & Loss pair.
+                $perpetualByAccount = static::perpetualOpeningValues($adjustment);
+                $tradingValue = $totalValue->minus(Money::sum(array_values($perpetualByAccount)));
+                $debitLines = [];
+
+                if ($tradingValue->isPositive()) {
+                    $debitLines[] = ['account_id' => $openingStock->id, 'debit' => $tradingValue->toString(), 'credit' => 0, 'narration' => 'Opening stock'];
+                }
+
+                foreach ($perpetualByAccount as $accountId => $amount) {
+                    $debitLines[] = ['account_id' => $accountId, 'debit' => $amount->toString(), 'credit' => 0, 'narration' => 'Opening stock'];
+                }
+
                 // The fiscal year is named explicitly rather than left to
                 // JournalVoucher::post()'s FiscalYear::current(): post()
                 // above has already resolved the year the date actually
@@ -372,7 +470,7 @@ class StockAdjustment extends Model
                         'reason' => $data['reason'] ?? null,
                     ],
                     [
-                        ['account_id' => $openingStock->id, 'debit' => $totalValue->toString(), 'credit' => 0, 'narration' => 'Opening stock'],
+                        ...$debitLines,
                         ['account_id' => $equity->id, 'debit' => 0, 'credit' => $totalValue->toString(), 'narration' => 'Opening stock'],
                     ],
                     $actor,
@@ -415,16 +513,24 @@ class StockAdjustment extends Model
 
             $lineIds = $fresh->lines()->pluck('id');
 
+            static::assertPerpetualStockRemovable($lineIds->all());
+
             ItemStockMovement::query()
                 ->where('reference_type', (new StockAdjustmentLine)->getMorphClass())
                 ->whereIn('reference_id', $lineIds)
                 ->update(['cancelled' => true]);
 
             if ($fresh->journal_voucher_id !== null) {
+                // An opening import's voucher, or the InventoryCost voucher
+                // of an adjustment with perpetual lines: reversing it puts
+                // the class accounts back in step with the movements just
+                // cancelled (P1).
                 JournalVoucher::reverse(
                     $fresh->journalVoucher()->firstOrFail(),
                     $actor,
-                    "Reversal of opening stock entry for stock adjustment #{$fresh->id}",
+                    $fresh->is_opening_import
+                        ? "Reversal of opening stock entry for stock adjustment #{$fresh->id}"
+                        : "Cancellation of stock adjustment #{$fresh->id}: {$reason}",
                 );
             }
 
@@ -437,6 +543,36 @@ class StockAdjustment extends Model
 
             $this->forceFill($fresh->getAttributes())->syncOriginal();
         });
+    }
+
+    /**
+     * Refuses to cancel an adjustment in (or an opening entry) of raw material
+     * or finished goods whose stock has already gone out again: cancelling
+     * removes it from its date on, and a perpetual item can never go below
+     * zero (M08b). Trading lines are not checked, the same as before, and
+     * only the perpetual items are locked (ascending id, after the adjustment
+     * row and before the reversal takes the fiscal year), so a trading-only
+     * adjustment cancels exactly as it always has.
+     *
+     * @param  array<int, int>  $lineIds
+     */
+    private static function assertPerpetualStockRemovable(array $lineIds): void
+    {
+        $movements = ItemStockMovement::query()
+            ->where('reference_type', (new StockAdjustmentLine)->getMorphClass())
+            ->whereIn('reference_id', $lineIds)
+            ->where('cancelled', false)
+            ->get();
+
+        $perpetualIds = PerpetualStockGuard::perpetualItemIds($movements->pluck('item_id')->all());
+
+        if ($perpetualIds === []) {
+            return;
+        }
+
+        $items = Item::lockForStockOut($perpetualIds)->keyBy('id');
+
+        PerpetualStockGuard::assertCanRemove($movements, $items, 'Cannot cancel this stock adjustment');
     }
 
     /**
@@ -455,13 +591,20 @@ class StockAdjustment extends Model
      * @param  array<int, Quantity>  $requestedOut  required quantity per item, already aggregated
      * @param  Collection<int, Item>  $items  every item on the adjustment, keyed by id
      */
-    private static function assertStockAvailable(array $requestedOut, Collection $items, int $storeId): void
+    private static function assertStockAvailable(array $requestedOut, Collection $items, int $storeId, string $date): void
     {
-        Item::lockForStockOut($items->keys()->all());
+        $locked = Item::lockForStockOut($items->keys()->all())->keyBy('id');
 
         if ($requestedOut === []) {
             return;
         }
+
+        // Raw material and finished goods are checked first, from the
+        // adjustment date on, so a backdated write-off cannot reach before
+        // the stock arrived either and the message names the shortfall
+        // (M08b). Trading items are skipped by the guard and keep the check
+        // below unchanged.
+        PerpetualStockGuard::assertCanTakeOut($locked, $requestedOut, $storeId, $date, 'Cannot adjust this stock out');
 
         $available = Item::currentStockByItem(array_keys($requestedOut), $storeId);
 
@@ -477,6 +620,105 @@ class StockAdjustment extends Model
                 );
             }
         }
+    }
+
+    /**
+     * Posts the one InventoryCost voucher for an adjustment's perpetual lines.
+     *
+     * Gross, not netted: each class account gets one debit (value in) and one
+     * credit (value out) and EXE23 the opposite, so the voucher reads like the
+     * document. Opening lines go against the "Profit & Loss" equity account
+     * instead of EXE23, the same counter-entry postOpeningImport() makes,
+     * because opening stock is a balance-sheet fact, not an expense. Zero
+     * amounts (an item whose remaining value is nil) are dropped; when nothing
+     * is left no voucher is posted. The voucher is dated and filed in the
+     * same year post() already resolved, with the correction reason, and the
+     * correction is logged once by post() itself.
+     *
+     * @param  list<array{item: Item, direction: string, reason: StockAdjustmentReason, value: Money}>  $postings
+     */
+    private static function postPerpetualVoucher(self $adjustment, array $postings, FiscalYear $fiscalYear, ?string $correctionReason, User $actor): ?JournalVoucher
+    {
+        $adjustmentAccountId = ManufacturingAccounts::id(ManufacturingAccounts::ADJUSTMENT);
+        $equityAccountId = null;
+
+        /** @var array<int, Money> $debits */
+        $debits = [];
+        /** @var array<int, Money> $credits */
+        $credits = [];
+
+        foreach ($postings as $posting) {
+            $classAccountId = $posting['item']->inventoryAccountId();
+
+            if ($posting['direction'] === 'in') {
+                $counterAccountId = $posting['reason'] === StockAdjustmentReason::Opening
+                    ? ($equityAccountId ??= Account::where('name', 'Profit & Loss')->firstOrFail()->id)
+                    : $adjustmentAccountId;
+
+                $debits[$classAccountId] = ($debits[$classAccountId] ?? Money::zero())->plus($posting['value']);
+                $credits[$counterAccountId] = ($credits[$counterAccountId] ?? Money::zero())->plus($posting['value']);
+            } else {
+                $debits[$adjustmentAccountId] = ($debits[$adjustmentAccountId] ?? Money::zero())->plus($posting['value']);
+                $credits[$classAccountId] = ($credits[$classAccountId] ?? Money::zero())->plus($posting['value']);
+            }
+        }
+
+        $voucherLines = [];
+
+        foreach ($debits as $accountId => $amount) {
+            if ($amount->isPositive()) {
+                $voucherLines[] = ['account_id' => $accountId, 'debit' => $amount->toString(), 'credit' => '0', 'narration' => 'Stock adjustment'];
+            }
+        }
+
+        foreach ($credits as $accountId => $amount) {
+            if ($amount->isPositive()) {
+                $voucherLines[] = ['account_id' => $accountId, 'debit' => '0', 'credit' => $amount->toString(), 'narration' => 'Stock adjustment'];
+            }
+        }
+
+        if ($voucherLines === []) {
+            return null;
+        }
+
+        return JournalVoucher::post(
+            [
+                'voucher_type' => VoucherType::InventoryCost->value,
+                'fiscal_year_id' => $fiscalYear->id,
+                'date' => $adjustment->date->toDateString(),
+                'narration' => "Stock adjustment #{$adjustment->id}",
+                'reason' => $correctionReason,
+            ],
+            $voucherLines,
+            $actor,
+            logCorrection: false,
+        );
+    }
+
+    /**
+     * Value of an opening import's perpetual lines per class account, for
+     * postOpeningImport()'s voucher. Read back from the posted lines, so it is
+     * exactly what their movements carry as cost_value.
+     *
+     * @return array<int, Money> keyed by account id, ascending
+     */
+    private static function perpetualOpeningValues(self $adjustment): array
+    {
+        /** @var array<int, Money> $values */
+        $values = [];
+
+        foreach ($adjustment->lines()->with('item')->orderBy('id')->get() as $line) {
+            if (! $line->item->isPerpetual()) {
+                continue;
+            }
+
+            $accountId = $line->item->inventoryAccountId();
+            $values[$accountId] = ($values[$accountId] ?? Money::zero())->plus(Money::of($line->line_value));
+        }
+
+        ksort($values);
+
+        return array_filter($values, fn (Money $amount): bool => $amount->isPositive());
     }
 
     /**

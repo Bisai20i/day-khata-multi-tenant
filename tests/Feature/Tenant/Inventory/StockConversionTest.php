@@ -49,7 +49,7 @@ function stockConversionTestActor(): User
     return User::factory()->create();
 }
 
-test('production consumes raw materials and produces a finished good with correct stock movements', function () {
+test('a multi-input refining entry consumes every input and produces the output with correct stock movements', function () {
     $tenant = provisionStockConversionTestTenant('stock-conversion-production.tenant-test');
 
     $tenant->run(function () {
@@ -66,7 +66,7 @@ test('production consumes raw materials and produces a finished good with correc
         $rawB->recordStockMovement(StockMovementType::Opening, 3, '2026-06-01', $store->id);
 
         $conversion = StockConversion::post(
-            ['type' => 'production', 'date' => '2026-06-02', 'note' => 'Assemble finished good'],
+            ['type' => 'refining', 'date' => '2026-06-02', 'note' => 'Assemble finished good'],
             [
                 ['item_id' => $rawA->id, 'quantity' => 10],
                 ['item_id' => $rawB->id, 'quantity' => 3],
@@ -77,7 +77,7 @@ test('production consumes raw materials and produces a finished good with correc
             $actor,
         );
 
-        expect($conversion->type->value)->toBe('production')
+        expect($conversion->type->value)->toBe('refining')
             ->and($conversion->store_id)->toBe($store->id)
             // All 10 of Raw A and all 3 of Raw B were consumed.
             ->and($rawA->fresh()->currentStock($store->id)->toString())->toBe('0.0000')
@@ -95,13 +95,13 @@ test('production consumes raw materials and produces a finished good with correc
         $rawBMovement = $movements->firstWhere('item_id', $rawB->id);
         $finishedMovement = $movements->firstWhere('item_id', $finished->id);
 
-        expect($rawAMovement->movement_type)->toBe(StockMovementType::ProductionOut)
+        expect($rawAMovement->movement_type)->toBe(StockMovementType::RefiningOut)
             ->and((float) $rawAMovement->quantity)->toBe(10.0)
             ->and($rawAMovement->store_id)->toBe($store->id)
-            ->and($rawBMovement->movement_type)->toBe(StockMovementType::ProductionOut)
+            ->and($rawBMovement->movement_type)->toBe(StockMovementType::RefiningOut)
             ->and((float) $rawBMovement->quantity)->toBe(3.0)
             ->and($rawBMovement->store_id)->toBe($store->id)
-            ->and($finishedMovement->movement_type)->toBe(StockMovementType::ProductionIn)
+            ->and($finishedMovement->movement_type)->toBe(StockMovementType::RefiningIn)
             ->and((float) $finishedMovement->quantity)->toBe(5.0)
             ->and($finishedMovement->store_id)->toBe($store->id);
     });
@@ -190,7 +190,7 @@ test('consuming more of an input item than is currently in stock is rejected and
         $raw->recordStockMovement(StockMovementType::Opening, 5, '2026-06-01', $store->id);
 
         expect(fn () => StockConversion::post(
-            ['type' => 'production', 'date' => '2026-06-02'],
+            ['type' => 'refining', 'date' => '2026-06-02'],
             [['item_id' => $raw->id, 'quantity' => 6]],
             [['item_id' => $finished->id, 'quantity' => 1]],
             $actor,
@@ -219,7 +219,7 @@ test('an input item appearing on more than one line has its requested quantity a
         // Two input lines for the same item totalling 11 must be rejected
         // even though neither line alone (6, then 5) exceeds the 10 on hand.
         expect(fn () => StockConversion::post(
-            ['type' => 'production', 'date' => '2026-06-02'],
+            ['type' => 'refining', 'date' => '2026-06-02'],
             [
                 ['item_id' => $raw->id, 'quantity' => 6],
                 ['item_id' => $raw->id, 'quantity' => 5],
@@ -249,7 +249,7 @@ test('a conversion posted at a non-default store only checks and moves stock at 
         $raw->recordStockMovement(StockMovementType::Opening, 10, '2026-06-01', $defaultStore->id);
 
         expect(fn () => StockConversion::post(
-            ['type' => 'production', 'date' => '2026-06-02', 'store_id' => $secondStore->id],
+            ['type' => 'refining', 'date' => '2026-06-02', 'store_id' => $secondStore->id],
             [['item_id' => $raw->id, 'quantity' => 5]],
             [['item_id' => $finished->id, 'quantity' => 1]],
             $actor,
@@ -271,14 +271,14 @@ test('at least one input and one output line are required', function () {
         $item = Item::factory()->create(['is_stockable' => true]);
 
         expect(fn () => StockConversion::post(
-            ['type' => 'production', 'date' => '2026-06-01'],
+            ['type' => 'refining', 'date' => '2026-06-01'],
             [],
             [['item_id' => $item->id, 'quantity' => 1]],
             $actor,
         ))->toThrow(InvalidArgumentException::class);
 
         expect(fn () => StockConversion::post(
-            ['type' => 'production', 'date' => '2026-06-01'],
+            ['type' => 'refining', 'date' => '2026-06-01'],
             [['item_id' => $item->id, 'quantity' => 1]],
             [],
             $actor,
@@ -301,7 +301,7 @@ test('cancelling reverts the stock impact of every line and rejects double-cance
         $raw->recordStockMovement(StockMovementType::Opening, 10, '2026-06-01', $store->id);
 
         $conversion = StockConversion::post(
-            ['type' => 'production', 'date' => '2026-06-02'],
+            ['type' => 'refining', 'date' => '2026-06-02'],
             [['item_id' => $raw->id, 'quantity' => 10]],
             [['item_id' => $finished->id, 'quantity' => 4]],
             $actor,

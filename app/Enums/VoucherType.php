@@ -36,6 +36,13 @@ namespace App\Enums;
  * JournalVoucher::postCashBank()): the voucher IS the record, the same as a
  * manually posted Journal voucher, so both are cancelled through
  * JournalVoucher::cancel() (see VoucherType::manuallyCancellableTypes()).
+ *
+ * MaterialIssue, Production and InventoryCost back the perpetual
+ * manufacturing postings (issue notes; direct costs, completions, material
+ * returns and abandon; stand-alone valued inventory postings) and are
+ * cancelled from their owning records, never manually. ProductionEntry is a
+ * header-only number series for production entries: no voucher ever
+ * carries it.
  */
 enum VoucherType: string
 {
@@ -62,6 +69,10 @@ enum VoucherType: string
     case BankReceipt = 'bank_receipt';
     case BankPayment = 'bank_payment';
     case Contra = 'contra';
+    case MaterialIssue = 'material_issue';
+    case Production = 'production';
+    case ProductionEntry = 'production_entry';
+    case InventoryCost = 'inventory_cost';
 
     /**
      * The five plain cash/bank voucher types (T14): each is a two-(or-more)

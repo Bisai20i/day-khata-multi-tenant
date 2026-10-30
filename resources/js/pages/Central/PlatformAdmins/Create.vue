@@ -33,7 +33,9 @@ function submit() {
 </script>
 
 <template>
-    <div>
+    <!-- Fills the layout's full-height column; the form stretches and its footer
+         is pushed to the very bottom, however short the content is. -->
+    <div class="flex flex-1 flex-col">
         <PageHeader
             title="Add platform admin"
             description="Create an account that can sign in to this platform panel and manage tenants. Fields marked * are required."
@@ -41,7 +43,7 @@ function submit() {
             back-label="All platform admins"
         />
 
-        <form class="flex flex-col gap-8" @submit.prevent="submit">
+        <form class="flex flex-1 flex-col gap-8" @submit.prevent="submit">
             <FormSection title="Account details" description="Who this admin is and what they can do. Owners can manage platform admins and all tenants; Support staff have more limited access.">
                 <div class="grid grid-cols-1 gap-4 sm:grid-cols-2">
                     <FormField v-slot="{ describedBy }" label="Full name" for="name" required :error="form.errors.name">
@@ -67,7 +69,7 @@ function submit() {
                 </div>
             </FormSection>
 
-            <FormActions>
+            <FormActions class="mt-auto">
                 <Button :as="Link" href="/platform-admins" variant="secondary" tone="neutral">Cancel</Button>
                 <Button type="submit" variant="primary" tone="purple" :loading="form.processing">
                     <UserPlus class="size-4" />

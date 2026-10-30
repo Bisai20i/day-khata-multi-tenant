@@ -165,12 +165,34 @@ function isZeroValue(line) {
     return zeroValueReasons.includes(line.reason_type);
 }
 
+// Raw materials and finished goods are valued in real time (manufacturing
+// MC8): stock coming in needs a cost rate greater than zero, and stock going
+// out is valued by the server at the item's moving average, so the rate
+// field does not apply to it. StockAdjustment::post() enforces both.
+const perpetualClasses = ['raw_material', 'finished_good'];
+
+function isPerpetual(line) {
+    return perpetualClasses.includes(itemsById.value.get(line.item_id)?.inventory_class);
+}
+
+function effectiveDirection(line) {
+    return line.reason_type === 'opening' ? 'in' : line.direction;
+}
+
+function needsRate(line) {
+    return isPerpetual(line) && effectiveDirection(line) === 'in';
+}
+
+function isValuedAtAverage(line) {
+    return isPerpetual(line) && effectiveDirection(line) === 'out';
+}
+
 // Exact decimal arithmetic, never floats: multiplyMoney rounds the product
 // once, the same way App\Support\Money\Money::round() does server-side, so
 // the preview and the posted document always agree (contracts C1/C8).
 // A line that is not yet fillable contributes nothing rather than NaN.
 function lineValue(line) {
-    if (isZeroValue(line)) return '0.00';
+    if (isZeroValue(line) || isValuedAtAverage(line)) return '0.00';
 
     const rate = String(line.unit_cost_rate ?? '').trim();
 
@@ -213,7 +235,7 @@ function submit() {
             direction: line.reason_type === 'opening' ? 'in' : line.direction,
             reason_type: line.reason_type,
             quantity: String(line.quantity ?? '').trim(),
-            unit_cost_rate: isZeroValue(line) || String(line.unit_cost_rate ?? '').trim() === ''
+            unit_cost_rate: isZeroValue(line) || isValuedAtAverage(line) || String(line.unit_cost_rate ?? '').trim() === ''
                 ? null
                 : String(line.unit_cost_rate).trim(),
             remarks: line.remarks || null,
@@ -356,11 +378,16 @@ function submit() {
                         <Input
                             v-model="line.unit_cost_rate"
                             type="number"
-                            min="0"
+                            :min="needsRate(line) ? '0.0001' : '0'"
                             step="0.0001"
-                            placeholder="0.0000"
-                            :disabled="isZeroValue(line)"
+                            :placeholder="needsRate(line) ? 'Required' : '0.0000'"
+                            :required="needsRate(line) && !isZeroValue(line)"
+                            :disabled="isZeroValue(line) || isValuedAtAverage(line)"
                         />
+                        <p v-if="needsRate(line) && isZeroValue(line)" class="mt-1 text-xs text-danger">
+                            This item cannot come in as damaged or lost.
+                        </p>
+                        <p v-else-if="isValuedAtAverage(line)" class="mt-1 text-xs text-text-muted">At average cost</p>
                         <p v-if="form.errors[`lines.${index}.unit_cost_rate`]" class="mt-1 text-xs text-danger">
                             {{ form.errors[`lines.${index}.unit_cost_rate`] }}
                         </p>

@@ -40,6 +40,11 @@ const props = defineProps({
         type: Array,
         default: () => [],
     },
+    // [{ value, label }] for App\Enums\InventoryClass.
+    inventoryClasses: {
+        type: Array,
+        default: () => [],
+    },
 });
 
 const { can } = usePermissions();
@@ -86,6 +91,7 @@ const form = useForm({
     is_vatable: false,
     is_stockable: true,
     is_active: true,
+    inventory_class: 'trading',
 });
 
 form.transform((data) => ({
@@ -156,6 +162,7 @@ const { showModal, editing, addAnother, savedNotice, isDirty, openCreate, openEd
         form.is_vatable = !!item.is_vatable;
         form.is_stockable = !!item.is_stockable;
         form.is_active = !!item.is_active;
+        form.inventory_class = item.inventory_class ?? 'trading';
         showMoreOptions.value = hasAnyValue(item, [...MORE_OPTION_FIELDS, 'image_path']);
     },
     // Adding items one after another is usually a run through one shelf, so
@@ -170,6 +177,7 @@ const { showModal, editing, addAnother, savedNotice, isDirty, openCreate, openEd
                   unit: lastCreated.unit,
                   is_vatable: lastCreated.is_vatable,
                   is_stockable: lastCreated.is_stockable,
+                  inventory_class: lastCreated.inventory_class ?? 'trading',
               }
             : {},
     onReset: () => {
@@ -178,6 +186,22 @@ const { showModal, editing, addAnother, savedNotice, isDirty, openCreate, openEd
         if (imageInput.value) imageInput.value.value = '';
     },
 });
+
+// Raw materials and finished goods are valued perpetually, which only makes
+// sense for counted stock, so they are always stockable (the server enforces
+// the same rule). Their class is fixed once the item has moved, because its
+// value already sits in that class's inventory account.
+const isPerpetualClass = computed(() => form.inventory_class !== 'trading');
+const inventoryClassLocked = computed(() => !!editing.value?.has_stock_movements);
+
+watch(
+    () => [form.inventory_class, form.is_stockable],
+    () => {
+        if (isPerpetualClass.value && !form.is_stockable) {
+            form.is_stockable = true;
+        }
+    },
+);
 
 const subcategoryOptions = computed(() => {
     const filtered = props.subcategories.filter((subcategory) => subcategory.item_category_id === form.item_category_id);
@@ -407,11 +431,34 @@ defineExpose({ openCreate, openEdit });
                         id="item-is-stockable"
                         v-model="form.is_stockable"
                         label="Stockable"
-                        hint="Keep a quantity on hand. Untick for services and other things you do not count."
+                        :hint="
+                            isPerpetualClass
+                                ? 'Raw materials and finished goods are always stockable.'
+                                : 'Keep a quantity on hand. Untick for services and other things you do not count.'
+                        "
                     />
                 </template>
 
                 <div class="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                    <FormField
+                        label="Inventory class"
+                        for="item-inventory-class"
+                        :help="
+                            inventoryClassLocked
+                                ? 'Locked: this item already has stock movements, so its value is already in the books under this class.'
+                                : 'Raw materials and finished goods are costed perpetually for manufacturing.'
+                        "
+                        :error="form.errors.inventory_class"
+                    >
+                        <Combobox
+                            id="item-inventory-class"
+                            :model-value="form.inventory_class"
+                            :options="inventoryClasses"
+                            :disabled="inventoryClassLocked"
+                            @update:model-value="(value) => (form.inventory_class = value ?? 'trading')"
+                        />
+                    </FormField>
+
                     <FormField
                         v-slot="{ describedBy }"
                         label="Reorder level"

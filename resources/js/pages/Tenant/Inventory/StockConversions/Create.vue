@@ -23,8 +23,11 @@ const emit = defineEmits(['cancel', 'posted']);
 const itemOptions = computed(() => props.items.map((i) => ({ value: i.id, label: `${i.name} (${i.unit})` })));
 const storeOptions = computed(() => props.stores.map((s) => ({ value: s.id, label: s.name })));
 
+// Production is no longer offered for new entries: raw materials and
+// finished goods now go through Material Issue Notes and Production Entries,
+// which post real-time journals (manufacturing contract MC8). Old production
+// rows still display on the index; the server rejects the type for new ones.
 const typeOptions = [
-    { value: 'production', label: 'Production' },
     { value: 'refining', label: 'Refining' },
     { value: 'repackaging', label: 'Repackaging' },
 ];
@@ -47,7 +50,7 @@ function emptyLine() {
 }
 
 const form = useForm({
-    type: 'production',
+    type: 'refining',
     // Today in Kathmandu, not the UTC day (contract C8).
     date: todayInKathmandu(),
     note: '',
@@ -119,7 +122,7 @@ function submit() {
     <div>
         <div class="mb-4 flex items-center justify-between">
             <div>
-                <h3 class="text-base font-bold text-text-strong">New production / refining entry</h3>
+                <h3 class="text-base font-bold text-text-strong">New refining / repackaging entry</h3>
                 <p class="text-sm text-text-muted">Input items are used up and output items are added to stock.</p>
             </div>
             <Button variant="secondary" tone="purple" type="button" @click="emit('cancel')">Cancel</Button>

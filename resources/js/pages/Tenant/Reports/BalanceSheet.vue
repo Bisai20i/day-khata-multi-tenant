@@ -159,6 +159,11 @@ function exportUrl() {
                         Stock in Hand is valued live at {{ formatMoney(stock.closing) }} as at {{ stock.asOf }}, because
                         this fiscal year has not been closed yet. Closing the year posts exactly that amount.
                     </p>
+                    <p v-if="can('manufacturing_reports.view')" class="mt-2 text-[12px]">
+                        <a :href="`/reports/manufacturing/inventory-schedule?to=${stock.asOf}`" class="font-semibold text-primary hover:underline">
+                            Inventory schedule: raw material, work in process and finished goods
+                        </a>
+                    </p>
                 </Card>
 
                 <Card variant="panel" title="Liabilities &amp; Capital">

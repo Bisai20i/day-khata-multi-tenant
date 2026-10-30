@@ -7,6 +7,8 @@ use App\Enums\StockMovementType;
 use App\Enums\VoucherType;
 use App\Support\Billing\DocumentCalculator;
 use App\Support\ClosedFiscalYearGuard;
+use App\Support\Inventory\PerpetualCosting;
+use App\Support\Inventory\PerpetualStockGuard;
 use App\Support\Inventory\StockCosting;
 use App\Support\Money\Money;
 use App\Support\Money\Quantity;
@@ -43,6 +45,13 @@ use InvalidArgumentException;
  * (`purchase_lines.account_id`), never the item's current account: re-pointing
  * an item between the bill and the debit note would otherwise leave two
  * accounts permanently wrong.
+ *
+ * A perpetual line (raw material / finished good, manufacturing contract MC8)
+ * credits its class's inventory account (AS12 / AS14) - the account its
+ * purchase line debited - and its stock movement carries the same credited
+ * net share as `cost_value`, so the item's subledger and the GL leave by the
+ * same figure (invariant P1). An unlinked perpetual return with no typed rate
+ * is valued at PerpetualCosting::issueCost(), the moving average.
  */
 #[Fillable([
     'purchase_id', 'supplier_id', 'journal_voucher_id', 'fiscal_year_id', 'debit_note_number', 'is_unlinked',
@@ -240,7 +249,7 @@ class PurchaseReturn extends Model
                 $prepared[] = static::prepareLine($purchaseLine, $quantity);
             }
 
-            static::assertStockAvailable($prepared, $storeId);
+            static::assertStockAvailable($prepared, $storeId, $date);
 
             $taxable = Money::sum(array_map(
                 static fn (array $line): Money => $line['purchaseLine']->vatable ? $line['net'] : Money::zero(),
@@ -334,7 +343,22 @@ class PurchaseReturn extends Model
                     'tds_amount' => $line['tds'],
                 ]);
 
-                if ($purchaseLine->item->is_stockable) {
+                if ($purchaseLine->item->is_stockable && $purchaseLine->item->isPerpetual()) {
+                    // The original line's cost share: exactly the net value
+                    // credited to the class account above (C6 shares, the
+                    // final return takes the remainder), never the moving
+                    // average.
+                    $purchaseLine->item->recordStockMovement(
+                        StockMovementType::PurchaseReturn,
+                        $line['baseQuantity'],
+                        $date,
+                        $storeId,
+                        $returnLine,
+                        static::unitCostRate($line['net'], $line['baseQuantity']),
+                        $line['net'],
+                        costValue: $line['net'],
+                    );
+                } elseif ($purchaseLine->item->is_stockable) {
                     $purchaseLine->item->recordStockMovement(
                         StockMovementType::PurchaseReturn,
                         $line['baseQuantity'],
@@ -447,6 +471,12 @@ class PurchaseReturn extends Model
 
             if ($enteredRate !== null) {
                 $net = Money::round($quantity->toBigDecimal()->multipliedBy($enteredRate->toBigDecimal()));
+            } elseif ($item->isPerpetual()) {
+                // The moving average the class account is carried at, so an
+                // untyped return takes out exactly what the subledger holds
+                // for that quantity (MC3; the whole balance when it empties
+                // the item).
+                $net = PerpetualCosting::issueCost($item, $baseQuantity, $date);
             } else {
                 $averageCost = StockCosting::averageCost($item, $date)
                     ?? Quantity::ofNullable($item->purchase_rate)?->toBigDecimal()
@@ -519,10 +549,12 @@ class PurchaseReturn extends Model
             $company = CompanySetting::current();
             $vatRate = $data['vat_rate'] ?? $company->default_vat_rate ?? '13';
 
+            static::lockItemsBeforePerpetualPricing($lines);
+
             ['lines' => $prepared, 'taxable' => $taxable, 'nonTaxable' => $nonTaxable, 'vat' => $vat, 'total' => $total]
                 = static::priceUnlinkedLines($date, $lines, $vatRate);
 
-            static::assertUnlinkedStockAvailable($prepared, $storeId);
+            static::assertUnlinkedStockAvailable($prepared, $storeId, $date);
 
             if (! $total->isPositive()) {
                 throw new InvalidArgumentException('An unlinked purchase return must credit more than zero.');
@@ -616,15 +648,29 @@ class PurchaseReturn extends Model
                     'tds_amount' => '0',
                 ]);
 
-                $line['item']->recordStockMovement(
-                    StockMovementType::PurchaseReturn,
-                    $line['baseQuantity'],
-                    $date,
-                    $storeId,
-                    $returnLine,
-                    null,
-                    $line['net'],
-                );
+                if ($line['item']->isPerpetual()) {
+                    // The same figure the class account was credited with.
+                    $line['item']->recordStockMovement(
+                        StockMovementType::PurchaseReturn,
+                        $line['baseQuantity'],
+                        $date,
+                        $storeId,
+                        $returnLine,
+                        null,
+                        $line['net'],
+                        costValue: $line['net'],
+                    );
+                } else {
+                    $line['item']->recordStockMovement(
+                        StockMovementType::PurchaseReturn,
+                        $line['baseQuantity'],
+                        $date,
+                        $storeId,
+                        $returnLine,
+                        null,
+                        $line['net'],
+                    );
+                }
             }
 
             return $purchaseReturn;
@@ -870,9 +916,14 @@ class PurchaseReturn extends Model
         $totals = [];
 
         foreach ($prepared as $line) {
-            $accountId = $line['purchaseLine']->account_id
-                ?? $line['purchaseLine']->item->account_id
-                ?? $fallbackAccountId;
+            // A perpetual item always credits its class account: the stock
+            // movement carries the same figure as cost_value, and P1 only
+            // holds if the GL leg lands on AS12 / AS14 too.
+            $accountId = $line['purchaseLine']->item->isPerpetual()
+                ? $line['purchaseLine']->item->inventoryAccountId()
+                : ($line['purchaseLine']->account_id
+                    ?? $line['purchaseLine']->item->account_id
+                    ?? $fallbackAccountId);
 
             $totals[$accountId] = ($totals[$accountId] ?? Money::zero())->plus($line['net']);
         }
@@ -942,10 +993,12 @@ class PurchaseReturn extends Model
      * The lock is taken even when negative stock is allowed and only the
      * check is skipped: it keeps the returned items ahead of the fiscal year
      * in the posting lock order (Item::lockForStockOut(), flags PUR-21).
+     * Only the trading check is skipped: raw material and finished goods are
+     * always checked from the return date on (PerpetualStockGuard, M08b).
      *
      * @param  list<array{purchaseLine: PurchaseLine, baseQuantity: Quantity}>  $prepared
      */
-    private static function assertStockAvailable(array $prepared, int $storeId): void
+    private static function assertStockAvailable(array $prepared, int $storeId, string $date): void
     {
         /** @var array<int, Quantity> $required */
         $required = [];
@@ -965,6 +1018,10 @@ class PurchaseReturn extends Model
 
         ksort($required);
         $items = Item::lockForStockOut(array_keys($required))->keyBy('id');
+
+        // Raw material and finished goods are checked whatever the setting
+        // (M08b); the guard skips trading items.
+        PerpetualStockGuard::assertCanTakeOut($items, $required, $storeId, $date, 'Cannot return this stock');
 
         if (CompanySetting::current()->allow_negative_stock) {
             return;
@@ -1067,11 +1124,12 @@ class PurchaseReturn extends Model
      * actually holds - mirrors assertStockAvailable()'s linked-return
      * equivalent, adapted to work off items directly rather than purchase
      * lines. Like it, the items are locked even when negative stock is
-     * allowed; only the check is skipped (flags PUR-21).
+     * allowed; only the trading check is skipped (flags PUR-21), raw
+     * material and finished goods are always checked (M08b).
      *
      * @param  list<array{item: Item, baseQuantity: Quantity}>  $prepared
      */
-    private static function assertUnlinkedStockAvailable(array $prepared, int $storeId): void
+    private static function assertUnlinkedStockAvailable(array $prepared, int $storeId, string $date): void
     {
         /** @var array<int, Quantity> $required */
         $required = [];
@@ -1087,6 +1145,10 @@ class PurchaseReturn extends Model
 
         ksort($required);
         $items = Item::lockForStockOut(array_keys($required))->keyBy('id');
+
+        // Raw material and finished goods are checked whatever the setting
+        // (M08b); the guard skips trading items.
+        PerpetualStockGuard::assertCanTakeOut($items, $required, $storeId, $date, 'Cannot return this stock');
 
         if (CompanySetting::current()->allow_negative_stock) {
             return;
@@ -1106,6 +1168,30 @@ class PurchaseReturn extends Model
     }
 
     /**
+     * Takes the item locks (ascending id, the posting lock order) before an
+     * unlinked return prices a perpetual line, so the moving average
+     * PerpetualCosting::issueCost() reads cannot move underneath it. Every
+     * item on the return is locked in one query, not just the perpetual ones:
+     * locking a subset first and the rest later would break the ascending
+     * order against a concurrent posting. A return of trading items only is
+     * left exactly as it was (assertUnlinkedStockAvailable() locks them).
+     *
+     * @param  array<int, array{item_id: int|string}>  $lines
+     */
+    private static function lockItemsBeforePerpetualPricing(array $lines): void
+    {
+        $itemIds = array_map(static fn (array $line): int => (int) $line['item_id'], $lines);
+
+        $hasPerpetual = Item::whereIn('id', $itemIds)
+            ->get(['id', 'inventory_class'])
+            ->contains(fn (Item $item): bool => $item->isPerpetual());
+
+        if ($hasPerpetual) {
+            Item::lockForStockOut($itemIds);
+        }
+    }
+
+    /**
      * One credit per item's own posting account (falling back to EXE8, the
      * same as a linked return) - mirrors accountVoucherLines() exactly,
      * adapted to work off items directly.
@@ -1121,7 +1207,9 @@ class PurchaseReturn extends Model
         $totals = [];
 
         foreach ($prepared as $line) {
-            $accountId = $line['item']->account_id ?? $fallbackAccountId;
+            $accountId = $line['item']->isPerpetual()
+                ? $line['item']->inventoryAccountId()
+                : ($line['item']->account_id ?? $fallbackAccountId);
             $totals[$accountId] = ($totals[$accountId] ?? Money::zero())->plus($line['net']);
         }
 

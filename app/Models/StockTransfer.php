@@ -5,6 +5,8 @@ namespace App\Models;
 use App\Casts\Decimal;
 use App\Enums\StockMovementType;
 use App\Support\ClosedFiscalYearGuard;
+use App\Support\Inventory\PerpetualCosting;
+use App\Support\Inventory\PerpetualStockGuard;
 use App\Support\Money\Money;
 use App\Support\Money\Quantity;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
@@ -170,7 +172,7 @@ class StockTransfer extends Model
                 ];
             }
 
-            static::assertStockAvailableAtSource($requestedOut, $items, $fromStoreId);
+            static::assertStockAvailableAtSource($requestedOut, $items, $fromStoreId, $data['date']);
 
             $totalValue = Money::sum(array_map(fn (array $line) => $line['line_value'], $preparedLines));
 
@@ -204,6 +206,31 @@ class StockTransfer extends Model
                     [StockMovementType::TransferOut, $fromStoreId],
                     [StockMovementType::TransferIn, $toStoreId],
                 ];
+
+                if ($line['item']->isPerpetual()) {
+                    // Both legs carry the same cost_value, so the item's
+                    // value balance and its class account (AS12 / AS14) are
+                    // unchanged and no voucher is needed (MC8). Costed after
+                    // assertStockAvailableAtSource() locked the item, and
+                    // line by line so a second line of the same item sees the
+                    // first; the moving average is item-wide, not per store.
+                    $cost = PerpetualCosting::issueCost($line['item'], $line['quantity'], $data['date']);
+
+                    foreach ($movements as [$movementType, $storeId]) {
+                        $line['item']->recordStockMovement(
+                            $movementType,
+                            $line['quantity'],
+                            $data['date'],
+                            $storeId,
+                            $transferLine,
+                            $line['unit_cost_rate'],
+                            $value,
+                            costValue: $cost,
+                        );
+                    }
+
+                    continue;
+                }
 
                 foreach ($movements as [$movementType, $storeId]) {
                     $line['item']->recordStockMovement(
@@ -252,6 +279,8 @@ class StockTransfer extends Model
 
             $lineIds = $fresh->lines()->pluck('id');
 
+            static::assertPerpetualStockRemovable($lineIds->all());
+
             ItemStockMovement::query()
                 ->where('reference_type', (new StockTransferLine)->getMorphClass())
                 ->whereIn('reference_id', $lineIds)
@@ -269,6 +298,37 @@ class StockTransfer extends Model
     }
 
     /**
+     * Refuses to cancel a transfer when raw material or finished goods it
+     * delivered have already gone out of the destination store: cancelling
+     * removes the receiving leg from the transfer date on, and a perpetual
+     * item can never go below zero (M08b). Only the TransferIn legs matter
+     * (cancelling the TransferOut leg puts stock back at the source).
+     * Trading items are not checked, the same as before, and only the
+     * perpetual items are locked (ascending id, after the transfer row), so a
+     * trading-only transfer cancels exactly as it always has.
+     *
+     * @param  array<int, int>  $lineIds
+     */
+    private static function assertPerpetualStockRemovable(array $lineIds): void
+    {
+        $movements = ItemStockMovement::query()
+            ->where('reference_type', (new StockTransferLine)->getMorphClass())
+            ->whereIn('reference_id', $lineIds)
+            ->where('cancelled', false)
+            ->get();
+
+        $perpetualIds = PerpetualStockGuard::perpetualItemIds($movements->pluck('item_id')->all());
+
+        if ($perpetualIds === []) {
+            return;
+        }
+
+        $items = Item::lockForStockOut($perpetualIds)->keyBy('id');
+
+        PerpetualStockGuard::assertCanRemove($movements, $items, 'Cannot cancel this stock transfer');
+    }
+
+    /**
      * Locks the items being moved and refuses the whole transfer if any of
      * them would go below zero at the source store. `lockForUpdate()` is a
      * no-op on SQLite, so the concurrency half of this is verified by review
@@ -277,13 +337,19 @@ class StockTransfer extends Model
      * @param  array<int, Quantity>  $requestedOut  required quantity per item, already aggregated
      * @param  Collection<int, Item>  $items
      */
-    private static function assertStockAvailableAtSource(array $requestedOut, $items, int $fromStoreId): void
+    private static function assertStockAvailableAtSource(array $requestedOut, $items, int $fromStoreId, string $date): void
     {
         if ($requestedOut === []) {
             return;
         }
 
-        Item::lockForStockOut(array_keys($requestedOut));
+        $locked = Item::lockForStockOut(array_keys($requestedOut))->keyBy('id');
+
+        // Raw material and finished goods are checked first, from the
+        // transfer date on, so a backdated transfer cannot move stock the
+        // source store did not yet hold (M08b). Trading items are skipped by
+        // the guard and keep the check below unchanged.
+        PerpetualStockGuard::assertCanTakeOut($locked, $requestedOut, $fromStoreId, $date, 'Cannot transfer this stock');
 
         $available = Item::currentStockByItem(array_keys($requestedOut), $fromStoreId);
 

@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 use App\Http\Controllers\Tenant\Auth\AuthenticatedSessionController;
 use App\Http\Controllers\Tenant\DashboardController;
+use App\Http\Controllers\Tenant\Reports\ReportIndexController;
 use App\Http\Middleware\AbortIfTenantSuspended;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Route;
@@ -56,6 +57,8 @@ Route::middleware([
 
         Route::get('/dashboard', [DashboardController::class, 'index'])->name('tenant.dashboard');
 
+        Route::get('/reports', ReportIndexController::class)->name('tenant.reports.index');
+
         require base_path('routes/tenant-business.php');
         require base_path('routes/tenant-stores.php');
         require base_path('routes/tenant-ledger.php');
@@ -66,6 +69,7 @@ Route::middleware([
         require base_path('routes/tenant-stock-adjustments.php');
         require base_path('routes/tenant-stock-transfers.php');
         require base_path('routes/tenant-stock-conversions.php');
+        require base_path('routes/tenant-manufacturing.php');
         require base_path('routes/tenant-reports-accounting.php');
         require base_path('routes/tenant-reports-sales-purchase.php');
         require base_path('routes/tenant-reports-inventory.php');

@@ -1169,6 +1169,12 @@ class AccountingReportController extends Controller
      * - closing stock is computed live by StockCosting as at the report
      *   date, which is exactly what close() will post.
      *
+     * Trading stock only, in both branches: closing is
+     * totalPeriodicClosingValue(), which leaves out Raw Material and
+     * Finished Good items. Their value already sits in AS12/AS14 (and WIP in
+     * AS13) as ordinary ledger balances that every statement reads directly,
+     * so adding them here too would show the same stock twice (MC9).
+     *
      * @return array{opening: string, closing: string, posted: bool, asOf: string}
      */
     private function stockPosition(FiscalYear $fiscalYear, string $to): array
@@ -1209,7 +1215,7 @@ class AccountingReportController extends Controller
 
         return [
             'opening' => ($withoutSweep[$stockInHand->id] ?? Money::zero())->toString(),
-            'closing' => StockCosting::totalClosingValue($to)->toString(),
+            'closing' => StockCosting::totalPeriodicClosingValue($to)->toString(),
             'posted' => false,
             'asOf' => $to,
         ];

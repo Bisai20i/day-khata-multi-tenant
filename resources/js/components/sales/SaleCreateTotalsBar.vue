@@ -43,7 +43,7 @@ function submitAndPrint(copies) {
     <!-- Totals + actions: pinned to the bottom of the scroll area so a
          long bill's grand total and Save buttons never scroll out of
          view (audit UX pass). -->
-    <div class="sticky bottom-0 z-10 flex flex-col gap-3 border-[1.5px] border-border bg-white px-4 py-3 shadow-[0_-4px_16px_rgba(0,0,0,.08)]">
+    <div class="sticky -bottom-4 z-10 -mx-4 -mb-4 mt-auto flex flex-col gap-3 border-t-[1.5px] border-border bg-white px-4 py-3 shadow-[0_-4px_16px_rgba(0,0,0,.08)] sm:-bottom-6 sm:-mx-6 sm:-mb-6 sm:px-6">
         <!-- Subtotal, Discount, Taxable, Non-taxable, VAT, Total: the same
              order and the same six figures the printed bill shows, so the
              cashier can reconcile the screen against the paper line by

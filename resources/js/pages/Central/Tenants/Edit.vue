@@ -32,7 +32,9 @@ function submit() {
 </script>
 
 <template>
-    <div>
+    <!-- Fills the layout's full-height column; the form stretches and its footer
+         is pushed to the very bottom, however short the content is. -->
+    <div class="flex flex-1 flex-col">
         <PageHeader
             :title="`Edit ${tenant.company_name}`"
             description="Update the company's name and contact details. Domains are managed on the tenant page. Fields marked * are required."
@@ -40,7 +42,7 @@ function submit() {
             :back-label="`Back to ${tenant.company_name}`"
         />
 
-        <form class="flex flex-col gap-8" @submit.prevent="submit">
+        <form class="flex flex-1 flex-col gap-8" @submit.prevent="submit">
             <FormSection title="Company" description="The business name shown on the tenant's screens and invoices, and how to reach them about their account.">
                 <div class="grid grid-cols-1 gap-4 sm:grid-cols-2">
                     <FormField v-slot="{ describedBy }" label="Company name" for="company_name" required :error="form.errors.company_name">
@@ -58,7 +60,7 @@ function submit() {
                 </div>
             </FormSection>
 
-            <FormActions :status="form.isDirty ? 'Unsaved changes' : 'No changes yet'" :emphasize="form.isDirty">
+            <FormActions class="mt-auto" :status="form.isDirty ? 'Unsaved changes' : 'No changes yet'" :emphasize="form.isDirty">
                 <Button :as="Link" :href="`/tenants/${tenant.id}`" variant="secondary" tone="neutral">Cancel</Button>
                 <Button type="submit" variant="primary" tone="purple" :loading="form.processing" :disabled="!form.isDirty">
                     <Check class="size-4" />

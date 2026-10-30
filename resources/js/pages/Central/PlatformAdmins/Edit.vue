@@ -59,7 +59,9 @@ function submit() {
 </script>
 
 <template>
-    <div>
+    <!-- Fills the layout's full-height column; the form stretches and its footer
+         is pushed to the very bottom, however short the content is. -->
+    <div class="flex flex-1 flex-col">
         <PageHeader
             title="Edit platform admin"
             :description="`Update details, role and access for ${admin.name}. Set status to Inactive to block sign-in.`"
@@ -67,7 +69,7 @@ function submit() {
             back-label="All platform admins"
         />
 
-        <form class="flex flex-col gap-8" @submit.prevent="submit">
+        <form class="flex flex-1 flex-col gap-8" @submit.prevent="submit">
             <FormSection title="Account details" description="Name and sign-in email for this admin.">
                 <div class="grid grid-cols-1 gap-4 sm:grid-cols-2">
                     <FormField v-slot="{ describedBy }" label="Name" for="name" required :error="form.errors.name">
@@ -101,7 +103,7 @@ function submit() {
                 </div>
             </FormSection>
 
-            <FormActions :status="form.isDirty ? 'Unsaved changes' : 'No changes yet'" :emphasize="form.isDirty">
+            <FormActions class="mt-auto" :status="form.isDirty ? 'Unsaved changes' : 'No changes yet'" :emphasize="form.isDirty">
                 <Button :as="Link" href="/platform-admins" variant="secondary" tone="neutral">Cancel</Button>
                 <Button type="submit" variant="primary" tone="purple" :loading="form.processing" :disabled="!form.isDirty">
                     <Check class="size-4" />

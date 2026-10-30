@@ -8,6 +8,9 @@ use App\Enums\VoucherType;
 use App\Support\Billing\DocumentCalculator;
 use App\Support\Billing\LineTotals;
 use App\Support\ClosedFiscalYearGuard;
+use App\Support\Inventory\PerpetualCosting;
+use App\Support\Inventory\PerpetualStockGuard;
+use App\Support\Manufacturing\ManufacturingAccounts;
 use App\Support\Money\Money;
 use App\Support\Money\Quantity;
 use App\Support\SettlementNarration;
@@ -37,6 +40,14 @@ use InvalidArgumentException;
  * returned line, in BASE units (return quantity x the original line's
  * `unit_conversion_factor`): returning 1 Box of an item sold in Boxes of 12
  * puts 12 base units back, not 1 (audit P0-12).
+ *
+ * Perpetual items (MC1, MC8) also put their cost back into inventory in the
+ * SAME credit-note voucher: Dr the item's class account (AS12/AS14) / Cr Cost
+ * of Goods Sold (EXE10), at exactly the `cost_value` written on the return
+ * movement. A linked return is costed at the original sale movement's cost,
+ * pro-rated by quantity (linkedReturnCost()); an unlinked return, having no
+ * sale movement to point at, at PerpetualCosting::issueCost(). Trading items
+ * add no line, exactly as before.
  *
  * Amounts (CONTRACTS C6, audit P0-3). Nothing here ever re-derives a value
  * by `line_total / quantity x returnQty`: that rounds twice, so returning a
@@ -357,14 +368,23 @@ class SalesReturn extends Model
 
             // A pending request takes no fiscal year and moves no stock, so
             // only a posting needs its items ahead of the fiscal year.
+            $costs = [];
+
             if ($post) {
                 static::lockReturnedItems(array_map(
                     static fn (array $line): int => (int) $line['sale_line']->item_id,
                     array_filter($prepared['lines'], static fn (array $line): bool => $line['moves_stock'])
                 ));
+
+                // Costed under the item locks and before the credit note
+                // takes the fiscal year, so the voucher and the movements
+                // below carry the same figures (MC3/MC8).
+                $costs = static::linkedReturnCosts($prepared['lines'], $date);
             }
 
-            $voucher = $post ? static::postCreditNote($sale, $prepared, $date, $data['reason'] ?? null, $actor) : null;
+            $voucher = $post
+                ? static::postCreditNote($sale, $prepared, $date, $data['reason'] ?? null, $actor, static::inventoryReturnLines($prepared['lines'], $costs))
+                : null;
 
             $salesReturn = static::create([
                 'sale_id' => $sale->id,
@@ -386,7 +406,7 @@ class SalesReturn extends Model
                 'created_by' => $actor->id,
             ]);
 
-            foreach ($prepared['lines'] as $line) {
+            foreach ($prepared['lines'] as $index => $line) {
                 $returnLine = $salesReturn->lines()->create([
                     'sale_line_id' => $line['sale_line']->id,
                     'quantity' => $line['quantity'],
@@ -399,7 +419,7 @@ class SalesReturn extends Model
                 ]);
 
                 if ($post && $line['moves_stock']) {
-                    static::recordReturnMovement($line, $returnLine, $date, $storeId);
+                    static::recordReturnMovement($line, $returnLine, $date, $storeId, $costs[$index] ?? null);
                 }
             }
 
@@ -459,6 +479,10 @@ class SalesReturn extends Model
                 'expected_total' => $data['expected_total'] ?? null,
             ]);
 
+            // Under the item locks taken above, before the voucher takes the
+            // fiscal year (MC3/MC8).
+            $costs = static::unlinkedReturnCosts($preparedLines, $totals->lines, $date);
+
             $voucherLines = [];
             $salesAccountId = Account::where('code', 'INI20')->firstOrFail()->id;
 
@@ -487,6 +511,8 @@ class SalesReturn extends Model
                 'credit' => $totals->total->toString(),
                 'narration' => 'Sales return credit note',
             ];
+
+            array_push($voucherLines, ...static::inventoryReturnLines($preparedLines, $costs));
 
             $voucher = JournalVoucher::post(
                 [
@@ -544,6 +570,19 @@ class SalesReturn extends Model
 
                 if ($item->is_stockable) {
                     $bonusBaseQuantity = $bonusQuantity->multipliedBy($line->conversionFactor);
+
+                    if (isset($costs[$index])) {
+                        $item->recordStockMovement(
+                            StockMovementType::SaleReturn,
+                            $line->baseQuantity->plus($bonusBaseQuantity),
+                            $date,
+                            $storeId,
+                            $returnLine,
+                            costValue: $costs[$index],
+                        );
+
+                        continue;
+                    }
 
                     $item->recordStockMovement(
                         StockMovementType::SaleReturn,
@@ -697,7 +736,7 @@ class SalesReturn extends Model
             $date = $salesReturn->date->format('Y-m-d');
             ClosedFiscalYearGuard::assertDateInOpenYear($date, $actor);
 
-            $storedLines = $salesReturn->lines()->with('saleLine.item:id,account_id')->orderBy('sale_line_id')->get();
+            $storedLines = $salesReturn->lines()->with('saleLine.item')->orderBy('sale_line_id')->get();
             $salesReturn->assertQuantitiesStillAvailable($sale, $storedLines);
 
             $prepared = [
@@ -718,7 +757,22 @@ class SalesReturn extends Model
                 ->map(fn (SaleReturnLine $line): int => (int) $line->saleLine->item_id)
                 ->all());
 
-            $voucher = static::postCreditNote($sale, $prepared, $date, $salesReturn->reason, $actor);
+            // Costed now, at approval, against the sale movement and the
+            // returns posted by then: a pending request reserves quantity,
+            // never cost, so it is priced exactly like a direct post() made
+            // at this moment (MC8).
+            $movementLines = $storedLines
+                ->filter(fn (SaleReturnLine $line): bool => in_array($line->sale_line_id, $movedStock, true))
+                ->mapWithKeys(fn (SaleReturnLine $line): array => [$line->id => [
+                    'sale_line' => $line->saleLine,
+                    'quantity' => Quantity::of($line->quantity),
+                    'bonus_quantity' => Quantity::of($line->bonus_quantity ?? '0'),
+                    'moves_stock' => true,
+                ]])
+                ->all();
+            $costs = static::linkedReturnCosts($movementLines, $date);
+
+            $voucher = static::postCreditNote($sale, $prepared, $date, $salesReturn->reason, $actor, static::inventoryReturnLines($movementLines, $costs));
 
             $salesReturn->update([
                 'journal_voucher_id' => $voucher->id,
@@ -733,14 +787,11 @@ class SalesReturn extends Model
                 }
 
                 static::recordReturnMovement(
-                    [
-                        'sale_line' => $line->saleLine,
-                        'quantity' => Quantity::of($line->quantity),
-                        'bonus_quantity' => Quantity::of($line->bonus_quantity ?? '0'),
-                    ],
+                    $movementLines[$line->id],
                     $line,
                     $date,
                     $salesReturn->store_id,
+                    $costs[$line->id] ?? null,
                 );
             }
 
@@ -815,6 +866,8 @@ class SalesReturn extends Model
                     default => 'Only a posted sales return can be cancelled.',
                 });
             }
+
+            static::assertPerpetualStockRemovable($salesReturn);
 
             $original = $salesReturn->journalVoucher()->firstOrFail();
             $reversal = JournalVoucher::reverse($original, $actor, "Cancellation of {$salesReturn->documentNumber()}: {$reason}");
@@ -966,7 +1019,7 @@ class SalesReturn extends Model
         // Every line of the sale is locked, not just the returned ones: the
         // components below are split across all of them, so a concurrent
         // return against any line changes what this one may credit.
-        $saleLines = SaleLine::where('sale_id', $sale->id)->with('item:id,account_id')->orderBy('id')->lockForUpdate()->get()->keyBy('id');
+        $saleLines = SaleLine::where('sale_id', $sale->id)->with('item')->orderBy('id')->lockForUpdate()->get()->keyBy('id');
 
         foreach (array_keys($requested) as $saleLineId) {
             if (! $saleLines->has($saleLineId)) {
@@ -1253,6 +1306,34 @@ class SalesReturn extends Model
     }
 
     /**
+     * Refuses to cancel a return whose raw material or finished goods have
+     * already gone out again: cancelling removes them from the store from the
+     * return date on, and a perpetual item can never go below zero whatever
+     * `allow_negative_stock` says (M08b). Trading items are not checked, the
+     * same as before, and only the perpetual items are locked (ascending id,
+     * after the return row and before the reversal takes the fiscal year), so
+     * a trading-only return cancels exactly as it always has.
+     */
+    private static function assertPerpetualStockRemovable(self $salesReturn): void
+    {
+        $movements = ItemStockMovement::query()
+            ->where('reference_type', (new SaleReturnLine)->getMorphClass())
+            ->whereIn('reference_id', $salesReturn->lines()->pluck('id'))
+            ->where('cancelled', false)
+            ->get();
+
+        $perpetualIds = PerpetualStockGuard::perpetualItemIds($movements->pluck('item_id')->all());
+
+        if ($perpetualIds === []) {
+            return;
+        }
+
+        $items = Item::lockForStockOut($perpetualIds)->keyBy('id');
+
+        PerpetualStockGuard::assertCanRemove($movements, $items, "Cannot cancel {$salesReturn->documentNumber()}");
+    }
+
+    /**
      * Which of these sale lines actually moved stock when the sale posted.
      *
      * Stockability is read from the movement the sale wrote, not from the
@@ -1282,13 +1363,28 @@ class SalesReturn extends Model
      * bonus addition). Returning 1 Box of an item sold in Boxes of 12 puts
      * 12 base units back.
      *
+     * `$costValue` is the perpetual cost linkedReturnCosts() priced the line
+     * at, which the credit note has already posted; null for a trading item.
+     *
      * @param  array{sale_line: SaleLine, quantity: Quantity, bonus_quantity?: Quantity}  $line
      */
-    private static function recordReturnMovement(array $line, SaleReturnLine $returnLine, string $date, int $storeId): void
+    private static function recordReturnMovement(array $line, SaleReturnLine $returnLine, string $date, int $storeId, ?Money $costValue = null): void
     {
         $saleLine = $line['sale_line'];
-        $returnedQuantity = $line['quantity']->plus($line['bonus_quantity'] ?? Quantity::zero());
-        $baseQuantity = $returnedQuantity->multipliedBy(Quantity::of($saleLine->unit_conversion_factor));
+        $baseQuantity = static::returnBaseQuantity($line);
+
+        if ($costValue !== null) {
+            $saleLine->item->recordStockMovement(
+                StockMovementType::SaleReturn,
+                $baseQuantity->toString(),
+                $date,
+                $storeId,
+                $returnLine,
+                costValue: $costValue,
+            );
+
+            return;
+        }
 
         $saleLine->item->recordStockMovement(
             StockMovementType::SaleReturn,
@@ -1331,9 +1427,208 @@ class SalesReturn extends Model
     }
 
     /**
-     * @param  array{taxable: Money, nontaxable: Money, vat: Money, tds: Money, total: Money, lines: list<array{sale_line: SaleLine, net: Money}>}  $prepared
+     * A linked return line's quantity in base units: paid plus bonus, times
+     * the original sale line's conversion factor (see recordReturnMovement()).
+     *
+     * @param  array{sale_line: SaleLine, quantity: Quantity, bonus_quantity?: Quantity}  $line
      */
-    private static function postCreditNote(Sale $sale, array $prepared, string $date, ?string $reason, User $actor): JournalVoucher
+    private static function returnBaseQuantity(array $line): Quantity
+    {
+        return $line['quantity']
+            ->plus($line['bonus_quantity'] ?? Quantity::zero())
+            ->multipliedBy(Quantity::of($line['sale_line']->unit_conversion_factor));
+    }
+
+    /**
+     * The perpetual cost each linked return line brings back (MC8), keyed
+     * like `$lines`. Only lines that moved stock on the way out and whose
+     * item is perpetual get an entry; every other line stays exactly as
+     * before. Must run after lockReturnedItems().
+     *
+     * @param  array<int, array{sale_line: SaleLine, quantity: Quantity, bonus_quantity?: Quantity, moves_stock: bool}>  $lines
+     * @return array<int, Money>
+     */
+    private static function linkedReturnCosts(array $lines, string $date): array
+    {
+        $costs = [];
+
+        foreach ($lines as $key => $line) {
+            if (! $line['moves_stock'] || ! $line['sale_line']->item->isPerpetual()) {
+                continue;
+            }
+
+            $costs[$key] = static::linkedReturnCost($line['sale_line'], static::returnBaseQuantity($line), $date);
+        }
+
+        return $costs;
+    }
+
+    /**
+     * The original sale movement's cost share for `$baseQuantity` coming
+     * back (MC8), anchored cumulatively exactly like the commission clawback
+     * (commissionReversalLines()) so rounding never drifts: after this
+     * return, the cost returned across every live return of the sale line
+     * must be `sale cost x returned qty / sold qty` (one HalfUp rounding), so
+     * this return takes that target minus what the live returns already took.
+     * The return that brings the line back in full takes exactly the
+     * remainder, so a fully returned line puts back its sale cost to the
+     * paisa and the GL (EXE10 nets to zero for it) matches the subledger.
+     * A cancelled return drops out of both sums. Floored at zero: a return
+     * never relieves inventory.
+     *
+     * "Already returned" is read from the live SaleReturn movements' own
+     * `cost_value`, the same figure the earlier credit notes posted.
+     *
+     * A sale movement without a `cost_value` cannot exist for a perpetual
+     * item (MC1 freezes the class once an item has any movement); if one is
+     * ever found the line falls back to issueCost(), like an unlinked return.
+     */
+    private static function linkedReturnCost(SaleLine $saleLine, Quantity $baseQuantity, string $date): Money
+    {
+        if (! $baseQuantity->isPositive()) {
+            return Money::zero();
+        }
+
+        $saleMovement = ItemStockMovement::query()
+            ->where('reference_type', $saleLine->getMorphClass())
+            ->where('reference_id', $saleLine->getKey())
+            ->where('movement_type', StockMovementType::Sale->value)
+            ->where('cancelled', false)
+            ->first();
+
+        if ($saleMovement === null || $saleMovement->cost_value === null) {
+            return PerpetualCosting::issueCost($saleLine->item, $baseQuantity, $date);
+        }
+
+        $soldQuantity = Quantity::of($saleMovement->quantity);
+        $soldCost = Money::of($saleMovement->cost_value);
+
+        $earlierReturns = ItemStockMovement::query()
+            ->where('reference_type', (new SaleReturnLine)->getMorphClass())
+            ->whereIn('reference_id', SaleReturnLine::query()->where('sale_line_id', $saleLine->getKey())->select('id'))
+            ->where('cancelled', false)
+            ->get(['quantity', 'cost_value']);
+
+        $returnedQuantity = Quantity::sum($earlierReturns->map(fn (ItemStockMovement $movement): Quantity => Quantity::of($movement->quantity)));
+        $returnedCost = Money::sum($earlierReturns->map(fn (ItemStockMovement $movement): Money => Money::of($movement->cost_value ?? '0')));
+
+        $returnedAfter = $returnedQuantity->plus($baseQuantity);
+
+        $target = ! $soldQuantity->isPositive() || $returnedAfter->isGreaterThanOrEqualTo($soldQuantity)
+            ? $soldCost
+            : $soldCost->multipliedByFraction($returnedAfter, $soldQuantity);
+
+        return Money::max(Money::zero(), $target->minus($returnedCost));
+    }
+
+    /**
+     * The perpetual cost each unlinked return line brings back (MC8), keyed
+     * by line index: PerpetualCosting::issueCost() as of the return date,
+     * there being no sale movement to take a share of. Costed per item and
+     * split back across that item's lines by quantity, as Sale does, so two
+     * lines of one item are priced off the same balance consistently. A
+     * negative quantity on a perpetual line is refused: it would take goods
+     * OUT of stock through a credit note. Must run after lockReturnedItems().
+     *
+     * @param  array<int, array{item: Item, item_unit_id: int|null, bonus_quantity: Quantity}>  $preparedLines
+     * @param  array<int, LineTotals>  $lineTotals
+     * @return array<int, Money>
+     */
+    private static function unlinkedReturnCosts(array $preparedLines, array $lineTotals, string $date): array
+    {
+        /** @var array<int, array{item: Item, quantity: Quantity, lines: array<int, Quantity>}> $byItem */
+        $byItem = [];
+
+        foreach ($preparedLines as $index => $prepared) {
+            $item = $prepared['item'];
+
+            if (! $item->is_stockable || ! $item->isPerpetual()) {
+                continue;
+            }
+
+            $line = $lineTotals[$index];
+            $baseQuantity = $line->baseQuantity->plus($prepared['bonus_quantity']->multipliedBy($line->conversionFactor));
+
+            if ($baseQuantity->isNegative()) {
+                throw new InvalidArgumentException("{$item->name} cannot be returned with a negative quantity.");
+            }
+
+            $byItem[$item->id] ??= ['item' => $item, 'quantity' => Quantity::zero(), 'lines' => []];
+            $byItem[$item->id]['quantity'] = $byItem[$item->id]['quantity']->plus($baseQuantity);
+            $byItem[$item->id]['lines'][$index] = $baseQuantity;
+        }
+
+        $costs = [];
+
+        foreach ($byItem as $entry) {
+            if (! $entry['quantity']->isPositive()) {
+                foreach (array_keys($entry['lines']) as $index) {
+                    $costs[$index] = Money::zero();
+                }
+
+                continue;
+            }
+
+            $itemCost = PerpetualCosting::issueCost($entry['item'], $entry['quantity'], $date);
+            $shares = count($entry['lines']) === 1 ? [$itemCost] : $itemCost->allocate(array_values($entry['lines']));
+
+            foreach (array_keys($entry['lines']) as $position => $index) {
+                $costs[$index] = $shares[$position];
+            }
+        }
+
+        return $costs;
+    }
+
+    /**
+     * The inventory half of a credit note (MC8): one debit per class account
+     * (AS12 Raw Material, AS14 Finished Goods) and one Cr Cost of Goods Sold
+     * (EXE10) for the total, the exact mirror of Sale's COGS pair. Empty when
+     * no perpetual line is being returned, so a trading return's voucher is
+     * unchanged and EXE10 is never looked up.
+     *
+     * @param  array<int, array<string, mixed>>  $lines  Linked (`sale_line`) or unlinked (`item`) lines.
+     * @param  array<int, Money>  $costs  Keyed like `$lines`.
+     * @return list<array{account_id: int, debit: string, credit: string, narration: string}>
+     */
+    private static function inventoryReturnLines(array $lines, array $costs): array
+    {
+        $byAccount = [];
+
+        foreach ($costs as $key => $cost) {
+            /** @var Item $item */
+            $item = $lines[$key]['item'] ?? $lines[$key]['sale_line']->item;
+            $accountId = $item->inventoryAccountId();
+            $byAccount[$accountId] = ($byAccount[$accountId] ?? Money::zero())->plus($cost);
+        }
+
+        $byAccount = array_filter($byAccount, static fn (Money $amount): bool => $amount->isPositive());
+
+        if ($byAccount === []) {
+            return [];
+        }
+
+        $voucherLines = [];
+
+        foreach ($byAccount as $accountId => $amount) {
+            $voucherLines[] = ['account_id' => $accountId, 'debit' => $amount->toString(), 'credit' => '0', 'narration' => 'Cost of goods returned'];
+        }
+
+        $voucherLines[] = [
+            'account_id' => ManufacturingAccounts::id(ManufacturingAccounts::COGS),
+            'debit' => '0',
+            'credit' => Money::sum($byAccount)->toString(),
+            'narration' => 'Cost of goods returned',
+        ];
+
+        return $voucherLines;
+    }
+
+    /**
+     * @param  array{taxable: Money, nontaxable: Money, vat: Money, tds: Money, total: Money, lines: list<array{sale_line: SaleLine, net: Money}>}  $prepared
+     * @param  list<array{account_id: int, debit: string, credit: string, narration: string}>  $inventoryLines  See inventoryReturnLines().
+     */
+    private static function postCreditNote(Sale $sale, array $prepared, string $date, ?string $reason, User $actor, array $inventoryLines = []): JournalVoucher
     {
         $sale->loadMissing('customer');
 
@@ -1387,6 +1682,10 @@ class SalesReturn extends Model
         // with the return and cancel() reverses it along with everything
         // else (JournalVoucher::reverse() mirrors every line).
         array_push($voucherLines, ...static::commissionReversalLines($sale, $prepared['total']));
+
+        // The perpetual cost coming back into inventory (MC8), last so the
+        // money-side lines keep their order. Empty for trading items.
+        array_push($voucherLines, ...$inventoryLines);
 
         return JournalVoucher::post(
             [

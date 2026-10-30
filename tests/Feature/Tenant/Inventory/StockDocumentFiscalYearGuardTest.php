@@ -150,7 +150,7 @@ test('a stock conversion dated in a closed fiscal year is rejected', function ()
         );
 
         expect(fn () => StockConversion::post(
-            ['type' => 'production', 'date' => '2025-06-01', 'store_id' => $store->id],
+            ['type' => 'refining', 'date' => '2025-06-01', 'store_id' => $store->id],
             [['item_id' => $raw->id, 'quantity' => '5']],
             [['item_id' => $finished->id, 'quantity' => '5']],
             $actor,

@@ -53,6 +53,12 @@ const props = defineProps({
         type: Array,
         default: () => [],
     },
+    // [{ value, label }] for Trading / Raw Material / Finished Good (MC1).
+    // Each item also carries `has_stock_movements`, which locks its class.
+    inventoryClasses: {
+        type: Array,
+        default: () => [],
+    },
 });
 
 const page = usePage();
@@ -575,6 +581,7 @@ function moreActionsFor(item) {
             :brands="brands"
             :stock-by-item="stockByItem"
             :posting-accounts="postingAccounts"
+            :inventory-classes="inventoryClasses"
         />
         <ItemsIndexImportModal ref="importModal" />
         <ItemsIndexUnitsModal ref="unitsModal" :items="items" />

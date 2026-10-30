@@ -10,7 +10,11 @@ use App\Models\FiscalYear;
 use App\Models\FixedAsset;
 use App\Models\Item;
 use App\Models\JournalVoucher;
+use App\Models\MaterialIssueNote;
 use App\Models\Payment;
+use App\Models\ProductionCompletion;
+use App\Models\ProductionDirectCost;
+use App\Models\ProductionEntry;
 use App\Models\Purchase;
 use App\Models\PurchaseReturn;
 use App\Models\Quotation;
@@ -54,6 +58,10 @@ class ActivityLogController extends Controller
             Quotation::class,
             CapitalSale::class,
             CapitalPurchase::class,
+            MaterialIssueNote::class,
+            ProductionEntry::class,
+            ProductionDirectCost::class,
+            ProductionCompletion::class,
             User::class,
             FiscalYear::class,
             Role::class,

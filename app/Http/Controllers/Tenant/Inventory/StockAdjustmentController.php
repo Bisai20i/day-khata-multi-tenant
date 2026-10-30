@@ -5,7 +5,6 @@ namespace App\Http\Controllers\Tenant\Inventory;
 use App\Enums\FiscalYearStatus;
 use App\Exports\Samples\OpeningStockSampleExport;
 use App\Http\Controllers\Concerns\ImportsCsv;
-use Maatwebsite\Excel\Facades\Excel;
 use App\Http\Controllers\Controller;
 use App\Models\CompanySetting;
 use App\Models\FiscalYear;
@@ -13,6 +12,7 @@ use App\Models\Item;
 use App\Models\PrintLog;
 use App\Models\StockAdjustment;
 use App\Models\Store;
+use App\Support\Money\Quantity;
 use Barryvdh\DomPDF\Facade\Pdf;
 use Illuminate\Auth\Access\AuthorizationException;
 use Illuminate\Http\RedirectResponse;
@@ -23,6 +23,7 @@ use Illuminate\Support\Facades\Validator;
 use Inertia\Inertia;
 use Inertia\Response;
 use InvalidArgumentException;
+use Maatwebsite\Excel\Facades\Excel;
 use Symfony\Component\HttpFoundation\StreamedResponse;
 
 class StockAdjustmentController extends Controller
@@ -73,7 +74,9 @@ class StockAdjustmentController extends Controller
             // PurchaseController::index() already sends.
             'items' => Item::query()->where('is_stockable', true)->orderBy('name')
                 ->with(['units' => fn ($q) => $q->where('is_active', true)->orderBy('name')])
-                ->get(['id', 'name', 'unit']),
+                // inventory_class lets the form require a rate when a raw
+                // material or finished good comes in (manufacturing MC8).
+                ->get(['id', 'name', 'unit', 'inventory_class']),
             'stores' => Store::where('is_active', true)->orderBy('name')->get(),
             // See PurchaseController::index()'s identical prop for the
             // rationale - the one closed year currently reopened for
@@ -175,10 +178,11 @@ class StockAdjustmentController extends Controller
      * Downloads a blank CSV template for the opening-stock bulk import, plus
      * one example row.
      */
-        public function openingStockSampleExcel()
+    public function openingStockSampleExcel()
     {
-        return Excel::download(new OpeningStockSampleExport(), 'opening-stock-import-sample.xlsx');
+        return Excel::download(new OpeningStockSampleExport, 'opening-stock-import-sample.xlsx');
     }
+
     public function openingStockTemplate(): StreamedResponse
     {
         return response()->streamDownload(function (): void {
@@ -228,7 +232,7 @@ class StockAdjustmentController extends Controller
             return back()->withErrors(['file' => 'That file could not be read. Make sure it matches the downloaded template and has an "item" column.'])->withInput();
         }
 
-        $items = Item::all(['id', 'name', 'is_stockable'])->keyBy(fn (Item $item) => strtolower($item->name));
+        $items = Item::all(['id', 'name', 'is_stockable', 'inventory_class'])->keyBy(fn (Item $item) => strtolower($item->name));
 
         $seenItems = [];
         $skipped = [];
@@ -280,9 +284,19 @@ class StockAdjustmentController extends Controller
                 continue;
             }
 
-            $seenItems[$itemKey] = true;
-
             $unitCostRate = trim($row['unit_cost_rate'] ?? '');
+
+            // A raw material or finished good is valued the moment it comes
+            // in (manufacturing MC8), so its opening row needs a cost. The
+            // row is skipped and reported, like every other bad row, rather
+            // than failing StockAdjustment::post() for the whole file.
+            if ($item->isPerpetual() && ($unitCostRate === '' || ! Quantity::of($unitCostRate)->isPositive())) {
+                $skipped[] = ['row' => $rowNumber, 'name' => $itemName, 'reason' => "\"{$itemName}\" is a {$item->inventory_class->label()} item and needs a unit cost rate greater than zero."];
+
+                continue;
+            }
+
+            $seenItems[$itemKey] = true;
 
             $lines[] = [
                 'item_id' => $item->id,

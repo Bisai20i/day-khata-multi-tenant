@@ -2,9 +2,9 @@
 
 namespace App\Http\Controllers\Tenant\Inventory;
 
+use App\Enums\InventoryClass;
 use App\Exports\Samples\ItemSampleExport;
 use App\Http\Controllers\Concerns\ImportsCsv;
-use Maatwebsite\Excel\Facades\Excel;
 use App\Http\Controllers\Controller;
 use App\Models\Account;
 use App\Models\Brand;
@@ -23,8 +23,10 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Facades\Validator;
 use Illuminate\Validation\Rule;
+use Illuminate\Validation\ValidationException;
 use Inertia\Inertia;
 use Inertia\Response;
+use Maatwebsite\Excel\Facades\Excel;
 use Symfony\Component\HttpFoundation\StreamedResponse;
 
 class ItemController extends Controller
@@ -58,19 +60,24 @@ class ItemController extends Controller
      * know internal ids. Image upload isn't supported via CSV (matches
      * Customer/Supplier import, neither of which supports bulk file
      * attachments either) - add one afterwards through the regular edit form.
+     * `inventory_class` is optional (blank = Trading), so an older template
+     * without the column still imports exactly as before.
      *
      * @var list<string>
      */
     private const IMPORT_COLUMNS = [
         'name', 'category', 'subcategory', 'unit', 'hs_code', 'barcode',
         'min_stock', 'purchase_rate', 'sale_rate', 'is_vatable', 'is_stockable',
-        'posting_account',
+        'posting_account', 'inventory_class',
     ];
 
     public function index(): Response
     {
         $items = Item::query()
             ->with(['category:id,name', 'subcategory:id,name', 'brand:id,name', 'account:id,code,name', 'units' => fn ($q) => $q->orderBy('name')])
+            // Drives the locked class select (MC1): any movement at all,
+            // cancelled ones included, fixes the item's inventory class.
+            ->withExists('stockMovements as has_stock_movements')
             ->latest()
             ->get();
 
@@ -88,6 +95,10 @@ class ItemController extends Controller
                 $item->id => (string) ($stock[$item->id] ?? '0.0000'),
             ]),
             'postingAccounts' => $this->postingAccountOptions()->values(),
+            'inventoryClasses' => collect(InventoryClass::cases())->map(fn (InventoryClass $class) => [
+                'value' => $class->value,
+                'label' => $class->label(),
+            ])->values(),
         ]);
     }
 
@@ -104,16 +115,27 @@ class ItemController extends Controller
         return redirect()->route('tenant.items.index')->with('status', 'Item added.');
     }
 
+    /**
+     * The class-change check runs again here under a row lock on the item:
+     * every stock posting locks its items (Item::lockForStockOut()) before it
+     * writes a movement, so a purchase saved at the same moment either lands
+     * before this check sees it or waits until the new class is committed.
+     */
     public function update(Request $request, Item $item): RedirectResponse
     {
         $data = $this->validated($request, $item);
 
-        if ($request->hasFile('image')) {
-            $this->deleteImage($item->image_path);
-            $data['image_path'] = $this->storeImage($request->file('image'));
-        }
+        DB::transaction(function () use ($request, $item, &$data): void {
+            $locked = Item::query()->whereKey($item->getKey())->lockForUpdate()->firstOrFail();
+            $this->assertClassChangeAllowed($locked, $data['inventory_class'] ?? null);
 
-        $item->update($data);
+            if ($request->hasFile('image')) {
+                $this->deleteImage($item->image_path);
+                $data['image_path'] = $this->storeImage($request->file('image'));
+            }
+
+            $item->update($data);
+        });
 
         return redirect()->route('tenant.items.index')->with('status', 'Item updated.');
     }
@@ -237,16 +259,17 @@ class ItemController extends Controller
      * Downloads a blank CSV template with the exact header this app's import
      * expects, plus one example row.
      */
-        public function importSampleExcel()
+    public function importSampleExcel()
     {
-        return Excel::download(new ItemSampleExport(), 'item-import-sample.xlsx');
+        return Excel::download(new ItemSampleExport, 'item-import-sample.xlsx');
     }
+
     public function importTemplate(): StreamedResponse
     {
         return response()->streamDownload(function (): void {
             $handle = fopen('php://output', 'w');
             fputcsv($handle, self::IMPORT_COLUMNS);
-            fputcsv($handle, ['Bottled Water 1L', 'Beverages', '', 'pcs', '2201.10.00', '', '10', '15.00', '20.00', 'yes', 'yes', 'EXE8']);
+            fputcsv($handle, ['Bottled Water 1L', 'Beverages', '', 'pcs', '2201.10.00', '', '10', '15.00', '20.00', 'yes', 'yes', 'EXE8', 'trading']);
             fclose($handle);
         }, 'item-import-template.csv', ['Content-Type' => 'text/csv']);
     }
@@ -324,6 +347,22 @@ class ItemController extends Controller
                 $subcategoryId = $subcategory->id;
             }
 
+            $inventoryClass = $this->parseInventoryClass($row['inventory_class'] ?? '');
+
+            if ($inventoryClass === null) {
+                $skipped[] = ['row' => $rowNumber, 'name' => $name, 'reason' => 'Unknown inventory class "'.trim($row['inventory_class'] ?? '').'" - use trading, raw_material or finished_good.'];
+
+                continue;
+            }
+
+            $isStockable = $this->parseBoolean($row['is_stockable'] ?? '', true);
+
+            if ($inventoryClass->isPerpetual() && ! $isStockable) {
+                $skipped[] = ['row' => $rowNumber, 'name' => $name, 'reason' => "A {$inventoryClass->label()} item must be stockable."];
+
+                continue;
+            }
+
             $postingAccountName = trim($row['posting_account'] ?? '');
             $postingAccountId = null;
 
@@ -392,7 +431,8 @@ class ItemController extends Controller
                 'purchase_rate' => $data['purchase_rate'] === '' ? null : $data['purchase_rate'],
                 'sale_rate' => $data['sale_rate'] === '' ? null : $data['sale_rate'],
                 'is_vatable' => $this->parseBoolean($row['is_vatable'] ?? '', false),
-                'is_stockable' => $this->parseBoolean($row['is_stockable'] ?? '', true),
+                'is_stockable' => $isStockable,
+                'inventory_class' => $inventoryClass,
             ];
         }
 
@@ -430,9 +470,84 @@ class ItemController extends Controller
     }
 
     /**
+     * Blank -> Trading. Accepts the stored value ("raw_material") or the
+     * label ("Raw Material"), case-insensitively, with spaces, hyphens and
+     * underscores treated alike. Null for anything else.
+     */
+    private function parseInventoryClass(string $value): ?InventoryClass
+    {
+        $normalised = str_replace([' ', '-'], '_', strtolower(trim($value)));
+
+        if ($normalised === '') {
+            return InventoryClass::Trading;
+        }
+
+        return InventoryClass::tryFrom($normalised);
+    }
+
+    /**
+     * Validated item attributes. `inventory_class` is optional on the wire:
+     * left out on create it is Trading, left out on update the item keeps
+     * its class, so older clients and the existing tests post unchanged.
+     *
+     * Two MC1 rules ride on top of the field rules: a raw material or
+     * finished good item must be stockable (perpetual value with no stock
+     * behind it cannot exist), and the class cannot change once the item
+     * has any stock movement (checked again under lock in update()).
+     *
      * @return array<string, mixed>
      */
     private function validated(Request $request, ?Item $item = null): array
+    {
+        $data = $this->validatedFields($request, $item);
+
+        if (($data['inventory_class'] ?? null) === null) {
+            unset($data['inventory_class']);
+
+            if ($item === null) {
+                $data['inventory_class'] = InventoryClass::Trading->value;
+            }
+        }
+
+        $class = InventoryClass::from($data['inventory_class'] ?? $item?->inventory_class?->value ?? InventoryClass::Trading->value);
+        $isStockable = array_key_exists('is_stockable', $data) ? (bool) $data['is_stockable'] : ($item?->is_stockable ?? true);
+
+        if ($class->isPerpetual() && ! $isStockable) {
+            throw ValidationException::withMessages([
+                'is_stockable' => "A {$class->label()} item must be stockable: its value is carried in the books through its stock movements.",
+            ]);
+        }
+
+        if ($item !== null) {
+            $this->assertClassChangeAllowed($item, $data['inventory_class'] ?? null);
+        }
+
+        return $data;
+    }
+
+    /**
+     * Refuses to change the class of an item that has any stock movement,
+     * cancelled ones included (MC1). Its value already sits in one account
+     * (AS11 at year-end, or AS12 / AS14), and a new class would leave that
+     * value stranded in the wrong one. A no-op when the class is unchanged.
+     */
+    private function assertClassChangeAllowed(Item $item, ?string $newClass): void
+    {
+        if ($newClass === null || $newClass === ($item->inventory_class ?? InventoryClass::Trading)->value) {
+            return;
+        }
+
+        if ($item->stockMovements()->exists()) {
+            throw ValidationException::withMessages([
+                'inventory_class' => "The inventory class of \"{$item->name}\" cannot be changed: it already has stock movements, and its stock value is already in the books under its current class.",
+            ]);
+        }
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function validatedFields(Request $request, ?Item $item = null): array
     {
         return $request->validate([
             'item_category_id' => ['required', 'exists:item_categories,id'],
@@ -474,6 +589,7 @@ class ItemController extends Controller
             'is_vatable' => ['boolean'],
             'is_stockable' => ['boolean'],
             'is_active' => ['boolean', $this->stillStockedRule($item)],
+            'inventory_class' => ['nullable', Rule::enum(InventoryClass::class)],
         ]);
     }
 
