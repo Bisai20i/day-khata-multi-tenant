@@ -2,18 +2,22 @@
 
 namespace App\Http\Controllers\Tenant\Sales;
 
+use App\Http\Controllers\Concerns\OffersDocumentBranch;
 use App\Http\Controllers\Controller;
 use App\Models\Account;
 use App\Models\CapitalSale;
 use App\Models\CompanySetting;
 use App\Models\Customer;
 use App\Models\PrintLog;
-use App\Models\Store;
 use App\Support\AmountInWords;
 use App\Support\Billing\BillingException;
+use App\Support\Branches\BranchAccounts;
+use App\Support\Branches\BranchFormOptions;
+use App\Support\Branches\BranchListFilter;
 use App\Support\Money\Money;
 use App\Support\NepaliCalendar;
 use Barryvdh\DomPDF\Facade\Pdf;
+use Illuminate\Auth\Access\AuthorizationException;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\Response as HttpResponse;
@@ -24,18 +28,30 @@ use InvalidArgumentException;
 
 class CapitalSaleController extends Controller
 {
-    public function index(): Response
+    use OffersDocumentBranch;
+
+    /**
+     * Branches (plan 12, BR12): the list follows the top-bar switcher and
+     * names each row's branch only when several branches can appear; the
+     * create form gets a branch picker and stores that know their branch.
+     * A company that is not multi-branch gets the same query and payload.
+     */
+    public function index(Request $request): Response
     {
         return Inertia::render('Tenant/Sales/CapitalSales/Index', [
-            'capitalSales' => CapitalSale::query()
+            'capitalSales' => BranchListFilter::apply(CapitalSale::query(), $request)
                 ->with(['customer:id,name', 'lines.account:id,code,name', 'journalVoucher:id,voucher_number'])
+                ->when(BranchListFilter::columnVisible($request), fn ($query) => $query->with('branch:id,name,code'))
                 ->orderByDesc('date')
                 ->orderByDesc('id')
                 ->get(),
             'customers' => Customer::query()->orderBy('name')->get(['id', 'name']),
-            'accounts' => Account::query()->orderBy('name')->get(['id', 'code', 'name']),
-            'stores' => Store::where('is_active', true)->orderBy('name')->get(['id', 'name']),
+            // The inter-branch control accounts are posted only by the system
+            // (BranchAccounts), so the pickers never offer them.
+            'accounts' => BranchAccounts::exclude(Account::query())->orderBy('name')->get(['id', 'code', 'name']),
+            'stores' => $this->branchStoreOptions($request),
             'defaultVatRate' => (string) (CompanySetting::current()->default_vat_rate ?? '13.00'),
+            ...BranchFormOptions::props($request),
         ]);
     }
 
@@ -46,14 +62,19 @@ class CapitalSaleController extends Controller
             'date' => ['required', 'date'],
             'narration' => ['nullable', 'string', 'max:255'],
             'payment_mode' => ['required', 'in:cash,bank,partial,credit'],
-            'bank_account_id' => ['nullable', 'exists:accounts,id'],
+            'bank_account_id' => ['nullable', 'exists:accounts,id', BranchAccounts::notControlAccountRule()],
             'store_id' => ['nullable', 'integer', 'exists:stores,id'],
+            // Sent by the branch picker of a multi-branch company (BR12),
+            // absent otherwise: CapitalSale::post() falls back to the store's
+            // branch, then the user's posting branch, and refuses a store of
+            // another branch or a branch the user cannot use.
+            'branch_id' => ['nullable', 'integer', 'exists:branches,id'],
             'cash_amount' => ['nullable', 'numeric', 'min:0', 'decimal:0,2'],
             'bank_amount' => ['nullable', 'numeric', 'min:0', 'decimal:0,2'],
             'vat_rate' => ['nullable', 'numeric', 'min:0', 'max:100', 'decimal:0,2'],
             'expected_total' => ['nullable', 'string'],
             'lines' => ['required', 'array', 'min:1'],
-            'lines.*.account_id' => ['required', 'exists:accounts,id'],
+            'lines.*.account_id' => ['required', 'exists:accounts,id', BranchAccounts::notControlAccountRule()],
             'lines.*.amount' => ['required', 'numeric', 'min:0.01', 'decimal:0,2'],
             'lines.*.vatable' => ['nullable', 'boolean'],
             'lines.*.narration' => ['nullable', 'string', 'max:255'],
@@ -70,8 +91,10 @@ class CapitalSaleController extends Controller
                     ? ['expected_total' => 'The bill total changed. Please review it before saving.']
                     : ['lines' => $e->getMessage()]
             );
-        } catch (InvalidArgumentException $e) {
-            return back()->withErrors(['lines' => $e->getMessage()])->withInput();
+        } catch (InvalidArgumentException|AuthorizationException $e) {
+            // A refused branch goes on the branch picker and a store of
+            // another branch on the store field; the rest stays on `lines`.
+            return back()->withErrors([BranchFormOptions::errorField($e, 'lines', 'branch_id', 'store_id') => $e->getMessage()])->withInput();
         }
 
         return redirect()->route('tenant.capital-sales.index')
@@ -91,7 +114,7 @@ class CapitalSaleController extends Controller
 
         try {
             $capitalSale->cancel($request->user(), $data['reason']);
-        } catch (InvalidArgumentException $e) {
+        } catch (InvalidArgumentException|AuthorizationException $e) {
             return back()->withErrors(['reason' => $e->getMessage()]);
         }
 
@@ -129,6 +152,8 @@ class CapitalSaleController extends Controller
             'dateBs' => NepaliCalendar::formatBs($documentDate),
             'fiscalYearName' => $capitalSale->fiscalYear?->name,
             'amountInWords' => AmountInWords::rupees($total),
+            // Multi-branch only; null keeps a single-branch invoice unchanged.
+            ...$this->printBranch($request, $capitalSale),
         ])->stream("capital-sale-{$capitalSale->id}.pdf");
     }
 }

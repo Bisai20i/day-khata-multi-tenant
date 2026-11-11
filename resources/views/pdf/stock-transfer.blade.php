@@ -5,6 +5,8 @@
 @section('doc-meta-extra')
     @if($stockTransfer->status === 'cancelled')
         <div style="margin-top: 4px;"><span class="status-badge">Cancelled</span></div>
+    @elseif($stockTransfer->status === 'in_transit')
+        <div style="margin-top: 4px;"><span class="status-badge">In transit</span></div>
     @endif
 @endsection
 
@@ -22,10 +24,19 @@
             <td>
                 <div class="party-label">From Store</div>
                 <div class="party-name">{{ $stockTransfer->fromStore->name ?? '-' }}</div>
+                @if($stockTransfer->relationLoaded('fromBranch') && $stockTransfer->fromBranch)
+                    <div>{{ $stockTransfer->fromBranch->name }}</div>
+                @endif
             </td>
             <td>
                 <div class="party-label">To Store</div>
                 <div class="party-name">{{ $stockTransfer->toStore->name ?? '-' }}</div>
+                @if($stockTransfer->relationLoaded('toBranch') && $stockTransfer->toBranch)
+                    <div>{{ $stockTransfer->toBranch->name }}</div>
+                @endif
+                @if($stockTransfer->status === 'received' && $stockTransfer->received_on)
+                    <div>Received {{ \App\Support\NepaliCalendar::formatBs($stockTransfer->received_on) }} ({{ $stockTransfer->received_on->format('Y-m-d') }})</div>
+                @endif
             </td>
         </tr>
     </table>
@@ -53,6 +64,13 @@
                         {{ $line->item->name }}
                         @if($line->item->unit)
                             <span style="color: #888;">({{ $line->item->unit }})</span>
+                        @endif
+                        @php
+                            $lineClass = $line->inventory_class instanceof \BackedEnum ? $line->inventory_class->value : $line->inventory_class;
+                            $lineClassLabel = ['raw_material' => 'Raw material', 'finished_good' => 'Finished good'][$lineClass] ?? null;
+                        @endphp
+                        @if($lineClassLabel)
+                            <div style="color: #888; font-size: 9px;">{{ $lineClassLabel }}</div>
                         @endif
                     </td>
                     <td class="text-right">{{ $qty($line->quantity) }}</td>

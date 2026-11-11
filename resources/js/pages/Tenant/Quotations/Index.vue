@@ -18,6 +18,7 @@ import Label from '@/components/ui/Label.vue';
 import { useToast } from '@/composables/useToast';
 import { useConfirm } from '@/composables/useConfirm';
 import { usePermissions } from '@/composables/usePermissions';
+import { useBranchListColumn } from '@/composables/useBranchListColumn';
 import { formatMoney } from '@/lib/money';
 import { formatBsDate } from '@/lib/format';
 import Create from './Create.vue';
@@ -35,7 +36,12 @@ const props = defineProps({
     },
     customers: { type: Array, default: () => [] },
     items: { type: Array, default: () => [] },
+    // Branch picker of the create form (BranchFormOptions::props()).
+    branchOptions: { type: Array, default: () => [] },
+    defaultBranchId: { type: Number, default: null },
 });
+
+const { branchColumns } = useBranchListColumn();
 
 const page = usePage();
 const { toast } = useToast();
@@ -192,6 +198,8 @@ const columns = [
         numeric: false,
         cell: ({ row }) => formatBsDate(row.original.date),
     },
+    // Only for a multi-branch company viewing all branches.
+    ...branchColumns(),
     {
         id: 'reference_number',
         header: 'Reference #',
@@ -295,7 +303,14 @@ function moreActionsFor(quotation) {
 <template>
     <div>
         <template v-if="showCreateForm">
-            <Create :customers="customers" :items="items" @cancel="closeForms" @saved="closeForms" />
+            <Create
+                :customers="customers"
+                :items="items"
+                :branch-options="branchOptions"
+                :default-branch-id="defaultBranchId"
+                @cancel="closeForms"
+                @saved="closeForms"
+            />
         </template>
 
         <template v-else-if="editingQuotation">

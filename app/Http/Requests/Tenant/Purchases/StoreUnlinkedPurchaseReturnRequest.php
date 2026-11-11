@@ -45,6 +45,10 @@ class StoreUnlinkedPurchaseReturnRequest extends FormRequest
             'cash_amount' => ['nullable', 'numeric', 'min:0', 'decimal:0,2'],
             'bank_amount' => ['nullable', 'numeric', 'min:0', 'decimal:0,2'],
             'store_id' => ['nullable', 'integer', Rule::exists('stores', 'id')->where('is_active', true)],
+            // Optional (plan 12): PurchaseReturn::postUnlinked() falls back to
+            // the store's branch, then the user's posting branch, and refuses
+            // a store of another branch.
+            'branch_id' => ['nullable', 'integer', 'exists:branches,id'],
             'reason' => ['required', 'string', 'max:255'],
             'expected_total' => ['required', 'numeric', 'decimal:0,2'],
             'lines' => ['required', 'array', 'min:1'],

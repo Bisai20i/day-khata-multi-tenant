@@ -21,6 +21,11 @@ const props = defineProps({
     placeholder: { type: String, default: 'Select…' },
     disabled: { type: Boolean, default: false },
     class: { type: [String, Array, Object], default: '' },
+    // Declared (not left as fallthrough attrs) so they land on the trigger
+    // button: SelectRoot renders no element of its own and drops its attrs,
+    // so an `id` passed for a <Label for> would otherwise reach nothing.
+    id: { type: String, default: null },
+    ariaLabel: { type: String, default: null },
 });
 
 const emit = defineEmits(['update:modelValue']);
@@ -34,6 +39,8 @@ const modelValue = computed({
 <template>
     <SelectRoot v-model="modelValue" :disabled="disabled">
         <SelectTrigger
+            :id="id ?? undefined"
+            :aria-label="ariaLabel ?? undefined"
             :class="cn(
                 'flex h-9 w-full items-center justify-between border-[1.5px] border-border bg-bg-subtle px-3 text-[13px] text-text-base outline-none transition-colors duration-150',
                 'data-[state=open]:border-primary data-[state=open]:bg-white data-[state=open]:[box-shadow:0_0_0_3px_var(--color-primary-focus-ring)]',

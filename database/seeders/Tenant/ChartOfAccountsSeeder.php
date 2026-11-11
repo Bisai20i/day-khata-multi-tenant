@@ -6,6 +6,10 @@ use App\Models\Account;
 use App\Models\AccountGroup;
 use App\Models\AccountHead;
 use App\Models\AccountSubgroup;
+use App\Models\PayComponent;
+use App\Support\Branches\BranchAccounts;
+use App\Support\Branches\BranchBalancer;
+use App\Support\Hr\HrAccounts;
 use Illuminate\Database\Seeder;
 
 class ChartOfAccountsSeeder extends Seeder
@@ -118,9 +122,21 @@ class ChartOfAccountsSeeder extends Seeder
             ['group' => 'Indirect Expenses', 'code' => 'EXE20', 'name' => 'Depreciation Expense'],
             ['group' => 'Indirect Expenses', 'code' => 'EXE21', 'name' => 'Loss on Asset Disposal'],
             ['group' => 'Indirect Income', 'code' => 'INI30', 'name' => 'Gain on Asset Disposal'],
+            ['group' => 'Indirect Income', 'code' => 'INI31', 'name' => 'Round Off'],
             ['group' => 'Indirect Expenses', 'code' => 'EXE22', 'name' => 'Sales Commission Expense'],
             ['group' => 'Indirect Expenses', 'code' => 'EXE23', 'name' => 'Inventory Adjustment'],
             ['group' => 'Indirect Expenses', 'code' => 'EXE24', 'name' => 'Production Loss'],
+            ['group' => 'Current Liabilities', 'code' => 'LIA22', 'name' => 'Salary Payable'],
+            ['group' => 'Current Assets', 'code' => 'ASA24', 'name' => 'Staff Advances Receivable'],
+            ['group' => 'Indirect Expenses', 'code' => 'EXE25', 'name' => 'Salaries & Wages'],
+            ['group' => 'Indirect Expenses', 'code' => 'EXE26', 'name' => 'Staff Bonus'],
+            ['group' => 'Indirect Expenses', 'code' => 'EXE27', 'name' => 'Staff Allowances'],
+            // Inter-branch accounts (plan 12, BR17; codes and placement
+            // explained on App\Support\Branches\BranchAccounts). Existing
+            // tenants get them from 2026_11_10_300000_add_inter_branch_accounts.
+            ['group' => 'Current Assets', 'code' => BranchAccounts::CLEARING_ACCOUNT_CODE, 'name' => BranchBalancer::CLEARING_ACCOUNT_NAME],
+            ['group' => 'Sales Accounts', 'code' => BranchAccounts::STOCK_TRANSFERRED_CODE, 'name' => BranchAccounts::STOCK_TRANSFERRED_NAME],
+            ['group' => 'Purchase Accounts', 'code' => BranchAccounts::STOCK_RECEIVED_CODE, 'name' => BranchAccounts::STOCK_RECEIVED_NAME],
         ];
 
         foreach ($defaultAccounts as $account) {
@@ -129,6 +145,21 @@ class ChartOfAccountsSeeder extends Seeder
                 'account_subgroup_id' => isset($account['subgroup']) ? $subgroups[$account['subgroup']]->id : null,
                 'code' => $account['code'],
                 'name' => $account['name'],
+            ]);
+        }
+
+        // The HR module's starter pay components (Salary, Bonus, Allowance),
+        // each mapped to its expense account above. Existing tenants get the
+        // same rows from 2026_11_05_100100_add_hr_accounts_and_pay_components.
+        foreach (HrAccounts::STARTER_COMPONENTS as $sortOrder => $component) {
+            PayComponent::create([
+                'code' => $component['code'],
+                'name' => $component['name'],
+                'kind' => PayComponent::KIND_EARNING,
+                'expense_account_id' => Account::where('code', $component['account'])->value('id'),
+                'is_system' => true,
+                'is_active' => true,
+                'sort_order' => $sortOrder + 1,
             ]);
         }
     }

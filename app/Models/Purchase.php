@@ -5,8 +5,12 @@ namespace App\Models;
 use App\Casts\Decimal;
 use App\Enums\StockMovementType;
 use App\Enums\VoucherType;
+use App\Models\Concerns\BelongsToBranch;
 use App\Support\Billing\DocumentCalculator;
 use App\Support\Billing\DocumentTotals;
+use App\Support\Billing\RoundOffPosting;
+use App\Support\Branches\BranchContext;
+use App\Support\Branches\DocumentBranch;
 use App\Support\ClosedFiscalYearGuard;
 use App\Support\Inventory\PerpetualStockGuard;
 use App\Support\Money\Money;
@@ -53,12 +57,14 @@ use InvalidArgumentException;
 #[Fillable([
     'supplier_id', 'store_id', 'journal_voucher_id', 'fiscal_year_id', 'purchase_number', 'bill_number', 'bill_number_key', 'pan_number',
     'chalani_number', 'date', 'payment_mode', 'bank_account_id', 'discount', 'discount_type', 'taxable_amount',
-    'nontaxable_amount', 'vat_rate', 'force_non_taxable', 'vat_amount', 'total', 'cash_amount',
+    'nontaxable_amount', 'vat_rate', 'force_non_taxable', 'vat_amount', 'total', 'round_off', 'cash_amount',
     'bank_amount', 'tds_account_id', 'tds_rate', 'tds_amount', 'narration', 'status',
-    'created_by', 'cancelled_at', 'cancelled_by', 'cancel_reason', 'reversal_journal_voucher_id',
+    'created_by', 'cancelled_at', 'cancelled_by', 'cancel_reason', 'reversal_journal_voucher_id', 'branch_id',
 ])]
 class Purchase extends Model
 {
+    use BelongsToBranch;
+
     /**
      * @return array<string, string>
      */
@@ -74,10 +80,12 @@ class Purchase extends Model
             'force_non_taxable' => 'boolean',
             'vat_amount' => Decimal::class.':2',
             'total' => Decimal::class.':2',
+            'round_off' => Decimal::class.':2',
             'cash_amount' => Decimal::class.':2',
             'bank_amount' => Decimal::class.':2',
             'tds_rate' => Decimal::class.':2',
             'tds_amount' => Decimal::class.':2',
+            'branch_id' => 'integer',
         ];
     }
 
@@ -211,18 +219,21 @@ class Purchase extends Model
             return [];
         }
 
-        $returnCredits = PurchaseReturn::query()
+        $returnCredits = BranchContext::unrestricted(fn () => PurchaseReturn::query()
             ->whereIn('purchase_id', $ids)
             ->where('status', 'posted')
             ->whereNull('refund_journal_voucher_id')
-            ->get(['id', 'purchase_id', 'total', 'tds_amount'])
+            ->get(['id', 'purchase_id', 'total', 'tds_amount']))
             ->groupBy('purchase_id')
             ->map(fn ($returns) => Money::sum($returns->map(fn (PurchaseReturn $return): Money => $return->supplierCredit())));
 
-        $allocated = PaymentAllocation::query()
+        // Outside the branch access scope (plan 12, section 5.7, BR07): a
+        // payment made from another branch still settles this bill, and a
+        // restricted user's view must not inflate what is due on it.
+        $allocated = BranchContext::unrestricted(fn () => PaymentAllocation::query()
             ->whereIn('purchase_id', $ids)
             ->whereHas('payment', fn ($query) => $query->where('status', '!=', 'cancelled'))
-            ->get(['purchase_id', 'amount'])
+            ->get(['purchase_id', 'amount']))
             ->groupBy('purchase_id')
             ->map(fn ($allocations) => Money::sum($allocations->map(fn (PaymentAllocation $allocation): Money => Money::of($allocation->amount))));
 
@@ -294,7 +305,7 @@ class Purchase extends Model
      * sale-purchase-ux.md. Omitted, this defaults to FiscalYear::current()
      * exactly as before.
      *
-     * @param  array{supplier_id: int, bill_number?: string, pan_number?: string, chalani_number?: string|null, date: string, payment_mode: string, bank_account_id?: int, store_id?: int|null, discount?: mixed, discount_type?: string, vat_rate?: mixed, force_non_taxable?: bool, cash_amount?: mixed, bank_amount?: mixed, tds_account_id?: int, tds_rate?: mixed, tds_amount?: mixed, expected_total?: string|null, narration?: string, fiscal_year_id?: int, reason?: string|null}  $data
+     * @param  array{supplier_id: int, bill_number?: string, pan_number?: string, chalani_number?: string|null, date: string, payment_mode: string, bank_account_id?: int, store_id?: int|null, branch_id?: int|null, discount?: mixed, discount_type?: string, vat_rate?: mixed, force_non_taxable?: bool, cash_amount?: mixed, bank_amount?: mixed, tds_account_id?: int, tds_rate?: mixed, tds_amount?: mixed, round_off?: mixed, expected_total?: string|null, narration?: string, fiscal_year_id?: int, reason?: string|null}  $data
      * @param  array<int, array{item_id: int, item_unit_id?: int|null, quantity: mixed, bonus_quantity?: mixed, rate: mixed, discount?: mixed, discount_type?: string, note?: string|null}>  $lines
      */
     public static function post(array $data, array $lines, User $actor): self
@@ -325,7 +336,12 @@ class Purchase extends Model
             static::lockStockItems($lines);
 
             $company = CompanySetting::current();
-            $storeId = static::resolveStoreId($data['store_id'] ?? null, $company);
+            // Branch and store together (plan 12, I5/I6): the requested
+            // branch, else the store's, else the actor's posting branch; the
+            // store defaults inside that branch. The voucher below and the
+            // row are filed under this same branch.
+            $placement = DocumentBranch::forStoreDocument($actor, $data['branch_id'] ?? null, $data['store_id'] ?? null, $company);
+            $storeId = $placement->requireStoreId();
 
             /** @var list<array{item: Item, item_unit_id: int|null, bonus_quantity: Quantity, note: string|null}> $context */
             $context = [];
@@ -374,6 +390,10 @@ class Purchase extends Model
                 ? (bool) $data['force_non_taxable']
                 : ! $supplier->is_vat_registered;
 
+            // Signed Round Off (+ adds to the bill, - reduces it). Zero unless the
+            // tenant has switched the feature on - decided here, on the server.
+            $roundOff = $company->effectiveRoundOff($data['round_off'] ?? null);
+
             $totals = DocumentCalculator::calculate($calculatorLines, [
                 'vat_rate' => $data['vat_rate'] ?? $company->default_vat_rate ?? '13',
                 'discount' => $data['discount'] ?? '0',
@@ -384,6 +404,7 @@ class Purchase extends Model
                 // known - DocumentCalculator itself only ever takes an
                 // amount, never a rate (CONTRACTS C3).
                 'tds_amount' => '0',
+                'round_off' => $roundOff,
                 'expected_total' => $data['expected_total'] ?? null,
             ]);
 
@@ -401,6 +422,7 @@ class Purchase extends Model
                     'discount_type' => $data['discount_type'] ?? 'flat',
                     'force_non_taxable' => $forceNonTaxable,
                     'tds_amount' => $tdsAmount->toString(),
+                    'round_off' => $roundOff,
                     'expected_total' => $data['expected_total'] ?? null,
                 ]);
             }
@@ -411,6 +433,9 @@ class Purchase extends Model
                 array_keys($netValues)
             ));
             $tdsShares = static::sharesOf($totals->tdsAmount, $netValues);
+            // The bill's Round Off, split across its lines by net value and stored
+            // per line so a linked return can give back exactly its share of it.
+            $roundOffShares = static::sharesOf($totals->roundOff, $netValues);
 
             // A raw material or finished good is perpetual (manufacturing
             // contract MC8): its line debits the class's inventory account
@@ -436,6 +461,12 @@ class Purchase extends Model
             }
 
             $voucherLines[] = ['account_id' => $supplier->account_id, 'debit' => '0', 'credit' => $totals->total->toString()];
+
+            // The supplier leg above already carries Round Off inside `total`;
+            // INI31 takes the other side (+ debits it, - credits it).
+            if ($roundOffLine = RoundOffPosting::line($totals->roundOff, creditWhenPositive: false)) {
+                $voucherLines[] = $roundOffLine;
+            }
 
             $tdsAccountId = null;
 
@@ -463,24 +494,26 @@ class Purchase extends Model
                     'narration' => $data['narration'] ?? "Purchase from {$supplier->name}",
                     'fiscal_year_id' => $targetFiscalYear->id,
                     'reason' => $reason,
+                    'branch_id' => $placement->branchId,
                 ],
                 $voucherLines,
                 $actor,
                 logCorrection: false,
                 // Every line carries the same compact narration (item 10),
                 // so the supplier's ledger reads "PU-42 - Cash Settlement".
-                lineNarration: fn (JournalVoucher $voucher): string => SettlementNarration::line("{$company->purchase_prefix}-{$voucher->voucher_number}", $data['payment_mode']),
+                lineNarration: fn (JournalVoucher $voucher): string => SettlementNarration::line($voucher->printedNumber((string) $company->purchase_prefix), $data['payment_mode']),
             );
 
             $purchase = static::create([
                 'supplier_id' => $supplier->id,
                 'store_id' => $storeId,
+                'branch_id' => $placement->branchId,
                 'journal_voucher_id' => $voucher->id,
                 'fiscal_year_id' => $targetFiscalYear->id,
                 // Stored once, in the format bills have always printed in, so
                 // a later prefix change never renumbers a printed bill
                 // (flags G-18).
-                'purchase_number' => "{$company->purchase_prefix}-{$voucher->voucher_number}",
+                'purchase_number' => $voucher->printedNumber((string) $company->purchase_prefix),
                 'bill_number' => $billNumber,
                 'bill_number_key' => $billNumber,
                 'pan_number' => $data['pan_number'] ?? null,
@@ -496,6 +529,7 @@ class Purchase extends Model
                 'force_non_taxable' => $forceNonTaxable,
                 'vat_amount' => $totals->vatAmount,
                 'total' => $totals->total,
+                'round_off' => $totals->roundOff,
                 'cash_amount' => $cashAmount,
                 'bank_amount' => $bankAmount,
                 // The account TDS actually landed on, not the one that was
@@ -531,6 +565,7 @@ class Purchase extends Model
                     'net_value' => $netValues[$index],
                     'vat_amount' => $vatShares[$index],
                     'tds_amount' => $tdsShares[$index],
+                    'round_off' => $roundOffShares[$index],
                 ]);
 
                 if ($item->is_stockable) {
@@ -609,15 +644,19 @@ class Purchase extends Model
 
             $lineIds = $purchase->lines()->orderBy('id')->pluck('id');
 
-            if (PurchaseReturnLine::whereIn('purchase_line_id', $lineIds)
+            // Blockers are read outside the branch access scope (plan 12,
+            // section 5.7): a restricted canceller must not be able to miss a
+            // live return or a payment filed in a branch they cannot see, and
+            // cancel a bill that is still returned against or paid.
+            if (BranchContext::unrestricted(fn () => PurchaseReturnLine::whereIn('purchase_line_id', $lineIds)
                 ->whereHas('purchaseReturn', fn ($query) => $query->where('status', '!=', 'cancelled'))
-                ->exists()) {
+                ->exists())) {
                 throw new InvalidArgumentException('Cannot cancel a purchase that has partial returns against it.');
             }
 
-            if ($purchase->paymentAllocations()
+            if (BranchContext::unrestricted(fn () => $purchase->paymentAllocations()
                 ->whereHas('payment', fn ($query) => $query->where('status', '!=', 'cancelled'))
-                ->exists()) {
+                ->exists())) {
                 throw new InvalidArgumentException('Cannot cancel a purchase that has a payment made against it.');
             }
 
@@ -629,8 +668,11 @@ class Purchase extends Model
 
             static::assertStockRemovable($movements);
 
+            // The reversal stays in the purchase's branch: reverse() keeps the
+            // original's origin branch and every line's branch, and still
+            // checks that the actor may post there.
             $reversal = JournalVoucher::reverse(
-                $purchase->journalVoucher()->firstOrFail(),
+                BranchContext::unrestricted(fn () => $purchase->journalVoucher()->firstOrFail()),
                 $actor,
                 "Cancellation of purchase #{$purchase->id}: {$reason}",
             );
@@ -738,6 +780,10 @@ class Purchase extends Model
      * Checked here, inside the transaction and behind the supplier row lock, so
      * the user gets this sentence rather than a unique-constraint stack trace;
      * the index on purchases.bill_number_key is the backstop.
+     *
+     * The rule is company-wide, like that index, so the lookup runs outside
+     * the branch access scope: a restricted clerk re-entering a bill already
+     * filed in another branch gets this sentence, not a constraint error.
      */
     private static function assertBillNumberUnused(Supplier $supplier, ?string $billNumber, int $fiscalYearId): void
     {
@@ -745,10 +791,10 @@ class Purchase extends Model
             return;
         }
 
-        $existing = static::where('supplier_id', $supplier->id)
+        $existing = BranchContext::unrestricted(fn () => static::where('supplier_id', $supplier->id)
             ->where('fiscal_year_id', $fiscalYearId)
             ->where('bill_number_key', $billNumber)
-            ->value('id');
+            ->value('id'));
 
         if ($existing !== null) {
             throw new InvalidArgumentException(
@@ -814,23 +860,6 @@ class Purchase extends Model
         $billNumber = trim((string) ($billNumber ?? ''));
 
         return $billNumber === '' ? null : $billNumber;
-    }
-
-    /**
-     * The store a purchase lands in when the form did not name one: the
-     * tenant's configured default, else the oldest active store.
-     */
-    private static function resolveStoreId(mixed $storeId, CompanySetting $company): int
-    {
-        $storeId = $storeId !== null && $storeId !== ''
-            ? (int) $storeId
-            : ($company->default_store_id ?? Store::where('is_active', true)->orderBy('id')->value('id'));
-
-        if (! $storeId) {
-            throw new InvalidArgumentException('No active store is configured.');
-        }
-
-        return (int) $storeId;
     }
 
     /**

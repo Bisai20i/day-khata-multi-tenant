@@ -10,10 +10,12 @@ use App\Exports\PurchaseVatBookExport;
 use App\Exports\SalesReturnRegisterExport;
 use App\Exports\SalesVatBookExport;
 use App\Http\Controllers\Controller;
+use App\Models\Area;
 use App\Models\CapitalPurchase;
 use App\Models\CapitalSale;
 use App\Models\Customer;
 use App\Models\FiscalYear;
+use App\Models\JournalVoucher;
 use App\Models\JournalVoucherLine;
 use App\Models\Purchase;
 use App\Models\PurchaseLine;
@@ -22,7 +24,11 @@ use App\Models\Sale;
 use App\Models\SalesReturn;
 use App\Models\Store;
 use App\Models\Supplier;
+use App\Support\AreaFilter;
 use App\Support\AsOfDate;
+use App\Support\Branches\BranchFilter;
+use App\Support\Branches\BranchStock;
+use App\Support\Branches\PartyBranchBalances;
 use App\Support\Money\Money;
 use Brick\Math\BigDecimal;
 use Brick\Math\RoundingMode;
@@ -76,11 +82,13 @@ class SalesPurchaseReportController extends Controller
         $storeId = $request->integer('store_id') ?: null;
         $paymentMode = $this->resolvePaymentMode($request);
         $search = $request->string('search')->trim()->toString();
+        $branchFilter = BranchFilter::fromRequest($request);
 
         $sales = Sale::query()
             ->with(['customer:id,name', 'journalVoucher:id,voucher_type,voucher_number'])
             ->whereDate('date', '>=', $from)
             ->whereDate('date', '<=', $to)
+            ->tap(fn (Builder $query) => $branchFilter->applyToDocuments($query, 'sales.branch_id'))
             ->when($customerId, fn (Builder $query) => $query->where('customer_id', $customerId))
             ->when($storeId, fn (Builder $query) => $query->where('store_id', $storeId))
             ->when($paymentMode, fn (Builder $query) => $query->where('payment_mode', $paymentMode))
@@ -88,6 +96,7 @@ class SalesPurchaseReportController extends Controller
                 $query->where(function (Builder $q) use ($search) {
                     $q->where('invoice_number', 'like', "%{$search}%")
                         ->orWhere('buyer_name', 'like', "%{$search}%")
+                        ->orWhere('chalani_number', 'like', "%{$search}%")
                         ->orWhereHas('customer', fn ($cq) => $cq->where('name', 'like', "%{$search}%"));
                 });
             })
@@ -95,7 +104,7 @@ class SalesPurchaseReportController extends Controller
             ->orderBy('id')
             ->get();
 
-        $rows = $sales->map(function (Sale $sale) {
+        $rows = $sales->map(function (Sale $sale) use ($branchFilter) {
             $subtotal = Money::of($sale->taxable_amount)->plus(Money::of($sale->nontaxable_amount))->toString();
 
             return [
@@ -103,14 +112,17 @@ class SalesPurchaseReportController extends Controller
                 'date' => $sale->date->toDateString(),
                 'invoice_number' => $sale->invoice_number,
                 'invoice_type' => $sale->invoice_type,
+                'chalani_number' => $sale->chalani_number,
                 'customer' => $sale->buyer_name ?? $sale->customer?->name,
                 'subtotal' => $subtotal,
                 'nontaxable_amount' => $sale->nontaxable_amount,
                 'taxable_amount' => $sale->taxable_amount,
                 'vat_amount' => $sale->vat_amount,
+                'round_off' => $sale->round_off,
                 'total' => $sale->total,
                 'payment_mode' => $sale->payment_mode,
                 'status' => $sale->status,
+                ...$branchFilter->rowBranch($sale->branch_id),
             ];
         })->values();
 
@@ -118,15 +130,16 @@ class SalesPurchaseReportController extends Controller
 
         return Inertia::render('Tenant/Reports/SalesRegister', [
             'sales' => $rows,
-            'totals' => $this->totalsFor($posted, ['subtotal', 'nontaxable_amount', 'taxable_amount', 'vat_amount', 'total']),
+            'totals' => $this->totalsFor($posted, ['subtotal', 'nontaxable_amount', 'taxable_amount', 'vat_amount', 'round_off', 'total']),
             'search' => $search,
             'customers' => Customer::query()->orderBy('name')->get(['id', 'name']),
-            'stores' => Store::where('is_active', true)->orderBy('name')->get(['id', 'name']),
+            'stores' => BranchStock::storeOptions($branchFilter, Store::where('is_active', true))->orderBy('name')->get(['id', 'name']),
             'from' => $from,
             'to' => $to,
             'customerId' => $customerId,
             'storeId' => $storeId,
             'paymentMode' => $paymentMode,
+            'branchReport' => $branchFilter->payload(),
         ]);
     }
 
@@ -146,11 +159,13 @@ class SalesPurchaseReportController extends Controller
         $storeId = $request->integer('store_id') ?: null;
         $paymentMode = $this->resolvePaymentMode($request);
         $search = $request->string('search')->trim()->toString();
+        $branchFilter = BranchFilter::fromRequest($request);
 
         $purchases = Purchase::query()
-            ->with(['supplier:id,name,tpin', 'journalVoucher:id,voucher_type,voucher_number'])
+            ->with(['supplier:id,name,tpin', 'journalVoucher:id,voucher_type,voucher_number,series_branch_id'])
             ->whereDate('date', '>=', $from)
             ->whereDate('date', '<=', $to)
+            ->tap(fn (Builder $query) => $branchFilter->applyToDocuments($query, 'purchases.branch_id'))
             ->when($supplierId, fn (Builder $query) => $query->where('supplier_id', $supplierId))
             ->when($storeId, fn (Builder $query) => $query->where('store_id', $storeId))
             ->when($paymentMode, fn (Builder $query) => $query->where('payment_mode', $paymentMode))
@@ -164,13 +179,15 @@ class SalesPurchaseReportController extends Controller
             ->orderBy('id')
             ->get();
 
-        $rows = $purchases->map(function (Purchase $purchase) {
+        JournalVoucher::loadSeriesBranches($purchases->pluck('journalVoucher'));
+
+        $rows = $purchases->map(function (Purchase $purchase) use ($branchFilter) {
             $subtotal = Money::of($purchase->taxable_amount)->plus(Money::of($purchase->nontaxable_amount))->toString();
 
             return [
                 'id' => $purchase->id,
                 'date' => $purchase->date->toDateString(),
-                'voucher_number' => $purchase->journalVoucher?->voucher_number,
+                'voucher_number' => $purchase->journalVoucher?->displayNumber(),
                 'bill_number' => $purchase->bill_number,
                 'pan_number' => $purchase->pan_number ?: $purchase->supplier?->tpin,
                 'supplier' => $purchase->supplier?->name,
@@ -178,9 +195,11 @@ class SalesPurchaseReportController extends Controller
                 'nontaxable_amount' => $purchase->nontaxable_amount,
                 'taxable_amount' => $purchase->taxable_amount,
                 'vat_amount' => $purchase->vat_amount,
+                'round_off' => $purchase->round_off,
                 'total' => $purchase->total,
                 'payment_mode' => $purchase->payment_mode,
                 'status' => $purchase->status,
+                ...$branchFilter->rowBranch($purchase->branch_id),
             ];
         })->values();
 
@@ -188,15 +207,16 @@ class SalesPurchaseReportController extends Controller
 
         return Inertia::render('Tenant/Reports/PurchaseRegister', [
             'purchases' => $rows,
-            'totals' => $this->totalsFor($posted, ['subtotal', 'nontaxable_amount', 'taxable_amount', 'vat_amount', 'total']),
+            'totals' => $this->totalsFor($posted, ['subtotal', 'nontaxable_amount', 'taxable_amount', 'vat_amount', 'round_off', 'total']),
             'search' => $search,
             'suppliers' => Supplier::query()->orderBy('name')->get(['id', 'name']),
-            'stores' => Store::where('is_active', true)->orderBy('name')->get(['id', 'name']),
+            'stores' => BranchStock::storeOptions($branchFilter, Store::where('is_active', true))->orderBy('name')->get(['id', 'name']),
             'from' => $from,
             'to' => $to,
             'supplierId' => $supplierId,
             'storeId' => $storeId,
             'paymentMode' => $paymentMode,
+            'branchReport' => $branchFilter->payload(),
         ]);
     }
 
@@ -204,25 +224,29 @@ class SalesPurchaseReportController extends Controller
     {
         [$from, $to] = $this->resolveDateRange($request);
         $storeId = $request->integer('store_id') ?: null;
+        $branchFilter = BranchFilter::fromRequest($request);
 
         return Inertia::render('Tenant/Reports/SalesVatBook', [
-            ...$this->salesVatBookPayload($from, $to, $storeId),
-            'stores' => Store::where('is_active', true)->orderBy('name')->get(['id', 'name']),
+            ...$this->salesVatBookPayload($from, $to, $storeId, $branchFilter),
+            'stores' => BranchStock::storeOptions($branchFilter, Store::where('is_active', true))->orderBy('name')->get(['id', 'name']),
+            'branchReport' => $branchFilter->payload(),
         ]);
     }
 
     /**
      * Same filtered rows/totals as salesVatBook(), streamed as a real .xlsx
      * via the exact same builder so the export can never drift from what is
-     * on screen and always honours the applied from/to/store_id filters.
+     * on screen and always honours the applied from/to/store_id/branch
+     * filters.
      */
     public function salesVatBookExport(Request $request)
     {
         [$from, $to] = $this->resolveDateRange($request);
-        $data = $this->salesVatBookPayload($from, $to, $request->integer('store_id') ?: null);
+        $branchFilter = BranchFilter::fromRequest($request);
+        $data = $this->salesVatBookPayload($from, $to, $request->integer('store_id') ?: null, $branchFilter);
 
         return Excel::download(
-            new SalesVatBookExport($data['rows'], $data['totals']),
+            new SalesVatBookExport($data['rows'], $data['totals'], $branchFilter->isActive(), $branchFilter->isActive() ? $branchFilter->label() : null),
             "sales-vat-book-{$from}-to-{$to}.xlsx",
         );
     }
@@ -231,10 +255,12 @@ class SalesPurchaseReportController extends Controller
     {
         [$from, $to] = $this->resolveDateRange($request);
         $storeId = $request->integer('store_id') ?: null;
+        $branchFilter = BranchFilter::fromRequest($request);
 
         return Inertia::render('Tenant/Reports/PurchaseVatBook', [
-            ...$this->purchaseVatBookPayload($from, $to, $storeId),
-            'stores' => Store::where('is_active', true)->orderBy('name')->get(['id', 'name']),
+            ...$this->purchaseVatBookPayload($from, $to, $storeId, $branchFilter),
+            'stores' => BranchStock::storeOptions($branchFilter, Store::where('is_active', true))->orderBy('name')->get(['id', 'name']),
+            'branchReport' => $branchFilter->payload(),
         ]);
     }
 
@@ -245,10 +271,11 @@ class SalesPurchaseReportController extends Controller
     public function purchaseVatBookExport(Request $request)
     {
         [$from, $to] = $this->resolveDateRange($request);
-        $data = $this->purchaseVatBookPayload($from, $to, $request->integer('store_id') ?: null);
+        $branchFilter = BranchFilter::fromRequest($request);
+        $data = $this->purchaseVatBookPayload($from, $to, $request->integer('store_id') ?: null, $branchFilter);
 
         return Excel::download(
-            new PurchaseVatBookExport($data['rows'], $data['totals']),
+            new PurchaseVatBookExport($data['rows'], $data['totals'], $branchFilter->isActive(), $branchFilter->isActive() ? $branchFilter->label() : null),
             "purchase-vat-book-{$from}-to-{$to}.xlsx",
         );
     }
@@ -257,20 +284,23 @@ class SalesPurchaseReportController extends Controller
     {
         [$from, $to] = $this->resolveDateRange($request);
         $storeId = $request->integer('store_id') ?: null;
+        $branchFilter = BranchFilter::fromRequest($request);
 
         return Inertia::render('Tenant/Reports/SalesReturnRegister', [
-            ...$this->salesReturnRegisterPayload($from, $to, $storeId),
-            'stores' => Store::where('is_active', true)->orderBy('name')->get(['id', 'name']),
+            ...$this->salesReturnRegisterPayload($from, $to, $storeId, $branchFilter),
+            'stores' => BranchStock::storeOptions($branchFilter, Store::where('is_active', true))->orderBy('name')->get(['id', 'name']),
+            'branchReport' => $branchFilter->payload(),
         ]);
     }
 
     public function salesReturnRegisterExport(Request $request)
     {
         [$from, $to] = $this->resolveDateRange($request);
-        $data = $this->salesReturnRegisterPayload($from, $to, $request->integer('store_id') ?: null);
+        $branchFilter = BranchFilter::fromRequest($request);
+        $data = $this->salesReturnRegisterPayload($from, $to, $request->integer('store_id') ?: null, $branchFilter);
 
         return Excel::download(
-            new SalesReturnRegisterExport($data['rows'], $data['totals']),
+            new SalesReturnRegisterExport($data['rows'], $data['totals'], $branchFilter->isActive(), $branchFilter->isActive() ? $branchFilter->label() : null),
             "sales-return-register-{$from}-to-{$to}.xlsx",
         );
     }
@@ -279,20 +309,23 @@ class SalesPurchaseReportController extends Controller
     {
         [$from, $to] = $this->resolveDateRange($request);
         $storeId = $request->integer('store_id') ?: null;
+        $branchFilter = BranchFilter::fromRequest($request);
 
         return Inertia::render('Tenant/Reports/PurchaseReturnRegister', [
-            ...$this->purchaseReturnRegisterPayload($from, $to, $storeId),
-            'stores' => Store::where('is_active', true)->orderBy('name')->get(['id', 'name']),
+            ...$this->purchaseReturnRegisterPayload($from, $to, $storeId, $branchFilter),
+            'stores' => BranchStock::storeOptions($branchFilter, Store::where('is_active', true))->orderBy('name')->get(['id', 'name']),
+            'branchReport' => $branchFilter->payload(),
         ]);
     }
 
     public function purchaseReturnRegisterExport(Request $request)
     {
         [$from, $to] = $this->resolveDateRange($request);
-        $data = $this->purchaseReturnRegisterPayload($from, $to, $request->integer('store_id') ?: null);
+        $branchFilter = BranchFilter::fromRequest($request);
+        $data = $this->purchaseReturnRegisterPayload($from, $to, $request->integer('store_id') ?: null, $branchFilter);
 
         return Excel::download(
-            new PurchaseReturnRegisterExport($data['rows'], $data['totals']),
+            new PurchaseReturnRegisterExport($data['rows'], $data['totals'], $branchFilter->isActive(), $branchFilter->isActive() ? $branchFilter->label() : null),
             "purchase-return-register-{$from}-to-{$to}.xlsx",
         );
     }
@@ -308,16 +341,22 @@ class SalesPurchaseReportController extends Controller
      * customer for rows issued before C7 added the snapshot), taxable,
      * exempt, VAT and total.
      *
+     * Branches (BR14): $branchFilter narrows every row group on the
+     * document's own branch_id, and in a multi-branch tenant each row names
+     * its branch (`branch`). Null (the default, e.g. a caller that has not
+     * adopted the filter) adds no predicate and no key: the rows are then
+     * what BranchAccessScope alone lets the user see, exactly as before.
+     *
      * @return array{rows: Collection<int, array<string, mixed>>, totals: array<string, string>, from: string, to: string, storeId: int|null}
      */
-    public function salesVatBookPayload(string $from, string $to, ?int $storeId): array
+    public function salesVatBookPayload(string $from, string $to, ?int $storeId, ?BranchFilter $branchFilter = null): array
     {
-        $rows = $this->salesVatBookRows($from, $to, $storeId);
+        $rows = $this->salesVatBookRows($from, $to, $storeId, $branchFilter ?? BranchFilter::inactive());
 
         return [
             'rows' => $rows,
             'totals' => [
-                ...$this->totalsFor($rows, ['subtotal', 'nontaxable_amount', 'taxable_amount', 'vat_amount', 'capital_amount', 'total']),
+                ...$this->totalsFor($rows, ['subtotal', 'nontaxable_amount', 'taxable_amount', 'vat_amount', 'capital_amount', 'round_off', 'total']),
                 'count' => $rows->count(),
             ],
             'from' => $from,
@@ -327,16 +366,18 @@ class SalesPurchaseReportController extends Controller
     }
 
     /**
+     * Branches: as salesVatBookPayload().
+     *
      * @return array{rows: Collection<int, array<string, mixed>>, totals: array<string, string>, from: string, to: string, storeId: int|null}
      */
-    public function purchaseVatBookPayload(string $from, string $to, ?int $storeId): array
+    public function purchaseVatBookPayload(string $from, string $to, ?int $storeId, ?BranchFilter $branchFilter = null): array
     {
-        $rows = $this->purchaseVatBookRows($from, $to, $storeId);
+        $rows = $this->purchaseVatBookRows($from, $to, $storeId, $branchFilter ?? BranchFilter::inactive());
 
         return [
             'rows' => $rows,
             'totals' => [
-                ...$this->totalsFor($rows, ['subtotal', 'nontaxable_amount', 'taxable_amount', 'vat_amount', 'capital_amount', 'fixed_asset_vat_amount', 'total']),
+                ...$this->totalsFor($rows, ['subtotal', 'nontaxable_amount', 'taxable_amount', 'vat_amount', 'capital_amount', 'fixed_asset_vat_amount', 'round_off', 'total']),
                 'count' => $rows->count(),
             ],
             'from' => $from,
@@ -346,16 +387,19 @@ class SalesPurchaseReportController extends Controller
     }
 
     /**
+     * Branches: as salesVatBookPayload(), on the return's own branch_id (a
+     * return inherits its original's branch, so this is the sale's branch).
+     *
      * @return array{rows: Collection<int, array<string, mixed>>, totals: array<string, string>, from: string, to: string, storeId: int|null}
      */
-    public function salesReturnRegisterPayload(string $from, string $to, ?int $storeId): array
+    public function salesReturnRegisterPayload(string $from, string $to, ?int $storeId, ?BranchFilter $branchFilter = null): array
     {
-        $rows = $this->salesReturnRegisterRows($from, $to, $storeId);
+        $rows = $this->salesReturnRegisterRows($from, $to, $storeId, $branchFilter ?? BranchFilter::inactive());
 
         return [
             'rows' => $rows,
             'totals' => [
-                ...$this->totalsFor($rows, ['subtotal', 'nontaxable_amount', 'taxable_amount', 'vat_amount', 'total']),
+                ...$this->totalsFor($rows, ['subtotal', 'nontaxable_amount', 'taxable_amount', 'vat_amount', 'round_off', 'total']),
                 'count' => $rows->count(),
             ],
             'from' => $from,
@@ -365,16 +409,18 @@ class SalesPurchaseReportController extends Controller
     }
 
     /**
+     * Branches: as salesReturnRegisterPayload().
+     *
      * @return array{rows: Collection<int, array<string, mixed>>, totals: array<string, string>, from: string, to: string, storeId: int|null}
      */
-    public function purchaseReturnRegisterPayload(string $from, string $to, ?int $storeId): array
+    public function purchaseReturnRegisterPayload(string $from, string $to, ?int $storeId, ?BranchFilter $branchFilter = null): array
     {
-        $rows = $this->purchaseReturnRegisterRows($from, $to, $storeId);
+        $rows = $this->purchaseReturnRegisterRows($from, $to, $storeId, $branchFilter ?? BranchFilter::inactive());
 
         return [
             'rows' => $rows,
             'totals' => [
-                ...$this->totalsFor($rows, ['subtotal', 'nontaxable_amount', 'taxable_amount', 'vat_amount', 'total']),
+                ...$this->totalsFor($rows, ['subtotal', 'nontaxable_amount', 'taxable_amount', 'vat_amount', 'round_off', 'total']),
                 'count' => $rows->count(),
             ],
             'from' => $from,
@@ -386,7 +432,7 @@ class SalesPurchaseReportController extends Controller
     /**
      * @return Collection<int, array<string, mixed>>
      */
-    private function salesVatBookRows(string $from, string $to, ?int $storeId): Collection
+    private function salesVatBookRows(string $from, string $to, ?int $storeId, BranchFilter $branchFilter): Collection
     {
         $issued = Sale::query()
             ->with(['customer:id,name,tpin'])
@@ -394,15 +440,17 @@ class SalesPurchaseReportController extends Controller
             ->whereDate('date', '>=', $from)
             ->whereDate('date', '<=', $to)
             ->when($storeId, fn (Builder $query) => $query->where('store_id', $storeId))
+            ->tap(fn (Builder $query) => $branchFilter->applyToDocuments($query, 'sales.branch_id'))
             ->orderBy('date')
             ->orderBy('id')
             ->get()
-            ->map(fn (Sale $sale) => $this->saleVatRow($sale, $sale->date->toDateString(), 'issued'));
+            ->map(fn (Sale $sale) => $this->withBranch($this->saleVatRow($sale, $sale->date->toDateString(), 'issued'), $sale, $branchFilter));
 
         $cancelled = $this->cancelledInPeriod(Sale::query()->with(['customer:id,name,tpin']), $from, $to)
             ->when($storeId, fn (Builder $query) => $query->where('store_id', $storeId))
+            ->tap(fn (Builder $query) => $branchFilter->applyToDocuments($query, 'sales.branch_id'))
             ->get()
-            ->map(fn (Sale $sale) => $this->saleVatRow($sale, $this->cancelDate($sale), 'cancelled'));
+            ->map(fn (Sale $sale) => $this->withBranch($this->saleVatRow($sale, $this->cancelDate($sale), 'cancelled'), $sale, $branchFilter));
 
         $capitalIssued = CapitalSale::query()
             ->with(['customer:id,name,tpin'])
@@ -410,15 +458,17 @@ class SalesPurchaseReportController extends Controller
             ->whereDate('date', '>=', $from)
             ->whereDate('date', '<=', $to)
             ->when($storeId, fn (Builder $query) => $query->where('store_id', $storeId))
+            ->tap(fn (Builder $query) => $branchFilter->applyToDocuments($query, 'capital_sales.branch_id'))
             ->orderBy('date')
             ->orderBy('id')
             ->get()
-            ->map(fn (CapitalSale $sale) => $this->capitalSaleVatRow($sale, $sale->date->toDateString(), 'issued'));
+            ->map(fn (CapitalSale $sale) => $this->withBranch($this->capitalSaleVatRow($sale, $sale->date->toDateString(), 'issued'), $sale, $branchFilter));
 
         $capitalCancelled = $this->cancelledInPeriod(CapitalSale::query()->with(['customer:id,name,tpin']), $from, $to)
             ->when($storeId, fn (Builder $query) => $query->where('store_id', $storeId))
+            ->tap(fn (Builder $query) => $branchFilter->applyToDocuments($query, 'capital_sales.branch_id'))
             ->get()
-            ->map(fn (CapitalSale $sale) => $this->capitalSaleVatRow($sale, $this->cancelDate($sale), 'cancelled'));
+            ->map(fn (CapitalSale $sale) => $this->withBranch($this->capitalSaleVatRow($sale, $this->cancelDate($sale), 'cancelled'), $sale, $branchFilter));
 
         return $this->numbered($issued->concat($capitalIssued)->concat($cancelled)->concat($capitalCancelled));
     }
@@ -448,6 +498,7 @@ class SalesPurchaseReportController extends Controller
             'taxable_amount' => $taxable,
             'vat_amount' => $this->signed($sale->vat_amount, $sign),
             'capital_amount' => Money::zero()->toString(),
+            'round_off' => $this->signed($sale->round_off, $sign),
             'total' => $this->signed($sale->total, $sign),
             'capital' => false,
         ];
@@ -492,7 +543,7 @@ class SalesPurchaseReportController extends Controller
      *
      * @return Collection<int, array<string, mixed>>
      */
-    private function purchaseVatBookRows(string $from, string $to, ?int $storeId): Collection
+    private function purchaseVatBookRows(string $from, string $to, ?int $storeId, BranchFilter $branchFilter): Collection
     {
         $issued = Purchase::query()
             ->with(['supplier:id,name,tpin', 'lines.account.group'])
@@ -500,15 +551,17 @@ class SalesPurchaseReportController extends Controller
             ->whereDate('date', '>=', $from)
             ->whereDate('date', '<=', $to)
             ->when($storeId, fn (Builder $query) => $query->where('store_id', $storeId))
+            ->tap(fn (Builder $query) => $branchFilter->applyToDocuments($query, 'purchases.branch_id'))
             ->orderBy('date')
             ->orderBy('id')
             ->get()
-            ->map(fn (Purchase $purchase) => $this->purchaseVatRow($purchase, $purchase->date->toDateString(), 'issued'));
+            ->map(fn (Purchase $purchase) => $this->withBranch($this->purchaseVatRow($purchase, $purchase->date->toDateString(), 'issued'), $purchase, $branchFilter));
 
         $cancelled = $this->cancelledInPeriod(Purchase::query()->with(['supplier:id,name,tpin', 'lines.account.group']), $from, $to)
             ->when($storeId, fn (Builder $query) => $query->where('store_id', $storeId))
+            ->tap(fn (Builder $query) => $branchFilter->applyToDocuments($query, 'purchases.branch_id'))
             ->get()
-            ->map(fn (Purchase $purchase) => $this->purchaseVatRow($purchase, $this->cancelDate($purchase), 'cancelled'));
+            ->map(fn (Purchase $purchase) => $this->withBranch($this->purchaseVatRow($purchase, $this->cancelDate($purchase), 'cancelled'), $purchase, $branchFilter));
 
         $capitalIssued = CapitalPurchase::query()
             ->with(['supplier:id,name,tpin'])
@@ -516,15 +569,17 @@ class SalesPurchaseReportController extends Controller
             ->whereDate('date', '>=', $from)
             ->whereDate('date', '<=', $to)
             ->when($storeId, fn (Builder $query) => $query->where('store_id', $storeId))
+            ->tap(fn (Builder $query) => $branchFilter->applyToDocuments($query, 'capital_purchases.branch_id'))
             ->orderBy('date')
             ->orderBy('id')
             ->get()
-            ->map(fn (CapitalPurchase $purchase) => $this->capitalPurchaseVatRow($purchase, $purchase->date->toDateString(), 'issued'));
+            ->map(fn (CapitalPurchase $purchase) => $this->withBranch($this->capitalPurchaseVatRow($purchase, $purchase->date->toDateString(), 'issued'), $purchase, $branchFilter));
 
         $capitalCancelled = $this->cancelledInPeriod(CapitalPurchase::query()->with(['supplier:id,name,tpin']), $from, $to)
             ->when($storeId, fn (Builder $query) => $query->where('store_id', $storeId))
+            ->tap(fn (Builder $query) => $branchFilter->applyToDocuments($query, 'capital_purchases.branch_id'))
             ->get()
-            ->map(fn (CapitalPurchase $purchase) => $this->capitalPurchaseVatRow($purchase, $this->cancelDate($purchase), 'cancelled'));
+            ->map(fn (CapitalPurchase $purchase) => $this->withBranch($this->capitalPurchaseVatRow($purchase, $this->cancelDate($purchase), 'cancelled'), $purchase, $branchFilter));
 
         return $this->numbered($issued->concat($capitalIssued)->concat($cancelled)->concat($capitalCancelled));
     }
@@ -562,6 +617,7 @@ class SalesPurchaseReportController extends Controller
             // subtracted from it, so gross/capital/reconciliation keep
             // tying to the ledger exactly as before.
             'fixed_asset_vat_amount' => $this->signed($this->fixedAssetVatAmount($purchase)->toString(), $sign),
+            'round_off' => $this->signed($purchase->round_off, $sign),
             'total' => $this->signed($purchase->total, $sign),
             'capital' => false,
         ];
@@ -632,7 +688,7 @@ class SalesPurchaseReportController extends Controller
      *
      * @return Collection<int, array<string, mixed>>
      */
-    private function salesReturnRegisterRows(string $from, string $to, ?int $storeId): Collection
+    private function salesReturnRegisterRows(string $from, string $to, ?int $storeId, BranchFilter $branchFilter): Collection
     {
         $issued = SalesReturn::query()
             ->with(['sale:id,invoice_number,customer_id,buyer_name,buyer_pan', 'sale.customer:id,name,tpin'])
@@ -640,10 +696,11 @@ class SalesPurchaseReportController extends Controller
             ->whereDate('date', '>=', $from)
             ->whereDate('date', '<=', $to)
             ->when($storeId, fn (Builder $query) => $query->where('store_id', $storeId))
+            ->tap(fn (Builder $query) => $branchFilter->applyToDocuments($query, 'sales_returns.branch_id'))
             ->orderBy('date')
             ->orderBy('id')
             ->get()
-            ->map(fn (SalesReturn $return) => $this->salesReturnRow($return, $return->date->toDateString(), 'issued'));
+            ->map(fn (SalesReturn $return) => $this->withBranch($this->salesReturnRow($return, $return->date->toDateString(), 'issued'), $return, $branchFilter));
 
         $cancelled = $this->cancelledInPeriod(
             SalesReturn::query()->with(['sale:id,invoice_number,customer_id,buyer_name,buyer_pan', 'sale.customer:id,name,tpin']),
@@ -651,8 +708,9 @@ class SalesPurchaseReportController extends Controller
             $to,
         )
             ->when($storeId, fn (Builder $query) => $query->where('store_id', $storeId))
+            ->tap(fn (Builder $query) => $branchFilter->applyToDocuments($query, 'sales_returns.branch_id'))
             ->get()
-            ->map(fn (SalesReturn $return) => $this->salesReturnRow($return, $this->cancelDate($return), 'cancelled'));
+            ->map(fn (SalesReturn $return) => $this->withBranch($this->salesReturnRow($return, $this->cancelDate($return), 'cancelled'), $return, $branchFilter));
 
         return $this->numbered($issued->concat($cancelled));
     }
@@ -682,6 +740,7 @@ class SalesPurchaseReportController extends Controller
             'taxable_amount' => $taxable,
             'vat_amount' => $this->signed($return->vat_amount, $sign),
             'tds_amount' => $this->signed($return->tds_amount, $sign),
+            'round_off' => $this->signed($return->round_off ?? '0', $sign),
             'total' => $this->signed($return->total, $sign),
         ];
     }
@@ -692,7 +751,7 @@ class SalesPurchaseReportController extends Controller
      *
      * @return Collection<int, array<string, mixed>>
      */
-    private function purchaseReturnRegisterRows(string $from, string $to, ?int $storeId): Collection
+    private function purchaseReturnRegisterRows(string $from, string $to, ?int $storeId, BranchFilter $branchFilter): Collection
     {
         $with = ['purchase:id,bill_number,supplier_id,pan_number', 'purchase.supplier:id,name,tpin'];
 
@@ -702,17 +761,32 @@ class SalesPurchaseReportController extends Controller
             ->whereDate('date', '>=', $from)
             ->whereDate('date', '<=', $to)
             ->when($storeId, fn (Builder $query) => $query->where('store_id', $storeId))
+            ->tap(fn (Builder $query) => $branchFilter->applyToDocuments($query, 'purchase_returns.branch_id'))
             ->orderBy('date')
             ->orderBy('id')
             ->get()
-            ->map(fn (PurchaseReturn $return) => $this->purchaseReturnRow($return, $return->date->toDateString(), 'issued'));
+            ->map(fn (PurchaseReturn $return) => $this->withBranch($this->purchaseReturnRow($return, $return->date->toDateString(), 'issued'), $return, $branchFilter));
 
         $cancelled = $this->cancelledInPeriod(PurchaseReturn::query()->with($with), $from, $to)
             ->when($storeId, fn (Builder $query) => $query->where('store_id', $storeId))
+            ->tap(fn (Builder $query) => $branchFilter->applyToDocuments($query, 'purchase_returns.branch_id'))
             ->get()
-            ->map(fn (PurchaseReturn $return) => $this->purchaseReturnRow($return, $this->cancelDate($return), 'cancelled'));
+            ->map(fn (PurchaseReturn $return) => $this->withBranch($this->purchaseReturnRow($return, $this->cancelDate($return), 'cancelled'), $return, $branchFilter));
 
         return $this->numbered($issued->concat($cancelled));
+    }
+
+    /**
+     * Appends the document's branch name to a book row in a multi-branch
+     * tenant (BranchFilter::rowBranch(), no query); a single-branch row keeps
+     * its exact shape.
+     *
+     * @param  array<string, mixed>  $row
+     * @return array<string, mixed>
+     */
+    private function withBranch(array $row, Model $document, BranchFilter $branchFilter): array
+    {
+        return [...$row, ...$branchFilter->rowBranch($document->getAttribute('branch_id'))];
     }
 
     /**
@@ -740,6 +814,7 @@ class SalesPurchaseReportController extends Controller
             'taxable_amount' => $taxable,
             'vat_amount' => $this->signed($return->vat_amount, $sign),
             'tds_amount' => $this->signed($return->tds_amount, $sign),
+            'round_off' => $this->signed($return->round_off ?? '0', $sign),
             'total' => $this->signed($return->total, $sign),
         ];
     }
@@ -760,18 +835,31 @@ class SalesPurchaseReportController extends Controller
      *   were invisible before (audit P1 "no ledger-based Debtors list"), so
      *   a tenant who imported opening balances saw an empty ageing report
      *   while the balance sheet showed lakhs of debtors.
+     *
+     * Branches (plan 12, BR14): the invoices are narrowed on their own
+     * branch_id and the ledger balance behind the opening bucket on
+     * journal_voucher_lines.branch_id, by the same BranchFilter. A party
+     * line is tagged with the branch of the document it settles, so a
+     * branch's buckets, its opening figure and its total all describe the
+     * same balance; a filtered side mixed with an unfiltered one would
+     * misstate the opening bucket by the other branches' invoices.
      */
     public function agedReceivables(Request $request): Response
     {
         $asOf = $this->resolveAsOf($request);
         $storeId = $request->integer('store_id') ?: null;
+        $areaFilter = AreaFilter::fromRequest($request);
+        $groupByArea = AreaFilter::groupRequested($request);
+        $branchFilter = BranchFilter::fromRequest($request);
 
         $sales = Sale::query()
-            ->with('customer:id,name,account_id')
+            ->with(['customer:id,name,account_id,area_id', 'customer.area:id,name'])
             ->where('payment_mode', 'credit')
             ->where('status', 'posted')
             ->whereDate('date', '<=', $asOf)
             ->when($storeId, fn (Builder $query) => $query->where('store_id', $storeId))
+            ->when($areaFilter->isActive(), fn (Builder $query) => $areaFilter->applyThroughRelation($query, 'customer'))
+            ->tap(fn (Builder $query) => $branchFilter->applyToDocuments($query, 'sales.branch_id'))
             ->orderBy('date')
             ->get();
 
@@ -786,7 +874,7 @@ class SalesPurchaseReportController extends Controller
             }
 
             $key = $sale->customer_id;
-            $byParty[$key] ??= $this->emptyAgingRow($sale->customer?->name ?? 'Unknown');
+            $byParty[$key] ??= $this->emptyAgingRow($sale->customer?->name ?? 'Unknown', $sale->customer?->area?->name);
             $bucket = $this->agingBucket((int) abs($sale->date->copy()->startOfDay()->diffInDays(Carbon::parse($asOf)->startOfDay())));
 
             $byParty[$key][$bucket] = Money::of($byParty[$key][$bucket])->plus($outstanding)->toString();
@@ -797,14 +885,16 @@ class SalesPurchaseReportController extends Controller
             }
         }
 
-        $rows = $this->withOpeningBucket($byParty, $accountIds, Customer::query(), $asOf, $storeId, creditNormal: false);
+        $rows = $this->withOpeningBucket($byParty, $accountIds, $areaFilter->apply(Customer::query()), $asOf, $storeId, creditNormal: false, branchIds: $branchFilter->lineBranchIds());
 
         return Inertia::render('Tenant/Reports/AgedReceivables', [
             'rows' => $rows,
             'totals' => $this->sumAgingTotals($rows),
-            'stores' => Store::where('is_active', true)->orderBy('name')->get(['id', 'name']),
+            ...$this->areaReportProps($areaFilter, $groupByArea, $rows, ['opening', ...self::AGING_BUCKETS, 'total']),
+            'stores' => BranchStock::storeOptions($branchFilter, Store::where('is_active', true))->orderBy('name')->get(['id', 'name']),
             'asOf' => $asOf,
             'storeId' => $storeId,
+            'branchReport' => $branchFilter->payload(),
         ]);
     }
 
@@ -817,13 +907,18 @@ class SalesPurchaseReportController extends Controller
     {
         $asOf = $this->resolveAsOf($request);
         $storeId = $request->integer('store_id') ?: null;
+        $areaFilter = AreaFilter::fromRequest($request);
+        $groupByArea = AreaFilter::groupRequested($request);
+        $branchFilter = BranchFilter::fromRequest($request);
 
         $purchases = Purchase::query()
-            ->with('supplier:id,name,account_id')
+            ->with(['supplier:id,name,account_id,area_id', 'supplier.area:id,name'])
             ->where('payment_mode', 'credit')
             ->where('status', 'posted')
             ->whereDate('date', '<=', $asOf)
             ->when($storeId, fn (Builder $query) => $query->where('store_id', $storeId))
+            ->when($areaFilter->isActive(), fn (Builder $query) => $areaFilter->applyThroughRelation($query, 'supplier'))
+            ->tap(fn (Builder $query) => $branchFilter->applyToDocuments($query, 'purchases.branch_id'))
             ->orderBy('date')
             ->get();
 
@@ -838,7 +933,7 @@ class SalesPurchaseReportController extends Controller
             }
 
             $key = $purchase->supplier_id;
-            $byParty[$key] ??= $this->emptyAgingRow($purchase->supplier?->name ?? 'Unknown');
+            $byParty[$key] ??= $this->emptyAgingRow($purchase->supplier?->name ?? 'Unknown', $purchase->supplier?->area?->name);
             $bucket = $this->agingBucket((int) abs($purchase->date->copy()->startOfDay()->diffInDays(Carbon::parse($asOf)->startOfDay())));
 
             $byParty[$key][$bucket] = Money::of($byParty[$key][$bucket])->plus($outstanding)->toString();
@@ -849,14 +944,16 @@ class SalesPurchaseReportController extends Controller
             }
         }
 
-        $rows = $this->withOpeningBucket($byParty, $accountIds, Supplier::query(), $asOf, $storeId, creditNormal: true);
+        $rows = $this->withOpeningBucket($byParty, $accountIds, $areaFilter->apply(Supplier::query()), $asOf, $storeId, creditNormal: true, branchIds: $branchFilter->lineBranchIds());
 
         return Inertia::render('Tenant/Reports/AgedPayables', [
             'rows' => $rows,
             'totals' => $this->sumAgingTotals($rows),
-            'stores' => Store::where('is_active', true)->orderBy('name')->get(['id', 'name']),
+            ...$this->areaReportProps($areaFilter, $groupByArea, $rows, ['opening', ...self::AGING_BUCKETS, 'total']),
+            'stores' => BranchStock::storeOptions($branchFilter, Store::where('is_active', true))->orderBy('name')->get(['id', 'name']),
             'asOf' => $asOf,
             'storeId' => $storeId,
+            'branchReport' => $branchFilter->payload(),
         ]);
     }
 
@@ -874,9 +971,9 @@ class SalesPurchaseReportController extends Controller
 
     public function debtorsExport(Request $request)
     {
-        $data = $this->partyBalancePayload($request, Customer::query(), creditNormal: false);
+        $data = $this->partyBalancePayload($request, Customer::query(), creditNormal: false, withBranchColumns: false);
 
-        return Excel::download(new DebtorsExport($data['rows'], $data['total']), 'debtors.xlsx');
+        return Excel::download(new DebtorsExport($data['rows'], $data['total'], $data['groups'], $data['branchReport']['label'] ?? null), 'debtors.xlsx');
     }
 
     /**
@@ -889,9 +986,9 @@ class SalesPurchaseReportController extends Controller
 
     public function creditorsExport(Request $request)
     {
-        $data = $this->partyBalancePayload($request, Supplier::query(), creditNormal: true);
+        $data = $this->partyBalancePayload($request, Supplier::query(), creditNormal: true, withBranchColumns: false);
 
-        return Excel::download(new CreditorsExport($data['rows'], $data['total']), 'creditors.xlsx');
+        return Excel::download(new CreditorsExport($data['rows'], $data['total'], $data['groups'], $data['branchReport']['label'] ?? null), 'creditors.xlsx');
     }
 
     /**
@@ -905,17 +1002,32 @@ class SalesPurchaseReportController extends Controller
      * those rows - an overpayment is real money owed back - but flags each one via
      * `is_credit_balance` so the difference from legacy is visible, not silent.
      *
+     * Branches (plan 12, BR14): the balance is the party account's lines
+     * narrowed by BranchFilter on journal_voucher_lines.branch_id (the
+     * account itself is one company account). `by_branch=1` adds a
+     * `by_branch` amount per branch column to every row, the columns and
+     * their totals to `branchReport`, and `by_branch_totals` to each area
+     * group; a row is then kept when any branch amount is non-zero even if
+     * the branches net to zero. Off, the rows are exactly what they were.
+     *
      * @param  Builder<covariant Model>  $parties
      * @return array<string, mixed>
      */
-    private function partyBalancePayload(Request $request, $parties, bool $creditNormal): array
+    private function partyBalancePayload(Request $request, $parties, bool $creditNormal, bool $withBranchColumns = true): array
     {
         $fiscalYears = FiscalYear::query()->orderByDesc('start_date')->get(['id', 'name', 'status']);
         $fiscalYearId = $request->integer('fiscal_year_id')
             ?: ($fiscalYears->firstWhere('status', FiscalYearStatus::Open)?->id ?? $fiscalYears->first()?->id);
 
-        $records = $parties->orderBy('name')->get(['id', 'name', 'account_id', 'address', 'mobile_no']);
-        $balances = $this->ledgerBalances($records->pluck('account_id')->filter()->all(), $fiscalYearId, null, $creditNormal);
+        $areaFilter = AreaFilter::fromRequest($request);
+        $groupByArea = AreaFilter::groupRequested($request);
+
+        $records = $areaFilter->apply($parties)
+            ->with('area:id,name')
+            ->orderBy('name')
+            ->get(['id', 'name', 'account_id', 'address', 'mobile_no', 'area_id']);
+        $branchFilter = BranchFilter::fromRequest($request);
+        $balances = $this->ledgerBalances($records->pluck('account_id')->filter()->all(), $fiscalYearId, null, $creditNormal, $branchFilter->lineBranchIds());
 
         $rows = $records
             ->map(fn (Model $party) => [
@@ -923,18 +1035,49 @@ class SalesPurchaseReportController extends Controller
                 'name' => $party->name,
                 'address' => $party->address,
                 'mobile_no' => $party->mobile_no,
+                'area' => $party->area?->name,
                 'balance' => ($balances[$party->account_id] ?? Money::zero())->toString(),
             ])
-            ->filter(fn (array $row) => ! Money::of($row['balance'])->isZero())
+            ->values();
+
+        $branchColumns = null;
+        $branchTotals = null;
+
+        // The Excel files carry no branch columns, so they keep only rows with a
+        // real balance instead of rows kept for a netting branch split.
+        if ($withBranchColumns && $branchFilter->byBranch()) {
+            $split = PartyBranchBalances::withBranchColumns(
+                $branchFilter,
+                $rows,
+                $records->mapWithKeys(fn (Model $party): array => [$party->getKey() => $party->account_id])->all(),
+                $fiscalYearId,
+                $creditNormal,
+            );
+            [$rows, $branchColumns, $branchTotals] = [$split['rows'], $split['columns'], $split['totals']];
+        }
+
+        $rows = $rows
+            ->filter(fn (array $row) => ! Money::of($row['balance'])->isZero()
+                || collect($row['by_branch'] ?? [])->contains(fn (string $amount): bool => ! Money::of($amount)->isZero()))
             ->map(fn (array $row) => [
                 ...$row,
                 'is_credit_balance' => Money::of($row['balance'])->isNegative(),
             ])
             ->values();
 
+        $areaProps = $this->areaReportProps($areaFilter, $groupByArea, $rows->all(), ['balance']);
+        $branchReport = $branchFilter->payload(supportsByBranch: true);
+
+        if ($branchColumns !== null) {
+            $areaProps['groups'] = PartyBranchBalances::groupsWithBranchTotals($areaProps['groups'], $branchColumns);
+            $branchReport = $branchReport === null ? null : [...$branchReport, 'columns' => $branchColumns, 'totals' => $branchTotals];
+        }
+
         return [
             'rows' => $rows,
             'total' => Money::sum($rows->map(fn (array $row) => Money::of($row['balance'])))->toString(),
+            ...$areaProps,
+            'branchReport' => $branchReport,
             'fiscalYears' => $fiscalYears,
             'fiscalYearId' => $fiscalYearId,
             'creditBalanceNote' => $creditNormal
@@ -956,15 +1099,20 @@ class SalesPurchaseReportController extends Controller
      * attributed to one store; folding the whole balance into a single
      * store's page would show every party under every store.
      *
+     * A branch filter is different: every ledger line carries a branch, so
+     * $branchIds (BranchFilter::lineBranchIds(), the same filter that
+     * narrowed the invoices) narrows the balance and the bucket stays.
+     *
      * @param  array<int|string, array<string, string>>  $byParty
      * @param  array<int|string, int>  $accountIds
      * @param  Builder<covariant Model>  $parties
+     * @param  list<int>|null  $branchIds
      * @return list<array<string, string>>
      */
-    private function withOpeningBucket(array $byParty, array $accountIds, $parties, string $asOf, ?int $storeId, bool $creditNormal): array
+    private function withOpeningBucket(array $byParty, array $accountIds, $parties, string $asOf, ?int $storeId, bool $creditNormal, ?array $branchIds = null): array
     {
         if ($storeId === null) {
-            $records = $parties->get(['id', 'name', 'account_id'])->keyBy(fn (Model $party) => $party->getKey());
+            $records = $parties->with('area:id,name')->get(['id', 'name', 'account_id', 'area_id'])->keyBy(fn (Model $party) => $party->getKey());
 
             foreach ($records as $id => $party) {
                 if ($party->account_id) {
@@ -985,7 +1133,7 @@ class SalesPurchaseReportController extends Controller
                     ->orderByDesc('start_date')
                     ->value('id');
 
-            $balances = $this->ledgerBalances(array_values($accountIds), $fiscalYearId, $asOf, $creditNormal);
+            $balances = $this->ledgerBalances(array_values($accountIds), $fiscalYearId, $asOf, $creditNormal, $branchIds);
 
             foreach ($fiscalYearId === null ? [] : $accountIds as $partyId => $accountId) {
                 $balance = $balances[$accountId] ?? Money::zero();
@@ -996,7 +1144,7 @@ class SalesPurchaseReportController extends Controller
                     continue;
                 }
 
-                $byParty[$partyId] ??= $this->emptyAgingRow($records->get($partyId)?->name ?? 'Unknown');
+                $byParty[$partyId] ??= $this->emptyAgingRow($records->get($partyId)?->name ?? 'Unknown', $records->get($partyId)?->area?->name);
                 $byParty[$partyId]['opening'] = $opening->toString();
             }
         }
@@ -1030,10 +1178,14 @@ class SalesPurchaseReportController extends Controller
      * `ROUND(column * 100)` integers and divided back at the end - lossless
      * at the two decimals a Money holds.
      *
+     * $branchIds (BranchFilter::lineBranchIds()) goes straight onto
+     * journal_voucher_lines.branch_id; null adds nothing.
+     *
      * @param  array<int, int>  $accountIds
+     * @param  list<int>|null  $branchIds
      * @return array<int, Money>
      */
-    private function ledgerBalances(array $accountIds, ?int $fiscalYearId, ?string $asOf, bool $creditNormal): array
+    private function ledgerBalances(array $accountIds, ?int $fiscalYearId, ?string $asOf, bool $creditNormal, ?array $branchIds = null): array
     {
         $ids = array_values(array_unique(array_map('intval', $accountIds)));
 
@@ -1050,6 +1202,7 @@ class SalesPurchaseReportController extends Controller
             ->whereIn('journal_voucher_lines.account_id', $ids)
             ->where('journal_vouchers.fiscal_year_id', $fiscalYearId)
             ->when($asOf !== null, fn (Builder $query) => $query->whereDate('journal_vouchers.date', '<=', $asOf))
+            ->tap(fn (Builder $query) => BranchFilter::narrowLines($query, $branchIds))
             ->groupBy('journal_voucher_lines.account_id')
             ->selectRaw("journal_voucher_lines.account_id as account_id, {$expression} as net_scaled")
             ->pluck('net_scaled', 'account_id');
@@ -1075,12 +1228,13 @@ class SalesPurchaseReportController extends Controller
     /**
      * @return array<string, string>
      */
-    private function emptyAgingRow(string $party): array
+    private function emptyAgingRow(string $party, ?string $area = null): array
     {
         $zero = Money::zero()->toString();
 
         return [
             'party' => $party,
+            'area' => $area,
             'opening' => $zero,
             'current' => $zero,
             'days31_60' => $zero,
@@ -1088,6 +1242,26 @@ class SalesPurchaseReportController extends Controller
             'days90Plus' => $zero,
             'invoiced' => $zero,
             'total' => $zero,
+        ];
+    }
+
+    /**
+     * The area props every area-aware party report sends to its page: the
+     * dropdown options, the active filter, and - only when "Group by area" is
+     * on - the rows grouped by area with exact subtotals of `$measures`.
+     *
+     * @param  iterable<int, array<string, mixed>>  $rows
+     * @param  list<string>  $measures
+     * @return array<string, mixed>
+     */
+    private function areaReportProps(AreaFilter $areaFilter, bool $groupByArea, iterable $rows, array $measures): array
+    {
+        return [
+            'areas' => Area::options(),
+            'area' => $areaFilter->value,
+            'areaLabel' => $areaFilter->isActive() ? $areaFilter->label() : null,
+            'groupByArea' => $groupByArea,
+            'groups' => $groupByArea ? AreaFilter::groupRows($rows, $measures) : null,
         ];
     }
 

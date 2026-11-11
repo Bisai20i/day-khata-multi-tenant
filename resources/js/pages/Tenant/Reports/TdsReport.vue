@@ -12,6 +12,10 @@ import DataTable from '@/components/ui/DataTable.vue';
 import Label from '@/components/ui/Label.vue';
 import { formatMoney } from '@/lib/money';
 import { formatBsDate } from '@/lib/format';
+import { useBranchReportFilter } from '@/composables/useBranchReportFilter';
+import { useBranchLabel } from '@/composables/useBranchLabel';
+import BranchReportFilter from '@/components/branch/BranchReportFilter.vue';
+import BranchReportNotes from '@/components/branch/BranchReportNotes.vue';
 
 defineOptions({ layout: AppLayout });
 
@@ -25,6 +29,8 @@ const props = defineProps({
     from: { type: String, required: true },
     to: { type: String, required: true },
     storeId: { type: [Number, null], default: null },
+    // Branch filter; null when the company has no branches. Rows then carry `branch`.
+    branchReport: { type: [Object, null], default: null },
 });
 
 useLayoutChrome('TDS Report');
@@ -32,6 +38,8 @@ useLayoutChrome('TDS Report');
 const from = ref(props.from);
 const to = ref(props.to);
 const storeId = ref(props.storeId);
+const branchFilter = useBranchReportFilter(() => props.branchReport);
+const { label: branchWord } = useBranchLabel();
 
 const storeOptions = computed(() => [
     { value: null, label: 'All stores' },
@@ -45,7 +53,7 @@ const rangeLabel = computed(
 function applyFilter() {
     router.get(
         window.location.pathname,
-        { from: from.value, to: to.value, store_id: storeId.value ?? undefined },
+        { from: from.value, to: to.value, store_id: storeId.value ?? undefined, ...branchFilter.toQuery() },
         { preserveState: true, preserveScroll: true },
     );
 }
@@ -66,6 +74,10 @@ function entryCell({ row }) {
 }
 
 function columnsFor(partyHeader, documentHeader) {
+    const branchColumn = props.branchReport
+        ? [{ id: 'branch', header: branchWord(), numeric: false, cell: ({ row }) => row.original.branch ?? '-' }]
+        : [];
+
     return [
         { id: 'date_bs', header: 'Date (BS)', numeric: false, cell: ({ row }) => formatBsDate(row.original.date) },
         { accessorKey: 'date', header: 'Date (AD)' },
@@ -76,6 +88,7 @@ function columnsFor(partyHeader, documentHeader) {
             cell: ({ row }) => row.original.document_number ?? '-',
         },
         { id: 'party', header: partyHeader, numeric: false, cell: ({ row }) => row.original.party ?? '-' },
+        ...branchColumn,
         { id: 'entry', header: 'Entry', numeric: false, cell: entryCell },
         { id: 'base_total', header: 'Gross Total', numeric: true, cell: ({ row }) => formatMoney(row.original.base_total) },
         {
@@ -92,8 +105,8 @@ function columnsFor(partyHeader, documentHeader) {
     ];
 }
 
-const salesColumns = columnsFor('Customer', 'Invoice #');
-const purchaseColumns = columnsFor('Supplier', 'Bill #');
+const salesColumns = computed(() => columnsFor('Customer', 'Invoice #'));
+const purchaseColumns = computed(() => columnsFor('Supplier', 'Bill #'));
 </script>
 
 <template>
@@ -123,9 +136,17 @@ const purchaseColumns = columnsFor('Supplier', 'Bill #');
                     <Label class="mb-1">Store</Label>
                     <Select v-model="storeId" :options="storeOptions" />
                 </div>
+                <BranchReportFilter
+                    v-if="branchReport"
+                    v-model:choice="branchFilter.choice.value"
+                    :report="branchReport"
+                    id-prefix="tds-report"
+                    @change="applyFilter"
+                />
                 <Button variant="primary" tone="purple" @click="applyFilter">Generate report</Button>
             </div>
             <p class="mt-2 text-[12px] text-text-muted">Showing report for {{ rangeLabel }}</p>
+            <BranchReportNotes v-if="branchReport" :report="branchReport" />
         </Card>
 
         <Card variant="panel" title="TDS on Sales (claimable credit)" class="mb-4">

@@ -8,6 +8,9 @@
 @section('title', $title ?? 'Manufacturing Report')
 
 @section('doc-meta-extra')
+    @if(!empty($branchFilterLabel))
+        <div>{{ $branchFilterLabel }}</div>
+    @endif
     @if(($from ?? null) && ($to ?? null))
         <div><strong>Period:</strong> {{ $from }} to {{ $to }}</div>
     @endif

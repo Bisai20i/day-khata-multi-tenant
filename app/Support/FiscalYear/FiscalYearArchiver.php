@@ -7,6 +7,7 @@ use App\Models\FiscalYear;
 use App\Models\FiscalYearArchive;
 use App\Models\JournalVoucher;
 use App\Models\User;
+use App\Support\Branches\BranchContext;
 use App\Support\Money\Money;
 use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Support\Facades\DB;
@@ -169,6 +170,18 @@ class FiscalYearArchiver
             $table->id();
             $table->string('voucher_type');
             $table->unsignedInteger('voucher_number');
+            // The series code printed with the number in a per_branch year
+            // (plan 12, BR20: 12 repeats once per branch), null in a shared
+            // year. Archive files written before BR20 have no such column;
+            // ArchivedFiscalYearController checks for it.
+            $table->string('series_code')->nullable();
+            // The voucher's origin branch (plan 12, section 5.3). Together
+            // with the lines' branch_id this lets ArchivedFiscalYearController
+            // show a branch-restricted user only the vouchers the live
+            // JournalVoucher scope would (section 5.7). Archive files written
+            // before this column existed have none, and the controller refuses
+            // them to restricted users rather than show every branch.
+            $table->unsignedBigInteger('branch_id')->nullable();
             $table->date('date');
             $table->string('narration');
             $table->string('reason')->nullable();
@@ -192,8 +205,15 @@ class FiscalYearArchiver
             $table->decimal('debit', 20, 2)->default(0);
             $table->decimal('credit', 20, 2)->default(0);
             $table->string('narration')->nullable();
+            // The line's own branch, and on Inter-Branch Clearing lines the
+            // branch on the other side (plan 12, section 5.3). Ids only, like
+            // the live columns; nullable for the same pre-branch reason as
+            // journal_vouchers.branch_id.
+            $table->unsignedBigInteger('branch_id')->nullable();
+            $table->unsignedBigInteger('counterparty_branch_id')->nullable();
 
             $table->index('journal_voucher_id');
+            $table->index('branch_id');
         });
     }
 
@@ -206,6 +226,10 @@ class FiscalYearArchiver
      * verbatim so a line's `journal_voucher_id` stays a meaningful,
      * self-consistent reference within the archive file on its own.
      *
+     * Read outside the branch access scope (plan 12, section 5.7): the
+     * archive is the year's complete record, so a restricted actor's view
+     * must never decide which vouchers or lines it holds.
+     *
      * @return array{0: int, 1: int} [voucherCount, lineCount]
      */
     private static function copyData(FiscalYear $fiscalYear, string $connectionName): array
@@ -213,43 +237,53 @@ class FiscalYearArchiver
         $voucherCount = 0;
         $lineCount = 0;
 
-        JournalVoucher::where('fiscal_year_id', $fiscalYear->id)
-            ->with(['lines.account', 'creator'])
-            ->chunkById(200, function ($vouchers) use ($connectionName, &$voucherCount, &$lineCount) {
-                foreach ($vouchers as $voucher) {
-                    DB::connection($connectionName)->table('journal_vouchers')->insert([
-                        'id' => $voucher->id,
-                        'voucher_type' => $voucher->voucher_type->value,
-                        'voucher_number' => $voucher->voucher_number,
-                        'date' => $voucher->date->toDateString(),
-                        'narration' => $voucher->narration,
-                        'reason' => $voucher->reason,
-                        'created_by_name' => $voucher->creator?->name ?? 'Unknown',
-                        'created_at' => $voucher->created_at,
-                    ]);
-                    $voucherCount++;
+        BranchContext::unrestricted(function () use ($fiscalYear, $connectionName, &$voucherCount, &$lineCount) {
+            JournalVoucher::where('fiscal_year_id', $fiscalYear->id)
+                ->with(['lines.account', 'creator'])
+                ->chunkById(200, function ($vouchers) use ($connectionName, &$voucherCount, &$lineCount) {
+                    // One query for the chunk's branch-series codes (none in a
+                    // shared year).
+                    JournalVoucher::loadSeriesBranches($vouchers);
 
-                    $lineRows = $voucher->lines->map(fn ($line) => [
-                        'id' => $line->id,
-                        'journal_voucher_id' => $voucher->id,
-                        // Both nullable-safe: an account with no code is
-                        // normal (party and fixed-asset accounts), and a line
-                        // whose account row has since been deleted still
-                        // deserves to be archived rather than to abort the
-                        // whole year's copy.
-                        'account_code' => $line->account?->code,
-                        'account_name' => $line->account?->name ?? 'Unknown',
-                        'debit' => Money::of($line->debit)->toString(),
-                        'credit' => Money::of($line->credit)->toString(),
-                        'narration' => $line->narration,
-                    ])->all();
+                    foreach ($vouchers as $voucher) {
+                        DB::connection($connectionName)->table('journal_vouchers')->insert([
+                            'id' => $voucher->id,
+                            'voucher_type' => $voucher->voucher_type->value,
+                            'voucher_number' => $voucher->voucher_number,
+                            'series_code' => $voucher->seriesCode(),
+                            'branch_id' => $voucher->branch_id,
+                            'date' => $voucher->date->toDateString(),
+                            'narration' => $voucher->narration,
+                            'reason' => $voucher->reason,
+                            'created_by_name' => $voucher->creator?->name ?? 'Unknown',
+                            'created_at' => $voucher->created_at,
+                        ]);
+                        $voucherCount++;
 
-                    if ($lineRows !== []) {
-                        DB::connection($connectionName)->table('journal_voucher_lines')->insert($lineRows);
-                        $lineCount += count($lineRows);
+                        $lineRows = $voucher->lines->map(fn ($line) => [
+                            'id' => $line->id,
+                            'journal_voucher_id' => $voucher->id,
+                            // Both nullable-safe: an account with no code is
+                            // normal (party and fixed-asset accounts), and a line
+                            // whose account row has since been deleted still
+                            // deserves to be archived rather than to abort the
+                            // whole year's copy.
+                            'account_code' => $line->account?->code,
+                            'account_name' => $line->account?->name ?? 'Unknown',
+                            'debit' => Money::of($line->debit)->toString(),
+                            'credit' => Money::of($line->credit)->toString(),
+                            'narration' => $line->narration,
+                            'branch_id' => $line->branch_id,
+                            'counterparty_branch_id' => $line->counterparty_branch_id,
+                        ])->all();
+
+                        if ($lineRows !== []) {
+                            DB::connection($connectionName)->table('journal_voucher_lines')->insert($lineRows);
+                            $lineCount += count($lineRows);
+                        }
                     }
-                }
-            });
+                });
+        });
 
         return [$voucherCount, $lineCount];
     }

@@ -11,6 +11,9 @@ import Label from '@/components/ui/Label.vue';
 import NepaliDateInput from '@/components/ui/NepaliDateInput.vue';
 import { formatMoney } from '@/lib/money';
 import { formatBsDate } from '@/lib/format';
+import { useBranchReportFilter } from '@/composables/useBranchReportFilter';
+import BranchReportFilter from '@/components/branch/BranchReportFilter.vue';
+import BranchReportNotes from '@/components/branch/BranchReportNotes.vue';
 
 defineOptions({ layout: AppLayout });
 
@@ -20,6 +23,8 @@ const props = defineProps({
     schedule: { type: Object, required: true },
     from: { type: String, required: true },
     to: { type: String, required: true },
+    // Branch filter; null when the company has no branches.
+    branchReport: { type: [Object, null], default: null },
 });
 
 useLayoutChrome('COGM and COGS Schedule');
@@ -27,12 +32,16 @@ useLayoutChrome('COGM and COGS Schedule');
 const from = ref(props.from);
 const to = ref(props.to);
 
+const branchFilter = useBranchReportFilter(() => props.branchReport);
+
 function apply() {
-    router.get(window.location.pathname, { from: from.value, to: to.value }, { preserveState: true, preserveScroll: true });
+    router.get(window.location.pathname, { from: from.value, to: to.value, ...branchFilter.toQuery() }, { preserveState: true, preserveScroll: true });
 }
 
 function fileUrl(suffix) {
-    return `${window.location.pathname}/${suffix}?${new URLSearchParams({ from: from.value, to: to.value })}`;
+    const params = new URLSearchParams({ from: from.value, to: to.value });
+    branchFilter.appendTo(params);
+    return `${window.location.pathname}/${suffix}?${params}`;
 }
 
 const rowClass = (style) => ({
@@ -63,8 +72,16 @@ const rowClass = (style) => ({
                     <Label class="mb-1">To (BS)</Label>
                     <NepaliDateInput v-model="to" />
                 </div>
+                <BranchReportFilter
+                    v-if="branchReport"
+                    v-model:choice="branchFilter.choice.value"
+                    :report="branchReport"
+                    id-prefix="mfg-cogs-schedule"
+                    @change="apply"
+                />
                 <Button variant="primary" tone="purple" @click="apply">Generate report</Button>
             </div>
+            <BranchReportNotes v-if="branchReport" :report="branchReport" />
         </Card>
 
         <div

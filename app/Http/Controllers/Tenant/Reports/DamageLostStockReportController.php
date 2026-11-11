@@ -8,6 +8,8 @@ use App\Models\FiscalYear;
 use App\Models\Item;
 use App\Models\StockAdjustmentLine;
 use App\Models\Store;
+use App\Support\Branches\BranchFilter;
+use App\Support\Branches\BranchStock;
 use App\Support\Money\Quantity;
 use Illuminate\Http\Request;
 use Illuminate\Support\Collection;
@@ -34,13 +36,19 @@ use Inertia\Response;
  * isZeroValue(), enforced in StockAdjustment::post()), so - matching
  * legacy's own item-wise query, which only ever summed `outstock` - neither
  * variant here reports a monetary value, only quantity.
+ *
+ * Branches (plan 12, BR15): filtered on the adjustment's own `branch_id`
+ * (BranchFilter::applyToDocuments(), like the BR14 document reports); a
+ * `store_id` outside the covered branches is dropped. Not multi-branch:
+ * unchanged, plus `branchReport: null`.
  */
 class DamageLostStockReportController extends Controller
 {
     public function index(Request $request): Response
     {
         [$from, $to] = $this->resolveDateRange($request);
-        $storeId = $request->integer('store_id') ?: null;
+        $filter = BranchFilter::fromRequest($request);
+        $storeId = $filter->allowedStoreId($request->integer('store_id') ?: null);
         $itemId = $request->integer('item_id') ?: null;
         $reasonFilter = $request->string('reason')->toString();
         $reasons = in_array($reasonFilter, ['damage', 'lost'], true) ? [$reasonFilter] : ['damage', 'lost'];
@@ -49,11 +57,14 @@ class DamageLostStockReportController extends Controller
             ->where('direction', 'out')
             ->whereIn('reason_type', $reasons)
             ->when($itemId, fn ($query) => $query->where('stock_adjustment_lines.item_id', $itemId))
-            ->whereHas('stockAdjustment', function ($query) use ($from, $to, $storeId) {
+            ->whereHas('stockAdjustment', function ($query) use ($from, $to, $storeId, $filter) {
                 $query->where('status', 'posted')
                     ->whereDate('date', '>=', $from)
                     ->whereDate('date', '<=', $to)
                     ->when($storeId, fn ($q) => $q->where('store_id', $storeId));
+
+                // The adjustment's own branch (I5: its store's branch).
+                $filter->applyToDocuments($query, 'stock_adjustments.branch_id');
             });
 
         $lines = (clone $baseQuery)
@@ -79,12 +90,13 @@ class DamageLostStockReportController extends Controller
             'itemWise' => $itemWiseRows,
             'totalQuantities' => $this->quantitiesByUnit($itemWiseRows),
             'items' => Item::query()->orderBy('name')->get(['id', 'name']),
-            'stores' => Store::where('is_active', true)->orderBy('name')->get(['id', 'name']),
+            'stores' => BranchStock::storeOptions($filter, Store::where('is_active', true))->orderBy('name')->get(['id', 'name']),
             'from' => $from,
             'to' => $to,
             'storeId' => $storeId,
             'itemId' => $itemId,
             'reason' => in_array($reasonFilter, ['damage', 'lost'], true) ? $reasonFilter : null,
+            'branchReport' => $filter->payload(),
         ]);
     }
 

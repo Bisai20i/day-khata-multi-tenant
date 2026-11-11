@@ -22,6 +22,9 @@ use App\Models\ProductionDirectCost;
 use App\Models\ProductionEntry;
 use App\Models\ProductionWipEntry;
 use App\Models\Store;
+use App\Support\Branches\BranchFormOptions;
+use App\Support\Branches\BranchListFilter;
+use App\Support\Branches\BranchStoreOptions;
 use Barryvdh\DomPDF\Facade\Pdf;
 use Illuminate\Auth\Access\AuthorizationException;
 use Illuminate\Http\RedirectResponse;
@@ -57,8 +60,12 @@ class ProductionEntryController extends Controller
             'to' => $request->filled('to') ? $request->string('to')->toString() : null,
         ];
 
-        $entries = ProductionEntry::query()
+        // Branches (plan 12, BR12): the list follows the top-bar switcher and
+        // names each row's branch only when several branches can appear. Not
+        // multi-branch: same query and payload as before.
+        $entries = BranchListFilter::apply(ProductionEntry::query(), $request)
             ->with(['finishedItem:id,name,unit', 'store:id,name'])
+            ->when(BranchListFilter::columnVisible($request), fn ($query) => $query->with('branch:id,name,code'))
             ->when(
                 in_array($filters['status'], $this->statuses(), true),
                 fn ($query) => $query->where('status', $filters['status']),
@@ -77,10 +84,19 @@ class ProductionEntryController extends Controller
         ]);
     }
 
-    public function create(): Response
+    /**
+     * Branches (plan 12, BR12): a multi-branch company gets a branch picker
+     * and only the stores of the branches the user may use, each with its
+     * branch_id so the store list follows the picker; the issue notes follow
+     * the store, so they stay in the entry's branch too (I5). Not
+     * multi-branch: same props as before.
+     */
+    public function create(Request $request): Response
     {
         return Inertia::render('Tenant/Manufacturing/Production/Create', [
-            'stores' => Store::where('is_active', true)->orderBy('name')->get(['id', 'name']),
+            'stores' => BranchStoreOptions::apply(Store::where('is_active', true), $request)
+                ->orderBy('name')
+                ->get(BranchStoreOptions::columns($request, ['id', 'name'])),
             'finishedItems' => Item::query()
                 ->where('inventory_class', InventoryClass::FinishedGood->value)
                 ->orderBy('name')
@@ -92,6 +108,7 @@ class ProductionEntryController extends Controller
             'creditAccounts' => $this->creditAccounts(),
             'costTypes' => $this->costTypes(),
             'correctionFiscalYear' => self::correctionFiscalYear(),
+            ...BranchFormOptions::props($request),
         ]);
     }
 
@@ -107,7 +124,7 @@ class ProductionEntryController extends Controller
             // costs: they are all dated into the same reopened year or none.
             $entry = DB::transaction(function () use ($data, $request) {
                 $entry = ProductionEntry::create(
-                    Arr::only($data, ['date', 'store_id', 'finished_item_id', 'planned_quantity', 'narration', 'reason']),
+                    Arr::only($data, ['date', 'store_id', 'branch_id', 'finished_item_id', 'planned_quantity', 'narration', 'reason']),
                     array_map('intval', $data['material_issue_note_ids']),
                     $request->user(),
                 );
@@ -119,7 +136,9 @@ class ProductionEntryController extends Controller
                 return $entry;
             });
         } catch (InvalidArgumentException|AuthorizationException $e) {
-            return back()->withErrors(['material_issue_note_ids' => $e->getMessage()])->withInput();
+            // A refused branch goes on the branch picker and a store outside
+            // the branch on the store field (plan 12, BR12).
+            return back()->withErrors([BranchFormOptions::errorField($e, 'material_issue_note_ids', 'branch_id', 'store_id') => $e->getMessage()])->withInput();
         }
 
         return redirect()->route('tenant.production-entries.show', $entry)
@@ -414,17 +433,23 @@ class ProductionEntryController extends Controller
      */
     private function unattachedNotes(?int $storeId = null): array
     {
-        return MaterialIssueNote::query()
+        $notes = MaterialIssueNote::query()
             ->where('status', MaterialIssueNote::STATUS_POSTED)
             ->whereNull('production_entry_id')
             ->when($storeId, fn ($query, $store) => $query->where('store_id', $store))
             ->with(['items.item:id,name,unit'])
             ->orderBy('date')
             ->orderBy('id')
-            ->get()
+            ->get();
+
+        // One query for the branch-series codes (none in shared years, BR20).
+        MaterialIssueNote::loadSeriesCodes($notes);
+
+        return $notes
             ->map(fn (MaterialIssueNote $note) => [
                 'id' => $note->id,
                 'number' => $note->number,
+                'document_number' => $note->documentNumber(),
                 'date' => $note->date->format('Y-m-d'),
                 'store_id' => $note->store_id,
                 'total_cost' => $note->total_cost,
@@ -546,11 +571,15 @@ class ProductionEntryController extends Controller
             'cancelled' => false,
         ]];
 
+        MaterialIssueNote::loadSeriesCodes($entry->materialIssueNotes);
+
         foreach ($entry->materialIssueNotes as $note) {
             $events[] = [
                 'date' => $note->date->format('Y-m-d'),
                 'kind' => 'material',
-                'label' => "Material issue note {$note->number}",
+                // Shared series: the bare number, as before; a branch series
+                // prints its full MI-{code}-{n} (BR20).
+                'label' => 'Material issue note '.((int) $note->series_branch_id === 0 ? $note->number : $note->documentNumber()),
                 'amount' => $note->total_cost,
                 'cancelled' => $note->status === MaterialIssueNote::STATUS_CANCELLED,
             ];

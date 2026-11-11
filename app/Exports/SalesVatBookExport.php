@@ -28,10 +28,14 @@ class SalesVatBookExport implements FromCollection, WithColumnFormatting, WithHe
     /**
      * @param  Collection<int, array<string, mixed>>  $rows
      * @param  array<string, string|int>  $totals
+     * @param  bool  $withBranch  Multi-branch tenant (BR14): a trailing Branch column from each row's `branch`.
+     * @param  string|null  $branchLabel  BranchFilter::label() in a multi-branch tenant, else null (no extra heading row)
      */
     public function __construct(
         private readonly Collection $rows,
         private readonly array $totals,
+        private readonly bool $withBranch = false,
+        private readonly ?string $branchLabel = null,
     ) {}
 
     /**
@@ -52,16 +56,21 @@ class SalesVatBookExport implements FromCollection, WithColumnFormatting, WithHe
             'taxable_amount' => $this->totals['taxable_amount'],
             'vat_amount' => $this->totals['vat_amount'],
             'capital_amount' => $this->totals['capital_amount'],
+            'round_off' => $this->totals['round_off'] ?? '0.00',
             'total' => $this->totals['total'],
         ]);
     }
 
     /**
-     * @return array<int, string>
+     * @return array<int, string>|list<list<string>>
      */
     public function headings(): array
     {
-        return ['SN', 'Date (BS)', 'Date (AD)', 'Invoice #', 'Buyer', 'Buyer PAN', 'Type', 'Entry', 'Sub Total', 'Non-Taxable', 'Taxable', 'VAT', 'Capital', 'Total'];
+        $headings = ['SN', 'Date (BS)', 'Date (AD)', 'Invoice #', 'Buyer', 'Buyer PAN', 'Type', 'Entry', 'Sub Total', 'Non-Taxable', 'Taxable', 'VAT', 'Capital', 'Round Off', 'Total'];
+
+        $headings = $this->withBranch ? [...$headings, 'Branch'] : $headings;
+
+        return $this->branchLabel === null ? $headings : [[$this->branchLabel], $headings];
     }
 
     /**
@@ -76,6 +85,7 @@ class SalesVatBookExport implements FromCollection, WithColumnFormatting, WithHe
             'L' => NumberFormat::FORMAT_NUMBER_00,
             'M' => NumberFormat::FORMAT_NUMBER_00,
             'N' => NumberFormat::FORMAT_NUMBER_00,
+            'O' => NumberFormat::FORMAT_NUMBER_00,
         ];
     }
 
@@ -99,7 +109,9 @@ class SalesVatBookExport implements FromCollection, WithColumnFormatting, WithHe
             Money::of($row['taxable_amount'])->toFloat(),
             Money::of($row['vat_amount'])->toFloat(),
             Money::of($row['capital_amount'])->toFloat(),
+            Money::of($row['round_off'] ?? '0')->toFloat(),
             Money::of($row['total'])->toFloat(),
+            ...($this->withBranch ? [$row['branch'] ?? ''] : []),
         ];
     }
 }

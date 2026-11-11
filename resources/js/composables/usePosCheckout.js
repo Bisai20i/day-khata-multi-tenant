@@ -59,6 +59,9 @@ export function usePosCheckout({
     searchQuery,
     syncActiveCartFromForm,
     persistCartsNow,
+    // usePosBranch().withBranch: adds the terminal's branch_id only for a
+    // multi-branch user with a picker, so other payloads stay unchanged.
+    withBranch = (data) => data,
 }) {
     const page = usePage();
     const { can } = usePermissions();
@@ -99,7 +102,7 @@ export function usePosCheckout({
         const expectedTotal = totals.value.total;
         tenderedCash = cashReceived.value;
 
-        form.transform((data) => ({
+        form.transform((data) => withBranch({
             ...toSalePayload(data, resolvedPaymentMode.value),
             ...(data.invoice_type ? { invoice_type: data.invoice_type } : {}),
             // C8: the total the cashier was looking at. The server refuses the

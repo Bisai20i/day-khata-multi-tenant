@@ -11,16 +11,49 @@ import NepaliDateInput from '@/components/ui/NepaliDateInput.vue';
 import Label from '@/components/ui/Label.vue';
 import { formatMoney, multiplyMoney, sumMoney } from '@/lib/money.js';
 import { todayInKathmandu } from '@/lib/format.js';
+import { storeLabel } from '@/lib/storeLabel.js';
+import { useBranchLabel } from '@/composables/useBranchLabel';
 
 const props = defineProps({
     items: { type: Array, default: () => [] },
     stores: { type: Array, default: () => [] },
+    // Every active store of every active branch, null when the company is
+    // not multi-branch (see StockTransferController::index()).
+    destinationStores: { type: Array, default: null },
 });
 
 const emit = defineEmits(['cancel', 'posted']);
 
-const itemOptions = computed(() => props.items.map((i) => ({ value: i.id, label: `${i.name} (${i.unit})` })));
-const storeOptions = computed(() => props.stores.map((s) => ({ value: s.id, label: s.name })));
+const CLASS_LABELS = { raw_material: 'Raw material', finished_good: 'Finished good' };
+const itemOptions = computed(() => props.items.map((i) => ({
+    value: i.id,
+    label: `${i.name} (${i.unit})${CLASS_LABELS[i.inventory_class] ? ` - ${CLASS_LABELS[i.inventory_class]}` : ''}`,
+})));
+const { label } = useBranchLabel();
+
+// Branches (plan 12, BR12 and BR18): the transfer is filed in the source
+// store's branch, so there is no branch picker, and the source list holds
+// only stores of branches the user may use. In a multi-branch company each
+// store reads "Store (Branch)" and the destination may be any active store
+// of any active branch, including branches the user cannot use: a store of
+// another branch makes it a two-step transfer (dispatched now, in transit
+// until that branch receives it). A single-branch company sees the plain
+// store names and the same list for both ends, as before.
+const fromStoreOptions = computed(() => props.stores.map((s) => ({ value: s.id, label: storeLabel(s) })));
+
+const toStores = computed(() => props.destinationStores ?? props.stores);
+
+const toStoreOptions = computed(() => toStores.value.map((s) => ({ value: s.id, label: storeLabel(s) })));
+
+const fromStore = computed(() => props.stores.find((s) => s.id === form.from_store_id) ?? null);
+const toStore = computed(() => toStores.value.find((s) => s.id === form.to_store_id) ?? null);
+
+const isCrossBranch = computed(
+    () => props.destinationStores !== null
+        && fromStore.value !== null
+        && toStore.value !== null
+        && fromStore.value.branch_id !== toStore.value.branch_id,
+);
 
 function emptyLine() {
     return { item_id: null, quantity: '', unit_cost_rate: '', remarks: '' };
@@ -87,7 +120,8 @@ function submit() {
         lines: data.lines.map((line) => ({
             item_id: line.item_id,
             quantity: String(line.quantity ?? '').trim(),
-            unit_cost_rate: String(line.unit_cost_rate ?? '').trim() === '' ? null : String(line.unit_cost_rate).trim(),
+            // Between branches the server values every line at average cost.
+            unit_cost_rate: isCrossBranch.value || String(line.unit_cost_rate ?? '').trim() === '' ? null : String(line.unit_cost_rate).trim(),
             remarks: line.remarks || null,
         })),
     })).post('/stock-transfers', {
@@ -122,7 +156,7 @@ function submit() {
                     <Label class="mb-1">Transfer from (source store) <span class="text-danger">*</span></Label>
                     <Combobox
                         :model-value="form.from_store_id"
-                        :options="storeOptions"
+                        :options="fromStoreOptions"
                         placeholder="Source store"
                         @update:model-value="(v) => (form.from_store_id = v)"
                     />
@@ -132,7 +166,7 @@ function submit() {
                     <Label class="mb-1">Transfer to (destination store) <span class="text-danger">*</span></Label>
                     <Combobox
                         :model-value="form.to_store_id"
-                        :options="storeOptions"
+                        :options="toStoreOptions"
                         placeholder="Destination store"
                         @update:model-value="(v) => (form.to_store_id = v)"
                     />
@@ -145,6 +179,13 @@ function submit() {
                     <p v-if="form.errors.note" class="mt-1 text-sm text-danger">{{ form.errors.note }}</p>
                 </div>
             </Card>
+
+            <p v-if="isCrossBranch" class="border-[1.5px] border-primary bg-primary-tint px-3 py-2 text-sm text-primary">
+                This sends the goods to another {{ label('lower') }} ({{ toStore?.branch?.name }}). They leave
+                {{ fromStore?.name }} now and stay in transit until {{ toStore?.branch?.name }} receives them. Each line
+                is valued at the item's average cost on the transfer date, so the unit cost below is not used.
+                Raw material and finished goods are valued at the item's moving average cost and cannot go below zero stock.
+            </p>
 
             <Card variant="panel" title="Items" class="!p-4">
                 <div class="mb-2 grid grid-cols-[1fr_120px_140px_1fr_28px] gap-2 text-[10px] font-bold tracking-[.8px] text-text-muted uppercase">
@@ -180,7 +221,14 @@ function submit() {
                             {{ form.errors[`lines.${index}.quantity`] }}
                         </p>
                     </div>
-                    <Input v-model="line.unit_cost_rate" type="number" min="0" step="0.0001" placeholder="0.0000" />
+                    <Input
+                        v-model="line.unit_cost_rate"
+                        type="number"
+                        min="0"
+                        step="0.0001"
+                        :placeholder="isCrossBranch ? 'Average cost' : '0.0000'"
+                        :disabled="isCrossBranch"
+                    />
                     <Input v-model="line.remarks" type="text" placeholder="Optional" />
                     <button
                         v-if="form.lines.length > 1"
@@ -201,14 +249,16 @@ function submit() {
             <Card variant="panel" class="grid grid-cols-1 gap-2 !p-4 text-sm">
                 <div>
                     <p class="text-[10px] font-bold tracking-[.8px] text-text-muted uppercase">Total value</p>
-                    <p class="font-bold text-text-strong">{{ formatMoney(totalValue) }}</p>
+                    <p v-if="isCrossBranch" class="font-bold text-text-strong">At average cost, worked out when posted</p>
+                    <p v-else class="font-bold text-text-strong">{{ formatMoney(totalValue) }}</p>
                 </div>
             </Card>
 
             <div class="flex items-center justify-end gap-2">
                 <Button variant="secondary" tone="purple" type="button" @click="emit('cancel')">Cancel</Button>
                 <Button variant="primary" tone="purple" type="submit" :disabled="form.processing || !canSubmit">
-                    {{ form.processing ? 'Posting...' : 'Post stock transfer' }}
+                    <template v-if="isCrossBranch">{{ form.processing ? 'Dispatching...' : 'Dispatch stock transfer' }}</template>
+                    <template v-else>{{ form.processing ? 'Posting...' : 'Post stock transfer' }}</template>
                 </Button>
             </div>
         </form>

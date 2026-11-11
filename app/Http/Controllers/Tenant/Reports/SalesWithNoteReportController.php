@@ -7,6 +7,8 @@ use App\Http\Controllers\Controller;
 use App\Models\FiscalYear;
 use App\Models\Sale;
 use App\Models\Store;
+use App\Support\Branches\BranchFilter;
+use App\Support\Branches\BranchStock;
 use App\Support\Money\Money;
 use App\Support\Money\Quantity;
 use Illuminate\Http\Request;
@@ -45,6 +47,7 @@ class SalesWithNoteReportController extends Controller
     {
         [$from, $to] = $this->resolveDateRange($request);
         $storeId = $request->integer('store_id') ?: null;
+        $branchFilter = BranchFilter::fromRequest($request);
 
         $sales = Sale::query()
             ->with(['customer:id,name', 'lines.item:id,name,unit', 'lines.itemUnit:id,name'])
@@ -54,6 +57,7 @@ class SalesWithNoteReportController extends Controller
             ->whereNotNull('narration')
             ->where('narration', '!=', '')
             ->when($storeId, fn ($query) => $query->where('store_id', $storeId))
+            ->tap(fn ($query) => $branchFilter->applyToDocuments($query, 'sales.branch_id'))
             ->orderBy('date')
             ->orderBy('id')
             ->get();
@@ -74,8 +78,9 @@ class SalesWithNoteReportController extends Controller
                 'note' => $sale->narration,
                 'chalani_number' => $sale->chalani_number,
                 'total' => $sale->total,
+                ...$branchFilter->rowBranch($sale->branch_id),
             ])->values(),
-            'stores' => Store::where('is_active', true)->orderBy('name')->get(['id', 'name']),
+            'stores' => BranchStock::storeOptions($branchFilter, Store::where('is_active', true))->orderBy('name')->get(['id', 'name']),
             'from' => $from,
             'to' => $to,
             'storeId' => $storeId,
@@ -83,6 +88,7 @@ class SalesWithNoteReportController extends Controller
                 'count' => $sales->count(),
                 'total' => Money::sum($sales->map(fn (Sale $sale) => Money::of($sale->total)))->toString(),
             ],
+            'branchReport' => $branchFilter->payload(),
         ]);
     }
 

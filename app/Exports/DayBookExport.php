@@ -18,9 +18,13 @@ use PhpOffice\PhpSpreadsheet\Style\NumberFormat;
 class DayBookExport implements FromCollection, WithColumnFormatting, WithHeadings, WithMapping
 {
     /**
-     * @param  array<int, array{date: string, voucherType: string, voucherNumber: int, narration: ?string, lines: array<int, array{accountCode: ?string, accountName: string, debit: string, credit: string, narration: ?string}>}>  $vouchers
+     * @param  array<int, array{date: string, voucherType: string, voucherNumber: int|string, narration: ?string, lines: array<int, array{accountCode: ?string, accountName: string, debit: string, credit: string, narration: ?string}>}>  $vouchers
+     * @param  string|null  $branchLabel  BranchFilter::label() in a multi-branch tenant, else null (no extra heading row)
      */
-    public function __construct(private readonly array $vouchers) {}
+    public function __construct(
+        private readonly array $vouchers,
+        private readonly ?string $branchLabel = null,
+    ) {}
 
     public function collection(): Collection
     {
@@ -43,11 +47,13 @@ class DayBookExport implements FromCollection, WithColumnFormatting, WithHeading
     }
 
     /**
-     * @return array<int, string>
+     * @return array<int, string>|list<list<string>>
      */
     public function headings(): array
     {
-        return ['Date', 'Voucher', 'Account', 'Narration', 'Debit', 'Credit'];
+        $headings = ['Date', 'Voucher', 'Account', 'Narration', 'Debit', 'Credit'];
+
+        return $this->branchLabel === null ? $headings : [[$this->branchLabel], $headings];
     }
 
     /**

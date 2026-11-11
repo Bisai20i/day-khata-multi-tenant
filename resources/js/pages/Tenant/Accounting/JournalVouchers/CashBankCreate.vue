@@ -10,6 +10,8 @@ import Select from '@/components/ui/Select.vue';
 import NepaliDateInput from '@/components/ui/NepaliDateInput.vue';
 import InfoTip from '@/components/ui/InfoTip.vue';
 import Label from '@/components/ui/Label.vue';
+import BranchSelect from '@/components/branch/BranchSelect.vue';
+import { useBranchField } from '@/composables/useBranchField';
 import JournalVoucherTotalsBar from '@/components/accounting/JournalVoucherTotalsBar.vue';
 import { useConfirm } from '@/composables/useConfirm';
 import { isZeroMoney, parseMoney, sumMoney } from '@/lib/money';
@@ -20,11 +22,23 @@ const props = defineProps({
         type: Array,
         default: () => [],
     },
+    // Branch picker (BranchFormOptions::props()): the voucher's branch; every
+    // line follows it.
+    branchOptions: { type: Array, default: () => [] },
+    defaultBranchId: { type: Number, default: null },
 });
 
 const emit = defineEmits(['cancel', 'posted']);
 const { confirm } = useConfirm();
 const page = usePage();
+
+// Branches (plan 12, BR12): hidden and not submitted unless the company runs
+// several branches and the user may pick, so a single-branch company posts
+// exactly the payload it did before.
+const { branchId, showPicker, withBranch } = useBranchField(
+    () => props.branchOptions,
+    () => props.defaultBranchId,
+);
 
 const accountOptions = computed(() =>
     props.accounts.map((account) => ({
@@ -154,7 +168,7 @@ function submit(print = false) {
             }));
         }
 
-        return payload;
+        return withBranch(payload);
     }).post('/journal-vouchers/cash-bank', {
         preserveScroll: true,
         onSuccess: () => {
@@ -187,7 +201,8 @@ function submit(print = false) {
 
     <form class="flex flex-1 flex-col gap-4" @submit.prevent="submit(false)">
         <Card variant="panel" class="!p-4">
-            <div class="grid grid-cols-1 gap-4 sm:grid-cols-3">
+            <div class="grid grid-cols-1 gap-4" :class="showPicker ? 'sm:grid-cols-4' : 'sm:grid-cols-3'">
+                <BranchSelect v-model="branchId" :options="branchOptions" :error="form.errors.branch_id" />
                 <div>
                     <div class="mb-1 flex items-center gap-1">
                         <Label>Voucher type <span class="text-danger" aria-hidden="true">*</span></Label>
@@ -215,6 +230,7 @@ function submit(print = false) {
                     </div>
                     <Input v-model="form.narration" type="text" placeholder="Describe this transaction" required />
                     <p v-if="form.errors.narration" class="mt-1 text-sm text-danger" role="alert">{{ form.errors.narration }}</p>
+                    <p v-if="!showPicker && form.errors.branch_id" class="mt-1 text-sm text-danger" role="alert">{{ form.errors.branch_id }}</p>
                 </div>
             </div>
         </Card>

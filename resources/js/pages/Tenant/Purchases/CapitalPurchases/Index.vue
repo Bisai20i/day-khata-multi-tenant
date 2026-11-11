@@ -10,9 +10,6 @@ import Input from '@/components/ui/Input.vue';
 import PageHeader from '@/components/ui/PageHeader.vue';
 import PurchaseStatusCell from '@/components/purchases/PurchaseStatusCell.vue';
 import Modal from '@/components/ui/Modal.vue';
-import Select from '@/components/ui/Select.vue';
-import Combobox from '@/components/ui/Combobox.vue';
-import NepaliDateInput from '@/components/ui/NepaliDateInput.vue';
 import DataTable from '@/components/ui/DataTable.vue';
 import DropdownMenuItem from '@/components/ui/DropdownMenuItem.vue';
 import RowActions from '@/components/ui/RowActions.vue';
@@ -20,10 +17,12 @@ import Tooltip from '@/components/ui/Tooltip.vue';
 import Label from '@/components/ui/Label.vue';
 import { useToast } from '@/composables/useToast';
 import { formatMoney } from '@/lib/money';
-import { formatBsDate, todayInKathmandu } from '@/lib/format';
+import { formatBsDate } from '@/lib/format';
+import CapitalPurchaseSettleModal from '@/components/purchases/CapitalPurchaseSettleModal.vue';
 import Create from './Create.vue';
 import { useOpenFiscalYear } from '@/composables/useOpenFiscalYear';
 import { usePermissions } from '@/composables/usePermissions';
+import { useBranchListColumn } from '@/composables/useBranchListColumn';
 
 defineOptions({ layout: AppLayout });
 
@@ -44,9 +43,16 @@ const props = defineProps({
     defaultVatRate: { type: String, default: '13.00' },
     depreciationCategories: { type: Array, default: () => [] },
     depreciationMethods: { type: Array, default: () => [] },
+    // Branch picker of the settlement and create forms (BranchFormOptions::props()).
+    branchOptions: { type: Array, default: () => [] },
+    defaultBranchId: { type: Number, default: null },
 });
 
 const page = usePage();
+
+// Plan 12, BR12: a branch column only for a multi-branch company viewing all
+// branches; the server narrows the list (and totals, export) to the switcher.
+const { branchColumns } = useBranchListColumn();
 const { toast } = useToast();
 useLayoutChrome('Capital & Service Purchases');
 
@@ -115,40 +121,12 @@ function submitCancel() {
 }
 
 // Later settlements (audit CS-01): pay off the outstanding part of a credit
-// bill, and (with capital_purchase_settlements.cancel) cancel a settlement again.
+// bill (CapitalPurchaseSettleModal), and (with capital_purchase_settlements.cancel)
+// cancel a settlement again.
 const settling = ref(null);
-const settleForm = useForm({
-    date: todayInKathmandu(),
-    amount: '',
-    payment_mode: 'cash',
-    bank_account_id: null,
-    reference_number: '',
-});
-const settleModeOptions = [
-    { value: 'cash', label: 'Cash' },
-    { value: 'bank', label: 'Bank' },
-];
-const settleAccountOptions = computed(() =>
-    props.accounts.map((account) => ({
-        value: account.id,
-        label: account.code ? `${account.code} - ${account.name}` : account.name,
-    })),
-);
 
 function openSettle(capitalPurchase) {
     settling.value = capitalPurchase;
-    settleForm.reset();
-    settleForm.clearErrors();
-    settleForm.amount = capitalPurchase.outstanding_amount;
-}
-
-function submitSettle() {
-    settleForm.post(`/capital-purchases/${settling.value.id}/settlements`, {
-        preserveScroll: true,
-        onSuccess: () => {
-            settling.value = null;
-        },
-    });
 }
 
 const cancellingSettlement = ref(null);
@@ -168,10 +146,6 @@ function submitCancelSettlement() {
             settling.value = null;
         },
     });
-}
-
-function liveSettlements(capitalPurchase) {
-    return (capitalPurchase.settlements ?? []).filter((settlement) => settlement.status === 'posted');
 }
 
 function lineSummary(capitalPurchase) {
@@ -203,6 +177,7 @@ const columns = [
         numeric: false,
         cell: ({ row }) => row.original.supplier?.name ?? '-',
     },
+    ...branchColumns(),
     {
         id: 'accounts',
         header: 'Accounts',
@@ -296,7 +271,8 @@ function moreActionsFor(purchase) {
 
     return [
         purchase.journal_voucher_id && canPrintVoucher.value && {
-            label: `Voucher #${purchase.journal_voucher?.voucher_number ?? purchase.journal_voucher_id}`,
+            // Branch-series vouchers (per-branch numbering) carry their series code.
+            label: `Voucher #${purchase.journal_voucher?.series_branch?.series_code ? `${purchase.journal_voucher.series_branch.series_code}-` : ''}${purchase.journal_voucher?.voucher_number ?? purchase.journal_voucher_id}`,
             icon: FileText,
             href: `/journal-vouchers/${purchase.journal_voucher_id}/print`,
         },
@@ -326,6 +302,8 @@ function moreActionsFor(purchase) {
                 :default-vat-rate="defaultVatRate"
                 :depreciation-categories="depreciationCategories"
                 :depreciation-methods="depreciationMethods"
+                :branch-options="branchOptions"
+                :default-branch-id="defaultBranchId"
                 @cancel="showCreateForm = false"
                 @posted="showCreateForm = false"
             />
@@ -393,66 +371,15 @@ function moreActionsFor(purchase) {
             </Card>
         </template>
 
-        <Modal
-            :open="!!settling"
-            title="Settle capital purchase"
-            size="compact"
-            @update:open="(value) => { if (!value) settling = null; }"
-        >
-            <div v-if="settling" class="flex flex-col gap-4">
-                <p class="text-sm text-text-muted">
-                    Outstanding on this bill: <strong class="text-text-strong">Rs. {{ formatMoney(settling.outstanding_amount) }}</strong>
-                </p>
-                <div v-if="Number(settling.outstanding_amount) > 0" class="flex flex-col gap-3">
-                    <div>
-                        <Label class="mb-1">Date (BS) <span class="text-danger">*</span></Label>
-                        <NepaliDateInput v-model="settleForm.date" required />
-                        <p v-if="settleForm.errors.date" class="mt-1 text-sm text-danger">{{ settleForm.errors.date }}</p>
-                    </div>
-                    <div>
-                        <Label class="mb-1">Amount <span class="text-danger">*</span></Label>
-                        <Input v-model="settleForm.amount" type="text" inputmode="decimal" required />
-                        <p v-if="settleForm.errors.amount" class="mt-1 text-sm text-danger">{{ settleForm.errors.amount }}</p>
-                    </div>
-                    <div>
-                        <Label class="mb-1">Paid by <span class="text-danger">*</span></Label>
-                        <Select :model-value="settleForm.payment_mode" :options="settleModeOptions" @update:model-value="(v) => (settleForm.payment_mode = v)" />
-                    </div>
-                    <div v-if="settleForm.payment_mode === 'bank'">
-                        <Label class="mb-1">Bank account <span class="text-danger">*</span></Label>
-                        <Combobox :model-value="settleForm.bank_account_id" :options="settleAccountOptions" placeholder="Select bank account" @update:model-value="(v) => (settleForm.bank_account_id = v)" />
-                        <p v-if="settleForm.errors.bank_account_id" class="mt-1 text-sm text-danger">{{ settleForm.errors.bank_account_id }}</p>
-                    </div>
-                    <div>
-                        <Label class="mb-1">Reference</Label>
-                        <Input v-model="settleForm.reference_number" type="text" maxlength="255" />
-                    </div>
-                </div>
-                <div v-if="liveSettlements(settling).length">
-                    <h4 class="border-b-[1.5px] border-border pb-1 text-sm font-bold text-text-strong">Payments made</h4>
-                    <ul class="mt-2 flex flex-col gap-2 text-sm">
-                        <li v-for="settlement in liveSettlements(settling)" :key="settlement.id" class="flex items-center justify-between gap-2">
-                            <span>{{ formatBsDate(settlement.date) }} - Rs. {{ formatMoney(settlement.amount) }} ({{ settlement.payment_mode }})</span>
-                            <Button v-if="canCancelSettlement" variant="secondary" tone="neutral" type="button" @click="openCancelSettlement(settlement)">Cancel</Button>
-                        </li>
-                    </ul>
-                </div>
-            </div>
-
-            <template #footer>
-                <Button variant="secondary" tone="neutral" type="button" @click="settling = null">Close</Button>
-                <Button
-                    v-if="settling && Number(settling.outstanding_amount) > 0"
-                    variant="primary"
-                    tone="purple"
-                    type="button"
-                    :loading="settleForm.processing"
-                    @click="submitSettle"
-                >
-                    Post settlement
-                </Button>
-            </template>
-        </Modal>
+        <CapitalPurchaseSettleModal
+            :capital-purchase="settling"
+            :accounts="accounts"
+            :can-cancel-settlement="canCancelSettlement"
+            :branch-options="branchOptions"
+            :default-branch-id="defaultBranchId"
+            @close="settling = null"
+            @cancel-settlement="openCancelSettlement"
+        />
 
         <Modal
             :open="!!cancellingSettlement"

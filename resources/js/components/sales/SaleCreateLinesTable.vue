@@ -6,6 +6,7 @@ import Select from '@/components/ui/Select.vue';
 import Combobox from '@/components/ui/Combobox.vue';
 import { formatMoney, formatQuantity } from '@/lib/money';
 import { stockStatus, toggleDiscountTypeOn, unitOptionsFor } from '@/lib/saleCreate';
+import { useStockScopeLabel } from '@/composables/useStockScopeLabel';
 
 // The lines already committed to the bill. selectItem/selectUnit/applyMrp are
 // the generic line actions from useSaleCreateItems(); `lines` and `errors`
@@ -24,6 +25,9 @@ const props = defineProps({
 });
 
 defineEmits(['remove']);
+
+// "Stock (this branch):" in a multi-branch company, plain "Stock:" otherwise.
+const { withStockScope } = useStockScopeLabel();
 
 const lineGridColumns = computed(() =>
     props.showLineExtras
@@ -131,7 +135,7 @@ function onLineEnter(index, field) {
                             {{ itemsById[line.item_id]?.is_vatable ? `VAT ${effectiveVatRate}%` : 'Non taxable' }}
                         </span>
                         <span class="text-xs text-text-muted">
-                            Stock: {{ formatQuantity(itemsById[line.item_id].current_stock) }} {{ itemsById[line.item_id].unit }}
+                            {{ withStockScope('Stock') }}: {{ formatQuantity(itemsById[line.item_id].current_stock) }} {{ itemsById[line.item_id].unit }}
                             <template v-if="line.item_unit_id">
                                 (1 {{ itemsById[line.item_id].units.find((u) => u.id === line.item_unit_id)?.name }} =
                                 {{ formatQuantity(itemsById[line.item_id].units.find((u) => u.id === line.item_unit_id)?.conversion_factor ?? 1) }}

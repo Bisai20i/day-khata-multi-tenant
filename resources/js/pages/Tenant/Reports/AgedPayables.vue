@@ -3,6 +3,7 @@ import { computed, ref } from 'vue';
 import { router } from '@inertiajs/vue3';
 import AppLayout from '@/layouts/AppLayout.vue';
 import { useLayoutChrome } from '@/composables/useLayoutChrome';
+import { useAreaReportFilter } from '@/composables/useAreaReportFilter';
 import Card from '@/components/ui/Card.vue';
 import NepaliDateInput from '@/components/ui/NepaliDateInput.vue';
 import Select from '@/components/ui/Select.vue';
@@ -10,8 +11,13 @@ import Button from '@/components/ui/Button.vue';
 import PageHeader from '@/components/ui/PageHeader.vue';
 import DataTable from '@/components/ui/DataTable.vue';
 import Label from '@/components/ui/Label.vue';
+import AreaFilterBar from '@/components/parties/AreaFilterBar.vue';
+import AreaGroupedTable from '@/components/parties/AreaGroupedTable.vue';
 import { formatMoney } from '@/lib/money';
 import { formatBsDate } from '@/lib/format';
+import { useBranchReportFilter } from '@/composables/useBranchReportFilter';
+import BranchReportFilter from '@/components/branch/BranchReportFilter.vue';
+import BranchReportNotes from '@/components/branch/BranchReportNotes.vue';
 
 defineOptions({ layout: AppLayout });
 
@@ -31,12 +37,21 @@ const props = defineProps({
     stores: { type: Array, default: () => [] },
     asOf: { type: String, required: true },
     storeId: { type: [Number, null], default: null },
+    areas: { type: Array, default: () => [] },
+    area: { type: String, default: '' },
+    areaLabel: { type: [String, null], default: null },
+    groupByArea: { type: Boolean, default: false },
+    groups: { type: [Array, null], default: null },
+    // Branch filter; null when the company has no branches.
+    branchReport: { type: [Object, null], default: null },
 });
 
 useLayoutChrome('Aged Payables');
 
 const asOf = ref(props.asOf);
 const storeId = ref(props.storeId);
+const areaFilter = useAreaReportFilter(props);
+const branchFilter = useBranchReportFilter(() => props.branchReport);
 
 const storeOptions = computed(() => [
     { value: null, label: 'All stores' },
@@ -48,13 +63,12 @@ const asOfLabel = computed(() => `As of BS ${formatBsDate(props.asOf)} (AD ${pro
 function applyFilter() {
     router.get(
         window.location.pathname,
-        { as_of: asOf.value, store_id: storeId.value ?? undefined },
+        { as_of: asOf.value, store_id: storeId.value ?? undefined, ...areaFilter.toQuery(), ...branchFilter.toQuery() },
         { preserveState: true, preserveScroll: true },
     );
 }
 
-const columns = [
-    { id: 'party', header: 'Supplier', numeric: false, cell: ({ row }) => row.original.party },
+const amountColumns = [
     { id: 'opening', header: 'Opening / unallocated', numeric: true, cell: ({ row }) => formatMoney(row.original.opening) },
     { id: 'current', header: 'Current (0-30)', numeric: true, cell: ({ row }) => formatMoney(row.original.current) },
     { id: 'days31_60', header: '31-60 days overdue', numeric: true, cell: ({ row }) => formatMoney(row.original.days31_60) },
@@ -62,6 +76,19 @@ const columns = [
     { id: 'days90Plus', header: 'Over 90 days overdue', numeric: true, cell: ({ row }) => formatMoney(row.original.days90Plus) },
     { id: 'total', header: 'Total', numeric: true, cell: ({ row }) => formatMoney(row.original.total) },
 ];
+const partyColumn = { id: 'party', header: 'Supplier', numeric: false, cell: ({ row }) => row.original.party };
+const areaColumn = { id: 'area', header: 'Area', numeric: false, cell: ({ row }) => row.original.area ?? '-' };
+
+// The flat list shows the area on each row; the grouped layout shows it as the heading instead.
+const flatColumns = [partyColumn, areaColumn, ...amountColumns];
+const groupedColumns = [partyColumn, ...amountColumns];
+const subtotalColumns = amountColumns.map((column) => column.id);
+
+const emptyMessage = computed(() =>
+    props.areaLabel
+        ? `Nothing outstanding for "${props.areaLabel}" as of this date. Try a later date.`
+        : 'Nothing outstanding as of this date. Try a later date.',
+);
 </script>
 
 <template>
@@ -81,13 +108,35 @@ const columns = [
                     <Label class="mb-1">Store</Label>
                     <Select v-model="storeId" :options="storeOptions" />
                 </div>
+                <AreaFilterBar
+                    v-model:area="areaFilter.area.value"
+                    v-model:group-by-area="areaFilter.groupByArea.value"
+                    :areas="areas"
+                    id-prefix="aged-payables"
+                />
+                <BranchReportFilter
+                    v-if="branchReport"
+                    v-model:choice="branchFilter.choice.value"
+                    :report="branchReport"
+                    id-prefix="aged-payables-branch"
+                    @change="applyFilter"
+                />
                 <Button variant="primary" tone="purple" @click="applyFilter">Generate report</Button>
             </div>
             <p class="mt-2 text-[12px] text-text-muted">Showing report {{ asOfLabel.charAt(0).toLowerCase() + asOfLabel.slice(1) }}</p>
+            <p v-if="areaLabel" class="mt-1 text-xs font-semibold text-text-strong">Area: {{ areaLabel }}</p>
+            <BranchReportNotes v-if="branchReport" :report="branchReport" />
         </Card>
 
         <Card variant="panel">
-            <DataTable :columns="columns" :data="rows" :page-size="25" empty-message="Nothing outstanding as of this date. Try a later date." />
+            <AreaGroupedTable
+                v-if="groupByArea"
+                :columns="groupedColumns"
+                :groups="groups ?? []"
+                :subtotal-columns="subtotalColumns"
+                :empty-message="emptyMessage"
+            />
+            <DataTable v-else :columns="flatColumns" :data="rows" :page-size="25" :empty-message="emptyMessage" />
 
             <div class="mt-3 flex flex-wrap justify-end gap-6 border-t-[1.5px] border-border pt-3 text-[12.5px]">
                 <div><span class="text-text-muted">Opening:</span> <span class="font-semibold">{{ formatMoney(totals.opening) }}</span></div>
@@ -106,7 +155,7 @@ const columns = [
                 same fiscal year and the date is today (the list shows closing balances). Invoice balances use
                 every payment recorded so far, so for a past date part of the difference lands in Opening / unallocated.
                 When a store is selected the ledger balance cannot be split by store, so the total covers
-                open invoices only.
+                open invoices only. Choosing an area keeps only the suppliers assigned to it.
             </p>
         </Card>
     </div>

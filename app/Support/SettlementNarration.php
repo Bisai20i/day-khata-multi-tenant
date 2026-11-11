@@ -9,7 +9,7 @@ namespace App\Support;
  *
  * Every sale, sales return and receipt voucher line is given this narration
  * (see Sale::post(), SalesReturn::postCreditNote()/postRefund() and
- * Receipt::post()), so a customer's ledger reads "SL-42 - Cash Settlement"
+ * Receipt::post()), so a customer's ledger reads "S-42 - Cash Settlement"
  * instead of a bare "Sale total"/"Settlement", telling a sale from a receipt
  * and cash from bank apart at a glance. T13 uses these same two methods for
  * purchases in parallel, so the signatures here are shared and fixed -
@@ -33,7 +33,7 @@ final class SettlementNarration
     }
 
     /**
-     * "{document number} - {forMode}", e.g. "SL-42 - Cash Settlement".
+     * "{document number} - {forMode}", e.g. "S-42 - Cash Settlement".
      */
     public static function line(string $documentNumber, ?string $mode): string
     {

@@ -11,7 +11,7 @@ class CustomerSampleExport implements FromCollection, WithHeadings, ShouldAutoSi
 {
     public function headings(): array
     {
-        return ['name', 'address', 'mobile_no', 'email', 'tpin', 'citizenship'];
+        return ['name', 'address', 'mobile_no', 'email', 'tpin', 'citizenship', 'area'];
     }
 
     public function collection(): Collection
@@ -24,6 +24,7 @@ class CustomerSampleExport implements FromCollection, WithHeadings, ShouldAutoSi
                 'email' => 'info@acmetrading.com',
                 'tpin' => '600123456',
                 'citizenship' => '',
+                'area' => '',
             ],
             [
                 'name' => 'Ram Sharma',
@@ -32,6 +33,7 @@ class CustomerSampleExport implements FromCollection, WithHeadings, ShouldAutoSi
                 'email' => 'ram@example.com',
                 'tpin' => '',
                 'citizenship' => '27-01-72-12345',
+                'area' => '',
             ],
         ]);
     }

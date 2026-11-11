@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Tenant\Sales;
 
 use App\Enums\FiscalYearStatus;
 use App\Exports\SalesExport;
+use App\Http\Controllers\Concerns\OffersDocumentBranch;
 use App\Http\Controllers\Controller;
 use App\Models\Account;
 use App\Models\Agent;
@@ -14,9 +15,14 @@ use App\Models\Item;
 use App\Models\PrintLog;
 use App\Models\Sale;
 use App\Models\SaleNoteTemplate;
-use App\Models\Store;
 use App\Support\AmountInWords;
 use App\Support\Billing\BillingException;
+use App\Support\Billing\RoundOffAccountMissing;
+use App\Support\Billing\RoundOffPosting;
+use App\Support\Branches\BranchAccounts;
+use App\Support\Branches\BranchFormOptions;
+use App\Support\Branches\BranchListFilter;
+use App\Support\Branches\BranchStockDisplay;
 use App\Support\Money\Money;
 use App\Support\NepaliCalendar;
 use Barryvdh\DomPDF\Facade\Pdf;
@@ -38,13 +44,15 @@ use Maatwebsite\Excel\Facades\Excel;
 
 class SaleController extends Controller
 {
+    use OffersDocumentBranch;
+
     /**
      * Party ledgers (customers, suppliers, agents) live under these
      * subgroups. They are perfectly valid accounts, but never a bank, cash or
      * TDS account, so the settlement pickers exclude them - see
      * settlementAccounts().
      */
-    private const PARTY_SUBGROUPS = ['Sundry Debtors', 'Sundry Creditors', 'Sales Agents'];
+    public const PARTY_SUBGROUPS = ['Sundry Debtors', 'Sundry Creditors', 'Sales Agents'];
 
     /**
      * Sortable columns for the list (audit section 4 polish, "list ...
@@ -80,9 +88,14 @@ class SaleController extends Controller
     {
         $filters = $this->listFilters($request);
         $settings = CompanySetting::current();
+        $stockDisplay = BranchStockDisplay::fromRequest($request);
 
-        $sales = $this->filteredSalesQuery($filters)
+        // Branches (plan 12, BR12): the list, its totals row and the export
+        // follow the top-bar switcher (filteredSalesQuery()); each row names
+        // its branch only when several branches can appear.
+        $sales = $this->filteredSalesQuery($filters, $request)
             ->with(['customer:id,name', 'agent:id,name', 'lines.item:id,name,unit'])
+            ->when(BranchListFilter::columnVisible($request), fn ($query) => $query->with('branch:id,name,code'))
             ->paginate(25)
             ->withQueryString();
 
@@ -93,12 +106,15 @@ class SaleController extends Controller
             // lists (never a page's worth of client-side addition), so the
             // totals row always ties to what is actually on screen (audit
             // section 4 polish, "list ... totals row").
-            'totals' => $this->filteredTotals($filters),
+            'totals' => $this->filteredTotals($filters, $request),
             'customers' => Customer::query()->orderBy('name')->get(['id', 'name', 'mobile_no']),
-            'items' => $this->itemsForPicker(),
+            'items' => $this->itemsForPicker($stockDisplay),
+            // What the picker's stock figures cover; null when not
+            // multi-branch.
+            'stockScope' => $stockDisplay->scope(),
             'bankAccounts' => $this->settlementAccounts(),
             'tdsAccounts' => $this->settlementAccounts(),
-            'stores' => Store::where('is_active', true)->orderBy('name')->get(['id', 'name']),
+            'stores' => $this->branchStoreOptions($request),
             'agents' => Agent::query()->where('is_active', true)->orderBy('name')->get(['id', 'name', 'commission_rate']),
             'noteTemplates' => SaleNoteTemplate::query()->orderBy('text')->get(['id', 'text']),
             'walkInCustomerId' => Customer::walkIn()?->id,
@@ -106,7 +122,10 @@ class SaleController extends Controller
                 'default_vat_rate' => $settings->default_vat_rate,
                 'default_store_id' => $settings->default_store_id,
                 'active_invoice_type' => $settings->active_invoice_type ?? 'full',
+                'round_off_enabled' => $settings->round_off_enabled,
+                'round_off_precision' => $settings->round_off_precision,
             ],
+            ...BranchFormOptions::props($request),
         ]);
     }
 
@@ -132,14 +151,18 @@ class SaleController extends Controller
     }
 
     /**
+     * The list's query, shared by the page, its totals row and the export so
+     * the three always agree. BranchListFilter narrows it to the switcher's
+     * branch (no predicate at all for a company that is not multi-branch).
+     *
      * @param  array{from: ?string, to: ?string, customer_id: ?int, search: ?string, sort: string, sort_dir: string}  $filters
      * @return Builder<Sale>
      */
-    private function filteredSalesQuery(array $filters): Builder
+    private function filteredSalesQuery(array $filters, Request $request): Builder
     {
         $sortColumn = self::SORTABLE_COLUMNS[$filters['sort']];
 
-        return Sale::query()
+        return BranchListFilter::apply(Sale::query(), $request)
             ->when($filters['from'], fn ($query, string $from) => $query->whereDate('date', '>=', $from))
             ->when($filters['to'], fn ($query, string $to) => $query->whereDate('date', '<=', $to))
             ->when($filters['customer_id'], fn ($query, int $customerId) => $query->where('customer_id', $customerId))
@@ -152,13 +175,14 @@ class SaleController extends Controller
      * @param  array{from: ?string, to: ?string, customer_id: ?int, search: ?string, sort: string, sort_dir: string}  $filters
      * @return array<string, string>
      */
-    private function filteredTotals(array $filters): array
+    private function filteredTotals(array $filters, Request $request): array
     {
         // Cancelled invoices stay in the list but never move the totals row.
-        $row = $this->filteredSalesQuery($filters)->reorder()->where('status', '!=', 'cancelled')->toBase()->selectRaw(
+        $row = $this->filteredSalesQuery($filters, $request)->reorder()->where('status', '!=', 'cancelled')->toBase()->selectRaw(
             'COALESCE(SUM(taxable_amount), 0) as taxable_amount, '
             .'COALESCE(SUM(nontaxable_amount), 0) as nontaxable_amount, '
             .'COALESCE(SUM(vat_amount), 0) as vat_amount, '
+            .'COALESCE(SUM(round_off), 0) as round_off, '
             .'COALESCE(SUM(total), 0) as total'
         )->first();
 
@@ -166,6 +190,7 @@ class SaleController extends Controller
             'taxable_amount' => Money::round($row->taxable_amount)->toString(),
             'nontaxable_amount' => Money::round($row->nontaxable_amount)->toString(),
             'vat_amount' => Money::round($row->vat_amount)->toString(),
+            'round_off' => Money::round($row->round_off)->toString(),
             'total' => Money::round($row->total)->toString(),
         ];
     }
@@ -181,7 +206,7 @@ class SaleController extends Controller
         $filters = $this->listFilters($request);
         $extension = $request->query('format') === 'csv' ? 'csv' : 'xlsx';
 
-        $rows = $this->filteredSalesQuery($filters)
+        $rows = $this->filteredSalesQuery($filters, $request)
             ->with(['customer:id,name', 'agent:id,name'])
             ->get()
             ->map(fn (Sale $sale): array => [
@@ -195,10 +220,11 @@ class SaleController extends Controller
                 'taxable_amount' => $sale->taxable_amount,
                 'nontaxable_amount' => $sale->nontaxable_amount,
                 'vat_amount' => $sale->vat_amount,
+                'round_off' => $sale->round_off,
                 'total' => $sale->total,
             ]);
 
-        return Excel::download(new SalesExport($rows, $this->filteredTotals($filters)), "sales.{$extension}");
+        return Excel::download(new SalesExport($rows, $this->filteredTotals($filters, $request)), "sales.{$extension}");
     }
 
     /**
@@ -234,17 +260,19 @@ class SaleController extends Controller
      * Stock here is the cross-store total, deliberately identical to
      * PosController's tiles (Sale::post() still enforces the per-store check
      * at posting time) so the same item never shows two different numbers on
-     * two screens.
+     * two screens. In a multi-branch company both narrow the same way, to
+     * the stores BranchStockDisplay covers (BR22 C1), so a restricted user
+     * never sees another branch's stock.
      *
      * @return Collection<int, Item>
      */
-    private function itemsForPicker(): Collection
+    private function itemsForPicker(BranchStockDisplay $stockDisplay): Collection
     {
         $items = Item::query()->where('is_active', true)->orderBy('name')
             ->with(['units' => fn ($q) => $q->where('is_active', true)->orderBy('name')])
             ->get(['id', 'name', 'unit', 'is_vatable', 'is_stockable', 'barcode', 'sale_rate', 'hs_code', 'min_stock']);
 
-        $stock = Item::currentStockByItem($items->pluck('id')->all());
+        $stock = Item::currentStockByItem($items->pluck('id')->all(), $stockDisplay->storeIds());
 
         return $items->map(function (Item $item) use ($stock) {
             $item->current_stock = $item->is_stockable
@@ -284,7 +312,10 @@ class SaleController extends Controller
                 $query->whereHas('group.accountHead', fn (Builder $head) => $head->where('is_profit_and_loss', false))
                     ->orWhereHas('subgroup.accountGroup.accountHead', fn (Builder $head) => $head->where('is_profit_and_loss', false));
             })
-            ->whereDoesntHave('subgroup', fn (Builder $subgroup) => $subgroup->whereIn('name', self::PARTY_SUBGROUPS));
+            ->whereDoesntHave('subgroup', fn (Builder $subgroup) => $subgroup->whereIn('name', self::PARTY_SUBGROUPS))
+            // Inter-Branch Clearing is a balance-sheet account only the system
+            // posts (BranchAccounts, invariant I3), never a settlement account.
+            ->where(fn (Builder $query) => $query->whereNull('code')->orWhereNotIn('code', BranchAccounts::CONTROL_CODES));
     }
 
     public function store(Request $request): RedirectResponse
@@ -308,16 +339,29 @@ class SaleController extends Controller
                 ]);
             }
 
+            // A negative Round Off that takes the bill to zero or below is the
+            // Round Off field's problem, not a line's.
+            if ($e->reason === BillingException::REASON_TOTAL_NOT_POSITIVE && RoundOffPosting::isNegativeInput($data['round_off'] ?? null)) {
+                throw ValidationException::withMessages(['round_off' => 'Round off cannot take the bill total to zero or below.']);
+            }
+
             return back()->withErrors(['lines' => $e->getMessage()])->withInput();
+        } catch (RoundOffAccountMissing $e) {
+            throw ValidationException::withMessages(['round_off' => $e->getMessage()]);
         } catch (InvalidArgumentException $e) {
-            return back()->withErrors(['lines' => $e->getMessage()])->withInput();
+            // A refused branch belongs on the branch picker and a store of
+            // another branch on the store field (plan 12, BR12); everything
+            // else stays under `lines` as before.
+            return back()->withErrors([BranchFormOptions::errorField($e, 'lines', 'branch_id', 'store_id') => $e->getMessage()])->withInput();
         } catch (AuthorizationException $e) {
             // The fiscal-year guard now lives inside JournalVoucher::write()
             // (C4), and it raises an AuthorizationException - not an
             // InvalidArgumentException - when someone who is not an admin
             // posts into a year that was reopened for correction. Shown on the
             // date field, since the date is what put the bill in that year.
-            return back()->withErrors(['date' => $e->getMessage()])->withInput();
+            // The voucher's own branch check (I6) also raises one; that is the
+            // branch picker's problem.
+            return back()->withErrors([BranchFormOptions::errorField($e, 'date') => $e->getMessage()])->withInput();
         }
 
         // C11: the posted document identifies itself in the flash, so the page
@@ -374,6 +418,7 @@ class SaleController extends Controller
             'nontaxable_amount' => $sale->nontaxable_amount,
             'vat_amount' => $sale->vat_amount,
             'tds_amount' => $sale->tds_amount,
+            'round_off' => $sale->round_off,
             'total' => $sale->total,
             'cash_settled' => $cashSettled->toString(),
             'bank_settled' => $bankSettled->toString(),
@@ -415,12 +460,20 @@ class SaleController extends Controller
             'bank_account_id' => ['nullable', 'integer', $settlementAccount],
             // Retired stores and items cannot take new documents (flags G-13).
             'store_id' => ['nullable', 'integer', Rule::exists('stores', 'id')->where('is_active', true)],
+            // Sent by the branch picker of a multi-branch company (BR12),
+            // absent otherwise: Sale::post() falls back to the store's
+            // branch, then the user's posting branch, and refuses a store of
+            // another branch or a branch the user cannot use.
+            'branch_id' => ['nullable', 'integer', 'exists:branches,id'],
             'discount' => ['nullable', 'decimal:0,2', 'min:0'],
             'discount_type' => ['nullable', 'in:percentage,flat'],
             'cash_amount' => ['nullable', 'decimal:0,2', 'min:0'],
             'bank_amount' => ['nullable', 'decimal:0,2', 'min:0'],
             'tds_account_id' => ['nullable', 'integer', $settlementAccount],
             'tds_amount' => ['nullable', 'decimal:0,2', 'min:0'],
+            // Signed (+ adds to the bill, - reduces it), so deliberately no
+            // `min`. Sale::post() zeroes it unless the tenant enabled Round Off.
+            'round_off' => ['nullable', 'numeric', 'decimal:0,2', 'between:-'.CompanySetting::ROUND_OFF_LIMIT.','.CompanySetting::ROUND_OFF_LIMIT],
             // A commission needs someone to pay it to (flags G-15).
             'agent_id' => ['nullable', 'exists:agents,id', Rule::requiredIf(fn (): bool => is_numeric(request()->input('commission_amount')) && BigDecimal::of((string) request()->input('commission_amount'))->isPositive())],
             'commission_amount' => ['nullable', 'decimal:0,2', 'min:0'],
@@ -505,6 +558,8 @@ class SaleController extends Controller
             'dateBs' => NepaliCalendar::formatBs($sale->date),
             'fiscalYearName' => $sale->fiscalYear?->name,
             'amountInWords' => AmountInWords::rupees(Money::of($sale->total)),
+            // Multi-branch only; null keeps a single-branch bill unchanged.
+            ...$this->printBranch($request, $sale),
         ];
 
         $rendered = [];
@@ -535,7 +590,7 @@ class SaleController extends Controller
     {
         $data = $request->validate(Arr::only($this->storeRules(), [
             'customer_id', 'invoice_type', 'chalani_number', 'date', 'discount', 'discount_type',
-            'cash_amount', 'bank_amount', 'tds_amount', 'narration',
+            'cash_amount', 'bank_amount', 'tds_amount', 'round_off', 'narration',
             'lines', 'lines.*.item_id', 'lines.*.item_unit_id', 'lines.*.quantity', 'lines.*.rate',
             'lines.*.discount', 'lines.*.discount_type', 'lines.*.bonus_quantity',
         ]) + ['payment_mode' => ['nullable', 'in:cash,bank,partial,credit']]);

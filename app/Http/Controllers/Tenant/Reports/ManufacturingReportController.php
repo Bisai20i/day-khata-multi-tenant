@@ -7,6 +7,7 @@ use App\Http\Controllers\Controller;
 use App\Models\CompanySetting;
 use App\Models\FiscalYear;
 use App\Models\Item;
+use App\Support\Branches\BranchFilter;
 use App\Support\Manufacturing\ManufacturingReports;
 use App\Support\Money\Money;
 use App\Support\Money\Quantity;
@@ -31,6 +32,12 @@ use Symfony\Component\HttpFoundation\BinaryFileResponse;
  * The date range defaults to the current fiscal year, like the Item Ledger.
  * The schedules read GL balances from the fiscal year that contains the
  * range's end date.
+ *
+ * Branches (plan 12, BR15): every page, PDF and export takes BranchFilter
+ * (`branch`, `branches[]`) and passes it to ManufacturingReports, so the
+ * Income Statement and Balance Sheet can link here with their own branch
+ * params. Pages get `branchReport` (null when not multi-branch); the PDF
+ * gets `branchFilterLabel` and the Excel export a label row.
  */
 class ManufacturingReportController extends Controller
 {
@@ -41,14 +48,16 @@ class ManufacturingReportController extends Controller
     public function stockLedger(Request $request): Response
     {
         [$from, $to] = $this->range($request);
+        $filter = BranchFilter::fromRequest($request);
 
         return Inertia::render('Tenant/Reports/Manufacturing/StockLedger', [
-            'ledger' => $this->ledgerFor($request, $from, $to),
+            'ledger' => $this->ledgerFor($request, $from, $to, $filter),
             'class' => $this->ledgerClass($request),
             'itemId' => $this->itemId($request),
             'items' => Item::query()->whereIn('inventory_class', ['raw_material', 'finished_good'])->orderBy('name')->get(['id', 'name', 'inventory_class']),
             'from' => $from,
             'to' => $to,
+            'branchReport' => $filter->payload(),
         ]);
     }
 
@@ -56,10 +65,14 @@ class ManufacturingReportController extends Controller
     {
         [, $to] = $this->range($request);
         $fiscalYear = $this->fiscalYear($to);
+        $filter = BranchFilter::fromRequest($request);
 
         return Inertia::render('Tenant/Reports/Manufacturing/InventorySchedule', [
-            'schedule' => $this->reports->inventorySchedule($fiscalYear, $to),
+            'schedule' => $this->reports->inventorySchedule($fiscalYear, $to, $filter),
             'asOf' => $to,
+            // A Balance Sheet note: for part of the company a management
+            // report, like the branch Balance Sheet it explains.
+            'branchReport' => $filter->payload(isStatement: true),
         ]);
     }
 
@@ -67,11 +80,13 @@ class ManufacturingReportController extends Controller
     {
         [$from, $to] = $this->range($request);
         $fiscalYear = $this->fiscalYear($to);
+        $filter = BranchFilter::fromRequest($request);
 
         return Inertia::render('Tenant/Reports/Manufacturing/CogsSchedule', [
-            'schedule' => $this->reports->cogsSchedule($fiscalYear, $from, $to),
+            'schedule' => $this->reports->cogsSchedule($fiscalYear, $from, $to, $filter),
             'from' => $from,
             'to' => $to,
+            'branchReport' => $filter->payload(isStatement: true),
         ]);
     }
 
@@ -79,16 +94,19 @@ class ManufacturingReportController extends Controller
     {
         [, $to] = $this->range($request);
         $fiscalYear = $this->fiscalYear($to);
+        $filter = BranchFilter::fromRequest($request);
 
         return Inertia::render('Tenant/Reports/Manufacturing/Reconciliation', [
-            'reconciliation' => $this->reports->reconciliation($fiscalYear, $to),
+            'reconciliation' => $this->reports->reconciliation($fiscalYear, $to, $filter),
             'asOf' => $to,
+            'branchReport' => $filter->payload(),
         ]);
     }
 
     public function print(Request $request, string $report): HttpResponse
     {
-        $document = $this->document($request, $report);
+        $filter = BranchFilter::fromRequest($request);
+        $document = $this->document($request, $report, $filter);
 
         $pdf = Pdf::loadView('pdf.manufacturing-report', [
             'title' => $document['title'],
@@ -102,6 +120,8 @@ class ManufacturingReportController extends Controller
             'headings' => $document['headings'],
             'numericColumns' => $document['numeric'],
             'rows' => $document['rows'],
+            // Printed from BR16 on; null when not multi-branch.
+            'branchFilterLabel' => $this->branchFilterLabel($filter),
         ]);
 
         return $pdf->stream("manufacturing-{$report}.pdf");
@@ -109,12 +129,22 @@ class ManufacturingReportController extends Controller
 
     public function export(Request $request, string $report): BinaryFileResponse
     {
-        $document = $this->document($request, $report);
+        $filter = BranchFilter::fromRequest($request);
+        $document = $this->document($request, $report, $filter);
 
         return Excel::download(
-            new ManufacturingReportExport($document['headings'], $document['rows'], $document['numeric']),
+            new ManufacturingReportExport($document['headings'], $document['rows'], $document['numeric'], $this->branchFilterLabel($filter)),
             "manufacturing-{$report}.xlsx",
         );
+    }
+
+    /**
+     * The branch label for the PDF and Excel header, or null for a tenant
+     * that is not multi-branch.
+     */
+    private function branchFilterLabel(BranchFilter $filter): ?string
+    {
+        return $filter->isActive() ? $filter->label() : null;
     }
 
     /**
@@ -163,7 +193,7 @@ class ManufacturingReportController extends Controller
     /**
      * @return array<string, mixed>
      */
-    private function ledgerFor(Request $request, string $from, string $to): array
+    private function ledgerFor(Request $request, string $from, string $to, BranchFilter $filter): array
     {
         $class = $this->ledgerClass($request);
 
@@ -172,6 +202,7 @@ class ManufacturingReportController extends Controller
             $from,
             $to,
             $class === ManufacturingReports::CLASS_WIP ? null : $this->itemId($request),
+            $filter,
         );
     }
 
@@ -183,26 +214,26 @@ class ManufacturingReportController extends Controller
      *
      * @return array{title: string, from: string, to: string, headings: array<int, string>, numeric: array<int, int>, rows: array<int, array{cells: array<int, mixed>, style: string}>}
      */
-    private function document(Request $request, string $report): array
+    private function document(Request $request, string $report, BranchFilter $filter): array
     {
         abort_unless(in_array($report, self::REPORTS, true), 404);
 
         [$from, $to] = $this->range($request);
 
         return match ($report) {
-            'stock-ledger' => $this->stockLedgerDocument($request, $from, $to),
-            'inventory-schedule' => $this->scheduleDocument($from, $to),
-            'cogs-schedule' => $this->cogsDocument($from, $to),
-            'reconciliation' => $this->reconciliationDocument($from, $to),
+            'stock-ledger' => $this->stockLedgerDocument($request, $from, $to, $filter),
+            'inventory-schedule' => $this->scheduleDocument($from, $to, $filter),
+            'cogs-schedule' => $this->cogsDocument($from, $to, $filter),
+            'reconciliation' => $this->reconciliationDocument($from, $to, $filter),
         };
     }
 
     /**
      * @return array{title: string, from: string, to: string, headings: array<int, string>, numeric: array<int, int>, rows: array<int, array{cells: array<int, mixed>, style: string}>}
      */
-    private function stockLedgerDocument(Request $request, string $from, string $to): array
+    private function stockLedgerDocument(Request $request, string $from, string $to, BranchFilter $filter): array
     {
-        $ledger = $this->ledgerFor($request, $from, $to);
+        $ledger = $this->ledgerFor($request, $from, $to, $filter);
         $quantity = fn (?string $value) => $value === null ? null : Quantity::of($value);
         $money = fn (?string $value) => $value === null ? null : Money::of($value);
 
@@ -245,9 +276,9 @@ class ManufacturingReportController extends Controller
     /**
      * @return array{title: string, from: string, to: string, headings: array<int, string>, numeric: array<int, int>, rows: array<int, array{cells: array<int, mixed>, style: string}>}
      */
-    private function scheduleDocument(string $from, string $to): array
+    private function scheduleDocument(string $from, string $to, BranchFilter $filter): array
     {
-        $schedule = $this->reports->inventorySchedule($this->fiscalYear($to), $to);
+        $schedule = $this->reports->inventorySchedule($this->fiscalYear($to), $to, $filter);
         $money = fn (?string $value) => $value === null ? null : Money::of($value);
 
         $rows = array_map(fn (array $row) => [
@@ -270,9 +301,9 @@ class ManufacturingReportController extends Controller
     /**
      * @return array{title: string, from: string, to: string, headings: array<int, string>, numeric: array<int, int>, rows: array<int, array{cells: array<int, mixed>, style: string}>}
      */
-    private function cogsDocument(string $from, string $to): array
+    private function cogsDocument(string $from, string $to, BranchFilter $filter): array
     {
-        $schedule = $this->reports->cogsSchedule($this->fiscalYear($to), $from, $to);
+        $schedule = $this->reports->cogsSchedule($this->fiscalYear($to), $from, $to, $filter);
 
         $rows = array_map(fn (array $line) => [
             'cells' => [$line['label'], Money::of($line['amount'])],
@@ -292,9 +323,9 @@ class ManufacturingReportController extends Controller
     /**
      * @return array{title: string, from: string, to: string, headings: array<int, string>, numeric: array<int, int>, rows: array<int, array{cells: array<int, mixed>, style: string}>}
      */
-    private function reconciliationDocument(string $from, string $to): array
+    private function reconciliationDocument(string $from, string $to, BranchFilter $filter): array
     {
-        $reconciliation = $this->reports->reconciliation($this->fiscalYear($to), $to);
+        $reconciliation = $this->reports->reconciliation($this->fiscalYear($to), $to, $filter);
 
         $rows = array_map(fn (array $row) => [
             'cells' => [$row['label'], Money::of($row['gl']), Money::of($row['subledger']), Money::of($row['difference'])],

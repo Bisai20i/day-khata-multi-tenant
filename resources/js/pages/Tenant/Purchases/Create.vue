@@ -1,6 +1,6 @@
 <script setup>
 import { computed, ref, watch } from 'vue';
-import { useForm } from '@inertiajs/vue3';
+import { useForm, usePage } from '@inertiajs/vue3';
 import { Plus } from '@lucide/vue';
 import Card from '@/components/ui/Card.vue';
 import Button from '@/components/ui/Button.vue';
@@ -13,6 +13,8 @@ import PurchaseCreatePaymentNotes from '@/components/purchases/PurchaseCreatePay
 import PurchaseCreateMoreOptions from '@/components/purchases/PurchaseCreateMoreOptions.vue';
 import PurchaseCreateTotalsBar from '@/components/purchases/PurchaseCreateTotalsBar.vue';
 import PurchaseCreateModals from '@/components/purchases/PurchaseCreateModals.vue';
+import BranchSelect from '@/components/branch/BranchSelect.vue';
+import { useBranchField } from '@/composables/useBranchField';
 import { useConfirm } from '@/composables/useConfirm';
 import { usePermissions } from '@/composables/usePermissions';
 import { usePurchaseCreatePreview } from '@/composables/usePurchaseCreatePreview';
@@ -57,9 +59,40 @@ const props = defineProps({
     // (see usePurchaseCreateQuickAdd()) - restores the in-progress draft
     // that would otherwise be lost when Index re-mounts this component.
     initialDraft: { type: Object, default: null },
+    // Branch picker (BranchFormOptions::props() on the server, plan 12).
+    branchOptions: { type: Array, default: () => [] },
+    defaultBranchId: { type: Number, default: null },
 });
 
 const emit = defineEmits(['cancel', 'posted']);
+
+// Branches (plan 12, BR12). The picker and the branch-filtered store list only
+// exist for a multi-branch company; everyone else submits exactly the payload
+// they did before (withBranch() drops branch_id) and sees every store.
+const page = usePage();
+const isMultiBranch = computed(() => page.props.branch?.isMulti === true);
+const { branchId, branchOptions, showPicker, withBranch, storesForBranch, keepStoreInBranch } = useBranchField(
+    () => props.branchOptions,
+    () => props.defaultBranchId,
+);
+const branchStores = computed(() => storesForBranch(props.stores));
+
+/**
+ * The company's default store, unless this is a multi-branch company and that
+ * store is not one the form offers (another branch, or a branch the user
+ * cannot use); then blank, i.e. "Default store", which the server resolves to
+ * the branch's own default (DocumentBranch).
+ */
+function initialStoreId() {
+    const storeId = props.settings.default_store_id ?? null;
+
+    if (storeId === null || !isMultiBranch.value) {
+        return storeId;
+    }
+
+    return branchStores.value.some((store) => store.id === storeId) ? storeId : null;
+}
+
 const { confirm } = useConfirm();
 const { can } = usePermissions();
 // Posting into a reopened year needs fiscal_year.edit (the server re-checks
@@ -71,7 +104,10 @@ const canAddItem = computed(() => can('items.create'));
 function defaultFormData() {
     return {
         supplier_id: null,
-        store_id: props.settings.default_store_id ?? null,
+        store_id: initialStoreId(),
+        // Mirrors the branch picker so a draft stashed for quick add keeps
+        // it; withBranch() decides what is actually submitted.
+        branch_id: branchId.value,
         bill_number: '',
         pan_number: '',
         chalani_number: '',
@@ -97,6 +133,9 @@ function defaultFormData() {
         // (taxable + nontaxable) x rate itself and stores both.
         tds_rate: '',
         tds_amount: '',
+        // Signed manual Round Off (+ adds, - reduces); only shown and sent
+        // when the tenant has the feature on.
+        round_off: '',
         narration: '',
         // Blank fiscal_year_id posts into whichever year is currently
         // open; the only other value the picker offers is
@@ -113,6 +152,34 @@ function defaultFormData() {
 }
 
 const form = useForm(props.initialDraft ? restorePurchaseDraft(props.initialDraft) : defaultFormData());
+
+// A draft restored after the quick-add round trip goes back to the branch it
+// was started in, while that branch is still offered, so the bill and its
+// store do not silently move to the default branch.
+if (props.initialDraft && branchOptions.value.some((option) => option.id === props.initialDraft.branch_id)) {
+    branchId.value = props.initialDraft.branch_id;
+}
+form.branch_id = branchId.value;
+watch(branchId, (id) => {
+    form.branch_id = id;
+});
+
+// Choosing another branch keeps the store when it belongs to that branch, else
+// falls back to the company default store if it is one of the branch's, else
+// to blank ("Default store": the server takes the branch's default store). A
+// store picked by hand is always one of the branch's stores.
+keepStoreInBranch(
+    () => props.stores,
+    () => form.store_id,
+    (storeId) => {
+        form.store_id = storeId;
+    },
+    (inBranch) => {
+        const companyDefault = props.settings.default_store_id ?? null;
+
+        return inBranch.some((store) => store.id === companyDefault) ? companyDefault : null;
+    },
+);
 
 const isCorrectionSelected = computed(
     () => !!props.correctionFiscalYear && form.fiscal_year_id === props.correctionFiscalYear.id,
@@ -200,8 +267,11 @@ function addLine(line) {
     priceConfirm.confirmLine(line, { returnFocus: () => stagingRow.value?.focusItem() });
 }
 
-const { totals, previewError, partialSplitError, canSubmit, preview, toggleLineDiscountType, toggleHeaderDiscountType } =
-    usePurchaseCreatePreview(form, itemsById, isCorrectionSelected);
+const roundOffEnabled = computed(() => props.settings.round_off_enabled === true);
+const roundOffPrecision = computed(() => String(props.settings.round_off_precision ?? '1'));
+
+const { totals, totalBeforeRoundOff, previewError, partialSplitError, canSubmit, preview, toggleLineDiscountType, toggleHeaderDiscountType } =
+    usePurchaseCreatePreview(form, itemsById, isCorrectionSelected, roundOffEnabled);
 
 const {
     supplierModalOpen,
@@ -229,6 +299,7 @@ const showLineExtras = ref(false);
 
 // A server error on a field that lives behind "More options" would otherwise
 // be invisible, so the panel opens itself to show it.
+// (round_off is not listed: its box sits in the always-visible Payment card.)
 const MORE_OPTIONS_FIELDS = ['store_id', 'pan_number', 'chalani_number', 'discount', 'vat_rate', 'tds_account_id', 'tds_rate', 'tds_amount'];
 
 watch(
@@ -265,7 +336,8 @@ function submit(print = false) {
         return;
     }
 
-    form.transform((data) => ({
+    // withBranch(): branch_id only when the picker shows (plan 12, BR12).
+    form.transform((data) => withBranch({
         ...data,
         discount: data.discount === '' ? '0' : data.discount,
         vat_rate: data.vat_rate === '' ? '0' : data.vat_rate,
@@ -276,6 +348,9 @@ function submit(print = false) {
         // withholding something nobody chose.
         tds_rate: data.tds_rate === '' ? undefined : data.tds_rate,
         tds_amount: data.tds_rate === '' ? (data.tds_amount === '' ? '0' : data.tds_amount) : undefined,
+        // Never a stale value when the feature is off (the server zeroes it
+        // anyway; expected_total below must agree with that).
+        round_off: roundOffEnabled.value ? (data.round_off ?? '') : '',
         // The total the user is looking at. The server recomputes and refuses
         // the save if it lands anywhere else (CONTRACTS C8).
         expected_total: preview.value.totals.total,
@@ -326,8 +401,31 @@ function submit(print = false) {
     <p v-if="form.errors.expected_total" class="mb-4 border-[1.5px] border-danger bg-danger-bg px-3 py-2 text-sm text-danger">
         {{ form.errors.expected_total }}
     </p>
+    <!-- A branch refusal when there is no picker to show it on (plan 12). -->
+    <p v-if="!showPicker && form.errors.branch_id" class="mb-4 border-[1.5px] border-danger bg-danger-bg px-3 py-2 text-sm text-danger" role="alert">
+        {{ form.errors.branch_id }}
+    </p>
+    <!-- The store field is hidden when the branch has a single store. -->
+    <p
+        v-if="isMultiBranch && branchStores.length <= 1 && form.errors.store_id"
+        class="mb-4 border-[1.5px] border-danger bg-danger-bg px-3 py-2 text-sm text-danger"
+        role="alert"
+    >
+        {{ form.errors.store_id }}
+    </p>
 
     <form class="flex flex-1 flex-col gap-4" @submit.prevent="submit(false)">
+        <Card v-if="showPicker" variant="panel" class="!p-4">
+            <div class="grid grid-cols-1 gap-4 sm:grid-cols-3">
+                <BranchSelect
+                    v-model="branchId"
+                    :options="branchOptions"
+                    :error="form.errors.branch_id"
+                    help="The bill is booked here and its stock received into a store of this branch."
+                />
+            </div>
+        </Card>
+
         <Card v-if="canPostCorrection && correctionFiscalYear" variant="panel" title="Fiscal year" class="!p-4">
             <div class="grid grid-cols-1 gap-4 sm:grid-cols-3">
                 <div>
@@ -422,6 +520,9 @@ function submit(print = false) {
             :bank-accounts="bankAccounts"
             :show-bank-field="showBankField"
             :show-partial-fields="showPartialFields"
+            :round-off-enabled="roundOffEnabled"
+            :round-off-precision="roundOffPrecision"
+            :total-before-round-off="totalBeforeRoundOff"
         />
 
         <!-- Toggled from the sticky bar below; rendered here, directly above
@@ -430,7 +531,7 @@ function submit(print = false) {
             <PurchaseCreateMoreOptions
                 v-if="showMoreOptions"
                 :form="form"
-                :stores="stores"
+                :stores="branchStores"
                 :tds-accounts="tdsAccounts"
                 :totals="totals"
                 @toggle-discount-type="toggleHeaderDiscountType"
@@ -440,6 +541,7 @@ function submit(print = false) {
         <PurchaseCreateTotalsBar
             v-model:show-more-options="showMoreOptions"
             :totals="totals"
+            :round-off="roundOffEnabled ? form.round_off : ''"
             :partial-split-error="partialSplitError"
             :can-submit="canSubmit"
             :processing="form.processing"

@@ -1,5 +1,5 @@
 <script setup>
-import { computed, h, ref } from 'vue';
+import { computed, h, ref, watch } from 'vue';
 import { router } from '@inertiajs/vue3';
 import AppLayout from '@/layouts/AppLayout.vue';
 import { useLayoutChrome } from '@/composables/useLayoutChrome';
@@ -13,6 +13,12 @@ import Label from '@/components/ui/Label.vue';
 import { formatQuantity, formatRate } from '@/lib/money';
 import { formatBsDate } from '@/lib/format';
 import { itemLedgerColumn } from '@/lib/itemLedger';
+import { stockBranchQuery } from '@/lib/stockBranchReport.js';
+import { useBranchReportFilter } from '@/composables/useBranchReportFilter';
+import { useBranchReportColumns } from '@/composables/useBranchReportColumns';
+import BranchReportFilter from '@/components/branch/BranchReportFilter.vue';
+import BranchReportNotes from '@/components/branch/BranchReportNotes.vue';
+import StockMovementBranchSummary from '@/components/branch/StockMovementBranchSummary.vue';
 
 defineOptions({ layout: AppLayout });
 
@@ -30,6 +36,8 @@ const props = defineProps({
     categoryId: { type: [Number, null], default: null },
     subcategoryId: { type: [Number, null], default: null },
     brandId: { type: [Number, null], default: null },
+    // Branch filter and the by-branch summary; null when the company has no branches.
+    branchReport: { type: [Object, null], default: null },
 });
 
 useLayoutChrome('Stock Movement Register');
@@ -41,6 +49,17 @@ const storeId = ref(props.storeId);
 const categoryId = ref(props.categoryId);
 const subcategoryId = ref(props.subcategoryId);
 const brandId = ref(props.brandId);
+
+// The server drops a store outside the chosen branches; follow what it applied.
+watch(
+    () => [props.storeId, props.stores],
+    () => {
+        storeId.value = props.storeId;
+    },
+);
+
+const branchFilter = useBranchReportFilter(() => props.branchReport, { byBranch: true });
+const { byBranch: hasBranchSummary } = useBranchReportColumns(() => props.branchReport);
 
 const itemOptions = computed(() => [
     { value: null, label: 'All items' },
@@ -102,6 +121,7 @@ function applyFilter() {
             category_id: categoryId.value ?? undefined,
             subcategory_id: subcategoryId.value ?? undefined,
             brand_id: brandId.value ?? undefined,
+            ...stockBranchQuery(branchFilter, storeId.value),
         },
         {
             preserveState: true,
@@ -192,10 +212,22 @@ const columns = [
                     <Label class="mb-1">Brand</Label>
                     <Select v-model="brandId" :options="brandOptions" />
                 </div>
+                <BranchReportFilter
+                    v-if="branchReport"
+                    v-model:choice="branchFilter.choice.value"
+                    v-model:by-branch="branchFilter.byBranch.value"
+                    :report="branchReport"
+                    :allow-by-branch="storeId === null"
+                    id-prefix="stock-movement-branch"
+                    @change="applyFilter"
+                />
                 <Button variant="primary" tone="purple" :loading="isLoading" @click="applyFilter">Generate report</Button>
                 <Button v-if="hasActiveFilter" variant="secondary" tone="purple" :disabled="isLoading" @click="resetFilters">Reset</Button>
             </div>
+            <BranchReportNotes v-if="branchReport" :report="branchReport" />
         </Card>
+
+        <StockMovementBranchSummary v-if="hasBranchSummary" :report="branchReport" />
 
         <Card variant="panel">
             <DataTable :columns="columns" :data="movements" :page-size="25" empty-message="No records for this period or filter. Try widening the date range." />

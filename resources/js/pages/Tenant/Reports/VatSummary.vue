@@ -13,6 +13,9 @@ import { FileSpreadsheet } from '@lucide/vue';
 import { formatMoney, compareMoney, subtractMoney } from '@/lib/money';
 import { formatBsDate } from '@/lib/format';
 import { usePermissions } from '@/composables/usePermissions';
+import { useBranchReportFilter } from '@/composables/useBranchReportFilter';
+import BranchReportFilter from '@/components/branch/BranchReportFilter.vue';
+import BranchReportNotes from '@/components/branch/BranchReportNotes.vue';
 
 defineOptions({ layout: AppLayout });
 
@@ -27,6 +30,8 @@ const props = defineProps({
     from: { type: String, required: true },
     to: { type: String, required: true },
     storeId: { type: [Number, null], default: null },
+    // Branch filter; null when the company has no branches.
+    branchReport: { type: [Object, null], default: null },
 });
 
 useLayoutChrome('VAT Summary');
@@ -34,6 +39,7 @@ useLayoutChrome('VAT Summary');
 const from = ref(props.from);
 const to = ref(props.to);
 const storeId = ref(props.storeId);
+const branchFilter = useBranchReportFilter(() => props.branchReport);
 
 const storeOptions = computed(() => [
     { value: null, label: 'All stores' },
@@ -56,7 +62,7 @@ function resetFilters() {
 function applyFilter() {
     router.get(
         window.location.pathname,
-        { from: from.value, to: to.value, store_id: storeId.value ?? undefined },
+        { from: from.value, to: to.value, store_id: storeId.value ?? undefined, ...branchFilter.toQuery() },
         {
             preserveState: true,
             preserveScroll: true,
@@ -71,6 +77,7 @@ const exportUrl = computed(() => {
     if (storeId.value) {
         params.set('store_id', storeId.value);
     }
+    branchFilter.appendTo(params);
 
     return `/reports/vat-summary/export?${params.toString()}`;
 });
@@ -119,9 +126,17 @@ const reconciles = computed(
                     <Label class="mb-1">Store</Label>
                     <Select v-model="storeId" :options="storeOptions" />
                 </div>
+                <BranchReportFilter
+                    v-if="branchReport"
+                    v-model:choice="branchFilter.choice.value"
+                    :report="branchReport"
+                    id-prefix="vat-summary"
+                    @change="applyFilter"
+                />
                 <Button variant="primary" tone="purple" :loading="isLoading" @click="applyFilter">Generate report</Button>
                 <Button v-if="hasActiveFilter" variant="secondary" tone="purple" :disabled="isLoading" @click="resetFilters">Reset</Button>
             </div>
+            <BranchReportNotes v-if="branchReport" :report="branchReport" />
         </Card>
 
         <div class="mb-4 grid gap-4 md:grid-cols-2">

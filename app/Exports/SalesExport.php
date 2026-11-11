@@ -47,6 +47,7 @@ class SalesExport implements FromCollection, WithColumnFormatting, WithHeadings,
             'taxable_amount' => $this->totals['taxable_amount'],
             'nontaxable_amount' => $this->totals['nontaxable_amount'],
             'vat_amount' => $this->totals['vat_amount'],
+            'round_off' => $this->totals['round_off'],
             'total' => $this->totals['total'],
         ]);
     }
@@ -56,7 +57,7 @@ class SalesExport implements FromCollection, WithColumnFormatting, WithHeadings,
      */
     public function headings(): array
     {
-        return ['Date (BS)', 'Date (AD)', 'Invoice #', 'Type', 'Customer', 'Agent', 'Payment', 'Status', 'Taxable', 'Exempt', 'VAT', 'Total'];
+        return ['Date (BS)', 'Date (AD)', 'Invoice #', 'Type', 'Customer', 'Agent', 'Payment', 'Status', 'Taxable', 'Exempt', 'VAT', 'Round Off', 'Total'];
     }
 
     /**
@@ -69,6 +70,7 @@ class SalesExport implements FromCollection, WithColumnFormatting, WithHeadings,
             'J' => NumberFormat::FORMAT_NUMBER_00,
             'K' => NumberFormat::FORMAT_NUMBER_00,
             'L' => NumberFormat::FORMAT_NUMBER_00,
+            'M' => NumberFormat::FORMAT_NUMBER_00,
         ];
     }
 
@@ -90,6 +92,7 @@ class SalesExport implements FromCollection, WithColumnFormatting, WithHeadings,
             Money::of($row['taxable_amount'])->toFloat(),
             Money::of($row['nontaxable_amount'])->toFloat(),
             Money::of($row['vat_amount'])->toFloat(),
+            Money::of($row['round_off'] ?? '0')->toFloat(),
             Money::of($row['total'])->toFloat(),
         ];
     }

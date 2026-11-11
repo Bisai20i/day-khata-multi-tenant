@@ -6,6 +6,7 @@ import Select from '@/components/ui/Select.vue';
 import Combobox from '@/components/ui/Combobox.vue';
 import InfoTip from '@/components/ui/InfoTip.vue';
 import Label from '@/components/ui/Label.vue';
+import RoundOffField from '@/components/ui/RoundOffField.vue';
 
 // Payment and Notes side by side, same layout as SaleCreatePaymentNotes.
 const props = defineProps({
@@ -15,6 +16,10 @@ const props = defineProps({
     bankAccounts: { type: Array, default: () => [] },
     showBankField: { type: Boolean, default: false },
     showPartialFields: { type: Boolean, default: false },
+    // Round Off box: only rendered when the tenant enabled the feature.
+    roundOffEnabled: { type: Boolean, default: false },
+    roundOffPrecision: { type: String, default: '1' },
+    totalBeforeRoundOff: { type: String, default: null },
 });
 
 const paymentModeOptions = [
@@ -69,6 +74,16 @@ const bankAccountOptions = computed(() =>
                     <Input id="purchase-bank-amount" v-model="form.bank_amount" type="number" min="0" step="0.01" placeholder="0.00" required aria-describedby="purchase-bank-error" />
                     <p v-if="form.errors.bank_amount" id="purchase-bank-error" class="mt-1 text-sm text-danger" role="alert">{{ form.errors.bank_amount }}</p>
                 </div>
+            </div>
+
+            <div v-if="roundOffEnabled" class="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2">
+                <RoundOffField
+                    id="purchase-round-off"
+                    v-model="form.round_off"
+                    :precision="roundOffPrecision"
+                    :total-before-round-off="totalBeforeRoundOff"
+                    :error="form.errors.round_off"
+                />
             </div>
         </Card>
 

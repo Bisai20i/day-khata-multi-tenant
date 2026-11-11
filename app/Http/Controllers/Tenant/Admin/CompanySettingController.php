@@ -12,6 +12,10 @@ use App\Models\FiscalYear;
 use App\Models\JournalVoucher;
 use App\Models\Store;
 use App\Models\VoucherSequence;
+use App\Support\Branches\ActiveBranchSelection;
+use App\Support\Branches\BranchContext;
+use App\Support\Branches\BranchStoreOptions;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Storage;
@@ -28,11 +32,13 @@ class CompanySettingController extends Controller
     /**
      * Every independently numbered, customer- or supplier-facing document
      * series: the settings column holding its prefix, and the VoucherType
-     * whose sequence hands out its numbers.
+     * whose sequence hands out its numbers. Public because these are also
+     * the only series an admin can give a starting number
+     * (setStartingNumber()), which the branch audit (NumberingChecks) reads.
      *
      * @var array<string, array{label: string, type: VoucherType}>
      */
-    private const NUMBERED_SERIES = [
+    public const NUMBERED_SERIES = [
         'sale_full_prefix' => ['label' => 'Full tax invoice', 'type' => VoucherType::Sale],
         'sale_abbreviated_prefix' => ['label' => 'Abbreviated tax invoice', 'type' => VoucherType::SaleAbbreviated],
         'sale_pan_prefix' => ['label' => 'PAN invoice', 'type' => VoucherType::SalePan],
@@ -41,17 +47,46 @@ class CompanySettingController extends Controller
         'purchase_return_prefix' => ['label' => 'Debit note (purchase return)', 'type' => VoucherType::PurchaseReturn],
     ];
 
-    public function edit(): Response
+    public function edit(Request $request): Response
     {
         $settings = CompanySetting::current();
-        $stores = Store::where('is_active', true)->orderBy('name')->get(['id', 'name']);
+        $stores = $this->defaultStoreOptions($request, $settings)->orderBy('name')->get(['id', 'name']);
         $invoiceNumbering = $this->invoiceNumbering($settings);
 
         return Inertia::render('Tenant/Admin/Settings/Edit', [
             'settings' => $settings,
+            'roundOffPrecisions' => CompanySetting::ROUND_OFF_PRECISIONS,
             'stores' => $stores,
             'invoiceNumbering' => $invoiceNumbering,
         ]);
+    }
+
+    /**
+     * The default-store picker's options. Not multi-branch: every active
+     * store, exactly as before (parity). Multi-branch: only the stores of the
+     * branches the actor may use (BranchStoreOptions, BR22 C5), so a
+     * branch-restricted admin never sees another branch's store names, plus
+     * the currently saved default store when it is still active: this is a
+     * company-wide setting, and dropping the saved store from the list would
+     * blank the field and clear it on the next save.
+     *
+     * @return Builder<Store>
+     */
+    private function defaultStoreOptions(Request $request, CompanySetting $settings): Builder
+    {
+        $active = Store::query()->where('is_active', true);
+
+        if (! ActiveBranchSelection::isMultiBranch($request)) {
+            return $active;
+        }
+
+        $savedId = $settings->default_store_id;
+
+        return Store::query()
+            ->where(fn (Builder $query) => BranchStoreOptions::apply($query->where('is_active', true), $request))
+            ->when($savedId !== null, fn (Builder $query) => $query->orWhere(
+                fn (Builder $saved) => $saved->whereKey($savedId)->where('is_active', true),
+            ));
     }
 
     public function update(Request $request): RedirectResponse
@@ -66,6 +101,8 @@ class CompanySettingController extends Controller
             'print_paper_size' => ['nullable', 'in:a4,a5,58mm,80mm'],
             'default_vat_rate' => ['required', 'numeric', 'decimal:0,2', 'min:0', 'max:100'],
             'allow_negative_stock' => ['boolean'],
+            'round_off_enabled' => ['boolean'],
+            'round_off_precision' => ['sometimes', 'required', Rule::in(CompanySetting::ROUND_OFF_PRECISIONS)],
             'default_store_id' => [
                 'nullable',
                 'integer',
@@ -171,15 +208,34 @@ class CompanySettingController extends Controller
     }
 
     /**
-     * @return array<int, array{voucher_type: string, label: string, prefix: string, next_number: int, can_set: bool, fiscal_year: string|null}>
+     * @return array<int, array{voucher_type: string, label: string, prefix: string, next_number: int|null, can_set: bool, fiscal_year: string|null, per_branch?: true}>
      */
     private function invoiceNumbering(CompanySetting $settings): array
     {
         $fiscalYear = FiscalYear::query()->where('status', FiscalYearStatus::Open)->first();
 
+        // A per_branch year (plan 12, BR20) has one series per branch, so a
+        // single next number or starting number means nothing there; its rows
+        // say so and are locked. Read from the row already loaded.
+        $perBranch = $fiscalYear?->usesPerBranchNumbering() ?? false;
+
         $rows = [];
 
         foreach (self::NUMBERED_SERIES as $column => $series) {
+            if ($perBranch) {
+                $rows[] = [
+                    'voucher_type' => $series['type']->value,
+                    'label' => $series['label'],
+                    'prefix' => (string) $settings->{$column},
+                    'next_number' => null,
+                    'can_set' => false,
+                    'fiscal_year' => $fiscalYear?->name,
+                    'per_branch' => true,
+                ];
+
+                continue;
+            }
+
             $nextNumber = $fiscalYear ? VoucherSequence::nextNumberFor($fiscalYear, $series['type']) : 1;
 
             $rows[] = [
@@ -187,10 +243,12 @@ class CompanySettingController extends Controller
                 'label' => $series['label'],
                 'prefix' => (string) $settings->{$column},
                 'next_number' => $nextNumber,
-                'can_set' => $fiscalYear !== null && ! JournalVoucher::query()
+                // Unrestricted: the series is company-wide, so a voucher in a
+                // branch the admin cannot see still locks the starting number.
+                'can_set' => $fiscalYear !== null && ! BranchContext::unrestricted(fn (): bool => JournalVoucher::query()
                     ->where('fiscal_year_id', $fiscalYear->id)
                     ->where('voucher_type', $series['type'])
-                    ->exists(),
+                    ->exists()),
                 'fiscal_year' => $fiscalYear?->name,
             ];
         }

@@ -11,7 +11,14 @@ import NepaliDateInput from '@/components/ui/NepaliDateInput.vue';
 import Label from '@/components/ui/Label.vue';
 import { formatMoney } from '@/lib/money.js';
 import { formatBsDate } from '@/lib/format.js';
+import { formatBranchAmount } from '@/lib/branchReport.js';
 import { usePermissions } from '@/composables/usePermissions';
+import { useBranchLabel } from '@/composables/useBranchLabel';
+import { useBranchReportFilter } from '@/composables/useBranchReportFilter';
+import { useBranchReportColumns } from '@/composables/useBranchReportColumns';
+import BranchReportFilter from '@/components/branch/BranchReportFilter.vue';
+import BranchReportNotes from '@/components/branch/BranchReportNotes.vue';
+import BranchReportCells from '@/components/branch/BranchReportCells.vue';
 
 defineOptions({ layout: AppLayout });
 
@@ -34,6 +41,8 @@ const props = defineProps({
     inBalance: { type: Boolean, default: true },
     // Accounts with no head or group, listed under "Unclassified" (flags G-08).
     unclassifiedCount: { type: Number, default: 0 },
+    // Branch filter and by-branch columns; null when the company has no branches.
+    branchReport: { type: [Object, null], default: null },
 });
 
 useLayoutChrome('Trial Balance');
@@ -49,6 +58,12 @@ const fiscalYear = ref(props.fiscalYearId);
 const from = ref(props.from);
 const to = ref(props.to);
 const accountId = ref(props.accountId);
+
+const { label: branchWord } = useBranchLabel();
+const branchFilter = useBranchReportFilter(() => props.branchReport, { byBranch: true });
+const { byBranch: hasBranchColumns, columns: branchColumns, unbalancedIds, totalOf, minWidth } = useBranchReportColumns(
+    () => props.branchReport,
+);
 
 // Legacy's `?accno=` single-ledger filter (audit T15-5): "All accounts" is
 // the default, matching the unfiltered trial balance.
@@ -74,6 +89,7 @@ function apply() {
             from: from.value ?? undefined,
             to: to.value ?? undefined,
             account_id: accountId.value ?? undefined,
+            ...branchFilter.toQuery(),
         },
         { preserveState: true, preserveScroll: true },
     );
@@ -86,6 +102,7 @@ function printUrl() {
         to: to.value ?? '',
         account_id: accountId.value ?? '',
     });
+    branchFilter.appendTo(params);
     return `/reports/trial-balance/print?${params.toString()}`;
 }
 
@@ -96,6 +113,7 @@ function exportUrl() {
         to: to.value ?? '',
         account_id: accountId.value ?? '',
     });
+    branchFilter.appendTo(params);
     return `/reports/trial-balance/export?${params.toString()}`;
 }
 </script>
@@ -130,6 +148,15 @@ function exportUrl() {
                     <Label class="mb-1">Account</Label>
                     <Select v-model="accountId" :options="accountOptions" />
                 </div>
+                <BranchReportFilter
+                    v-if="branchReport"
+                    v-model:choice="branchFilter.choice.value"
+                    v-model:by-branch="branchFilter.byBranch.value"
+                    :report="branchReport"
+                    allow-by-branch
+                    id-prefix="trial-balance"
+                    @change="apply"
+                />
                 <Button variant="primary" tone="purple" @click="apply">Generate report</Button>
                 <Button v-if="accountId !== null" variant="secondary" tone="purple" @click="accountId = null; apply()">Reset</Button>
             </div>
@@ -137,6 +164,7 @@ function exportUrl() {
                 Showing report for {{ formatBsDate(from) }} to {{ formatBsDate(to) }} BS
                 <span class="text-text-muted">({{ from }} to {{ to }})</span>
             </p>
+            <BranchReportNotes v-if="branchReport" :report="branchReport" />
         </Card>
 
         <Card variant="panel">
@@ -161,12 +189,16 @@ function exportUrl() {
                     {{ formatMoney(totalCredit) }}.
                 </p>
 
+                <p v-if="hasBranchColumns && heads.length > 0" class="mb-2 text-[12px] text-text-muted">
+                    {{ branchWord }} columns show each account's closing balance in that {{ branchWord.toLowerCase() }}, as Dr or Cr.
+                </p>
+
                 <p v-if="heads.length === 0" class="px-1 py-6 text-center text-[13px] text-text-muted">
                     No transactions in this period. Try widening the date range.
                 </p>
 
                 <div v-else class="overflow-x-auto">
-                    <div class="min-w-[720px] divide-y divide-border">
+                    <div class="min-w-[720px] divide-y divide-border" :style="minWidth(720, 112)">
                         <div class="flex items-center px-1 pb-2 text-[10px] font-bold tracking-[.8px] text-text-muted uppercase">
                             <div class="flex-1">Account</div>
                             <div class="w-28 text-right">Opening Debit (Dr)</div>
@@ -175,6 +207,13 @@ function exportUrl() {
                             <div class="w-28 text-right">Period Credit (Cr)</div>
                             <div class="w-28 text-right">Closing Debit (Dr)</div>
                             <div class="w-28 text-right">Closing Credit (Cr)</div>
+                            <BranchReportCells
+                                v-if="hasBranchColumns"
+                                header
+                                :columns="branchColumns"
+                                :warn-ids="unbalancedIds"
+                                warn-title="Total debit and credit do not match for this column."
+                            />
                         </div>
 
                         <template v-for="head in heads" :key="head.name">
@@ -195,6 +234,7 @@ function exportUrl() {
                                     <div class="w-28 text-right">{{ formatMoney(account.periodCredit) }}</div>
                                     <div class="w-28 text-right">{{ formatMoney(account.closingDebit) }}</div>
                                     <div class="w-28 text-right">{{ formatMoney(account.closingCredit) }}</div>
+                                    <BranchReportCells v-if="hasBranchColumns" :columns="branchColumns" :values="account.by_branch" mode="drcr" />
                                 </div>
 
                                 <template v-for="subgroup in group.subgroups" :key="subgroup.name">
@@ -212,6 +252,7 @@ function exportUrl() {
                                         <div class="w-28 text-right">{{ formatMoney(account.periodCredit) }}</div>
                                         <div class="w-28 text-right">{{ formatMoney(account.closingDebit) }}</div>
                                         <div class="w-28 text-right">{{ formatMoney(account.closingCredit) }}</div>
+                                        <BranchReportCells v-if="hasBranchColumns" :columns="branchColumns" :values="account.by_branch" mode="drcr" />
                                     </div>
                                 </template>
                             </template>
@@ -225,6 +266,12 @@ function exportUrl() {
                             <div class="w-28 text-right">{{ formatMoney(totalPeriodCredit) }}</div>
                             <div class="w-28 text-right">{{ formatMoney(totalDebit) }}</div>
                             <div class="w-28 text-right">{{ formatMoney(totalCredit) }}</div>
+                            <BranchReportCells v-if="hasBranchColumns" :columns="branchColumns">
+                                <template #default="{ column }">
+                                    <span class="block">Dr {{ formatBranchAmount(totalOf(column.id)?.debit) }}</span>
+                                    <span class="block">Cr {{ formatBranchAmount(totalOf(column.id)?.credit) }}</span>
+                                </template>
+                            </BranchReportCells>
                         </div>
                     </div>
                 </div>

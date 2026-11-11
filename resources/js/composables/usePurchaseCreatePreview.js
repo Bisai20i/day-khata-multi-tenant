@@ -1,12 +1,18 @@
 import { computed } from 'vue';
 import { addMoney, calculateDocument, formatMoney, moneyEquals, parseMoney, percentOf } from '@/lib/money';
+import { totalBeforeRoundOff as totalBeforeRoundOffOf } from '@/lib/roundOff';
 
 /**
  * Live bill preview for Purchases/Create.vue: totals, TDS preview, discount
  * toggles, partial-split validation and the submit gate. Pure derivation from
  * the form - nothing here posts or mutates anything except the toggles.
  */
-export function usePurchaseCreatePreview(form, itemsById, isCorrectionSelected) {
+export function usePurchaseCreatePreview(form, itemsById, isCorrectionSelected, roundOffEnabled = computed(() => false)) {
+    // Round Off only counts while the tenant has the feature on: a stale value
+    // (a restored draft, a setting switched off meanwhile) must never reach the
+    // total or expected_total, because the server forces it to 0 in that case.
+    const effectiveRoundOff = computed(() => (roundOffEnabled.value ? (form.round_off ?? '') : ''));
+
     function isVatable(line) {
         return itemsById.value.get(line.item_id)?.is_vatable ?? false;
     }
@@ -50,6 +56,7 @@ export function usePurchaseCreatePreview(form, itemsById, isCorrectionSelected) 
             discount_type: form.discount_type,
             force_non_taxable: form.force_non_taxable,
             tds_amount: tdsAmount,
+            round_off: effectiveRoundOff.value,
         };
     }
 
@@ -82,6 +89,11 @@ export function usePurchaseCreatePreview(form, itemsById, isCorrectionSelected) 
     const preview = computed(() => calculateDocument(previewLines.value, previewHeader(tdsPreviewAmount.value)));
 
     const totals = computed(() => (preview.value.ok ? preview.value.totals : null));
+    // The total with Round Off taken back out, for RoundOffField's suggestion;
+    // null while the bill cannot be totalled or the box holds something unreadable.
+    const totalBeforeRoundOff = computed(() =>
+        totals.value ? totalBeforeRoundOffOf(totals.value.total, effectiveRoundOff.value) : null,
+    );
     // An incomplete bill (no lines filled in yet) is not an error worth shouting
     // about; anything else the calculator refuses is shown to the user as typed.
     const previewError = computed(() =>
@@ -148,6 +160,7 @@ export function usePurchaseCreatePreview(form, itemsById, isCorrectionSelected) 
     return {
         preview,
         totals,
+        totalBeforeRoundOff,
         previewError,
         partialSplitError,
         canSubmit,

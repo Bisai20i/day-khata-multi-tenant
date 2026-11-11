@@ -11,6 +11,7 @@ use App\Support\Money\Quantity;
 use Brick\Math\BigDecimal;
 use Brick\Math\RoundingMode;
 use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Database\Eloquent\Collection as EloquentCollection;
 use Illuminate\Support\Collection;
 
 /**
@@ -170,22 +171,12 @@ class StockCosting
      */
     public static function valuationRows(string $asOf, ?int $storeId = null, array $filters = []): Collection
     {
-        $items = Item::query()
-            ->where('is_stockable', true)
-            ->when(($filters['item_category_id'] ?? null) !== null, fn (Builder $q) => $q->where('item_category_id', $filters['item_category_id']))
-            ->when(($filters['item_subcategory_id'] ?? null) !== null, fn (Builder $q) => $q->where('item_subcategory_id', $filters['item_subcategory_id']))
-            ->when(($filters['brand_id'] ?? null) !== null, fn (Builder $q) => $q->where('brand_id', $filters['brand_id']))
-            ->when(($filters['search'] ?? null) !== null, fn (Builder $q) => $q->where('name', 'like', '%'.$filters['search'].'%'))
-            ->when(($filters['inventory_class'] ?? null) !== null, fn (Builder $q) => $q->whereIn('inventory_class', (array) $filters['inventory_class']))
-            ->orderBy('name')
-            ->get(['id', 'name', 'unit', 'purchase_rate', 'hs_code', 'inventory_class']);
+        $items = static::stockableItems($filters);
 
         if ($items->isEmpty()) {
             return new Collection;
         }
 
-        $includeEmpty = (bool) ($filters['include_empty'] ?? false);
-        $stockStatus = $filters['stock_status'] ?? 'all';
         $quantities = Item::currentStockByItem($items->modelKeys(), $storeId, $asOf);
         [$perpetualItems, $periodicItems] = $items->partition(fn (Item $item) => $item->isPerpetual());
         $bases = static::basisByItem($periodicItems->modelKeys(), $asOf);
@@ -234,6 +225,258 @@ class StockCosting
                 'value' => $value,
             ];
         })
+            ->pipe(fn (Collection $rows) => static::filterRows($rows, $filters));
+    }
+
+    /**
+     * valuationRows() for the stores of a set of branches (plan 12, BR15),
+     * with optional per-branch figures. Same row shape, same `$filters`, the
+     * same company-wide cost (no per-store or per-branch cost, see the class
+     * docblock); only the quantity is narrowed to the branches' stores.
+     *
+     * Values follow the convention BranchReportTotals and the year-end close
+     * use for a branch's closing stock (invariant I4), so a branch's trading
+     * stock here is, to the paisa, the closing stock its Balance Sheet and
+     * Income Statement show:
+     *
+     * - a periodic item is valued per store (store quantity times the
+     *   company cost, rounded once per store) and a branch is the sum of its
+     *   stores;
+     * - Main is the company value of the item less every other branch's
+     *   stores, so it absorbs the per-store rounding and the branches add up
+     *   to the company row exactly; a set containing Main is therefore the
+     *   company value less the stores outside the set;
+     * - a perpetual item is the sum of its stores' cost_value balances,
+     *   which already add up exactly.
+     *
+     * One grouped query (item, store) for quantities and perpetual values,
+     * whatever the number of stores, plus the basis query valuationRows()
+     * runs. With `$withBranches` every row also carries `by_branch`: branch id
+     * => quantity and value, for every id in `$branchIds`, summing to the
+     * row's own quantity and value.
+     *
+     * @param  list<int>  $branchIds  the branches covered (non-empty)
+     * @param  array<int, int>  $storeBranches  store id => branch id, every store of the company
+     * @param  int|null  $mainBranchId  BranchContext::mainBranchIdOrNull()
+     * @param  array<string, mixed>  $filters  as valuationRows()
+     * @return Collection<int, array{item_id: int, name: string, unit: string, hs_code: ?string, inventory_class: string, quantity: Quantity, average_cost: string, value: Money, by_branch?: array<int, array{quantity: Quantity, value: Money}>}>
+     */
+    public static function branchValuationRows(string $asOf, array $branchIds, array $storeBranches, ?int $mainBranchId, array $filters = [], bool $withBranches = false): Collection
+    {
+        $items = static::stockableItems($filters);
+
+        if ($items->isEmpty()) {
+            return new Collection;
+        }
+
+        $withMain = $mainBranchId !== null && in_array($mainBranchId, $branchIds, true);
+        $setStoreIds = array_keys(array_filter($storeBranches, fn (int $branchId): bool => in_array($branchId, $branchIds, true)));
+
+        // With Main in the set every store is needed (Main is the company
+        // less the other stores); without it only the set's own stores.
+        $byStore = static::balancesByItemAndStore($items->modelKeys(), $asOf, $withMain ? null : $setStoreIds);
+        $periodicItems = $items->reject(fn (Item $item) => $item->isPerpetual());
+        $bases = static::basisByItem($periodicItems->modelKeys(), $asOf);
+        $inSet = array_fill_keys($setStoreIds, true);
+
+        return $items->map(function (Item $item) use ($byStore, $bases, $inSet, $withMain, $branchIds, $storeBranches, $mainBranchId, $withBranches): array {
+            $stores = $byStore[$item->getKey()] ?? [];
+            $perpetual = $item->isPerpetual();
+            $cost = BigDecimal::zero();
+
+            if (! $perpetual) {
+                $basis = $bases[$item->getKey()] ?? null;
+                $cost = $basis !== null && ! $basis['quantity']->isZero()
+                    ? $basis['value']->toBigDecimal()->dividedBy($basis['quantity']->toBigDecimal(), self::AVERAGE_COST_SCALE, RoundingMode::HalfUp)
+                    : static::fallbackCost($item);
+            }
+
+            // Per store: quantity, and value (perpetual: cost_value balance;
+            // periodic: store quantity at the company cost, rounded here).
+            $storeQuantity = [];
+            $storeValue = [];
+
+            foreach ($stores as $storeId => $balance) {
+                $storeQuantity[$storeId] = $balance['quantity'];
+                $storeValue[$storeId] = $perpetual
+                    ? $balance['cost']
+                    : static::valueAt($balance['quantity'], $cost);
+            }
+
+            $companyValue = $perpetual ? Money::zero() : static::valueAt(Quantity::sum(array_values($storeQuantity)), $cost);
+
+            $quantity = Quantity::sum(array_values(array_intersect_key($storeQuantity, $inSet)));
+
+            if (! $perpetual && $withMain) {
+                $value = $companyValue->minus(Money::sum(array_values(array_diff_key($storeValue, $inSet))));
+            } else {
+                $value = Money::sum(array_values(array_intersect_key($storeValue, $inSet)));
+            }
+
+            $row = [
+                'item_id' => $item->getKey(),
+                'name' => $item->name,
+                'unit' => $item->unit,
+                'hs_code' => $item->hs_code,
+                'inventory_class' => ($item->inventory_class ?? InventoryClass::Trading)->value,
+                'quantity' => $quantity,
+                'average_cost' => $perpetual
+                    ? ($quantity->isZero()
+                        ? Quantity::zero()->toString()
+                        : Quantity::round($value->toBigDecimal()->dividedBy($quantity->toBigDecimal(), self::AVERAGE_COST_SCALE, RoundingMode::HalfUp))->toString())
+                    : Quantity::round($cost)->toString(),
+                'value' => $value,
+            ];
+
+            if ($withBranches) {
+                $row['by_branch'] = static::branchSplit($branchIds, $storeBranches, $mainBranchId, $storeQuantity, $storeValue, $perpetual ? null : $companyValue);
+            }
+
+            return $row;
+        })
+            ->pipe(fn (Collection $rows) => static::filterRows($rows, $filters));
+    }
+
+    /**
+     * Quantity and value per branch of one item, from its per-store figures.
+     * Main (periodic items) is the company value less every other store, the
+     * same rule as the row total, so the branches add up to the row.
+     *
+     * @param  list<int>  $branchIds
+     * @param  array<int, int>  $storeBranches
+     * @param  array<int, Quantity>  $storeQuantity
+     * @param  array<int, Money>  $storeValue
+     * @param  Money|null  $companyValue  null for a perpetual item
+     * @return array<int, array{quantity: Quantity, value: Money}>
+     */
+    private static function branchSplit(array $branchIds, array $storeBranches, ?int $mainBranchId, array $storeQuantity, array $storeValue, ?Money $companyValue): array
+    {
+        $split = [];
+
+        foreach ($branchIds as $branchId) {
+            $quantity = Quantity::zero();
+            $value = Money::zero();
+
+            foreach ($storeQuantity as $storeId => $storeQty) {
+                if (($storeBranches[$storeId] ?? null) === $branchId) {
+                    $quantity = $quantity->plus($storeQty);
+                    $value = $value->plus($storeValue[$storeId]);
+                }
+            }
+
+            if ($companyValue !== null && $branchId === $mainBranchId) {
+                $others = Money::zero();
+
+                foreach ($storeValue as $storeId => $amount) {
+                    if (($storeBranches[$storeId] ?? null) !== $mainBranchId) {
+                        $others = $others->plus($amount);
+                    }
+                }
+
+                $value = $companyValue->minus($others);
+            }
+
+            $split[$branchId] = ['quantity' => $quantity, 'value' => $value];
+        }
+
+        return $split;
+    }
+
+    /**
+     * Quantity at a per-base-unit cost, rounded to the paisa exactly once.
+     */
+    private static function valueAt(Quantity $quantity, BigDecimal $cost): Money
+    {
+        return $quantity->isZero() || $cost->isZero()
+            ? Money::zero()
+            : Money::round($quantity->toBigDecimal()->multipliedBy($cost));
+    }
+
+    /**
+     * Net quantity (every non-cancelled movement) and net cost_value (priced
+     * movements only, as PerpetualCosting sums it) per item and store, in one
+     * grouped query, scaled-integer sums for the SQLite reason
+     * Item::currentStockByItem() gives.
+     *
+     * @param  array<int, int|string>  $itemIds
+     * @param  list<int>|null  $storeIds  null for every store
+     * @return array<int, array<int, array{quantity: Quantity, cost: Money}>> item id => store id => balance
+     */
+    private static function balancesByItemAndStore(array $itemIds, string $asOf, ?array $storeIds): array
+    {
+        if ($itemIds === [] || $storeIds === []) {
+            return [];
+        }
+
+        $cast = (new ItemStockMovement)->getConnection()->getDriverName() === 'sqlite' ? 'INTEGER' : 'SIGNED';
+        $scaledQuantity = "CAST(ROUND(quantity * 10000) AS {$cast})";
+        $scaledCost = "CAST(ROUND(COALESCE(cost_value, 0) * 100) AS {$cast})";
+
+        $inTypes = array_values(array_map(
+            fn (StockMovementType $type) => $type->value,
+            array_filter(StockMovementType::cases(), fn (StockMovementType $type) => $type->direction() === 1),
+        ));
+        $placeholders = implode(', ', array_fill(0, count($inTypes), '?'));
+
+        $rows = ItemStockMovement::query()
+            ->selectRaw(
+                "item_id, store_id,
+                 SUM(CASE WHEN movement_type IN ({$placeholders}) THEN {$scaledQuantity} ELSE -{$scaledQuantity} END) as quantity_scaled,
+                 SUM(CASE WHEN movement_type IN ({$placeholders}) THEN {$scaledCost} ELSE -{$scaledCost} END) as cost_scaled",
+                [...$inTypes, ...$inTypes],
+            )
+            ->whereIn('item_id', array_values(array_unique(array_map('intval', $itemIds))))
+            ->where('cancelled', false)
+            ->when($storeIds !== null, fn (Builder $query) => $query->whereIn('store_id', $storeIds))
+            ->whereDate('date', '<=', $asOf)
+            ->groupBy('item_id', 'store_id')
+            ->toBase()
+            ->get();
+
+        $balances = [];
+
+        foreach ($rows as $row) {
+            $balances[(int) $row->item_id][(int) $row->store_id] = [
+                'quantity' => Quantity::of(BigDecimal::of((int) $row->quantity_scaled)->dividedBy(10000, 4, RoundingMode::Unnecessary)),
+                'cost' => Money::of(BigDecimal::of((int) $row->cost_scaled)->dividedBy(100, 2, RoundingMode::Unnecessary)),
+            ];
+        }
+
+        return $balances;
+    }
+
+    /**
+     * The stockable items valuationRows() lists, narrowed by `$filters`.
+     *
+     * @param  array<string, mixed>  $filters
+     * @return EloquentCollection<int, Item>
+     */
+    private static function stockableItems(array $filters): EloquentCollection
+    {
+        return Item::query()
+            ->where('is_stockable', true)
+            ->when(($filters['item_category_id'] ?? null) !== null, fn (Builder $q) => $q->where('item_category_id', $filters['item_category_id']))
+            ->when(($filters['item_subcategory_id'] ?? null) !== null, fn (Builder $q) => $q->where('item_subcategory_id', $filters['item_subcategory_id']))
+            ->when(($filters['brand_id'] ?? null) !== null, fn (Builder $q) => $q->where('brand_id', $filters['brand_id']))
+            ->when(($filters['search'] ?? null) !== null, fn (Builder $q) => $q->where('name', 'like', '%'.$filters['search'].'%'))
+            ->when(($filters['inventory_class'] ?? null) !== null, fn (Builder $q) => $q->whereIn('inventory_class', (array) $filters['inventory_class']))
+            ->orderBy('name')
+            ->get(['id', 'name', 'unit', 'purchase_rate', 'hs_code', 'inventory_class']);
+    }
+
+    /**
+     * The `include_empty` and `stock_status` filters of valuationRows().
+     *
+     * @param  Collection<int, array<string, mixed>>  $rows
+     * @param  array<string, mixed>  $filters
+     * @return Collection<int, array<string, mixed>>
+     */
+    private static function filterRows(Collection $rows, array $filters): Collection
+    {
+        $includeEmpty = (bool) ($filters['include_empty'] ?? false);
+        $stockStatus = $filters['stock_status'] ?? 'all';
+
+        return $rows
             ->filter(fn (array $row) => $includeEmpty || ! $row['quantity']->isZero() || ! $row['value']->isZero())
             ->when($stockStatus === 'positive', fn (Collection $rows) => $rows->filter(fn (array $row) => $row['quantity']->isPositive()))
             ->when($stockStatus === 'negative', fn (Collection $rows) => $rows->filter(fn (array $row) => $row['quantity']->isNegative()))

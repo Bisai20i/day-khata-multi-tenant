@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers\Tenant\Sales;
 
+use App\Http\Controllers\Concerns\OffersDocumentBranch;
 use App\Http\Controllers\Controller;
 use App\Models\CompanySetting;
 use App\Models\Customer;
@@ -11,6 +12,9 @@ use App\Models\Sale;
 use App\Models\SalesReturn;
 use App\Models\Store;
 use App\Support\AmountInWords;
+use App\Support\Branches\ActiveBranchSelection;
+use App\Support\Branches\BranchFormOptions;
+use App\Support\Branches\BranchListFilter;
 use App\Support\Money\Money;
 use App\Support\NepaliCalendar;
 use Barryvdh\DomPDF\Facade\Pdf;
@@ -27,6 +31,8 @@ use InvalidArgumentException;
 
 class SalesReturnController extends Controller
 {
+    use OffersDocumentBranch;
+
     /**
      * Listing is server-side filtered (date range + customer, the latter
      * via the parent sale since a return has no customer_id of its own) and
@@ -55,7 +61,11 @@ class SalesReturnController extends Controller
         $to = $request->filled('to') ? $request->string('to')->toString() : null;
         $customerId = $request->filled('customer_id') ? (int) $request->input('customer_id') : null;
 
-        $returns = SalesReturn::query()
+        // Branches (plan 12, BR12): both lists follow the top-bar switcher
+        // and name each row's branch only when several branches can appear.
+        $showBranch = BranchListFilter::columnVisible($request);
+
+        $returns = BranchListFilter::apply(SalesReturn::query(), $request)
             ->whereIn('status', ['posted', 'cancelled'])
             ->with([
                 'sale:id,customer_id,invoice_number', 'sale.customer:id,name',
@@ -64,6 +74,7 @@ class SalesReturnController extends Controller
                 // `customer_id` and per-line `item_id` are loaded alongside.
                 'customer:id,name', 'lines.saleLine.item:id,name,unit', 'lines.item:id,name,unit',
             ])
+            ->when($showBranch, fn ($query) => $query->with('branch:id,name,code'))
             ->when($from, fn ($query, string $from) => $query->whereDate('date', '>=', $from))
             ->when($to, fn ($query, string $to) => $query->whereDate('date', '<=', $to))
             ->when($customerId, fn ($query, int $customerId) => $query->where(
@@ -75,9 +86,10 @@ class SalesReturnController extends Controller
             ->paginate(25)
             ->withQueryString();
 
-        $pendingRequests = SalesReturn::query()
+        $pendingRequests = BranchListFilter::apply(SalesReturn::query(), $request)
             ->whereIn('status', ['pending', 'rejected'])
             ->with(['sale:id,customer_id,invoice_number', 'sale.customer:id,name', 'lines.saleLine.item:id,name,unit', 'creator:id,name'])
+            ->when($showBranch, fn ($query) => $query->with('branch:id,name,code'))
             ->orderByDesc('date')
             ->orderByDesc('id')
             ->get();
@@ -102,10 +114,18 @@ class SalesReturnController extends Controller
                 ->get(['id', 'name', 'unit', 'is_vatable', 'is_stockable', 'sale_rate']),
             'walkInCustomerId' => Customer::walkIn()?->id,
             'refundAccounts' => SalesReturn::refundAccountQuery()->orderBy('name')->get(['id', 'code', 'name']),
-            'stores' => Store::where('is_active', true)->orderBy('name')->get(),
+            // Multi-branch: id, name, branch_id and is_branch_default, only
+            // of the user's branches (OffersDocumentBranch). Otherwise the
+            // same rows as before.
+            'stores' => ActiveBranchSelection::isMultiBranch($request)
+                ? $this->branchStoreOptions($request)
+                : Store::where('is_active', true)->orderBy('name')->get(),
             'invoiceSettings' => [
                 'default_vat_rate' => CompanySetting::current()->default_vat_rate,
             ],
+            // The unlinked form's branch picker. A linked return has none: it
+            // always lands in its sale's branch (DocumentBranch::inherited).
+            ...BranchFormOptions::props($request),
         ]);
     }
 
@@ -170,6 +190,9 @@ class SalesReturnController extends Controller
             'store_id' => $sale->store_id,
             'total' => (string) $sale->total,
             'lines' => SalesReturn::returnableLines($sale),
+            // A linked return inherits the sale's branch: shown read-only,
+            // and its store dropdown offers only that branch's stores.
+            ...(ActiveBranchSelection::isMultiBranch($request) ? ['branch_id' => (int) $sale->branch_id] : []),
         ];
     }
 
@@ -199,6 +222,9 @@ class SalesReturnController extends Controller
             'date' => ['required', 'date'],
             'reason' => ['nullable', 'string', 'max:255'],
             'store_id' => ['nullable', 'integer', 'exists:stores,id'],
+            // Sent by the branch picker of a multi-branch company (BR12);
+            // postUnlinked() checks it is active and usable.
+            'branch_id' => ['nullable', 'integer', 'exists:branches,id'],
             'refund_account_id' => ['nullable', 'integer', Rule::in(SalesReturn::refundAccountQuery()->pluck('id')->all())],
             'refund_cash_amount' => ['nullable', 'decimal:0,2', 'min:0'],
             'refund_bank_amount' => ['nullable', 'decimal:0,2', 'min:0'],
@@ -312,7 +338,7 @@ class SalesReturnController extends Controller
      * - SalesReturn::postRefund() via DocumentCalculator::assertExactSplit()
      * (C3). Leaving both blank keeps the original single-account behaviour.
      *
-     * @return array{sale_id: int, date: string, reason: ?string, refund_account_id: ?int, refund_cash_amount: ?string, refund_bank_amount: ?string, store_id: ?int, expected_total: ?string, lines: array<int, array{sale_line_id: int, quantity: string, bonus_quantity?: string}>}
+     * @return array{sale_id: int, date: string, reason: ?string, refund_account_id: ?int, refund_cash_amount: ?string, refund_bank_amount: ?string, store_id: ?int, branch_id?: ?int, expected_total: ?string, lines: array<int, array{sale_line_id: int, quantity: string, bonus_quantity?: string}>}
      */
     private function validatedReturn(Request $request): array
     {
@@ -324,6 +350,9 @@ class SalesReturnController extends Controller
             'refund_cash_amount' => ['nullable', 'decimal:0,2', 'min:0'],
             'refund_bank_amount' => ['nullable', 'decimal:0,2', 'min:0'],
             'store_id' => ['nullable', 'integer', 'exists:stores,id'],
+            // Optional: a linked return always lands in its sale's branch,
+            // and naming any other branch is refused (plan 12, section 5.4).
+            'branch_id' => ['nullable', 'integer'],
             'expected_total' => ['nullable', 'string'],
             'lines' => ['required', 'array', 'min:1'],
             'lines.*.sale_line_id' => ['required', 'integer', 'distinct', 'exists:sale_lines,id'],
@@ -336,7 +365,7 @@ class SalesReturnController extends Controller
 
     /**
      * @param  array<string, mixed>  $data
-     * @return array{sale_id: int, date: string, reason: ?string, refund_account_id: ?int, refund_cash_amount: ?string, refund_bank_amount: ?string, store_id: ?int, expected_total: ?string}
+     * @return array{sale_id: int, date: string, reason: ?string, refund_account_id: ?int, refund_cash_amount: ?string, refund_bank_amount: ?string, store_id: ?int, branch_id: ?int, expected_total: ?string}
      */
     private function header(array $data): array
     {
@@ -348,6 +377,7 @@ class SalesReturnController extends Controller
             'refund_cash_amount' => $data['refund_cash_amount'] ?? null,
             'refund_bank_amount' => $data['refund_bank_amount'] ?? null,
             'store_id' => $data['store_id'] ?? null,
+            'branch_id' => $data['branch_id'] ?? null,
             'expected_total' => $data['expected_total'] ?? null,
         ];
     }
@@ -361,10 +391,16 @@ class SalesReturnController extends Controller
      * because the fiscal-year guard raises it for a non-admin posting into a
      * reopened year: that belongs on the form as a message, not as a 403
      * page that loses everything typed.
+     *
+     * A refused branch (inactive, not the user's, or another branch than a
+     * linked return's sale) goes on `branch_id` and a store of another
+     * branch on `store_id` (plan 12, BR12); everything else as before.
      */
     private function failed(InvalidArgumentException|AuthorizationException $exception): RedirectResponse
     {
-        $key = str_contains($exception->getMessage(), 'total changed') ? 'expected_total' : 'lines';
+        $key = str_contains($exception->getMessage(), 'total changed')
+            ? 'expected_total'
+            : BranchFormOptions::errorField($exception, 'lines', 'branch_id', 'store_id');
 
         return back()->withErrors([$key => $exception->getMessage()])->withInput();
     }
@@ -402,6 +438,8 @@ class SalesReturnController extends Controller
             'fiscalYearName' => $salesReturn->fiscalYear?->name ?? $salesReturn->journalVoucher?->fiscalYear?->name,
             'copyNumber' => PrintLog::record($salesReturn, $request->user()),
             'amountInWords' => AmountInWords::rupees(Money::of($salesReturn->total)),
+            // Multi-branch only; null keeps a single-branch note unchanged.
+            ...$this->printBranch($request, $salesReturn),
         ])->stream("sales-return-{$salesReturn->id}.pdf");
     }
 }

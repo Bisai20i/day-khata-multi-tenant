@@ -5,7 +5,8 @@ namespace App\Http\Controllers\Tenant\Reports;
 use App\Http\Controllers\Controller;
 use App\Models\Store;
 use App\Support\AsOfDate;
-use App\Support\Inventory\StockCosting;
+use App\Support\Branches\BranchFilter;
+use App\Support\Branches\BranchStock;
 use App\Support\Money\Money;
 use Illuminate\Http\Request;
 use Inertia\Inertia;
@@ -25,16 +26,33 @@ use Inertia\Response;
  * Balance Sheet and the year-end closing entry read StockCosting too, so
  * this screen now agrees with the books by construction rather than by
  * coincidence.
+ *
+ * Branches (plan 12, BR15): `branch` / `branches[]` narrow the report to
+ * the covered branches' stores, valued by StockCosting::
+ * branchValuationRows() (the year-end convention, so a branch's trading
+ * stock equals its statements' closing stock); `by_branch=1` adds each
+ * row's quantity and value per branch (`byBranch`, keyed by branch id) and
+ * `branchReport.columns` / `branchReport.totals` (value per branch). A
+ * `store_id` outside the covered branches is dropped. Not multi-branch:
+ * the same queries and payload as before, plus `branchReport: null`.
  */
 class StockValuationReportController extends Controller
 {
     public function index(Request $request): Response
     {
         $asOf = $this->resolveAsOf($request);
-        $storeId = $request->integer('store_id') ?: null;
+        $filter = BranchFilter::fromRequest($request);
+        $storeId = $filter->allowedStoreId($request->integer('store_id') ?: null);
         $stockStatus = $this->resolveStockStatus($request);
 
-        $rows = StockCosting::valuationRows($asOf, $storeId, ['stock_status' => $stockStatus])
+        // By-branch columns only for the branch view: one store is one
+        // branch already.
+        $withBranches = $filter->byBranch() && $storeId === null;
+        $columns = $withBranches ? BranchStock::columns($filter) : null;
+
+        $valuationRows = BranchStock::valuationRows($filter, $asOf, $storeId, ['stock_status' => $stockStatus], $withBranches);
+
+        $rows = $valuationRows
             ->map(fn (array $row) => [
                 'itemId' => $row['item_id'],
                 'name' => $row['name'],
@@ -43,19 +61,27 @@ class StockValuationReportController extends Controller
                 'quantity' => $row['quantity']->toString(),
                 'avgCost' => $row['average_cost'],
                 'valuation' => $row['value']->toString(),
+                ...($columns === null ? [] : ['byBranch' => BranchStock::presentRow($row['by_branch'] ?? [], $columns)]),
             ])
             // Exact Money comparison, never a float sort key: two valuations
             // a paisa apart must order deterministically.
             ->sort(fn (array $a, array $b) => Money::of($b['valuation'])->compareTo(Money::of($a['valuation'])))
             ->values();
 
+        $branchReport = $filter->payload(supportsByBranch: $storeId === null);
+
+        if ($branchReport !== null && $columns !== null) {
+            $branchReport = [...$branchReport, 'columns' => $columns, 'totals' => BranchStock::valueTotals($valuationRows, $columns)];
+        }
+
         return Inertia::render('Tenant/Reports/StockValuation', [
             'asOf' => $asOf,
             'rows' => $rows,
             'grandTotalValuation' => Money::sum($rows->map(fn (array $row) => Money::of($row['valuation'])))->toString(),
-            'stores' => Store::where('is_active', true)->orderBy('name')->get(['id', 'name']),
+            'stores' => BranchStock::storeOptions($filter, Store::where('is_active', true))->orderBy('name')->get(['id', 'name']),
             'storeId' => $storeId,
             'stockStatus' => $stockStatus,
+            'branchReport' => $branchReport,
         ]);
     }
 

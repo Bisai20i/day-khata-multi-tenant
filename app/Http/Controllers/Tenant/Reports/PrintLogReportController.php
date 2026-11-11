@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Tenant\Reports;
 
 use App\Http\Controllers\Controller;
 use App\Models\PrintLog;
+use App\Support\Branches\BranchMorphVisibility;
 use App\Support\NepaliCalendar;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Http\Request;
@@ -45,7 +46,14 @@ class PrintLogReportController extends Controller
         $printableType = $request->string('printable_type')->toString() ?: null;
         $copiesOnly = $request->boolean('copies_only');
 
-        $logs = PrintLog::query()
+        $query = PrintLog::query();
+
+        // print_logs has no branch column: a branch-restricted user must not
+        // see who printed another branch's documents, and when. A no-op for
+        // the owner and all-branch users (plan 12, section 5.7).
+        BranchMorphVisibility::apply($query, 'printable_type', 'printable_id');
+
+        $logs = $query
             ->with(['printable', 'printedBy:id,name'])
             ->when($printableType, fn ($query) => $query->where('printable_type', $printableType))
             ->when($from, fn ($query) => $query->whereDate('printed_at', '>=', $from))
@@ -84,11 +92,14 @@ class PrintLogReportController extends Controller
      * Modules are being added in parallel, so a list maintained here would
      * be out of date the week it was written.
      *
+     * A branch-restricted user is only offered the types of rows they can
+     * see, through the same filter as the list itself.
+     *
      * @return array<int, array{value: string, label: string}>
      */
     private function documentTypeOptions(): array
     {
-        return PrintLog::query()
+        return BranchMorphVisibility::apply(PrintLog::query(), 'printable_type', 'printable_id')
             ->select('printable_type')
             ->distinct()
             ->orderBy('printable_type')

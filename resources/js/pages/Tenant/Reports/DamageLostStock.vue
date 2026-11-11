@@ -1,5 +1,5 @@
 <script setup>
-import { computed, ref } from 'vue';
+import { computed, ref, watch } from 'vue';
 import { router, usePage } from '@inertiajs/vue3';
 import AppLayout from '@/layouts/AppLayout.vue';
 import { useLayoutChrome } from '@/composables/useLayoutChrome';
@@ -12,6 +12,9 @@ import DataTable from '@/components/ui/DataTable.vue';
 import Label from '@/components/ui/Label.vue';
 import { formatQuantity } from '@/lib/money';
 import { formatBsDate } from '@/lib/format';
+import { useBranchReportFilter } from '@/composables/useBranchReportFilter';
+import BranchReportFilter from '@/components/branch/BranchReportFilter.vue';
+import BranchReportNotes from '@/components/branch/BranchReportNotes.vue';
 import { itemLedgerColumn } from '@/lib/itemLedger';
 
 defineOptions({ layout: AppLayout });
@@ -27,6 +30,8 @@ const props = defineProps({
     storeId: { type: [Number, null], default: null },
     itemId: { type: [Number, null], default: null },
     reason: { type: String, default: null },
+    // Branch filter; null when the company has no branches.
+    branchReport: { type: [Object, null], default: null },
 });
 
 const page = usePage();
@@ -35,6 +40,16 @@ useLayoutChrome('Damage & Lost Stock');
 const from = ref(props.from);
 const to = ref(props.to);
 const storeId = ref(props.storeId);
+
+// The server drops a store outside the chosen branches; follow what it applied.
+watch(
+    () => [props.storeId, props.stores],
+    () => {
+        storeId.value = props.storeId;
+    },
+);
+
+const branchFilter = useBranchReportFilter(() => props.branchReport);
 const itemId = ref(props.itemId);
 const reason = ref(props.reason);
 
@@ -80,6 +95,7 @@ function applyFilter() {
             store_id: storeId.value ?? undefined,
             item_id: itemId.value ?? undefined,
             reason: reason.value ?? undefined,
+            ...branchFilter.toQuery(),
         },
         {
             preserveState: true,
@@ -156,9 +172,17 @@ const totalQuantityLabel = computed(() => {
                     <Label class="mb-1">Reason</Label>
                     <Select v-model="reason" :options="reasonOptions" />
                 </div>
+                <BranchReportFilter
+                    v-if="branchReport"
+                    v-model:choice="branchFilter.choice.value"
+                    :report="branchReport"
+                    id-prefix="damage-lost-branch"
+                    @change="applyFilter"
+                />
                 <Button variant="primary" tone="purple" :loading="isLoading" @click="applyFilter">Generate report</Button>
                 <Button v-if="hasActiveFilter" variant="secondary" tone="purple" :disabled="isLoading" @click="resetFilters">Reset</Button>
             </div>
+            <BranchReportNotes v-if="branchReport" :report="branchReport" />
         </Card>
 
         <div class="mb-3 flex items-center gap-2">

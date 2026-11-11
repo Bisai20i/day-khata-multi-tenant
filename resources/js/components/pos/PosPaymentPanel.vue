@@ -8,6 +8,7 @@ import Combobox from '@/components/ui/Combobox.vue';
 import Label from '@/components/ui/Label.vue';
 import { addMoney, formatMoney } from '@/lib/money';
 import { usePermissions } from '@/composables/usePermissions';
+import BranchSelect from '@/components/branch/BranchSelect.vue';
 
 /**
  * Payment area, bottom half of the POS right-hand side: payment grid with
@@ -33,6 +34,9 @@ defineProps({
     bankAccountOptions: { type: Array, default: () => [] },
     tdsAccountOptions: { type: Array, default: () => [] },
     storeOptions: { type: Array, default: () => [] },
+    // The terminal's branch picker (usePosBranch); renders nothing unless
+    // the company runs several branches and the user may pick.
+    branchOptions: { type: Array, default: () => [] },
     submitBlockedReason: { type: String, default: '' },
     canSubmit: { type: Boolean, default: false },
 });
@@ -45,6 +49,8 @@ const emit = defineEmits([
     'hold',
     'complete',
 ]);
+
+const branchId = defineModel('branchId', { type: [Number, null], default: null });
 
 const showAdvanced = ref(false);
 
@@ -80,6 +86,10 @@ const { can } = usePermissions();
                         Reset
                     </Button>
                 </div>
+            </div>
+
+            <div v-if="branchOptions.length > 1" class="mb-2.5">
+                <BranchSelect v-model="branchId" :options="branchOptions" :error="form.errors.branch_id" />
             </div>
 
             <!-- Legacy's fixed 2x2 layout: Cash | Bank / Note | Bank account -->
@@ -174,7 +184,7 @@ const { can } = usePermissions();
         </Card>
 
         <!-- Totals -->
-        <Card v-if="totals || form.errors.lines || form.errors.expected_total" variant="panel" class="shrink-0">
+        <Card v-if="totals || form.errors.lines || form.errors.expected_total || form.errors.branch_id || form.errors.store_id" variant="panel" class="shrink-0">
             <dl v-if="totals" class="grid grid-cols-[1fr_auto] gap-x-3 gap-y-1 text-[13px]" aria-live="polite">
                 <dt class="text-text-muted">Subtotal</dt>
                 <dd class="text-right font-medium text-text-strong tabular-nums">{{ formatMoney(addMoney(totals.vatable_subtotal, totals.non_vatable_subtotal)) }}</dd>
@@ -196,6 +206,10 @@ const { can } = usePermissions();
             <p v-else-if="!previewError" class="text-sm text-text-faint">Totals appear once the cart has items.</p>
             <p v-if="form.errors.lines" class="mt-2 text-sm text-danger">{{ form.errors.lines }}</p>
             <p v-if="form.errors.expected_total" class="mt-2 text-sm text-danger">{{ form.errors.expected_total }}</p>
+            <!-- Shown here too: the picker may be hidden and the store sits
+                 under More options. -->
+            <p v-if="form.errors.branch_id && branchOptions.length < 2" class="mt-2 text-sm text-danger" role="alert">{{ form.errors.branch_id }}</p>
+            <p v-if="form.errors.store_id" class="mt-2 text-sm text-danger" role="alert">{{ form.errors.store_id }}</p>
         </Card>
 
         <!-- Actions: legacy's Hold / Save / Save & Print row -->

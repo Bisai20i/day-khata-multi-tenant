@@ -23,6 +23,7 @@ import { todayInKathmandu } from '@/lib/format.js';
 import Create from './Create.vue';
 import { useOpenFiscalYear } from '@/composables/useOpenFiscalYear';
 import { usePermissions } from '@/composables/usePermissions';
+import { useBranchListColumn } from '@/composables/useBranchListColumn';
 
 defineOptions({ layout: AppLayout });
 
@@ -33,7 +34,12 @@ const props = defineProps({
     accounts: { type: Array, default: () => [] },
     suppliers: { type: Array, default: () => [] },
     pools: { type: Array, default: () => [] },
+    // Branch picker of the create form (BranchFormOptions::props()).
+    branchOptions: { type: Array, default: () => [] },
+    defaultBranchId: { type: Number, default: null },
 });
+
+const { branchColumns } = useBranchListColumn();
 
 const page = usePage();
 const { toast } = useToast();
@@ -125,6 +131,8 @@ async function postDepreciation() {
 const columns = [
     { accessorKey: 'asset_code', header: 'Code' },
     { accessorKey: 'asset_name', header: 'Name' },
+    // Only for a multi-branch company viewing all branches.
+    ...branchColumns(),
     { accessorKey: 'category', header: 'Depreciation pool' },
     {
         id: 'method',
@@ -182,7 +190,15 @@ const columns = [
 <template>
     <div>
         <template v-if="showCreateForm">
-            <Create :accounts="accounts" :suppliers="suppliers" :pools="pools" @cancel="showCreateForm = false" @posted="showCreateForm = false" />
+            <Create
+                :accounts="accounts"
+                :suppliers="suppliers"
+                :pools="pools"
+                :branch-options="branchOptions"
+                :default-branch-id="defaultBranchId"
+                @cancel="showCreateForm = false"
+                @posted="showCreateForm = false"
+            />
         </template>
 
         <template v-else>

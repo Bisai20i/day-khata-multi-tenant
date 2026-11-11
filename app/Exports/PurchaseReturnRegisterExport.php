@@ -22,10 +22,14 @@ class PurchaseReturnRegisterExport implements FromCollection, WithColumnFormatti
     /**
      * @param  Collection<int, array<string, mixed>>  $rows
      * @param  array<string, string|int>  $totals
+     * @param  bool  $withBranch  Multi-branch tenant (BR14): a trailing Branch column from each row's `branch`.
+     * @param  string|null  $branchLabel  BranchFilter::label() in a multi-branch tenant, else null (no extra heading row)
      */
     public function __construct(
         private readonly Collection $rows,
         private readonly array $totals,
+        private readonly bool $withBranch = false,
+        private readonly ?string $branchLabel = null,
     ) {}
 
     /**
@@ -41,19 +45,25 @@ class PurchaseReturnRegisterExport implements FromCollection, WithColumnFormatti
             'supplier' => 'Total',
             'supplier_pan' => null,
             'entry' => null,
+            'subtotal' => $this->totals['subtotal'] ?? '0.00',
             'taxable_amount' => $this->totals['taxable_amount'],
             'nontaxable_amount' => $this->totals['nontaxable_amount'],
             'vat_amount' => $this->totals['vat_amount'],
+            'round_off' => $this->totals['round_off'] ?? '0.00',
             'total' => $this->totals['total'],
         ]);
     }
 
     /**
-     * @return array<int, string>
+     * @return array<int, string>|list<list<string>>
      */
     public function headings(): array
     {
-        return ['SN', 'Date (BS)', 'Date (AD)', 'Debit Note #', 'Against Bill #', 'Supplier', 'Supplier PAN', 'Entry', 'Sub Total', 'Non-Taxable', 'Taxable', 'VAT', 'Total'];
+        $headings = ['SN', 'Date (BS)', 'Date (AD)', 'Debit Note #', 'Against Bill #', 'Supplier', 'Supplier PAN', 'Entry', 'Sub Total', 'Non-Taxable', 'Taxable', 'VAT', 'Round Off', 'Total'];
+
+        $headings = $this->withBranch ? [...$headings, 'Branch'] : $headings;
+
+        return $this->branchLabel === null ? $headings : [[$this->branchLabel], $headings];
     }
 
     /**
@@ -67,6 +77,7 @@ class PurchaseReturnRegisterExport implements FromCollection, WithColumnFormatti
             'K' => NumberFormat::FORMAT_NUMBER_00,
             'L' => NumberFormat::FORMAT_NUMBER_00,
             'M' => NumberFormat::FORMAT_NUMBER_00,
+            'N' => NumberFormat::FORMAT_NUMBER_00,
         ];
     }
 
@@ -89,7 +100,9 @@ class PurchaseReturnRegisterExport implements FromCollection, WithColumnFormatti
             Money::of($row['nontaxable_amount'])->toFloat(),
             Money::of($row['taxable_amount'])->toFloat(),
             Money::of($row['vat_amount'])->toFloat(),
+            Money::of($row['round_off'] ?? '0')->toFloat(),
             Money::of($row['total'])->toFloat(),
+            ...($this->withBranch ? [$row['branch'] ?? ''] : []),
         ];
     }
 }

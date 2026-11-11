@@ -83,14 +83,18 @@ class TenantController extends Controller
 
     /**
      * Show the form for creating a new tenant. The module checkboxes start
-     * from the same default set a tenant created without a selection gets.
+     * from the same default set a tenant created without a selection gets,
+     * except Multiple branches, which a platform admin ticks on purpose
+     * (plan 12, BR24).
      */
     public function create(): Response
     {
         return Inertia::render('Central/Tenants/Create', [
             'moduleCatalog' => self::moduleCatalog(),
             'tenantBaseDomain' => self::tenantBaseDomain(),
-            'defaultModules' => UpdateTenantModulesRequest::canonicalModules(config('permissions.default_modules', [])),
+            'defaultModules' => UpdateTenantModulesRequest::canonicalModules(
+                array_values(array_diff(config('permissions.default_modules', []), ['branches']))
+            ),
         ]);
     }
 
@@ -116,7 +120,7 @@ class TenantController extends Controller
      * from the catalog on every call (config only, no queries) so the UI can
      * never offer a module the server would reject.
      *
-     * @return list<array{key: string, label: string, always_on: bool, requires: list<string>}>
+     * @return list<array{key: string, label: string, description: string, always_on: bool, requires: list<string>}>
      */
     private static function moduleCatalog(): array
     {
@@ -125,6 +129,7 @@ class TenantController extends Controller
             $catalog[] = [
                 'key' => $key,
                 'label' => $module['label'],
+                'description' => $module['description'],
                 'always_on' => $module['always_on'],
                 'requires' => $module['requires'],
             ];

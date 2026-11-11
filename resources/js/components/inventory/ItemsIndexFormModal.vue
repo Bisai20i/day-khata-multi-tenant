@@ -13,6 +13,7 @@ import Combobox from '@/components/ui/Combobox.vue';
 import NepaliDateInput from '@/components/ui/NepaliDateInput.vue';
 import { useCrudModal } from '@/composables/useCrudModal';
 import { usePermissions } from '@/composables/usePermissions';
+import { useStockScopeLabel } from '@/composables/useStockScopeLabel';
 import { generateItemBarcode } from '@/lib/barcode.js';
 import { findCreatedByName, hasAnyError, hasAnyValue } from '@/lib/formModal.js';
 import { formatQuantity } from '@/lib/money.js';
@@ -60,6 +61,9 @@ const postingAccountOptions = computed(() => [
     { value: null, label: 'Default (Purchases Account)' },
     ...props.postingAccounts.map((account) => ({ value: account.id, label: account.label })),
 ]);
+
+// Names what the on-hand figure covers in a multi-branch company (BR22 C1).
+const { withStockScope } = useStockScopeLabel();
 
 // "0.0000" when the item has never moved. Kept as a string all the way to
 // the formatter: this is a quantity, so it never goes through Number().
@@ -592,7 +596,7 @@ defineExpose({ openCreate, openEdit });
                 />
 
                 <p v-if="hasStock(editing) && !form.is_active" class="border-[1.5px] border-warning-text bg-warning-bg px-3 py-2 text-sm text-warning-text">
-                    This item still has {{ formatQuantity(stockOnHand(editing)) }} {{ editing.unit }} in stock. An inactive item
+                    This item still has {{ formatQuantity(stockOnHand(editing)) }} {{ editing.unit }} {{ withStockScope('in stock') }}. An inactive item
                     disappears from every picker, so that stock could never be sold, adjusted or transferred out. Clear the stock
                     first.
                 </p>

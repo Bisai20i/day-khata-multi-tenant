@@ -10,7 +10,8 @@ use App\Models\ItemCategory;
 use App\Models\PurchaseLine;
 use App\Models\SaleLine;
 use App\Models\Store;
-use App\Support\Inventory\StockCosting;
+use App\Support\Branches\BranchFilter;
+use App\Support\Branches\BranchStock;
 use App\Support\Money\Money;
 use App\Support\Money\Quantity;
 use Illuminate\Database\Eloquent\Builder;
@@ -50,9 +51,10 @@ class CategoryWiseReportController extends Controller
     {
         [$from, $to] = $this->resolveDateRange($request);
         $storeId = $request->integer('store_id') ?: null;
+        $branchFilter = BranchFilter::fromRequest($request);
 
         $categories = ItemCategory::query()->with('subcategories')->orderBy('name')->get();
-        $aggregates = $this->categoryAggregatesFromSaleLines($from, $to, $storeId);
+        $aggregates = $this->categoryAggregatesFromSaleLines($from, $to, $storeId, $branchFilter);
 
         ['rows' => $rows, 'grandTotal' => $grandTotal] = $this->buildCategoryValueRows($categories, $aggregates);
 
@@ -61,8 +63,9 @@ class CategoryWiseReportController extends Controller
             'to' => $to,
             'rows' => $rows,
             'grandTotal' => $grandTotal,
-            'stores' => Store::where('is_active', true)->orderBy('name')->get(['id', 'name']),
+            'stores' => BranchStock::storeOptions($branchFilter, Store::where('is_active', true))->orderBy('name')->get(['id', 'name']),
             'storeId' => $storeId,
+            'branchReport' => $branchFilter->payload(),
         ]);
     }
 
@@ -73,9 +76,10 @@ class CategoryWiseReportController extends Controller
     {
         [$from, $to] = $this->resolveDateRange($request);
         $storeId = $request->integer('store_id') ?: null;
+        $branchFilter = BranchFilter::fromRequest($request);
 
         $categories = ItemCategory::query()->with('subcategories')->orderBy('name')->get();
-        $aggregates = $this->categoryAggregatesFromPurchaseLines($from, $to, $storeId);
+        $aggregates = $this->categoryAggregatesFromPurchaseLines($from, $to, $storeId, $branchFilter);
 
         ['rows' => $rows, 'grandTotal' => $grandTotal] = $this->buildCategoryValueRows($categories, $aggregates);
 
@@ -84,8 +88,9 @@ class CategoryWiseReportController extends Controller
             'to' => $to,
             'rows' => $rows,
             'grandTotal' => $grandTotal,
-            'stores' => Store::where('is_active', true)->orderBy('name')->get(['id', 'name']),
+            'stores' => BranchStock::storeOptions($branchFilter, Store::where('is_active', true))->orderBy('name')->get(['id', 'name']),
             'storeId' => $storeId,
+            'branchReport' => $branchFilter->payload(),
         ]);
     }
 
@@ -97,10 +102,11 @@ class CategoryWiseReportController extends Controller
     public function stockByCategory(Request $request): Response
     {
         $asOf = $this->resolveAsOf($request);
-        $storeId = $request->integer('store_id') ?: null;
+        $branchFilter = BranchFilter::fromRequest($request);
+        $storeId = $branchFilter->allowedStoreId($request->integer('store_id') ?: null);
 
         $categories = ItemCategory::query()->with('subcategories')->orderBy('name')->get();
-        $aggregates = $this->categoryAggregatesFromStock($asOf, $storeId);
+        $aggregates = $this->categoryAggregatesFromStock($asOf, $storeId, $branchFilter);
 
         ['rows' => $rows, 'grandTotal' => $grandTotal] = $this->buildCategoryValueRows($categories, $aggregates);
 
@@ -109,18 +115,22 @@ class CategoryWiseReportController extends Controller
             'rows' => $rows,
             'grandTotal' => $grandTotal,
             'grandTotalValuation' => $grandTotal['value'],
-            'stores' => Store::where('is_active', true)->orderBy('name')->get(['id', 'name']),
+            'stores' => BranchStock::storeOptions($branchFilter, Store::where('is_active', true))->orderBy('name')->get(['id', 'name']),
             'storeId' => $storeId,
+            'branchReport' => $branchFilter->payload(),
         ]);
     }
 
     /**
      * Posted-only sale line totals grouped by category/subcategory within
-     * the date range, with quantities in base units keyed by unit.
+     * the date range, with quantities in base units keyed by unit. Narrowed
+     * on the sale's own branch_id (BR14); sale_lines carry no access scope,
+     * so BranchFilter::applyToDocuments() also keeps a restricted user to
+     * their own branches here.
      *
      * @return array<string, array{value: Money, quantities: array<string, Quantity>}> keyed "{categoryId}:{subcategoryId}"
      */
-    private function categoryAggregatesFromSaleLines(string $from, string $to, ?int $storeId): array
+    private function categoryAggregatesFromSaleLines(string $from, string $to, ?int $storeId, BranchFilter $branchFilter): array
     {
         $rows = SaleLine::query()
             ->join('sales', 'sales.id', '=', 'sale_lines.sale_id')
@@ -129,6 +139,7 @@ class CategoryWiseReportController extends Controller
             ->whereDate('sales.date', '>=', $from)
             ->whereDate('sales.date', '<=', $to)
             ->when($storeId !== null, fn (Builder $query) => $query->where('sales.store_id', $storeId))
+            ->tap(fn (Builder $query) => $branchFilter->applyToDocuments($query, 'sales.branch_id'))
             ->get([
                 'items.item_category_id as category_id',
                 'items.item_subcategory_id as subcategory_id',
@@ -147,7 +158,7 @@ class CategoryWiseReportController extends Controller
      *
      * @return array<string, array{value: Money, quantities: array<string, Quantity>}> keyed "{categoryId}:{subcategoryId}"
      */
-    private function categoryAggregatesFromPurchaseLines(string $from, string $to, ?int $storeId): array
+    private function categoryAggregatesFromPurchaseLines(string $from, string $to, ?int $storeId, BranchFilter $branchFilter): array
     {
         $rows = PurchaseLine::query()
             ->join('purchases', 'purchases.id', '=', 'purchase_lines.purchase_id')
@@ -156,6 +167,7 @@ class CategoryWiseReportController extends Controller
             ->whereDate('purchases.date', '>=', $from)
             ->whereDate('purchases.date', '<=', $to)
             ->when($storeId !== null, fn (Builder $query) => $query->where('purchases.store_id', $storeId))
+            ->tap(fn (Builder $query) => $branchFilter->applyToDocuments($query, 'purchases.branch_id'))
             ->get([
                 'items.item_category_id as category_id',
                 'items.item_subcategory_id as subcategory_id',
@@ -203,11 +215,13 @@ class CategoryWiseReportController extends Controller
     /**
      * Closing stock quantity and value per category/subcategory, read through
      * StockCosting (C10) so a category total can never disagree with the
-     * Balance Sheet's Stock in Hand.
+     * Balance Sheet's Stock in Hand. Narrowed to the covered branches'
+     * stores through BranchStock (BR15); one store or the whole company
+     * exactly as before otherwise.
      *
      * @return array<string, array{value: Money, quantities: array<string, Quantity>}>
      */
-    private function categoryAggregatesFromStock(string $asOf, ?int $storeId): array
+    private function categoryAggregatesFromStock(string $asOf, ?int $storeId, BranchFilter $branchFilter): array
     {
         $items = Item::query()
             ->where('is_stockable', true)
@@ -216,7 +230,7 @@ class CategoryWiseReportController extends Controller
 
         $aggregates = [];
 
-        foreach (StockCosting::valuationRows($asOf, $storeId) as $row) {
+        foreach (BranchStock::valuationRows($branchFilter, $asOf, $storeId) as $row) {
             $item = $items->get($row['item_id']);
 
             if ($item === null) {

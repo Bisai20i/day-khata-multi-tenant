@@ -27,8 +27,13 @@ use App\Models\PurchaseReturn;
 use App\Models\Receipt;
 use App\Models\Sale;
 use App\Models\SalesReturn;
+use App\Models\StockTransfer;
 use App\Models\Supplier;
 use App\Models\User;
+use App\Support\Branches\ActiveBranchSelection;
+use App\Support\Branches\BranchAccounts;
+use App\Support\Branches\BranchContext;
+use App\Support\Branches\BranchFilter;
 use App\Support\Money\Money;
 use App\Support\NepaliCalendar;
 use Barryvdh\DomPDF\Facade\Pdf;
@@ -90,16 +95,51 @@ class AccountController extends Controller
      * Stock accounts valued by the opening stock import rather than here:
      * trading Stock in Hand plus the perpetual inventory control accounts
      * (ManufacturingAccounts::CONTROL_CODES), whose balance must equal the
-     * stock ledger. Frozen as literals like the rest of this list.
+     * stock ledger. Also the HR control accounts LIA22 (Salary Payable) and
+     * ASA24 (Staff Advances Receivable), which must equal the HR sub-ledger.
+     * And ASA25 (Inter-Branch Clearing, BranchAccounts): only the system
+     * posts it, in matching pairs across branches, so a one-sided opening
+     * balance would break invariant I3 and block the year-end close.
+     * Frozen as literals like the rest of this list.
      */
-    private const OPENING_BALANCE_BLOCKED_CODES = ['AS11', 'AS12', 'AS13', 'AS14'];
+    private const OPENING_BALANCE_BLOCKED_CODES = ['AS11', 'AS12', 'AS13', 'AS14', 'LIA22', 'ASA24', 'ASA25'];
 
-    public function index(): Response
+    /**
+     * The chart of accounts. The three inter-branch control accounts
+     * (BranchAccounts::CONTROL_CODES, seeded for every tenant) mean nothing
+     * to a company that is not multi-branch, so they are listed only once it
+     * is, or once any voucher line has ever touched them (a company that
+     * traded across branches and went back to Main alone keeps seeing the
+     * balances it carries). BR22 parity; the account pickers are untouched.
+     */
+    public function index(Request $request): Response
     {
+        $showBranchControlAccounts = ActiveBranchSelection::isMultiBranch($request);
+
         return Inertia::render('Tenant/Accounting/Accounts/Index', [
             'accountGroups' => AccountGroup::query()->orderBy('name')->get(['id', 'name']),
             'accountSubgroups' => AccountSubgroup::query()->orderBy('name')->get(['id', 'account_group_id', 'name']),
-            'accounts' => Account::query()->with(['group:id,name', 'subgroup:id,name'])->orderBy('name')->get(),
+            'accounts' => Account::query()
+                ->with(['group:id,name', 'subgroup:id,name'])
+                ->when(! $showBranchControlAccounts, fn (Builder $query) => $query->where(
+                    function (Builder $inner): void {
+                        $inner->whereNull('code')
+                            ->orWhereNotIn('code', BranchAccounts::CONTROL_CODES)
+                            ->orWhereHas('journalVoucherLines');
+
+                        // Defence in depth: an account holding a control code
+                        // under another name is not a control account
+                        // (BranchAccounts::codeConflictMessage()), so it stays
+                        // listed. The migration moves any such clash aside;
+                        // this only covers one introduced outside the app
+                        // (e.g. a direct database edit).
+                        foreach (BranchAccounts::CONTROL_NAMES as $code => $name) {
+                            $inner->orWhere(fn (Builder $own) => $own->where('code', $code)->where('name', '!=', $name));
+                        }
+                    },
+                ))
+                ->orderBy('name')
+                ->get(),
             'openingBalanceImports' => $this->openingBalanceImports(),
         ]);
     }
@@ -199,6 +239,16 @@ class AccountController extends Controller
      * balance double-counts" applies to any windowed book, not only Cash
      * Book). Each line also carries a `document` drill-down to whichever
      * module record (if any) the voucher was posted on behalf of.
+     *
+     * Branches (plan 12, BR14): the same BranchFilter as the general ledger
+     * report (`branch`, `branches[]`), resolved the same way. An explicit
+     * choice wins (`branch=all` is "every branch I may see"); with none the
+     * statement follows the top-bar switcher only when it is narrowed to a
+     * branch, and with the switcher on "All branches" it stays company-wide
+     * (a restricted user still only ever sees their own branches' lines,
+     * labelled as such). The account itself is one company account; only
+     * its lines are narrowed, opening balance included, so the running
+     * balance is the branch's own.
      */
     public function ledger(Request $request, Account $account): Response
     {
@@ -207,19 +257,22 @@ class AccountController extends Controller
 
         $fiscalYearId = $request->integer('fiscal_year_id') ?: FiscalYear::query()->where('status', FiscalYearStatus::Open)->value('id');
         $fiscalYear = $fiscalYearId ? FiscalYear::find($fiscalYearId) : null;
+        $branchFilter = BranchFilter::fromRequest($request);
 
         $data = $fiscalYear
-            ? $this->ledgerData($account, $fiscalYear, $request->string('from')->toString(), $request->string('to')->toString())
+            ? $this->ledgerData($account, $fiscalYear, $request->string('from')->toString(), $request->string('to')->toString(), $branchFilter->lineBranchIds())
             : $this->emptyLedgerData();
 
         return Inertia::render('Tenant/Accounting/Accounts/Ledger', array_merge([
             'account' => $account->only(['id', 'code', 'name']),
+            'partyArea' => $this->partyAreaName($account),
             // Per account, so a party-ledger-only user sees Print/Export on a
             // customer statement exactly when the routes would allow it.
             'canPrint' => $this->mayOpenLedger($request->user(), $account, 'print'),
             'canExport' => $this->mayOpenLedger($request->user(), $account, 'export'),
             'fiscalYears' => FiscalYear::query()->orderByDesc('start_date')->get(['id', 'name', 'status', 'start_date', 'end_date']),
             'fiscalYearId' => $fiscalYearId,
+            'branchReport' => $branchFilter->payload(),
         ], $data));
     }
 
@@ -231,12 +284,14 @@ class AccountController extends Controller
         $fiscalYear = $this->resolveLedgerFiscalYear($request);
         abort_if($fiscalYear === null, 404, 'No fiscal year to print.');
 
-        $data = $this->ledgerData($account, $fiscalYear, $request->string('from')->toString(), $request->string('to')->toString());
+        $branchFilter = BranchFilter::fromRequest($request);
+        $data = $this->ledgerData($account, $fiscalYear, $request->string('from')->toString(), $request->string('to')->toString(), $branchFilter->lineBranchIds());
 
         $pdf = Pdf::loadView('pdf.account-book', [
             'title' => "Ledger - {$account->name}",
             'company' => CompanySetting::current(),
             'documentNumber' => $account->code ? "{$account->code} - {$account->name}" : $account->name,
+            'partyArea' => $this->partyAreaName($account),
             'documentDate' => $data['to'],
             'dateAd' => $data['to'],
             'dateBs' => NepaliCalendar::formatBs($data['to']),
@@ -246,6 +301,8 @@ class AccountController extends Controller
             'openingBalance' => $data['openingBalance'],
             'closingBalance' => $data['closingBalance'],
             'entries' => $data['entries'],
+            // Printed from BR16 on; null for a tenant that is not multi-branch.
+            'branchFilterLabel' => $branchFilter->isActive() ? $branchFilter->label() : null,
         ]);
 
         return $pdf->stream("ledger-{$account->id}.pdf");
@@ -259,10 +316,11 @@ class AccountController extends Controller
         $fiscalYear = $this->resolveLedgerFiscalYear($request);
         abort_if($fiscalYear === null, 404, 'No fiscal year to export.');
 
-        $data = $this->ledgerData($account, $fiscalYear, $request->string('from')->toString(), $request->string('to')->toString());
+        $branchFilter = BranchFilter::fromRequest($request);
+        $data = $this->ledgerData($account, $fiscalYear, $request->string('from')->toString(), $request->string('to')->toString(), $branchFilter->lineBranchIds());
 
         return Excel::download(
-            new AccountBookExport($data['entries'], $data['openingBalance'], $data['closingBalance']),
+            new AccountBookExport($data['entries'], $data['openingBalance'], $data['closingBalance'], $branchFilter->isActive() ? $branchFilter->label() : null),
             "ledger-{$account->id}.xlsx",
         );
     }
@@ -311,6 +369,18 @@ class AccountController extends Controller
     }
 
     /**
+     * The area of the customer or supplier this account is the ledger of, for
+     * the statement header; null for any other account or a party with no area.
+     */
+    private function partyAreaName(Account $account): ?string
+    {
+        $party = Customer::query()->with('area:id,name')->where('account_id', $account->id)->first()
+            ?? Supplier::query()->with('area:id,name')->where('account_id', $account->id)->first();
+
+        return $party?->area?->name;
+    }
+
+    /**
      * A year that does not exist, or a date window that runs backwards, is a
      * validation error rather than a silent fallback to the open year
      * (flags G-21).
@@ -332,9 +402,15 @@ class AccountController extends Controller
     }
 
     /**
+     * $branchIds (BranchFilter::lineBranchIds()) narrows both the opening
+     * balance and the window's lines to those branches, directly on
+     * journal_voucher_lines.branch_id (plan 12, section 8); null adds
+     * nothing, so the queries are exactly what they were.
+     *
+     * @param  list<int>|null  $branchIds
      * @return array{entries: array<int, array<string, mixed>>, openingBalance: string, closingBalance: string, from: string, to: string}
      */
-    private function ledgerData(Account $account, FiscalYear $fiscalYear, string $requestedFrom, string $requestedTo): array
+    private function ledgerData(Account $account, FiscalYear $fiscalYear, string $requestedFrom, string $requestedTo, ?array $branchIds = null): array
     {
         $start = $fiscalYear->start_date->toDateString();
         $end = $fiscalYear->end_date->toDateString();
@@ -346,7 +422,7 @@ class AccountController extends Controller
             [$from, $to] = [$start, $end];
         }
 
-        $openingBalance = $this->openingBalanceFor($account, $fiscalYear, $from);
+        $openingBalance = $this->openingBalanceFor($account, $fiscalYear, $from, $branchIds);
 
         $lines = $account->journalVoucherLines()
             ->whereHas('journalVoucher', function (Builder $query) use ($fiscalYear, $from, $to) {
@@ -355,6 +431,7 @@ class AccountController extends Controller
                     ->whereDate('date', '>=', $from)
                     ->whereDate('date', '<=', $to);
             })
+            ->when($branchIds !== null, fn (Builder $lines) => BranchFilter::narrowLines($lines, $branchIds))
             ->with('journalVoucher')
             ->get()
             ->sortBy([['journalVoucher.date', 'asc'], ['id', 'asc']])
@@ -369,6 +446,10 @@ class AccountController extends Controller
         // from a JSON number.
         $runningBalance = $openingBalance;
 
+        // Branch-series numbers (BR20) print with their code; no query when
+        // every voucher is in the shared series.
+        JournalVoucher::loadSeriesBranches($lines->pluck('journalVoucher'));
+
         $entries = $lines->map(function (JournalVoucherLine $line) use (&$runningBalance) {
             $debit = Money::of($line->debit);
             $credit = Money::of($line->credit);
@@ -377,7 +458,7 @@ class AccountController extends Controller
             return [
                 'date' => $line->journalVoucher->date->toDateString(),
                 'voucherType' => $line->journalVoucher->voucher_type->value,
-                'voucherNumber' => $line->journalVoucher->voucher_number,
+                'voucherNumber' => $line->journalVoucher->displayNumber(),
                 'narration' => $line->narration ?? $line->journalVoucher->narration,
                 'debit' => $debit->toString(),
                 'credit' => $credit->toString(),
@@ -407,9 +488,13 @@ class AccountController extends Controller
      * This year's Opening Balance voucher lines on $account, plus this
      * year's own lines dated before $from - the same "never sum across a
      * year boundary" rule AccountingReportController::accountBook() uses for
-     * the Cash/Bank Book (audit P0-18).
+     * the Cash/Bank Book (audit P0-18). Narrowed by the same branch
+     * predicate as the window's lines, or the running balance would start
+     * from the company's figure.
+     *
+     * @param  list<int>|null  $branchIds
      */
-    private function openingBalanceFor(Account $account, FiscalYear $fiscalYear, string $from): Money
+    private function openingBalanceFor(Account $account, FiscalYear $fiscalYear, string $from, ?array $branchIds = null): Money
     {
         $cast = JournalVoucherLine::query()->getConnection()->getDriverName() === 'sqlite' ? 'INTEGER' : 'SIGNED';
 
@@ -421,6 +506,7 @@ class AccountController extends Controller
                         ->where('voucher_type', VoucherType::OpeningBalance->value)
                         ->orWhereDate('date', '<', $from));
             })
+            ->tap(fn (Builder $lines) => BranchFilter::narrowLines($lines, $branchIds))
             ->selectRaw(
                 "COALESCE(SUM(CAST(ROUND(debit * 100) AS {$cast})), 0) - COALESCE(SUM(CAST(ROUND(credit * 100) AS {$cast})), 0) as net_scaled"
             )
@@ -478,18 +564,37 @@ class AccountController extends Controller
                 'label' => 'Depreciation '.($m->fixedAsset?->asset_code ?? "#{$m->fixed_asset_id}"),
                 'url' => null,
             ]],
+            // A transfer between branches (BR18) owns its dispatch, receipt
+            // and cancellation vouchers; each links to the transfer's print.
+            [StockTransfer::class, 'journal_voucher_id', fn (StockTransfer $m) => [
+                'label' => "Stock transfer #{$m->id} (dispatch)",
+                'url' => route('tenant.stock-transfers.print', $m),
+            ]],
+            [StockTransfer::class, 'receipt_journal_voucher_id', fn (StockTransfer $m) => [
+                'label' => "Stock transfer #{$m->id} (receipt)",
+                'url' => route('tenant.stock-transfers.print', $m),
+            ]],
+            [StockTransfer::class, 'reversal_journal_voucher_id', fn (StockTransfer $m) => [
+                'label' => "Stock transfer #{$m->id} (cancelled)",
+                'url' => route('tenant.stock-transfers.print', $m),
+            ]],
         ];
 
-        foreach ($lookups as [$modelClass, $column, $resolve]) {
-            /** @var Model|null $record */
-            $record = $modelClass::query()->where($column, $voucher->id)->first();
+        // Unrestricted (plan 12, BR07 carry-forward f): a voucher line the
+        // user may see can belong to a document filed in a branch they cannot
+        // (a receipt in B2 settling a B1 invoice); the label is still shown.
+        return BranchContext::unrestricted(function () use ($lookups, $voucher): ?array {
+            foreach ($lookups as [$modelClass, $column, $resolve]) {
+                /** @var Model|null $record */
+                $record = $modelClass::query()->where($column, $voucher->id)->first();
 
-            if ($record) {
-                return $resolve($record);
+                if ($record) {
+                    return $resolve($record);
+                }
             }
-        }
 
-        return null;
+            return null;
+        });
     }
 
     /**
@@ -604,7 +709,12 @@ class AccountController extends Controller
             }
 
             if (in_array(strtoupper((string) $account->code), self::OPENING_BALANCE_BLOCKED_CODES, true)) {
-                $skipped[] = ['row' => $rowNumber, 'name' => $label, 'reason' => "\"{$account->name}\" is valued by the opening stock import, not here."];
+                $blockedCode = strtoupper((string) $account->code);
+                $skipped[] = ['row' => $rowNumber, 'name' => $label, 'reason' => match (true) {
+                    in_array($blockedCode, ['LIA22', 'ASA24'], true) => "\"{$account->name}\" is controlled by the HR module and cannot take an opening balance here.",
+                    $blockedCode === 'ASA25' => "\"{$account->name}\" is posted only by the system for inter-branch entries and cannot take an opening balance here.",
+                    default => "\"{$account->name}\" is valued by the opening stock import, not here.",
+                }];
 
                 continue;
             }
@@ -726,14 +836,17 @@ class AccountController extends Controller
      */
     private function reverseActiveOpeningBalanceImports(User $actor, string $narration): void
     {
-        $previous = JournalVoucher::query()
+        // Looked up outside the branch access scope: an import replaces every
+        // active import company-wide. reverse() still checks that the actor
+        // may post into each voucher's branches.
+        $previous = BranchContext::unrestricted(fn () => JournalVoucher::query()
             ->where('voucher_type', VoucherType::OpeningBalance)
             ->where('narration', self::OPENING_BALANCE_IMPORT_NARRATION)
             ->where('status', 'posted')
             ->whereHas('fiscalYear', fn ($query) => $query->where('status', FiscalYearStatus::Open))
             ->orderBy('id')
             ->lockForUpdate()
-            ->get();
+            ->get());
 
         foreach ($previous as $voucher) {
             JournalVoucher::reverse($voucher, $actor, $narration);

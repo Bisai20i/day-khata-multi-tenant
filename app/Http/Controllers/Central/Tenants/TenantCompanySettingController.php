@@ -261,7 +261,25 @@ class TenantCompanySettingController extends Controller
 
         $rows = [];
 
+        // A per_branch year (plan 12, BR20) has one series per branch, so one
+        // next number means nothing there; the rows say so and are locked.
+        $perBranch = $fiscalYear?->usesPerBranchNumbering() ?? false;
+
         foreach (self::NUMBERED_SERIES as $column => $series) {
+            if ($perBranch) {
+                $rows[] = [
+                    'voucher_type' => $series['type']->value,
+                    'label' => $series['label'],
+                    'prefix' => (string) $settings->{$column},
+                    'next_number' => null,
+                    'can_set' => false,
+                    'fiscal_year' => $fiscalYear->name,
+                    'per_branch' => true,
+                ];
+
+                continue;
+            }
+
             $nextNumber = $fiscalYear ? VoucherSequence::nextNumberFor($fiscalYear, $series['type']) : 1;
 
             $rows[] = [
@@ -269,7 +287,8 @@ class TenantCompanySettingController extends Controller
                 'label' => $series['label'],
                 'prefix' => (string) $settings->{$column},
                 'next_number' => $nextNumber,
-                'can_set' => $fiscalYear !== null && ! JournalVoucher::query()
+                // A per_branch year (plan 12, BR20) refuses a starting number.
+                'can_set' => $fiscalYear !== null && ! $fiscalYear->usesPerBranchNumbering() && ! JournalVoucher::query()
                     ->where('fiscal_year_id', $fiscalYear->id)
                     ->where('voucher_type', $series['type'])
                     ->exists(),

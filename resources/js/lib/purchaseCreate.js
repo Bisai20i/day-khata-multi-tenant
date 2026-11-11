@@ -36,6 +36,8 @@ export function emptyPurchaseLine() {
 export function restorePurchaseDraft(draft) {
     return {
         ...draft,
+        // A draft saved before Round Off existed has no such key.
+        round_off: draft.round_off ?? '',
         lines: (draft.lines ?? []).filter((line) => line.item_id !== null && line.item_id !== undefined),
     };
 }

@@ -4,11 +4,17 @@ namespace App\Models;
 
 use App\Casts\Decimal;
 use App\Enums\VoucherType;
+use App\Models\Concerns\BelongsToBranch;
+use App\Support\Branches\BranchContext;
+use App\Support\Branches\BranchRuleViolation;
+use App\Support\Branches\DocumentBranch;
 use App\Support\ClosedFiscalYearGuard;
 use App\Support\Money\Money;
 use App\Support\SettlementNarration;
 use Carbon\CarbonImmutable;
+use Illuminate\Auth\Access\AuthorizationException;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
+use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
@@ -33,15 +39,28 @@ use InvalidArgumentException;
  * old code allowed an allocation to exceed an invoice's outstanding balance
  * by up to 0.01 and a Re 0.01 receipt to be rejected as "not greater than
  * zero" (audit P0-4); a paisa either belongs on the invoice or it does not.
+ *
+ * Branches (plan 12, sections 5.3 and 5.4, BR07): branch_id is where the
+ * money came in. An allocation may settle an invoice of another branch; the
+ * voucher then follows the party-line rule: the cash or bank line sits in the
+ * receipt's branch, the customer line is split by the branch of each invoice
+ * it settles, and the unallocated (on-account) remainder stays in the
+ * receipt's branch, because it settles no document yet. The voucher is posted
+ * with autoBalance, so Inter-Branch Clearing lines (hub = the receipt's
+ * branch) make every branch balance on its own (I1). A receipt whose
+ * allocations all sit in its own branch (every receipt of a single-branch
+ * company) posts exactly the two lines it always did.
  */
 #[Fillable([
     'customer_id', 'date', 'amount', 'payment_mode', 'bank_account_id',
     'reference_number', 'narration', 'status', 'journal_voucher_id',
     'created_by', 'cancelled_at', 'cancelled_by', 'cancel_reason',
-    'reversal_journal_voucher_id',
+    'reversal_journal_voucher_id', 'branch_id',
 ])]
 class Receipt extends Model
 {
+    use BelongsToBranch;
+
     /**
      * @return array<string, string>
      */
@@ -51,6 +70,7 @@ class Receipt extends Model
             'date' => 'date:Y-m-d',
             'amount' => Decimal::class.':2',
             'cancelled_at' => 'datetime',
+            'branch_id' => 'integer',
         ];
     }
 
@@ -128,17 +148,39 @@ class Receipt extends Model
      * - an invoice with nothing outstanding (a cash sale, or one already
      *   settled) cannot be allocated against at all.
      *
-     * @param  array{customer_id: int, date: string, amount: string|float, payment_mode: string, bank_account_id?: int|null, reference_number?: string|null, narration?: string|null, allocations?: array<int, array{sale_id: int, amount: string|float}>}  $data
+     * Branch: $data['branch_id'] when given, else the actor's posting branch
+     * (DocumentBranch::forDocument()); it must be active and accessible. Each
+     * allocated invoice may be in any branch the actor may use; the voucher
+     * lines follow the party-line rule in the class docblock.
+     *
+     * @param  array{customer_id: int, date: string, amount: string|float, payment_mode: string, bank_account_id?: int|null, reference_number?: string|null, narration?: string|null, branch_id?: int|string|null, allocations?: array<int, array{sale_id: int, amount: string|float}>}  $data
+     *
+     * Lock order: the allocated sales (ascending id), then (inside
+     * JournalVoucher::post()) the fiscal year, with the sale locks taken
+     * before the first plain SELECT of the transaction. On MySQL (REPEATABLE
+     * READ) the first plain read fixes the snapshot: a customer, branch or
+     * account read taken before the locks would make the outstanding-balance
+     * read miss a receipt committed while this one waited, and two receipts
+     * could together over-settle one invoice. The payload is aggregated
+     * before the transaction opens (pure arithmetic, no query). Same
+     * discipline as SalaryPaymentPoster::post().
+     *
+     * @throws InvalidArgumentException
      */
     public static function post(array $data, User $actor): self
     {
-        return DB::transaction(function () use ($data, $actor) {
+        $bySale = static::allocationsBySale($data['allocations'] ?? []);
+
+        return DB::transaction(function () use ($data, $actor, $bySale) {
+            $sales = static::lockSales(array_keys($bySale));
             $customer = Customer::findOrFail($data['customer_id']);
             $amount = Money::of($data['amount']);
 
             if (! $amount->isPositive()) {
                 throw new InvalidArgumentException('Receipt amount must be greater than zero.');
             }
+
+            $branchId = DocumentBranch::forDocument($actor, $data['branch_id'] ?? null)->branchId;
 
             ClosedFiscalYearGuard::assertDateInOpenYear($data['date'], $actor);
 
@@ -162,33 +204,47 @@ class Receipt extends Model
                 throw new InvalidArgumentException("Unknown payment mode: {$paymentMode}");
             }
 
-            $preparedAllocations = static::prepareAllocations($data['allocations'] ?? [], $customer, CarbonImmutable::parse($data['date'])->toDateString());
+            $preparedAllocations = static::prepareAllocations($bySale, $sales, $customer, CarbonImmutable::parse($data['date'])->toDateString(), $actor);
             $allocatedTotal = Money::sum(array_column($preparedAllocations, 'amount'));
 
             if ($allocatedTotal->isGreaterThan($amount)) {
                 throw new InvalidArgumentException('Allocations cannot exceed the receipt amount.');
             }
 
-            $voucher = JournalVoucher::post(
-                [
-                    'voucher_type' => VoucherType::Receipt->value,
-                    'date' => $data['date'],
-                    'narration' => $data['narration'] ?? "Receipt from {$customer->name}",
-                ],
-                [
-                    ['account_id' => $settlementAccountId, 'debit' => $amount->toString(), 'credit' => '0', 'narration' => 'Amount received'],
-                    ['account_id' => $customer->account_id, 'debit' => '0', 'credit' => $amount->toString(), 'narration' => 'Settlement'],
-                ],
-                $actor,
-                // Every line of this voucher carries the same compact
-                // narration (audit section 3 "Sales", "ledger narrations"), so
-                // the customer's ledger reads "{voucher number} - Cash
-                // Settlement" and tells a receipt apart from a sale at a
-                // glance. Resolved inside post(), once the number exists.
-                lineNarration: fn (JournalVoucher $voucher): string => SettlementNarration::line($voucher->voucher_number, $paymentMode),
-            );
+            $voucherLines = [
+                ['account_id' => $settlementAccountId, 'debit' => $amount->toString(), 'credit' => '0', 'narration' => 'Amount received', 'branch_id' => $branchId],
+            ];
+
+            foreach (static::customerCreditByBranch($amount, $preparedAllocations, $branchId) as $lineBranchId => $credit) {
+                $voucherLines[] = ['account_id' => $customer->account_id, 'debit' => '0', 'credit' => $credit->toString(), 'narration' => 'Settlement', 'branch_id' => $lineBranchId];
+            }
+
+            try {
+                $voucher = JournalVoucher::post(
+                    [
+                        'voucher_type' => VoucherType::Receipt->value,
+                        'date' => $data['date'],
+                        'narration' => $data['narration'] ?? "Receipt from {$customer->name}",
+                        'branch_id' => $branchId,
+                    ],
+                    $voucherLines,
+                    $actor,
+                    // Every line of this voucher carries the same compact
+                    // narration (audit section 3 "Sales", "ledger narrations"), so
+                    // the customer's ledger reads "{voucher number} - Cash
+                    // Settlement" and tells a receipt apart from a sale at a
+                    // glance. Resolved inside post(), once the number exists.
+                    lineNarration: fn (JournalVoucher $voucher): string => SettlementNarration::line($voucher->seriesNumber(), $paymentMode),
+                    autoBalance: true,
+                );
+            } catch (BranchRuleViolation $exception) {
+                // A missing Inter-Branch Clearing account is a setup problem
+                // the user must see on the form, not a 500.
+                throw new InvalidArgumentException($exception->getMessage(), 0, $exception);
+            }
 
             $receipt = static::create([
+                'branch_id' => $branchId,
                 'customer_id' => $customer->id,
                 'date' => $data['date'],
                 'amount' => $amount,
@@ -214,14 +270,14 @@ class Receipt extends Model
     }
 
     /**
-     * Sums the payload per sale, locks those sale rows in ascending id
-     * order, and checks each aggregated amount against that invoice's
-     * outstanding balance read inside the same transaction.
+     * Sums the payload per sale (pure arithmetic, run before the transaction
+     * opens), ascending sale id, so repeating an invoice cannot slip past
+     * its cap.
      *
-     * @param  array<int, array{sale_id: int, amount: string|float}>  $allocations
-     * @return list<array{sale_id: int, amount: Money}>
+     * @param  array<int, array{sale_id: int|string, amount: string|float}>  $allocations
+     * @return array<int, Money>
      */
-    private static function prepareAllocations(array $allocations, Customer $customer, string $receiptDate): array
+    private static function allocationsBySale(array $allocations): array
     {
         $bySale = [];
 
@@ -236,20 +292,52 @@ class Receipt extends Model
             $bySale[$saleId] = isset($bySale[$saleId]) ? $bySale[$saleId]->plus($amount) : $amount;
         }
 
-        if ($bySale === []) {
-            return [];
-        }
-
         ksort($bySale);
 
-        $sales = Sale::whereIn('id', array_keys($bySale))->orderBy('id')->lockForUpdate()->get()->keyBy('id');
+        return $bySale;
+    }
+
+    /**
+     * Locks the allocated sales in ascending id order; the first query of
+     * post()'s transaction (see the lock order there). Read outside the
+     * branch access scope (plan 12, section 5.7): through a restricted
+     * actor's scope an invoice of another branch would look deleted, and
+     * its row would go unlocked. prepareAllocations() then checks access.
+     *
+     * @param  list<int>  $saleIds
+     * @return Collection<int, Sale>
+     */
+    private static function lockSales(array $saleIds): Collection
+    {
+        if ($saleIds === []) {
+            return new Collection;
+        }
+
+        return BranchContext::unrestricted(fn () => Sale::whereIn('id', $saleIds)->orderBy('id')->lockForUpdate()->get()->keyBy('id'));
+    }
+
+    /**
+     * Checks each aggregated amount against the locked invoice's outstanding
+     * balance, read inside the same transaction.
+     *
+     * Access first (I6): a sale the actor may not use is reported exactly
+     * like a missing one, before any other check, so a restricted user
+     * learns nothing about a hidden invoice (whether it exists, whose it is,
+     * whether it is cancelled or how much it owes).
+     *
+     * @param  array<int, Money>  $bySale
+     * @param  Collection<int, Sale>  $sales
+     * @return list<array{sale_id: int, amount: Money, branch_id: int}>
+     */
+    private static function prepareAllocations(array $bySale, Collection $sales, Customer $customer, string $receiptDate, User $actor): array
+    {
         $prepared = [];
 
         foreach ($bySale as $saleId => $amount) {
             $sale = $sales->get($saleId);
 
-            if (! $sale) {
-                throw new InvalidArgumentException("Sale [{$saleId}] no longer exists.");
+            if (! $sale || (! BranchContext::accessIsLifted() && ! BranchContext::canAccessBranch((int) $sale->branch_id, $actor))) {
+                throw new InvalidArgumentException("Sale [{$saleId}] does not exist or is not available to you.");
             }
 
             if ($sale->customer_id !== $customer->id) {
@@ -281,10 +369,40 @@ class Receipt extends Model
                 );
             }
 
-            $prepared[] = ['sale_id' => $sale->id, 'amount' => $amount];
+            $prepared[] = ['sale_id' => $sale->id, 'amount' => $amount, 'branch_id' => (int) $sale->branch_id];
         }
 
         return $prepared;
+    }
+
+    /**
+     * The customer credit per branch under the party-line rule (plan 12,
+     * section 5.3): each allocation in its invoice's branch, the unallocated
+     * remainder in the receipt's branch. Ascending branch id, zero amounts
+     * left out (a ledger line must move something). With every allocation in
+     * the receipt's branch this is one entry for the whole amount, the single
+     * customer line receipts have always posted.
+     *
+     * @param  list<array{sale_id: int, amount: Money, branch_id: int}>  $allocations  Already capped at $amount in total.
+     * @return array<int, Money>
+     */
+    private static function customerCreditByBranch(Money $amount, array $allocations, int $receiptBranchId): array
+    {
+        $byBranch = [];
+
+        foreach ($allocations as $allocation) {
+            $byBranch[$allocation['branch_id']] = ($byBranch[$allocation['branch_id']] ?? Money::zero())->plus($allocation['amount']);
+        }
+
+        $onAccount = $amount->minus(Money::sum(array_column($allocations, 'amount')));
+
+        if ($onAccount->isPositive()) {
+            $byBranch[$receiptBranchId] = ($byBranch[$receiptBranchId] ?? Money::zero())->plus($onAccount);
+        }
+
+        ksort($byBranch);
+
+        return $byBranch;
     }
 
     /**
@@ -298,6 +416,9 @@ class Receipt extends Model
      *
      * The status is re-read under a row lock inside the transaction, so two
      * clicks (or two users) cannot both post a reversal (audit P0-16).
+     *
+     * @throws InvalidArgumentException
+     * @throws AuthorizationException When the receipt touched a branch the actor may not post into.
      */
     public function cancel(User $actor, string $reason): void
     {
@@ -319,8 +440,12 @@ class Receipt extends Model
                 throw new InvalidArgumentException('This receipt has already been cancelled.');
             }
 
+            // reverse() mirrors every line in its own branch, clearing lines
+            // and their counterparties included, so each branch the receipt
+            // touched nets back to zero; it checks the actor may post into
+            // all of them. The voucher is looked up outside the access scope.
             $reversal = JournalVoucher::reverse(
-                $receipt->journalVoucher()->firstOrFail(),
+                BranchContext::unrestricted(fn () => $receipt->journalVoucher()->firstOrFail()),
                 $actor,
                 "Cancellation of receipt #{$receipt->id}: {$reason}",
             );

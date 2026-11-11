@@ -54,6 +54,7 @@ Group-level `role:admin` (applies to every child): `tenant-fixed-assets`, `tenan
 | accounting | Accounting | no | none | journal and cash/bank vouchers, full account ledger, fixed assets |
 | reports | Reports | no | none | accounting, sales, purchase, tax, receivables/payables and stock reports (incl. item ledger) |
 | manufacturing | Manufacturing | no | inventory, accounting | material issue notes, production entries, manufacturing reports (added 2026-10-25, opt-in: not in default_modules) |
+| hr | HR and payroll | no | accounting | staff, pay components, payroll runs, salary payments, staff advances, HR reports (added 2026-11-05, in default_modules, OFF for existing tenants: no grant migration) |
 | admin | Administration | no | none | activity log, print log, backups, notices |
 
 Decisions and justifications:
@@ -96,7 +97,7 @@ Decisions and justifications:
 |---|---|---|---|---|
 | tenant.impersonate | GET /impersonate/{user} | ImpersonationController@login | signed (outside auth:web) | allowlist |
 
-### routes/tenant-business.php (54)
+### routes/tenant-business.php (56)
 
 | route name | method + URI | controller@method | gated today | proposed key |
 |---|---|---|---|---|
@@ -121,12 +122,14 @@ Decisions and justifications:
 | tenant.customers.destroy | DELETE /customers/{customer} | CustomerController@destroy | any auth | customers.delete |
 | tenant.customers.import.template | GET /customers/import/template | CustomerController@importTemplate | any auth | customers.import |
 | tenant.customers.import | POST /customers/import | CustomerController@import | any auth | customers.import |
+| tenant.customers.assign-area | POST /customers/assign-area | CustomerController@assignArea | any auth | customers.edit |
 | tenant.suppliers.index | GET /suppliers | SupplierController@index | any auth | suppliers.view |
 | tenant.suppliers.store | POST /suppliers | SupplierController@store | any auth | suppliers.create |
 | tenant.suppliers.update | PUT /suppliers/{supplier} | SupplierController@update | any auth | suppliers.edit |
 | tenant.suppliers.destroy | DELETE /suppliers/{supplier} | SupplierController@destroy | any auth | suppliers.delete |
 | tenant.suppliers.import.template | GET /suppliers/import/template | SupplierController@importTemplate | any auth | suppliers.import |
 | tenant.suppliers.import | POST /suppliers/import | SupplierController@import | any auth | suppliers.import |
+| tenant.suppliers.assign-area | POST /suppliers/assign-area | SupplierController@assignArea | any auth | suppliers.edit |
 | tenant.brands.index | GET /brands | BrandController@index | any auth | brands.view |
 | tenant.brands.store | POST /brands | BrandController@store | any auth | brands.manage |
 | tenant.brands.update | PUT /brands/{brand} | BrandController@update | any auth | brands.manage |
@@ -164,7 +167,30 @@ Decisions and justifications:
 | tenant.stores.update | PUT /stores/{store} | StoreController@update | any auth | stores.manage |
 | tenant.stores.destroy | DELETE /stores/{store} | StoreController@destroy | any auth | stores.manage |
 
-### routes/tenant-ledger.php (14)
+### routes/tenant-branches.php (9)
+
+| route name | method + URI | controller@method | gated today | proposed key |
+|---|---|---|---|---|
+| tenant.branches.index | GET /branches | BranchController@index | can: | branches.view |
+| tenant.branches.store | POST /branches | BranchController@store | can: | branches.manage |
+| tenant.branches.update | PUT /branches/{branch} | BranchController@update | can: | branches.manage |
+| tenant.branches.deactivate | POST /branches/{branch}/deactivate | BranchController@deactivate | can: | branches.manage |
+| tenant.branches.reactivate | POST /branches/{branch}/reactivate | BranchController@reactivate | can: | branches.manage |
+| tenant.branches.label | PUT /branch-label | BranchController@updateLabel | can: | branches.manage |
+| tenant.reports.branch-comparison | GET /reports/branch-comparison | BranchComparisonReportController@index | can: | branches.report |
+| tenant.reports.branch-comparison.export | GET /reports/branch-comparison/export | BranchComparisonReportController@export | can: | branches.report |
+| tenant.reports.inter-branch-balances | GET /reports/inter-branch-balances | InterBranchBalancesReportController@index | can: | branches.report |
+
+### routes/tenant-areas.php (4)
+
+| route name | method + URI | controller@method | gated today | proposed key |
+|---|---|---|---|---|
+| tenant.areas.index | GET /areas | AreaController@index | new | areas.view |
+| tenant.areas.store | POST /areas | AreaController@store | new | areas.manage |
+| tenant.areas.update | PUT /areas/{area} | AreaController@update | new | areas.manage |
+| tenant.areas.destroy | DELETE /areas/{area} | AreaController@destroy | new | areas.manage |
+
+### routes/tenant-ledger.php (15)
 
 | route name | method + URI | controller@method | gated today | proposed key |
 |---|---|---|---|---|
@@ -173,6 +199,7 @@ Decisions and justifications:
 | tenant.fiscal-years.close | POST /fiscal-years/{fiscalYear}/close | FiscalYearController@close | admin | fiscal_year.close_archive (owner only) |
 | tenant.fiscal-years.reopen | POST /fiscal-years/{fiscalYear}/reopen | FiscalYearController@reopen | admin | fiscal_year.close_archive (owner only) |
 | tenant.fiscal-years.lock | POST /fiscal-years/{fiscalYear}/lock | FiscalYearController@relock | admin | fiscal_year.close_archive (owner only) |
+| tenant.fiscal-years.numbering-scope | POST /fiscal-years/{fiscalYear}/numbering-scope | FiscalYearController@updateNumberingScope | new | fiscal_year.close_archive (owner only) |
 | tenant.journal-vouchers.index | GET /journal-vouchers | JournalVoucherController@index | any auth | journal_vouchers.view |
 | tenant.journal-vouchers.export | GET /journal-vouchers/export | JournalVoucherController@export | any auth | journal_vouchers.export |
 | tenant.journal-vouchers.store | POST /journal-vouchers | JournalVoucherController@store | admin | journal_vouchers.create |
@@ -253,13 +280,14 @@ Decisions and justifications:
 | tenant.stock-adjustments.opening-stock.template | GET /stock-adjustments/opening-stock/template | StockAdjustmentController@openingStockTemplate | any auth | opening_stock.import |
 | tenant.stock-adjustments.opening-stock.import | POST /stock-adjustments/opening-stock/import | StockAdjustmentController@importOpeningStock | any auth | opening_stock.import |
 
-### routes/tenant-stock-transfers.php (4)
+### routes/tenant-stock-transfers.php (5)
 
 | route name | method + URI | controller@method | gated today | proposed key |
 |---|---|---|---|---|
 | tenant.stock-transfers.index | GET /stock-transfers | StockTransferController@index | any auth | stock_transfers.view |
 | tenant.stock-transfers.store | POST /stock-transfers | StockTransferController@store | any auth | stock_transfers.create |
 | tenant.stock-transfers.cancel | POST /stock-transfers/{stock_transfer}/cancel | StockTransferController@cancel | admin | stock_transfers.cancel |
+| tenant.stock-transfers.receive | POST /stock-transfers/{stock_transfer}/receive | StockTransferController@receive | new (branches) | stock_transfers.receive |
 | tenant.stock-transfers.print | GET /stock-transfers/{stock_transfer}/print | StockTransferController@print | any auth | stock_transfers.print |
 
 ### routes/tenant-stock-conversions.php (4)
@@ -301,6 +329,38 @@ Decisions and justifications:
 | tenant.reports.manufacturing.reconciliation | GET /reports/manufacturing/reconciliation | ManufacturingReportController@reconciliation | new | manufacturing_reports.view |
 | tenant.reports.manufacturing.print | GET /reports/manufacturing/{report}/print | ManufacturingReportController@print | new | manufacturing_reports.export |
 | tenant.reports.manufacturing.export | GET /reports/manufacturing/{report}/export | ManufacturingReportController@export | new | manufacturing_reports.export |
+
+### routes/tenant-hr.php (27)
+
+| route name | method + URI | controller@method | gated today | proposed key |
+|---|---|---|---|---|
+| tenant.hr.staff.index | GET /hr/staff | StaffController@index | new | hr_staff.view |
+| tenant.hr.staff.create | GET /hr/staff/create | StaffController@create | new | hr_staff.create |
+| tenant.hr.staff.store | POST /hr/staff | StaffController@store | new | hr_staff.create |
+| tenant.hr.staff.edit | GET /hr/staff/{staff}/edit | StaffController@edit | new | hr_staff.view |
+| tenant.hr.staff.update | PUT /hr/staff/{staff} | StaffController@update | new | hr_staff.edit |
+| tenant.hr.staff.statement | GET /hr/staff/{staff}/statement | HrReportController@statement | new | hr_reports.view |
+| tenant.hr.pay-components.index | GET /hr/pay-components | PayComponentController@index | new | pay_components.view |
+| tenant.hr.pay-components.store | POST /hr/pay-components | PayComponentController@store | new | pay_components.manage |
+| tenant.hr.pay-components.update | PUT /hr/pay-components/{component} | PayComponentController@update | new | pay_components.manage |
+| tenant.hr.payroll.index | GET /hr/payroll | PayrollRunController@index | new | payroll.view |
+| tenant.hr.payroll.create | GET /hr/payroll/create | PayrollRunController@create | new | payroll.create |
+| tenant.hr.payroll.store | POST /hr/payroll | PayrollRunController@store | new | payroll.create |
+| tenant.hr.payroll.show | GET /hr/payroll/{run} | PayrollRunController@show | new | payroll.view |
+| tenant.hr.payroll.update | PUT /hr/payroll/{run} | PayrollRunController@update | new | payroll.create |
+| tenant.hr.payroll.destroy | DELETE /hr/payroll/{run} | PayrollRunController@destroy | new | payroll.create |
+| tenant.hr.payroll.post | POST /hr/payroll/{run}/post | PayrollRunController@post | new | payroll.manage |
+| tenant.hr.payroll.cancel | POST /hr/payroll/{run}/cancel | PayrollRunController@cancel | new | payroll.cancel |
+| tenant.hr.salary-payments.index | GET /hr/salary-payments | PayrollPaymentController@index | new | payroll_payments.view |
+| tenant.hr.salary-payments.store | POST /hr/salary-payments | PayrollPaymentController@store | new | payroll_payments.create |
+| tenant.hr.salary-payments.cancel | POST /hr/salary-payments/{payment}/cancel | PayrollPaymentController@cancel | new | payroll_payments.cancel |
+| tenant.hr.staff-advances.index | GET /hr/staff-advances | StaffAdvanceController@index | new | staff_advances.view |
+| tenant.hr.staff-advances.store | POST /hr/staff-advances | StaffAdvanceController@store | new | staff_advances.create |
+| tenant.hr.staff-advances.cancel | POST /hr/staff-advances/{advance}/cancel | StaffAdvanceController@cancel | new | staff_advances.cancel |
+| tenant.hr.reports.payroll-register | GET /hr/reports/payroll-register | HrReportController@payrollRegister | new | hr_reports.view |
+| tenant.hr.reports.payroll-register.export | GET /hr/reports/payroll-register/export | HrReportController@payrollRegisterExport | new | hr_reports.export |
+| tenant.hr.reports.staff-balances | GET /hr/reports/staff-balances | HrReportController@staffBalances | new | hr_reports.view |
+| tenant.hr.reports.staff-balances.export | GET /hr/reports/staff-balances/export | HrReportController@staffBalancesExport | new | hr_reports.export |
 
 ### routes/tenant-reports-accounting.php (20, group `role:admin`)
 
@@ -381,13 +441,14 @@ vat-summary 2, stock-movement-register 1, sales-with-note 1, damage-lost-stock 1
 | tenant.admin.users.update | PUT /admin/users/{user} | UserController@update | admin | users.manage |
 | tenant.admin.users.transfer-ownership | POST /admin/users/{user}/transfer-ownership | UserController@transferOwnership | (new, P12) | ownership.transfer |
 
-### routes/tenant-profile.php (3)
+### routes/tenant-profile.php (4)
 
 | route name | method + URI | controller@method | gated today | proposed key |
 |---|---|---|---|---|
 | tenant.profile.edit | GET /profile | ProfileController@edit | any auth | allowlist |
 | tenant.profile.update | PUT /profile | ProfileController@update | any auth | allowlist |
 | tenant.profile.password | PUT /profile/password | ProfileController@updatePassword | any auth | allowlist |
+| tenant.active-branch.update | PUT /active-branch | ActiveBranchController@update | any auth | allowlist |
 
 ### routes/tenant-fixed-assets.php (5, group `role:admin`)
 
@@ -496,13 +557,13 @@ Route definitions counted per file (explicit `Route::get/post/put/delete` calls,
 | tenant-impersonation.php | 1 | tenant-reports-sales-purchase.php | 16 |
 | tenant-business.php | 54 | tenant-reports-inventory.php | 1 |
 | tenant-stores.php | 4 | tenant-reports-tds.php | 1 |
-| tenant-ledger.php | 14 | tenant-reports-stock-valuation.php | 1 |
+| tenant-ledger.php | 15 | tenant-reports-stock-valuation.php | 1 |
 | tenant-sales.php | 12 | tenant-reports-item-wise-sales.php | 1 |
 | tenant-purchase.php | 12 | tenant-reports-item-wise-purchase.php | 1 |
 | tenant-sales-returns.php | 8 | tenant-reports-category-wise.php | 3 |
 | tenant-purchase-returns.php | 7 | tenant-reports-vat-summary.php | 2 |
 | tenant-stock-adjustments.php | 6 | tenant-reports-stock-movement-register.php | 1 |
-| tenant-stock-transfers.php | 4 | tenant-reports-sales-with-note.php | 1 |
+| tenant-stock-transfers.php | 5 | tenant-reports-sales-with-note.php | 1 |
 | tenant-stock-conversions.php | 4 | tenant-reports-damage-lost-stock.php | 1 |
 | tenant-employees.php | 3 | tenant-reports-brand-wise.php | 1 |
 | tenant-profile.php | 3 | tenant-reports-print-log.php | 1 |
@@ -545,17 +606,19 @@ Legacy column omitted: `config/privileges.php` is absent from this repo.
 | opening_balances.cancel | core | Chart of accounts | Reverse an opening balance import | no | 1 |
 | customers.view | core | Customers and suppliers | View customers | no | 1 |
 | customers.create | core | Customers and suppliers | Add customers | no | 1 |
-| customers.edit | core | Customers and suppliers | Edit customers | no | 1 |
+| customers.edit | core | Customers and suppliers | Edit customers | no | 2 |
 | customers.delete | core | Customers and suppliers | Delete customers | no | 1 |
 | customers.import | core | Customers and suppliers | Import customers | no | 2 |
 | suppliers.view | core | Customers and suppliers | View suppliers | no | 1 |
 | suppliers.create | core | Customers and suppliers | Add suppliers | no | 1 |
-| suppliers.edit | core | Customers and suppliers | Edit suppliers | no | 1 |
+| suppliers.edit | core | Customers and suppliers | Edit suppliers | no | 2 |
 | suppliers.delete | core | Customers and suppliers | Delete suppliers | no | 1 |
 | suppliers.import | core | Customers and suppliers | Import suppliers | no | 2 |
 | party_ledger.view | core | Customers and suppliers | View customer and supplier ledgers | no | 1 |
 | party_ledger.print | core | Customers and suppliers | Print customer and supplier ledgers | no | 1 |
 | party_ledger.export | core | Customers and suppliers | Export customer and supplier ledgers | no | 1 |
+| areas.view | core | Customers and suppliers | View areas | no | 1 |
+| areas.manage | core | Customers and suppliers | Add, rename and delete areas | no | 3 |
 | items.view | core | Items | View items | no | 2 |
 | items.create | core | Items | Add items | no | 1 |
 | items.edit | core | Items | Edit items, units and VAT status | no | 5 |

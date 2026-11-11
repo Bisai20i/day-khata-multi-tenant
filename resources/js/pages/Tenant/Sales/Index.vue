@@ -20,7 +20,8 @@ import Label from '@/components/ui/Label.vue';
 import { useToast } from '@/composables/useToast';
 import { useOpenFiscalYear } from '@/composables/useOpenFiscalYear';
 import { usePermissions } from '@/composables/usePermissions';
-import { formatMoney } from '@/lib/money';
+import { useBranchListColumn } from '@/composables/useBranchListColumn';
+import { formatMoney, isZeroMoney } from '@/lib/money';
 import { formatBsDate } from '@/lib/format';
 import Create from './Create.vue';
 
@@ -58,9 +59,23 @@ const props = defineProps({
             default_vat_rate: '13.00',
             default_store_id: null,
             active_invoice_type: 'full',
+            round_off_enabled: false,
+            round_off_precision: '1',
         }),
     },
+    // Branch picker of the create form (BranchFormOptions::props()).
+    branchOptions: { type: Array, default: () => [] },
+    defaultBranchId: { type: Number, default: null },
 });
+
+const { branchColumns } = useBranchListColumn();
+
+// Round Off figure in the filtered totals row: shown while the feature is on,
+// and also when the filtered sales carry a non-zero Round Off from before it
+// was switched off (so the row still adds up to the Total beside it).
+const showRoundOffTotal = computed(
+    () => !!props.invoiceSettings?.round_off_enabled || (!!props.totals?.round_off && !isZeroMoney(props.totals.round_off)),
+);
 
 const customerOptions = computed(() => props.customers.map((customer) => ({ value: customer.id, label: customer.name })));
 
@@ -319,6 +334,8 @@ const columns = [
         numeric: false,
         cell: ({ row }) => formatBsDate(row.original.date),
     },
+    // Only for a multi-branch company viewing all branches.
+    ...branchColumns(),
     {
         id: 'voucher',
         header: sortableHeader('voucher', 'Invoice #'),
@@ -421,6 +438,8 @@ const columns = [
                 :walk-in-customer-id="walkInCustomerId"
                 :invoice-settings="invoiceSettings"
                 :initial-draft="initialDraft"
+                :branch-options="branchOptions"
+                :default-branch-id="defaultBranchId"
                 @cancel="closeCreateForm"
                 @posted="closeCreateForm"
             />
@@ -528,7 +547,7 @@ const columns = [
 
                 <!-- Server-computed SQL sums for the whole filtered set, not
                      just this page (audit section 4 polish). -->
-                <div class="mt-3 grid grid-cols-2 gap-3 sm:grid-cols-4 border-t-[1.5px] border-border pt-3 text-sm">
+                <div class="mt-3 grid grid-cols-2 gap-3 border-t-[1.5px] border-border pt-3 text-sm" :class="showRoundOffTotal ? 'sm:grid-cols-5' : 'sm:grid-cols-4'">
                     <div>
                         <p class="text-[10px] font-bold tracking-[.8px] text-text-muted uppercase">Taxable (filtered)</p>
                         <p class="font-bold text-text-strong">{{ formatMoney(totals.taxable_amount) }}</p>
@@ -540,6 +559,10 @@ const columns = [
                     <div>
                         <p class="text-[10px] font-bold tracking-[.8px] text-text-muted uppercase">VAT (filtered)</p>
                         <p class="font-bold text-text-strong">{{ formatMoney(totals.vat_amount) }}</p>
+                    </div>
+                    <div v-if="showRoundOffTotal">
+                        <p class="text-[10px] font-bold tracking-[.8px] text-text-muted uppercase">Round off (filtered)</p>
+                        <p class="font-bold text-text-strong">{{ formatMoney(totals.round_off ?? '0.00') }}</p>
                     </div>
                     <div>
                         <p class="text-[10px] font-bold tracking-[.8px] text-text-muted uppercase">Total (filtered)</p>

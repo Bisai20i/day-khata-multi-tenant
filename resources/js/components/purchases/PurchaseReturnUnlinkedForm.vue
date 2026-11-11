@@ -12,6 +12,8 @@ import NepaliDateInput from '@/components/ui/NepaliDateInput.vue';
 import Label from '@/components/ui/Label.vue';
 import { addMoney, formatMoney, formatQuantity, moneyEquals, parseMoney } from '@/lib/money';
 import { todayInKathmandu } from '@/lib/format';
+import BranchSelect from '@/components/branch/BranchSelect.vue';
+import { useBranchField } from '@/composables/useBranchField';
 import {
     blankUnlinkedLine,
     isFilledUnlinkedLine,
@@ -38,12 +40,23 @@ const props = defineProps({
     bankAccounts: { type: Array, default: () => [] },
     items: { type: Array, default: () => [] },
     defaultVatRate: { type: String, default: '13.00' },
+    // Branch picker (BranchFormOptions::props() on the server, plan 12).
+    branchOptions: { type: Array, default: () => [] },
+    defaultBranchId: { type: Number, default: null },
 });
 
 const emit = defineEmits(['cancel', 'posted']);
 
+// Branches (plan 12, BR12): an unlinked return has no parent to inherit from,
+// so a multi-branch company picks its branch here and the store list follows
+// it. Everyone else submits exactly what they did before (withBranch()).
+const { branchId, branchOptions, showPicker, withBranch, storesForBranch, keepStoreInBranch } = useBranchField(
+    () => props.branchOptions,
+    () => props.defaultBranchId,
+);
+
 const supplierOptions = computed(() => props.suppliers.map((supplier) => ({ value: supplier.id, label: supplier.name })));
-const storeOptions = computed(() => props.stores.map((store) => ({ value: store.id, label: store.name })));
+const storeOptions = computed(() => storesForBranch(props.stores).map((store) => ({ value: store.id, label: store.name })));
 const bankAccountOptions = computed(() =>
     props.bankAccounts.map((account) => ({
         value: account.id,
@@ -84,6 +97,17 @@ const form = useForm({
     bank_amount: '',
     lines: [blankUnlinkedLine()],
 });
+
+// Another branch clears a store that is not one of its stores back to blank
+// ("Default store": the server takes the branch's default store).
+keepStoreInBranch(
+    () => props.stores,
+    () => form.store_id,
+    (storeId) => {
+        form.store_id = storeId;
+    },
+    () => null,
+);
 
 /** Picking a different item invalidates the unit chosen for the old one. */
 function setItem(index, itemId) {
@@ -232,7 +256,8 @@ const canSubmit = computed(
 );
 
 function submit() {
-    form.transform((data) => ({
+    // withBranch(): branch_id only when the picker shows (plan 12, BR12).
+    form.transform((data) => withBranch({
         date: data.date,
         supplier_id: data.supplier_id || null,
         store_id: data.store_id || null,
@@ -266,6 +291,10 @@ function submit() {
         <p v-if="form.errors.lines || form.errors.expected_total" class="border-[1.5px] border-danger bg-danger-bg px-3 py-2 text-sm text-danger">
             {{ form.errors.lines ?? form.errors.expected_total }}
         </p>
+        <!-- A branch refusal when there is no picker to show it on (plan 12). -->
+        <p v-if="!showPicker && form.errors.branch_id" class="border-[1.5px] border-danger bg-danger-bg px-3 py-2 text-sm text-danger" role="alert">
+            {{ form.errors.branch_id }}
+        </p>
 
         <Card variant="panel" class="!p-4">
         <div class="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-5">
@@ -279,6 +308,7 @@ function submit() {
                 <Combobox :model-value="form.supplier_id" :options="supplierOptions" placeholder="Optional" @update:model-value="(v) => (form.supplier_id = v)" />
                 <p v-if="form.errors.supplier_id" class="mt-1 text-sm text-danger">{{ form.errors.supplier_id }}</p>
             </div>
+            <BranchSelect v-model="branchId" :options="branchOptions" :error="form.errors.branch_id" />
             <div>
                 <Label class="mb-1">Store</Label>
                 <Combobox :model-value="form.store_id" :options="storeOptions" placeholder="Default store" @update:model-value="(v) => (form.store_id = v)" />

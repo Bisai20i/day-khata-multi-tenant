@@ -73,6 +73,7 @@ Route::name('tenant.')->group(function () {
         Route::get('/import/template', [CustomerController::class, 'importTemplate'])->middleware('can:customers.import')->name('import.template');
         Route::get('/import/sample-excel', [CustomerController::class, 'importSampleExcel'])->middleware('can:customers.import')->name('import.sample-excel');
         Route::post('/import', [CustomerController::class, 'import'])->middleware('can:customers.import')->name('import');
+        Route::post('/assign-area', [CustomerController::class, 'assignArea'])->middleware('can:customers.edit')->name('assign-area');
     });
 
     Route::prefix('suppliers')->name('suppliers.')->group(function () {
@@ -83,6 +84,7 @@ Route::name('tenant.')->group(function () {
         Route::get('/import/template', [SupplierController::class, 'importTemplate'])->middleware('can:suppliers.import')->name('import.template');
         Route::get('/import/sample-excel', [SupplierController::class, 'importSampleExcel'])->middleware('can:suppliers.import')->name('import.sample-excel');
         Route::post('/import', [SupplierController::class, 'import'])->middleware('can:suppliers.import')->name('import');
+        Route::post('/assign-area', [SupplierController::class, 'assignArea'])->middleware('can:suppliers.edit')->name('assign-area');
     });
 
     Route::prefix('brands')->name('brands.')->group(function () {

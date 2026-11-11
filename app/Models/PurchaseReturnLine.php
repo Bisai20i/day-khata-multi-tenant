@@ -31,6 +31,7 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
 #[Fillable([
     'purchase_return_id', 'purchase_line_id', 'item_id', 'item_unit_id', 'unit_conversion_factor',
     'quantity', 'bonus_quantity', 'rate', 'line_total', 'net_value', 'vat_amount', 'tds_amount',
+    'round_off',
 ])]
 class PurchaseReturnLine extends Model
 {
@@ -48,6 +49,8 @@ class PurchaseReturnLine extends Model
             'net_value' => Decimal::class.':2',
             'vat_amount' => Decimal::class.':2',
             'tds_amount' => Decimal::class.':2',
+            // The slice of the original bill's Round Off this line gave back (signed; 0 on unlinked lines).
+            'round_off' => Decimal::class.':2',
         ];
     }
 

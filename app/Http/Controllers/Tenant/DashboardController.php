@@ -15,6 +15,9 @@ use App\Models\Purchase;
 use App\Models\Sale;
 use App\Models\SaleLine;
 use App\Models\Supplier;
+use App\Support\Branches\BranchDashboardComparison;
+use App\Support\Branches\BranchFilter;
+use App\Support\Branches\BranchStock;
 use App\Support\Inventory\StockCosting;
 use App\Support\Money\Money;
 use App\Support\Money\Quantity;
@@ -74,6 +77,20 @@ class DashboardController extends Controller
      * Owners hold every key their tenant is entitled to, so they see the
      * full page; a widget of a module the tenant is not entitled to is
      * hidden for the owner too, which is the Gate's module rule.
+     *
+     * Branches (plan 12, BR16): every transaction figure follows the
+     * BranchFilter (explicit `branch` / `branches[]`, else the top-bar
+     * switcher, else every branch the user may see), each on its own
+     * predicate: the document's branch_id for sales and purchase figures
+     * (applyToDocuments, which also covers the sale_lines join the access
+     * scope does not reach), journal_voucher_lines.branch_id for the ledger
+     * balances (applyToLines), and the covered branches' stores for stock
+     * (storeIds / BranchStock, the stock reports' convention). Master data
+     * (customer, supplier, item and account counts, recent customers, the
+     * account-group breakdown, expiring items) is company-wide: none of it
+     * belongs to a branch. `branchReport` is the filter control's prop and
+     * `branchComparison` the per-branch widget; both are null for a tenant
+     * that is not multi-branch, whose queries are then exactly as before.
      */
     public function index(Request $request): Response
     {
@@ -86,6 +103,7 @@ class DashboardController extends Controller
 
         $can = fn (string $key): bool => $user->can($key);
 
+        $filter = BranchFilter::fromRequest($request);
         $fiscalYear = FiscalYear::query()->where('status', FiscalYearStatus::Open)->first();
         $today = now()->toDateString();
         $weekAgo = now()->subWeek()->toDateString();
@@ -133,42 +151,39 @@ class DashboardController extends Controller
 
         if ($can('sales.view')) {
             $kpis['sales'] = [
-                'today' => $this->documentTotals(Sale::class, whereDate: $today),
-                'thisWeek' => $this->documentTotals(Sale::class, since: $weekAgo),
+                'today' => $this->documentTotals($filter, Sale::class, whereDate: $today),
+                'thisWeek' => $this->documentTotals($filter, Sale::class, since: $weekAgo),
             ];
-            $props['salesTrend'] = $this->dailyTotals(Sale::class, 7);
-            $props['recentSales'] = $this->recentSales();
+            $props['salesTrend'] = $this->dailyTotals($filter, Sale::class, 7);
+            $props['recentSales'] = $this->recentSales($filter);
         }
 
         if ($can('purchases.view')) {
             $kpis['purchases'] = [
-                'today' => $this->documentTotals(Purchase::class, whereDate: $today),
-                'thisWeek' => $this->documentTotals(Purchase::class, since: $weekAgo),
+                'today' => $this->documentTotals($filter, Purchase::class, whereDate: $today),
+                'thisWeek' => $this->documentTotals($filter, Purchase::class, since: $weekAgo),
             ];
-            $props['purchaseTrend'] = $this->dailyTotals(Purchase::class, 7);
+            $props['purchaseTrend'] = $this->dailyTotals($filter, Purchase::class, 7);
         }
 
         if ($can('cash_bank_book.view')) {
-            $kpis['cashInHand'] = $this->accountBalance('AS1', $fiscalYear)->toString();
+            $kpis['cashInHand'] = $this->accountBalance($filter, 'AS1', $fiscalYear)->toString();
         }
 
         if ($can('stock_valuation.view')) {
-            // Read through StockCosting, the single place stock is valued
-            // (CONTRACTS C10), so the dashboard figure is the same one the
-            // Balance Sheet and the year-end closing entry use.
-            $kpis['stockValue'] = StockCosting::totalClosingValue($today)->toString();
+            $kpis['stockValue'] = $this->stockValue($filter, $today)->toString();
         }
 
         if ($can('receivables_reports.view')) {
-            $kpis['debtors'] = $this->subgroupBalance('Sundry Debtors', $fiscalYear, creditNormal: false)->toString();
+            $kpis['debtors'] = $this->subgroupBalance($filter, 'Sundry Debtors', $fiscalYear, creditNormal: false)->toString();
         }
 
         if ($can('payables_reports.view')) {
-            $kpis['creditors'] = $this->subgroupBalance('Sundry Creditors', $fiscalYear, creditNormal: true)->toString();
+            $kpis['creditors'] = $this->subgroupBalance($filter, 'Sundry Creditors', $fiscalYear, creditNormal: true)->toString();
         }
 
         if ($can('tax_reports.view')) {
-            $weekSales = $this->activeDocuments(Sale::class, since: $weekAgo);
+            $weekSales = $this->activeDocuments($filter, Sale::class, since: $weekAgo);
 
             $kpis['tax'] = [
                 'thisWeek' => [
@@ -180,27 +195,55 @@ class DashboardController extends Controller
         }
 
         if ($can('sales_reports.view')) {
-            $props['topItemsThisMonth'] = $this->topItemsThisMonth();
-            $props['topCustomersThisMonth'] = $this->topCustomersThisMonth();
+            $props['topItemsThisMonth'] = $this->topItemsThisMonth($filter);
+            $props['topCustomersThisMonth'] = $this->topCustomersThisMonth($filter);
         }
 
         if ($can('stock_reports.view')) {
-            $props['lowStockItems'] = $this->lowStockItems();
+            $props['lowStockItems'] = $this->lowStockItems($filter);
         }
 
         if ($kpis !== []) {
             $props['kpis'] = $kpis;
         }
 
+        // Null for a tenant that is not multi-branch, before any query runs.
+        $props['branchReport'] = $filter->payload();
+        $props['branchComparison'] = BranchDashboardComparison::build(
+            $filter,
+            now()->startOfMonth()->toDateString(),
+            withSales: $can('sales.view'),
+            withPurchases: $can('purchases.view'),
+            canOpenReport: $filter->isActive() && $can('branches.report'),
+        );
+
         return Inertia::render('Tenant/Dashboard', $props);
+    }
+
+    /**
+     * Closing stock value as at $asOf, read through StockCosting, the single
+     * place stock is valued (CONTRACTS C10), so the dashboard figure is the
+     * same one the Balance Sheet and the year-end closing entry use. For a
+     * dashboard covering only some branches it is those branches' stores,
+     * valued exactly as the Stock Valuation report values them (BR15).
+     */
+    private function stockValue(BranchFilter $filter, string $asOf): Money
+    {
+        if ($filter->effectiveIds() === null) {
+            return StockCosting::totalClosingValue($asOf);
+        }
+
+        return Money::sum(BranchStock::valuationRows($filter, $asOf, null)->map(fn (array $row): Money => $row['value']));
     }
 
     /**
      * @return Collection<int, array{name: string, total: string}>
      */
-    private function topItemsThisMonth(): Collection
+    private function topItemsThisMonth(BranchFilter $filter): Collection
     {
-        return SaleLine::query()
+        // sale_lines carries no access scope, so the sale's branch is applied
+        // explicitly (BranchFilter::applyToDocuments covers a restricted user).
+        return $filter->applyToDocuments(SaleLine::query(), 'sales.branch_id')
             ->join('sales', 'sales.id', '=', 'sale_lines.sale_id')
             ->join('items', 'items.id', '=', 'sale_lines.item_id')
             ->where('sales.status', '!=', 'cancelled')
@@ -217,9 +260,9 @@ class DashboardController extends Controller
     /**
      * @return Collection<int, array{name: string, total: string}>
      */
-    private function topCustomersThisMonth(): Collection
+    private function topCustomersThisMonth(BranchFilter $filter): Collection
     {
-        return Sale::query()
+        return $filter->applyToDocuments(Sale::query(), 'sales.branch_id')
             ->join('customers', 'customers.id', '=', 'sales.customer_id')
             ->where('sales.status', '!=', 'cancelled')
             ->where('sales.date', '>=', now()->startOfMonth()->toDateString())
@@ -235,9 +278,9 @@ class DashboardController extends Controller
     /**
      * @return Collection<int, array{id: int, customer: ?string, date: string, total: string, paymentMode: string}>
      */
-    private function recentSales(): Collection
+    private function recentSales(BranchFilter $filter): Collection
     {
-        return Sale::with('customer:id,name')
+        return $filter->applyToDocuments(Sale::with('customer:id,name'))
             ->where('status', '!=', 'cancelled')
             ->orderByDesc('date')
             ->orderByDesc('id')
@@ -286,9 +329,13 @@ class DashboardController extends Controller
      * PHP-side sum over movements. Items with no min_stock set are not "low",
      * they simply have no reorder level.
      *
+     * On-hand is the covered branches' stores (BranchFilter::storeIds(),
+     * null for every store), against the item's company-wide reorder level:
+     * items carry one min_stock, not one per branch.
+     *
      * @return array<int, array{id: int, name: string, unit: string, stock: string, minStock: string}>
      */
-    private function lowStockItems(): array
+    private function lowStockItems(BranchFilter $filter): array
     {
         $items = Item::query()
             ->where('is_stockable', true)
@@ -301,7 +348,7 @@ class DashboardController extends Controller
             return [];
         }
 
-        $stock = Item::currentStockByItem($items->modelKeys());
+        $stock = Item::currentStockByItem($items->modelKeys(), $filter->storeIds());
 
         return $items
             ->map(function (Item $item) use ($stock) {
@@ -330,9 +377,9 @@ class DashboardController extends Controller
      * @param  class-string<Sale>|class-string<Purchase>  $modelClass
      * @return array{count: int, total: string}
      */
-    private function documentTotals(string $modelClass, ?string $whereDate = null, ?string $since = null): array
+    private function documentTotals(BranchFilter $filter, string $modelClass, ?string $whereDate = null, ?string $since = null): array
     {
-        $query = $this->activeDocuments($modelClass, $whereDate, $since);
+        $query = $this->activeDocuments($filter, $modelClass, $whereDate, $since);
 
         return [
             'count' => (clone $query)->count(),
@@ -341,12 +388,16 @@ class DashboardController extends Controller
     }
 
     /**
+     * Non-cancelled documents, narrowed to the covered branches on the
+     * document's own branch_id (no predicate when the filter narrows
+     * nothing).
+     *
      * @param  class-string<Sale>|class-string<Purchase>  $modelClass
      * @return Builder<Sale|Purchase>
      */
-    private function activeDocuments(string $modelClass, ?string $whereDate = null, ?string $since = null)
+    private function activeDocuments(BranchFilter $filter, string $modelClass, ?string $whereDate = null, ?string $since = null)
     {
-        return $modelClass::query()
+        return $filter->applyToDocuments($modelClass::query())
             ->where('status', '!=', 'cancelled')
             ->when($whereDate !== null, fn ($query) => $query->whereDate('date', $whereDate))
             ->when($since !== null, fn ($query) => $query->whereDate('date', '>=', $since));
@@ -356,13 +407,14 @@ class DashboardController extends Controller
      * Net balance of a single ledger account within one fiscal year - never
      * all-time. See the class docblock for the double-counting this fixes.
      */
-    private function accountBalance(string $code, ?FiscalYear $fiscalYear): Money
+    private function accountBalance(BranchFilter $filter, string $code, ?FiscalYear $fiscalYear): Money
     {
         if ($fiscalYear === null) {
             return Money::zero();
         }
 
         return $this->ledgerNet(
+            $filter,
             JournalVoucherLine::query()->whereHas('account', fn ($query) => $query->where('code', $code)),
             $fiscalYear,
         );
@@ -375,13 +427,14 @@ class DashboardController extends Controller
      * liability-side subgroups, where a credit balance is the normal,
      * positive-looking one.
      */
-    private function subgroupBalance(string $subgroupName, ?FiscalYear $fiscalYear, bool $creditNormal): Money
+    private function subgroupBalance(BranchFilter $filter, string $subgroupName, ?FiscalYear $fiscalYear, bool $creditNormal): Money
     {
         if ($fiscalYear === null) {
             return Money::zero();
         }
 
         $net = $this->ledgerNet(
+            $filter,
             JournalVoucherLine::query()->whereHas('account.subgroup', fn ($query) => $query->where('name', $subgroupName)),
             $fiscalYear,
         );
@@ -390,11 +443,15 @@ class DashboardController extends Controller
     }
 
     /**
+     * The branch predicate goes straight onto the lines table (plan 12,
+     * section 8); BranchAccessScope already limits a restricted user's lines
+     * to their branches, so lineBranchIds() only ever narrows further.
+     *
      * @param  Builder<JournalVoucherLine>  $query
      */
-    private function ledgerNet($query, FiscalYear $fiscalYear): Money
+    private function ledgerNet(BranchFilter $filter, $query, FiscalYear $fiscalYear): Money
     {
-        $netScaled = $query
+        $netScaled = $filter->applyToLines($query)
             ->whereHas('journalVoucher', fn ($voucher) => $voucher->where('fiscal_year_id', $fiscalYear->id))
             ->selectRaw(
                 'COALESCE(SUM('.$this->scaledMoney('debit').'), 0) - COALESCE(SUM('.$this->scaledMoney('credit').'), 0) as net_scaled'
@@ -411,15 +468,15 @@ class DashboardController extends Controller
      * @param  class-string<Sale>|class-string<Purchase>  $modelClass
      * @return array<int, array{date: string, total: string}>
      */
-    private function dailyTotals(string $modelClass, int $days): array
+    private function dailyTotals(BranchFilter $filter, string $modelClass, int $days): array
     {
         return collect(range($days - 1, 0))
-            ->map(function (int $offset) use ($modelClass) {
+            ->map(function (int $offset) use ($filter, $modelClass) {
                 $date = now()->subDays($offset)->toDateString();
 
                 return [
                     'date' => $date,
-                    'total' => $this->sumColumn($this->activeDocuments($modelClass, whereDate: $date), 'total')->toString(),
+                    'total' => $this->sumColumn($this->activeDocuments($filter, $modelClass, whereDate: $date), 'total')->toString(),
                 ];
             })
             ->values()

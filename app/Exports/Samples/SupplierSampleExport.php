@@ -11,7 +11,7 @@ class SupplierSampleExport implements FromCollection, WithHeadings, ShouldAutoSi
 {
     public function headings(): array
     {
-        return ['name', 'address', 'mobile_no', 'email', 'tpin'];
+        return ['name', 'address', 'mobile_no', 'email', 'tpin', 'area'];
     }
 
     public function collection(): Collection
@@ -23,6 +23,7 @@ class SupplierSampleExport implements FromCollection, WithHeadings, ShouldAutoSi
                 'mobile_no' => '9801000001',
                 'email' => 'himalayan@distributors.com',
                 'tpin' => '300123456',
+                'area' => '',
             ],
             [
                 'name' => 'Valley Suppliers Pvt. Ltd.',
@@ -30,6 +31,7 @@ class SupplierSampleExport implements FromCollection, WithHeadings, ShouldAutoSi
                 'mobile_no' => '9811000002',
                 'email' => 'supply@valley.com',
                 'tpin' => '600987654',
+                'area' => '',
             ],
         ]);
     }

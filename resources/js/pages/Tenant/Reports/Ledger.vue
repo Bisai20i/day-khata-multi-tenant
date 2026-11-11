@@ -11,9 +11,12 @@ import PageHeader from '@/components/ui/PageHeader.vue';
 import NepaliDateInput from '@/components/ui/NepaliDateInput.vue';
 import DataTable from '@/components/ui/DataTable.vue';
 import Label from '@/components/ui/Label.vue';
-import { formatMoney } from '@/lib/money.js';
+import { compareMoney, formatMoney, sumMoney } from '@/lib/money.js';
 import { formatBsDate } from '@/lib/format.js';
 import { usePermissions } from '@/composables/usePermissions';
+import { useBranchReportFilter } from '@/composables/useBranchReportFilter';
+import BranchReportFilter from '@/components/branch/BranchReportFilter.vue';
+import BranchReportNotes from '@/components/branch/BranchReportNotes.vue';
 
 defineOptions({ layout: AppLayout });
 
@@ -30,6 +33,8 @@ const props = defineProps({
     openingBalance: { type: String, default: '0.00' },
     closingBalance: { type: String, default: '0.00' },
     entries: { type: Array, default: () => [] },
+    // Branch filter; null when the company has no branches.
+    branchReport: { type: [Object, null], default: null },
 });
 
 useLayoutChrome('Account Ledger');
@@ -54,14 +59,16 @@ const accountId = ref(props.accountId);
 const from = ref(props.from);
 const to = ref(props.to);
 
-// Sum of debits and credits in the period
-const totalPeriodDebit = computed(() => {
-    return props.entries.reduce((sum, e) => sum + Number(e.debit || 0), 0).toFixed(2);
-});
+const branchFilter = useBranchReportFilter(() => props.branchReport);
 
-const totalPeriodCredit = computed(() => {
-    return props.entries.reduce((sum, e) => sum + Number(e.credit || 0), 0).toFixed(2);
-});
+// Sum of debits and credits in the period (exact decimal strings, never floats)
+const totalPeriodDebit = computed(() => sumMoney(props.entries.map((e) => e.debit || '0.00')));
+
+const totalPeriodCredit = computed(() => sumMoney(props.entries.map((e) => e.credit || '0.00')));
+
+// Dr/Cr side and unsigned amount of a signed balance, through the money helpers.
+const isDebitBalance = (balance) => compareMoney(balance, '0.00') >= 0;
+const absoluteMoney = (balance) => formatMoney(balance).replace(/^-/, '');
 
 function apply() {
     router.get(
@@ -71,6 +78,7 @@ function apply() {
             account_id: accountId.value ?? undefined,
             from: from.value ?? undefined,
             to: to.value ?? undefined,
+            ...branchFilter.toQuery(),
         },
         { preserveState: true, preserveScroll: true },
     );
@@ -101,6 +109,7 @@ function printUrl() {
         from: from.value ?? '',
         to: to.value ?? '',
     });
+    branchFilter.appendTo(params);
     return `/reports/ledger/print?${params.toString()}`;
 }
 
@@ -111,6 +120,7 @@ function exportUrl() {
         from: from.value ?? '',
         to: to.value ?? '',
     });
+    branchFilter.appendTo(params);
     return `/reports/ledger/export?${params.toString()}`;
 }
 
@@ -153,20 +163,20 @@ const columns = [
     {
         accessorKey: 'debit',
         header: 'Debit (Rs.)',
-        cell: ({ row }) => (Number(row.original.debit) > 0 ? formatMoney(row.original.debit) : '-'),
+        cell: ({ row }) => (compareMoney(row.original.debit || '0.00', '0.00') > 0 ? formatMoney(row.original.debit) : '-'),
     },
     {
         accessorKey: 'credit',
         header: 'Credit (Rs.)',
-        cell: ({ row }) => (Number(row.original.credit) > 0 ? formatMoney(row.original.credit) : '-'),
+        cell: ({ row }) => (compareMoney(row.original.credit || '0.00', '0.00') > 0 ? formatMoney(row.original.credit) : '-'),
     },
     {
         accessorKey: 'balance',
         header: 'Running Balance (Rs.)',
         cell: ({ row }) => {
-            const num = Number(row.original.balance);
-            if (num > 0) return `${formatMoney(row.original.balance)} Dr`;
-            if (num < 0) return `${formatMoney(Math.abs(num).toFixed(2))} Cr`;
+            const sign = compareMoney(row.original.balance, '0.00');
+            if (sign > 0) return `${formatMoney(row.original.balance)} Dr`;
+            if (sign < 0) return `${absoluteMoney(row.original.balance)} Cr`;
             return '0.00';
         },
     },
@@ -214,6 +224,15 @@ const columns = [
                     <NepaliDateInput v-model="to" />
                 </div>
             </div>
+            <div v-if="branchReport" class="mt-3">
+                <BranchReportFilter
+                    v-model:choice="branchFilter.choice.value"
+                    :report="branchReport"
+                    id-prefix="ledger"
+                    @change="apply"
+                />
+                <BranchReportNotes :report="branchReport" />
+            </div>
             <div class="mt-3 flex items-center justify-end gap-2 border-t border-border pt-3">
                 <Button v-if="from || to" variant="secondary" tone="purple" type="button" @click="clearWindow">Clear dates</Button>
                 <Button variant="primary" type="button" @click="apply">Filter Ledger</Button>
@@ -237,9 +256,9 @@ const columns = [
                 </Card>
                 <Card variant="panel" class="p-3">
                     <p class="text-[11px] font-bold uppercase tracking-wider text-text-muted">Opening Balance</p>
-                    <p class="mt-1 text-sm font-bold" :class="Number(openingBalance) >= 0 ? 'text-primary' : 'text-danger'">
-                        Rs. {{ formatMoney(Math.abs(Number(openingBalance)).toFixed(2)) }}
-                        <span class="text-xs font-semibold">{{ Number(openingBalance) >= 0 ? 'Dr' : 'Cr' }}</span>
+                    <p class="mt-1 text-sm font-bold" :class="isDebitBalance(openingBalance) ? 'text-primary' : 'text-danger'">
+                        Rs. {{ absoluteMoney(openingBalance) }}
+                        <span class="text-xs font-semibold">{{ isDebitBalance(openingBalance) ? 'Dr' : 'Cr' }}</span>
                     </p>
                     <p class="text-xs text-text-muted">At period start</p>
                 </Card>
@@ -254,9 +273,9 @@ const columns = [
                 </Card>
                 <Card variant="panel" class="p-3">
                     <p class="text-[11px] font-bold uppercase tracking-wider text-text-muted">Closing Balance</p>
-                    <p class="mt-1 text-base font-extrabold" :class="Number(closingBalance) >= 0 ? 'text-primary' : 'text-danger'">
-                        Rs. {{ formatMoney(Math.abs(Number(closingBalance)).toFixed(2)) }}
-                        <span class="text-xs font-bold">{{ Number(closingBalance) >= 0 ? 'Dr' : 'Cr' }}</span>
+                    <p class="mt-1 text-base font-extrabold" :class="isDebitBalance(closingBalance) ? 'text-primary' : 'text-danger'">
+                        Rs. {{ absoluteMoney(closingBalance) }}
+                        <span class="text-xs font-bold">{{ isDebitBalance(closingBalance) ? 'Dr' : 'Cr' }}</span>
                     </p>
                     <p class="text-xs text-text-muted">Current running balance</p>
                 </Card>

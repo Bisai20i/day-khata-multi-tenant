@@ -12,6 +12,10 @@ import DataTable from '@/components/ui/DataTable.vue';
 import Label from '@/components/ui/Label.vue';
 import { formatMoney, formatQuantity, formatRate } from '@/lib/money';
 import { formatBsDate } from '@/lib/format';
+import { useBranchReportFilter } from '@/composables/useBranchReportFilter';
+import { useBranchLabel } from '@/composables/useBranchLabel';
+import BranchReportFilter from '@/components/branch/BranchReportFilter.vue';
+import BranchReportNotes from '@/components/branch/BranchReportNotes.vue';
 
 defineOptions({ layout: AppLayout });
 
@@ -31,6 +35,8 @@ const props = defineProps({
     categoryId: { type: [Number, null], default: null },
     subcategoryId: { type: [Number, null], default: null },
     brandId: { type: [Number, null], default: null },
+    // Branch filter; null when the company has no branches.
+    branchReport: { type: [Object, null], default: null },
 });
 
 useLayoutChrome('Item-wise Sales');
@@ -42,6 +48,9 @@ const itemId = ref(props.itemId);
 const categoryId = ref(props.categoryId);
 const subcategoryId = ref(props.subcategoryId);
 const brandId = ref(props.brandId);
+
+const branchFilter = useBranchReportFilter(() => props.branchReport);
+const { label: branchWord } = useBranchLabel();
 
 const storeOptions = computed(() => [
     { value: null, label: 'All stores' },
@@ -103,6 +112,7 @@ function applyFilter() {
             category_id: categoryId.value ?? undefined,
             subcategory_id: subcategoryId.value ?? undefined,
             brand_id: brandId.value ?? undefined,
+            ...branchFilter.toQuery(),
         },
         {
             preserveState: true,
@@ -117,7 +127,7 @@ const selectedItemName = computed(
     () => props.itemsList.find((item) => item.id === props.itemId)?.name ?? '',
 );
 
-const lineColumns = [
+const baseLineColumns = [
     { id: 'date_bs', header: 'Date (BS)', numeric: false, cell: ({ row }) => formatBsDate(row.original.date) },
     { accessorKey: 'date', header: 'Date (AD)' },
     { accessorKey: 'document_number', header: 'Invoice No.' },
@@ -127,6 +137,23 @@ const lineColumns = [
     { id: 'line_total', header: 'Line Value', numeric: true, cell: ({ row }) => formatMoney(row.original.line_total) },
     { id: 'vatable', header: 'Vatable', numeric: false, cell: ({ row }) => (row.original.vatable ? 'Yes' : 'No') },
 ];
+
+// The branch column exists only for a multi-branch company.
+const lineColumns = computed(() => {
+    if (!props.branchReport) {
+        return baseLineColumns;
+    }
+
+    const branchColumn = {
+        id: 'branch',
+        header: branchWord(),
+        numeric: false,
+        cell: ({ row }) => row.original.branch ?? '-',
+    };
+    const at = baseLineColumns.findIndex((column) => column.accessorKey === 'document_number') + 1;
+
+    return [...baseLineColumns.slice(0, at), branchColumn, ...baseLineColumns.slice(at)];
+});
 
 const rangeLabel = computed(
     () => `BS ${formatBsDate(props.from)} to ${formatBsDate(props.to)} (AD ${props.from} to ${props.to})`,
@@ -191,9 +218,17 @@ const columns = [
                     <Label class="mb-1">Item (drill-down)</Label>
                     <Select v-model="itemId" :options="itemOptions" />
                 </div>
+                <BranchReportFilter
+                    v-if="branchReport"
+                    v-model:choice="branchFilter.choice.value"
+                    :report="branchReport"
+                    id-prefix="item-wise-sales"
+                    @change="applyFilter"
+                />
                 <Button variant="primary" tone="purple" :loading="isLoading" @click="applyFilter">Generate report</Button>
                 <Button v-if="hasActiveFilter" variant="secondary" tone="purple" :disabled="isLoading" @click="resetFilters">Reset</Button>
             </div>
+            <BranchReportNotes v-if="branchReport" :report="branchReport" />
         </Card>
 
         <Card variant="panel">

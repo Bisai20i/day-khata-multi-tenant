@@ -3,10 +3,13 @@ import {
     Boxes,
     Calculator,
     Factory,
+    GitCompareArrows,
     Receipt,
     ShoppingBag,
     TrendingUp,
+    Users,
 } from '@lucide/vue';
+import { pluralizeLabel } from '@/composables/useBranchLabel';
 
 /**
  * Single source of truth for every report, grouped the way the Reports hub
@@ -18,10 +21,17 @@ import {
  * `filterNavByPermission` hides reports the user cannot open. That only hides
  * links: the server `can:` middleware is the authority.
  *
+ * `branchLabel` is what the company calls a branch (the shared `branchLabel`
+ * prop, "Branch" by default), used in the branch reports' names.
+ *
+ * @param {{ branchLabel?: string, isMultiBranch?: boolean }} [options] `isMultiBranch` hides the branch card for a company with one active branch
  * @returns {Array<{ label: string, description: string, icon: object, items: Array<{ label: string, description: string, href: string, permission: string }> }>}
  */
-export function reportCategories() {
-    return [
+export function reportCategories({ branchLabel = 'Branch', isMultiBranch = true } = {}) {
+    const branchWord = branchLabel || 'Branch';
+    const branchLower = branchWord.toLowerCase();
+
+    const categories = [
         {
             label: 'Accounts',
             description: 'Ledgers, statements and day-to-day books.',
@@ -106,15 +116,55 @@ export function reportCategories() {
                 { label: 'Inventory Reconciliation', description: 'Stock records against the ledger.', href: '/reports/manufacturing/reconciliation', permission: 'manufacturing_reports.view' },
             ],
         },
+        {
+            // branches.report is only granted while the branches module is on;
+            // callers also pass isMultiBranch so a one-branch company never sees it.
+            label: `${branchWord} reports`,
+            description: `Management figures per ${branchLower}.`,
+            icon: GitCompareArrows,
+            items: [
+                {
+                    label: `${branchWord} Comparison`,
+                    description: `Sales, purchases, gross and net profit side by side for each ${branchLower}.`,
+                    href: '/reports/branch-comparison',
+                    permission: 'branches.report',
+                },
+                {
+                    label: `Inter-${branchLower} Balances`,
+                    description: `Who owes whom between ${pluralizeLabel(branchLower)}, goods in transit, and whether both sides agree.`,
+                    href: '/reports/inter-branch-balances',
+                    permission: 'branches.report',
+                },
+            ],
+        },
+        {
+            label: 'HR',
+            description: 'Payroll paid, and what is owed to or by staff.',
+            icon: Users,
+            items: [
+                { label: 'Payroll Register', description: 'Salary, bonus and allowance paid per staff, with paid and unpaid.', href: '/hr/reports/payroll-register', permission: 'hr_reports.view' },
+                { label: 'Staff Balances', description: 'Salary payable and advances receivable per staff, reconciled to the ledger.', href: '/hr/reports/staff-balances', permission: 'hr_reports.view' },
+            ],
+        },
     ];
+
+    return isMultiBranch ? categories : categories.filter((category) => category.label !== `${branchWord} reports`);
 }
 
 /**
  * Every distinct permission key a report is gated by - the sidebar's "All
  * reports" link is shown when the user holds any one of them.
  *
+ * `isMultiBranch` defaults to true because lib/nav-items.js builds its static
+ * sidebar tree once, before any page props exist, and must keep the hub
+ * reachable for a `branches.report` holder in a multi-branch company. A
+ * caller that knows the company (the shared `branch.isMulti` prop) passes
+ * it, so a Main-only company's `branches.report` holder is not offered a
+ * hub that would list nothing (BR22).
+ *
+ * @param {{ isMultiBranch?: boolean }} [options]
  * @returns {string[]}
  */
-export function reportPermissions() {
-    return [...new Set(reportCategories().flatMap((category) => category.items.map((item) => item.permission)))];
+export function reportPermissions({ isMultiBranch = true } = {}) {
+    return [...new Set(reportCategories({ isMultiBranch }).flatMap((category) => category.items.map((item) => item.permission)))];
 }

@@ -8,11 +8,15 @@
 @section('title', $typeLabel)
 
 @section('doc-meta-extra')
+    {{-- Multi-branch companies only (plan 12, BR12); single-branch bills print as before. --}}
+    @if(! empty($branchName))
+        <div><strong>{{ $branchLabel ?? 'Branch' }}:</strong> {{ $branchName }}</div>
+    @endif
     @if($capitalPurchase->bill_number)
         <div><strong>Supplier Bill No:</strong> {{ $capitalPurchase->bill_number }}</div>
     @endif
     @if($capitalPurchase->journalVoucher)
-        <div><strong>Voucher:</strong> #{{ $capitalPurchase->journalVoucher->voucher_number }}</div>
+        <div><strong>Voucher:</strong> #{{ $capitalPurchase->journalVoucher->seriesNumber() }}</div>
     @endif
     <div><strong>Payment:</strong> {{ $paymentModeLabel }}</div>
     @if($capitalPurchase->status === 'cancelled')
@@ -115,7 +119,8 @@
     </table>
     <div class="clearfix"></div>
 
-    @if($settlements->isNotEmpty())
+    @php($settledInOtherBranches = $settledInOtherBranches ?? null)
+    @if($settlements->isNotEmpty() || $settledInOtherBranches)
         <div class="party-label" style="margin-top: 12px;">Payments made against this bill</div>
         <table class="items-table">
             <thead>
@@ -135,6 +140,14 @@
                         <td class="text-right">{{ Money::of($settlement->amount)->format() }}</td>
                     </tr>
                 @endforeach
+                {{-- Branch-restricted viewer (plan 12, I6): settlements paid from branches they cannot see, as one sum, so the list matches the outstanding. --}}
+                @if($settledInOtherBranches)
+                    <tr>
+                        <td colspan="2">{{ $settledInOtherBranchesLabel ?? 'Paid from other branches' }}</td>
+                        <td>Paid</td>
+                        <td class="text-right">{{ $settledInOtherBranches->format() }}</td>
+                    </tr>
+                @endif
             </tbody>
         </table>
     @endif

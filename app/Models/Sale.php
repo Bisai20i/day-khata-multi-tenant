@@ -5,10 +5,14 @@ namespace App\Models;
 use App\Casts\Decimal;
 use App\Enums\StockMovementType;
 use App\Enums\VoucherType;
+use App\Models\Concerns\BelongsToBranch;
 use App\Support\Billing\BillingException;
 use App\Support\Billing\DocumentCalculator;
 use App\Support\Billing\DocumentTotals;
 use App\Support\Billing\LineTotals;
+use App\Support\Billing\RoundOffPosting;
+use App\Support\Branches\BranchContext;
+use App\Support\Branches\DocumentBranch;
 use App\Support\Inventory\PerpetualCosting;
 use App\Support\Inventory\PerpetualStockGuard;
 use App\Support\Manufacturing\ManufacturingAccounts;
@@ -54,12 +58,14 @@ use InvalidArgumentException;
     'invoice_number', 'buyer_name', 'buyer_pan', 'buyer_address',
     'invoice_type', 'chalani_number', 'date', 'payment_mode',
     'bank_account_id', 'discount', 'discount_type', 'discount_amount', 'taxable_amount', 'nontaxable_amount',
-    'vat_rate', 'vat_amount', 'total', 'cash_amount', 'bank_amount',
+    'vat_rate', 'vat_amount', 'total', 'round_off', 'cash_amount', 'bank_amount',
     'tds_account_id', 'tds_amount', 'narration', 'status', 'created_by',
-    'cancelled_at', 'cancelled_by', 'cancel_reason', 'reversal_journal_voucher_id',
+    'cancelled_at', 'cancelled_by', 'cancel_reason', 'reversal_journal_voucher_id', 'branch_id',
 ])]
 class Sale extends Model
 {
+    use BelongsToBranch;
+
     /** An abbreviated tax invoice may not be issued above this value (IRD rule). */
     private const ABBREVIATED_INVOICE_CEILING = '10000.00';
 
@@ -78,10 +84,12 @@ class Sale extends Model
             'vat_rate' => Decimal::class.':2',
             'vat_amount' => Decimal::class.':2',
             'total' => Decimal::class.':2',
+            'round_off' => Decimal::class.':2',
             'cash_amount' => Decimal::class.':2',
             'bank_amount' => Decimal::class.':2',
             'tds_amount' => Decimal::class.':2',
             'commission_amount' => Decimal::class.':2',
+            'branch_id' => 'integer',
         ];
     }
 
@@ -233,10 +241,14 @@ class Sale extends Model
         $returnedNet = Money::zero();
         $refunded = Money::zero();
 
-        $postedReturns = $this->returns()
+        // Returns and receipt allocations are read outside the branch access
+        // scope (plan 12, section 5.7, BR07): a receipt taken in another
+        // branch still settles this invoice, so what is due on it must not
+        // depend on who is looking.
+        $postedReturns = BranchContext::unrestricted(fn () => $this->returns()
             ->where('status', 'posted')
             ->orderBy('id')
-            ->get(['id', 'total', 'tds_amount', 'refund_journal_voucher_id']);
+            ->get(['id', 'total', 'tds_amount', 'refund_journal_voucher_id']));
 
         foreach ($postedReturns as $return) {
             $credit = Money::of($return->total)->minus(Money::of($return->tds_amount));
@@ -249,9 +261,9 @@ class Sale extends Model
         }
 
         $allocated = Money::sum(
-            $this->receiptAllocations()
+            BranchContext::unrestricted(fn () => $this->receiptAllocations()
                 ->whereHas('receipt', fn ($query) => $query->where('status', '!=', 'cancelled'))
-                ->pluck('amount')
+                ->pluck('amount'))
                 ->map(fn ($amount) => Money::of($amount))
         );
 
@@ -288,7 +300,7 @@ class Sale extends Model
      * what closes P0-10: PAN bills used to charge a hidden 13% that the PDF
      * then hid from the customer while it still posted to LIA20.
      *
-     * @param  array{customer_id: int, chalani_number?: string|null, date: string, payment_mode: string, bank_account_id?: int|null, discount?: string|float, discount_type?: string, cash_amount?: string|float|null, bank_amount?: string|float|null, tds_account_id?: int|null, tds_amount?: string|float, agent_id?: int|null, commission_amount?: string|float, narration?: string|null, store_id?: int|null, expected_total?: string|null}  $data
+     * @param  array{customer_id: int, chalani_number?: string|null, date: string, payment_mode: string, bank_account_id?: int|null, discount?: string|float, discount_type?: string, cash_amount?: string|float|null, bank_amount?: string|float|null, tds_account_id?: int|null, tds_amount?: string|float, round_off?: string|float|null, agent_id?: int|null, commission_amount?: string|float, narration?: string|null, store_id?: int|null, branch_id?: int|null, expected_total?: string|null}  $data
      * @param  array<int, array{item_id: int, item_unit_id?: int|null, quantity: string|float, rate: string|float, discount?: string|float, discount_type?: string}>  $lines
      */
     public static function post(array $data, array $lines, User $actor): self
@@ -301,7 +313,12 @@ class Sale extends Model
             // registered under, set only by the platform admin from the
             // central panel (TenantCompanySettingController::update()).
             $invoiceType = $data['invoice_type'] ?? $settings->active_invoice_type ?? 'full';
-            $storeId = static::resolveStoreId($data, $settings);
+            // Branch and store together (plan 12, I5/I6): the requested
+            // branch, else the store's, else the actor's posting branch; the
+            // store defaults inside that branch. The voucher below and the
+            // row are filed under this same branch.
+            $placement = DocumentBranch::forStoreDocument($actor, $data['branch_id'] ?? null, $data['store_id'] ?? null, $settings);
+            $storeId = $placement->requireStoreId();
 
             $items = Item::with('units')->whereIn('id', collect($lines)->pluck('item_id'))->get()->keyBy('id');
 
@@ -312,6 +329,7 @@ class Sale extends Model
                 'discount' => $data['discount'] ?? '0',
                 'discount_type' => $data['discount_type'] ?? 'flat',
                 'tds_amount' => $data['tds_amount'] ?? '0',
+                'round_off' => $settings->effectiveRoundOff($data['round_off'] ?? null),
                 'force_non_taxable' => $invoiceType === 'pan',
                 'expected_total' => $data['expected_total'] ?? null,
             ]);
@@ -346,12 +364,13 @@ class Sale extends Model
                     'voucher_type' => static::voucherTypeFor($invoiceType)->value,
                     'date' => $data['date'],
                     'narration' => $data['narration'] ?? "Sale to {$customer->name}",
+                    'branch_id' => $placement->branchId,
                 ],
                 static::voucherLines($customer, $totals, $preparedLines, $paymentMode, $cashAmount, $bankAmount, $bankAccountId, $tdsAccountId, $agent, $commissionAmount, $perpetualCosts),
                 $actor,
                 // Every line of this voucher carries the same compact
                 // narration (audit section 3 "Sales", "ledger narrations"), so
-                // the customer's ledger reads "SL-42 - Cash Settlement"
+                // the customer's ledger reads "S-42 - Cash Settlement"
                 // instead of a bare "Sale total"/"Settlement". The invoice
                 // number comes from this voucher's own number (C7), so it is
                 // resolved inside post() once that number exists.
@@ -363,6 +382,7 @@ class Sale extends Model
                 'agent_id' => $agentId,
                 'commission_amount' => $commissionAmount,
                 'store_id' => $storeId,
+                'branch_id' => $placement->branchId,
                 'journal_voucher_id' => $voucher->id,
                 'fiscal_year_id' => $voucher->fiscal_year_id,
                 'invoice_number' => static::invoiceNumberFor($invoiceType, $voucher, $settings),
@@ -382,6 +402,7 @@ class Sale extends Model
                 'vat_rate' => $totals->vatRate,
                 'vat_amount' => $totals->vatAmount,
                 'total' => $totals->total,
+                'round_off' => $totals->roundOff,
                 'cash_amount' => $paymentMode === 'partial' ? $cashAmount : null,
                 'bank_amount' => $paymentMode === 'partial' ? $bankAmount : null,
                 'tds_account_id' => $tdsAccountId,
@@ -426,6 +447,7 @@ class Sale extends Model
             'discount' => $data['discount'] ?? '0',
             'discount_type' => $data['discount_type'] ?? 'flat',
             'tds_amount' => $data['tds_amount'] ?? '0',
+            'round_off' => $settings->effectiveRoundOff($data['round_off'] ?? null),
             'force_non_taxable' => $invoiceType === 'pan',
             'expected_total' => null,
         ]);
@@ -451,6 +473,7 @@ class Sale extends Model
             'vat_rate' => $totals->vatRate,
             'vat_amount' => $totals->vatAmount,
             'total' => $totals->total,
+            'round_off' => $totals->roundOff,
             'cash_amount' => $paymentMode === 'partial' ? Money::ofNullable($data['cash_amount'] ?? null) : null,
             'bank_amount' => $paymentMode === 'partial' ? Money::ofNullable($data['bank_amount'] ?? null) : null,
             'tds_amount' => $totals->tdsAmount,
@@ -767,7 +790,7 @@ class Sale extends Model
             default => $settings->sale_full_prefix,
         };
 
-        return "{$prefix}-{$voucher->voucher_number}";
+        return $voucher->printedNumber((string) $prefix);
     }
 
     /**
@@ -783,25 +806,6 @@ class Sale extends Model
         return ($data['discount_type'] ?? 'flat') === 'percentage'
             ? Money::of($data['discount'] ?? '0')
             : $totals->headerDiscount;
-    }
-
-    /**
-     * The store this sale moves stock out of: the explicit choice, else the
-     * tenant's configured default store (which used to be saved and never
-     * read - audit P1), else the lowest-id active store.
-     *
-     * @param  array<string, mixed>  $data
-     */
-    private static function resolveStoreId(array $data, CompanySetting $settings): int
-    {
-        $storeId = $data['store_id'] ?? $settings->default_store_id
-            ?? Store::where('is_active', true)->orderBy('id')->value('id');
-
-        if (! $storeId) {
-            throw new InvalidArgumentException('No active store is configured.');
-        }
-
-        return (int) $storeId;
     }
 
     /**
@@ -1040,6 +1044,12 @@ class Sale extends Model
             $voucherLines[] = ['account_id' => $accountId, 'debit' => $zero, 'credit' => $amount->toString(), 'narration' => 'Sales revenue'];
         }
 
+        // The customer leg above already carries Round Off inside `total`;
+        // INI31 takes the other side (+ credits it, - debits it).
+        if ($roundOffLine = RoundOffPosting::line($totals->roundOff, creditWhenPositive: true)) {
+            $voucherLines[] = $roundOffLine;
+        }
+
         if ($totals->vatAmount->isPositive()) {
             $vatPayableId = Account::where('code', 'LIA20')->firstOrFail()->id;
             $voucherLines[] = ['account_id' => $vatPayableId, 'debit' => $zero, 'credit' => $totals->vatAmount->toString(), 'narration' => 'VAT payable'];
@@ -1156,18 +1166,28 @@ class Sale extends Model
             // 'cancelled'); a 'pending' one deliberately still blocks - it
             // represents a live decision someone still has to make against
             // this exact sale.
-            if (SaleReturnLine::whereIn('sale_line_id', $sale->lines()->pluck('id'))
+            //
+            // Blockers are read outside the branch access scope (plan 12,
+            // section 5.7): a restricted canceller must not be able to miss a
+            // live return or a receipt filed in a branch they cannot see, and
+            // cancel a bill that is still returned against or paid.
+            if (BranchContext::unrestricted(fn () => SaleReturnLine::whereIn('sale_line_id', $sale->lines()->pluck('id'))
                 ->whereHas('salesReturn', fn ($query) => $query->whereNotIn('status', ['cancelled', 'rejected']))
-                ->exists()) {
+                ->exists())) {
                 throw new InvalidArgumentException('Cannot cancel a sale that has partial returns against it.');
             }
 
-            if ($sale->receiptAllocations()->whereHas('receipt', fn ($query) => $query->where('status', '!=', 'cancelled'))->exists()) {
+            if (BranchContext::unrestricted(fn () => $sale->receiptAllocations()
+                ->whereHas('receipt', fn ($query) => $query->where('status', '!=', 'cancelled'))
+                ->exists())) {
                 throw new InvalidArgumentException('Cannot cancel a sale that has a payment received against it.');
             }
 
+            // The reversal stays in the sale's branch: reverse() keeps the
+            // original's origin branch and every line's branch, and still
+            // checks that the actor may post there.
             $reversal = JournalVoucher::reverse(
-                $sale->journalVoucher()->firstOrFail(),
+                BranchContext::unrestricted(fn () => $sale->journalVoucher()->firstOrFail()),
                 $actor,
                 "Cancellation of sale {$sale->invoice_number}: {$reason}",
             );

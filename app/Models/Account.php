@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use App\Support\Branches\BranchContext;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
@@ -21,14 +22,19 @@ class Account extends Model
      * or moved (audit JE-02). EXE9 and INI22 are the opening and closing stock
      * accounts FiscalYear's year-end stock entry resolves by code (confirmed
      * list, flags D3). AS12-AS14, EXE10, EXE23 and EXE24 are the perpetual
-     * manufacturing inventory accounts (ManufacturingAccounts).
+     * manufacturing inventory accounts (ManufacturingAccounts). LIA22, ASA24
+     * and EXE25-EXE27 are the HR payroll accounts (HrAccounts). ASA25
+     * (Inter-Branch Clearing), INI23 (Stock Transferred to Branches) and
+     * EXE11 (Stock Received from Branches) are the inter-branch accounts
+     * (BranchAccounts), looked up by code by BranchBalancer and the year-end
+     * I3 check.
      *
      * @var list<string>
      */
     public const SYSTEM_CODES = [
-        'AS1', 'AS11', 'AS12', 'AS13', 'AS14', 'AS31', 'ASA23', 'CA2', 'EXE8', 'EXE9', 'EXE10',
-        'EXE20', 'EXE21', 'EXE22', 'EXE23', 'EXE24',
-        'INI20', 'INI22', 'INI30', 'LIA20', 'LIA21',
+        'AS1', 'AS11', 'AS12', 'AS13', 'AS14', 'AS31', 'ASA23', 'ASA24', 'ASA25', 'CA2', 'EXE8', 'EXE9', 'EXE10',
+        'EXE11', 'EXE20', 'EXE21', 'EXE22', 'EXE23', 'EXE24', 'EXE25', 'EXE26', 'EXE27',
+        'INI20', 'INI22', 'INI23', 'INI30', 'INI31', 'LIA20', 'LIA21', 'LIA22',
     ];
 
     /**
@@ -65,6 +71,10 @@ class Account extends Model
         'capital_purchases' => 'bank_account_id',
         'capital_sales' => 'bank_account_id',
         'capital_purchase_settlements' => 'bank_account_id',
+        'hr_pay_components' => 'expense_account_id',
+        'hr_payroll_payments' => 'bank_account_id',
+        'hr_staff_advances' => 'bank_account_id',
+        'production_direct_costs' => 'credit_account_id',
     ];
 
     public function isSystemAccount(): bool
@@ -84,7 +94,9 @@ class Account extends Model
 
         // ANY line counts - posted, cancelled or reversed, any fiscal year,
         // opening-balance lines included - so no history loses its account.
-        if ($this->journalVoucherLines()->exists()) {
+        // Unrestricted: a line filed in a branch the actor cannot see still
+        // ties the account to history (plan 12, section 5.7).
+        if ($this->hasAnyLedgerLine()) {
             return 'This account has ledger entries (including opening balance or cancelled ones) and cannot be deleted.';
         }
 
@@ -103,6 +115,17 @@ class Account extends Model
         }
 
         return null;
+    }
+
+    /**
+     * Whether any journal line, in any branch, posts to this account. Read
+     * inside BranchContext::unrestricted() because the line access scope would
+     * otherwise hide other branches' lines from a restricted user and let them
+     * delete or re-head an account that has history.
+     */
+    public function hasAnyLedgerLine(): bool
+    {
+        return BranchContext::unrestricted(fn (): bool => $this->journalVoucherLines()->exists());
     }
 
     /**
@@ -131,7 +154,7 @@ class Account extends Model
                 throw new InvalidArgumentException('This is a system account the ledger depends on; its code, name and group cannot be changed.');
             }
 
-            if ($account->isDirty(['account_group_id', 'account_subgroup_id']) && $account->journalVoucherLines()->exists()) {
+            if ($account->isDirty(['account_group_id', 'account_subgroup_id']) && $account->hasAnyLedgerLine()) {
                 $before = static::headIdFor($account->getOriginal('account_group_id'), $account->getOriginal('account_subgroup_id'));
                 $after = static::headIdFor($account->account_group_id, $account->account_subgroup_id);
 

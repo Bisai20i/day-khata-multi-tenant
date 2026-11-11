@@ -13,6 +13,7 @@ use Illuminate\Database\Eloquent\Relations\MorphMany;
 #[Fillable([
     'purchase_id', 'item_id', 'item_unit_id', 'account_id', 'quantity', 'bonus_quantity', 'unit_conversion_factor',
     'rate', 'discount', 'discount_type', 'vatable', 'note', 'line_total', 'net_value', 'vat_amount', 'tds_amount',
+    'round_off',
 ])]
 class PurchaseLine extends Model
 {
@@ -35,6 +36,8 @@ class PurchaseLine extends Model
             'net_value' => Decimal::class.':2',
             'vat_amount' => Decimal::class.':2',
             'tds_amount' => Decimal::class.':2',
+            // This line's slice of the bill's signed Round Off (allocated by net value at posting).
+            'round_off' => Decimal::class.':2',
         ];
     }
 

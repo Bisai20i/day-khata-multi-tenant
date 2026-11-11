@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Tenant\Auth;
 
 use App\Http\Controllers\Controller;
 use App\Models\User;
+use App\Support\Branches\ActiveBranchSelection;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
@@ -25,6 +26,7 @@ class ImpersonationController extends Controller
         Auth::guard('web')->login($user);
 
         $request->session()->regenerate();
+        $request->session()->forget(ActiveBranchSelection::SESSION_KEY);
 
         return redirect()->route('tenant.dashboard');
     }

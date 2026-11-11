@@ -321,10 +321,15 @@ class Item extends Model
      * exact on SQLite and on MySQL alike; dividing back by 10^4 is lossless
      * at the 4 decimals a Quantity holds.
      *
+     * $storeId is one store, a list of stores (plan 12, BR15: the stores of
+     * the branches a report covers; an empty list matches nothing) or null
+     * for every store.
+     *
      * @param  array<int, int|string>  $itemIds
+     * @param  int|list<int>|null  $storeId
      * @return array<int, Quantity>
      */
-    public static function currentStockByItem(array $itemIds, ?int $storeId = null, ?string $asOf = null): array
+    public static function currentStockByItem(array $itemIds, int|array|null $storeId = null, ?string $asOf = null): array
     {
         $ids = array_values(array_unique(array_map('intval', $itemIds)));
 
@@ -349,7 +354,8 @@ class Item extends Model
             )
             ->whereIn('item_id', $ids)
             ->where('cancelled', false)
-            ->when($storeId !== null, fn (Builder $query) => $query->where('store_id', $storeId))
+            ->when(is_int($storeId), fn (Builder $query) => $query->where('store_id', $storeId))
+            ->when(is_array($storeId), fn (Builder $query) => $query->whereIn('store_id', $storeId))
             ->when($asOf !== null, fn (Builder $query) => $query->whereDate('date', '<=', $asOf))
             ->groupBy('item_id')
             ->pluck('net_scaled', 'item_id');

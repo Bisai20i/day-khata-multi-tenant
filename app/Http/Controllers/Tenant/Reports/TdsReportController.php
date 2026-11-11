@@ -10,6 +10,8 @@ use App\Models\PurchaseReturn;
 use App\Models\Sale;
 use App\Models\SalesReturn;
 use App\Models\Store;
+use App\Support\Branches\BranchFilter;
+use App\Support\Branches\BranchStock;
 use App\Support\Money\Money;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
@@ -44,6 +46,15 @@ use Inertia\Response;
  *
  * Only `status = 'posted'` returns appear: a pending request has no money
  * effect at all and a rejected one never had any.
+ *
+ * **Branches** (plan 12, BR14). The branch filter (`branch`, `branches[]`,
+ * BranchFilter) narrows every row group on the document's own branch_id,
+ * the same predicate the VAT books use: this is a register of documents, a
+ * return inherits its original's branch and a cancellation belongs to the
+ * cancelled document, so every event lands in the document's branch. In a
+ * multi-branch tenant each row also names its branch (`branch`). A tenant
+ * that is not multi-branch, or a view of every branch, runs exactly the old
+ * queries and gets exactly the old rows.
  */
 class TdsReportController extends Controller
 {
@@ -51,9 +62,10 @@ class TdsReportController extends Controller
     {
         [$from, $to] = $this->resolveDateRange($request);
         $storeId = $request->integer('store_id') ?: null;
+        $branchFilter = BranchFilter::fromRequest($request);
 
-        $salesRows = $this->salesRows($from, $to, $storeId);
-        $purchaseRows = $this->purchaseRows($from, $to, $storeId);
+        $salesRows = $this->salesRows($from, $to, $storeId, $branchFilter);
+        $purchaseRows = $this->purchaseRows($from, $to, $storeId, $branchFilter);
 
         $salesTotal = $this->sumTds($salesRows);
         $purchasesTotal = $this->sumTds($purchaseRows);
@@ -64,17 +76,18 @@ class TdsReportController extends Controller
             'salesTotal' => $salesTotal->toString(),
             'purchasesTotal' => $purchasesTotal->toString(),
             'grandTotal' => $salesTotal->plus($purchasesTotal)->toString(),
-            'stores' => Store::where('is_active', true)->orderBy('name')->get(['id', 'name']),
+            'stores' => BranchStock::storeOptions($branchFilter, Store::where('is_active', true))->orderBy('name')->get(['id', 'name']),
             'from' => $from,
             'to' => $to,
             'storeId' => $storeId,
+            'branchReport' => $branchFilter->payload(),
         ]);
     }
 
     /**
      * @return Collection<int, array<string, mixed>>
      */
-    private function salesRows(string $from, string $to, ?int $storeId): Collection
+    private function salesRows(string $from, string $to, ?int $storeId, BranchFilter $branchFilter): Collection
     {
         $issued = Sale::query()
             ->with(['customer:id,name', 'tdsAccount:id,name'])
@@ -83,8 +96,10 @@ class TdsReportController extends Controller
             ->whereDate('date', '>=', $from)
             ->whereDate('date', '<=', $to)
             ->when($storeId, fn (Builder $query) => $query->where('store_id', $storeId))
+            ->tap(fn (Builder $query) => $branchFilter->applyToDocuments($query, 'sales.branch_id'))
             ->get()
             ->map(fn (Sale $sale) => [
+                ...$branchFilter->rowBranch($sale->branch_id),
                 'entry' => 'invoice',
                 'date' => $sale->date->toDateString(),
                 'document_number' => $sale->invoice_number,
@@ -102,8 +117,10 @@ class TdsReportController extends Controller
         $cancelled = $this->cancelledInPeriod(Sale::query()->with(['customer:id,name', 'tdsAccount:id,name']), $from, $to)
             ->whereNotNull('tds_account_id')
             ->when($storeId, fn (Builder $query) => $query->where('store_id', $storeId))
+            ->tap(fn (Builder $query) => $branchFilter->applyToDocuments($query, 'sales.branch_id'))
             ->get()
             ->map(fn (Sale $sale) => [
+                ...$branchFilter->rowBranch($sale->branch_id),
                 'entry' => 'cancelled',
                 'date' => $this->cancelDate($sale),
                 'document_number' => $sale->invoice_number,
@@ -120,8 +137,10 @@ class TdsReportController extends Controller
             ->whereDate('date', '>=', $from)
             ->whereDate('date', '<=', $to)
             ->when($storeId, fn (Builder $query) => $query->where('store_id', $storeId))
+            ->tap(fn (Builder $query) => $branchFilter->applyToDocuments($query, 'sales_returns.branch_id'))
             ->get()
             ->map(fn (SalesReturn $return) => [
+                ...$branchFilter->rowBranch($return->branch_id),
                 'entry' => 'credit_note',
                 'date' => $return->date->toDateString(),
                 'document_number' => $return->credit_note_number,
@@ -138,7 +157,7 @@ class TdsReportController extends Controller
     /**
      * @return Collection<int, array<string, mixed>>
      */
-    private function purchaseRows(string $from, string $to, ?int $storeId): Collection
+    private function purchaseRows(string $from, string $to, ?int $storeId, BranchFilter $branchFilter): Collection
     {
         $issued = Purchase::query()
             ->with(['supplier:id,name', 'tdsAccount:id,name'])
@@ -147,8 +166,10 @@ class TdsReportController extends Controller
             ->whereDate('date', '>=', $from)
             ->whereDate('date', '<=', $to)
             ->when($storeId, fn (Builder $query) => $query->where('store_id', $storeId))
+            ->tap(fn (Builder $query) => $branchFilter->applyToDocuments($query, 'purchases.branch_id'))
             ->get()
             ->map(fn (Purchase $purchase) => [
+                ...$branchFilter->rowBranch($purchase->branch_id),
                 'entry' => 'invoice',
                 'date' => $purchase->date->toDateString(),
                 'document_number' => $purchase->bill_number,
@@ -162,8 +183,10 @@ class TdsReportController extends Controller
         $cancelled = $this->cancelledInPeriod(Purchase::query()->with(['supplier:id,name', 'tdsAccount:id,name']), $from, $to)
             ->whereNotNull('tds_account_id')
             ->when($storeId, fn (Builder $query) => $query->where('store_id', $storeId))
+            ->tap(fn (Builder $query) => $branchFilter->applyToDocuments($query, 'purchases.branch_id'))
             ->get()
             ->map(fn (Purchase $purchase) => [
+                ...$branchFilter->rowBranch($purchase->branch_id),
                 'entry' => 'cancelled',
                 'date' => $this->cancelDate($purchase),
                 'document_number' => $purchase->bill_number,
@@ -180,8 +203,10 @@ class TdsReportController extends Controller
             ->whereDate('date', '>=', $from)
             ->whereDate('date', '<=', $to)
             ->when($storeId, fn (Builder $query) => $query->where('store_id', $storeId))
+            ->tap(fn (Builder $query) => $branchFilter->applyToDocuments($query, 'purchase_returns.branch_id'))
             ->get()
             ->map(fn (PurchaseReturn $return) => [
+                ...$branchFilter->rowBranch($return->branch_id),
                 'entry' => 'debit_note',
                 'date' => $return->date->toDateString(),
                 'document_number' => $return->debit_note_number,

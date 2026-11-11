@@ -12,6 +12,10 @@ import Label from '@/components/ui/Label.vue';
 import { formatMoney, isZeroMoney } from '@/lib/money.js';
 import { formatBsDate } from '@/lib/format.js';
 import { usePermissions } from '@/composables/usePermissions';
+import { useBranchReportFilter } from '@/composables/useBranchReportFilter';
+import BranchReportFilter from '@/components/branch/BranchReportFilter.vue';
+import BranchReportNotes from '@/components/branch/BranchReportNotes.vue';
+import BranchBadge from '@/components/branch/BranchBadge.vue';
 
 defineOptions({ layout: AppLayout });
 
@@ -27,6 +31,8 @@ const props = defineProps({
     to: { type: [String, null], default: null },
     voucherType: { type: [String, null], default: null },
     voucherTypeOptions: { type: Array, default: () => [] },
+    // Branch filter; null when the company has no branches.
+    branchReport: { type: [Object, null], default: null },
 });
 
 useLayoutChrome('Day Book');
@@ -42,6 +48,8 @@ const fiscalYear = ref(props.fiscalYearId);
 const from = ref(props.from);
 const to = ref(props.to);
 const voucherType = ref(props.voucherType);
+
+const branchFilter = useBranchReportFilter(() => props.branchReport);
 
 // Kept per page rather than shared, matching this app's existing
 // per-page-file convention (mem.md gotcha #5).
@@ -69,6 +77,14 @@ const voucherTypeLabels = {
     bank_receipt: 'Bank Receipt',
     bank_payment: 'Bank Payment',
     contra: 'Contra',
+    material_issue: 'Material Issue',
+    production: 'Production',
+    production_entry: 'Production Entry',
+    inventory_cost: 'Inventory Cost',
+    payroll: 'Payroll',
+    salary_payment: 'Salary Payment',
+    staff_advance: 'Staff Advance',
+    branch_stock_transfer: 'Branch Stock Transfer',
 };
 
 // See CashBook.vue: a book is only ever read inside one fiscal year.
@@ -92,6 +108,7 @@ function applyFilter() {
             from: from.value ?? undefined,
             to: to.value ?? undefined,
             voucher_type: voucherType.value || undefined,
+            ...branchFilter.toQuery(),
         },
         { preserveState: true, preserveScroll: true },
     );
@@ -104,6 +121,7 @@ function printUrl() {
         to: to.value ?? '',
         voucher_type: voucherType.value ?? '',
     });
+    branchFilter.appendTo(params);
     return `/reports/day-book/print?${params.toString()}`;
 }
 
@@ -114,6 +132,7 @@ function exportUrl() {
         to: to.value ?? '',
         voucher_type: voucherType.value ?? '',
     });
+    branchFilter.appendTo(params);
     return `/reports/day-book/export?${params.toString()}`;
 }
 
@@ -149,11 +168,19 @@ function voucherLabel(voucher) {
                     <Label class="mb-1">Voucher type</Label>
                     <Select v-model="voucherType" :options="voucherTypeFilterOptions" />
                 </div>
+                <BranchReportFilter
+                    v-if="branchReport"
+                    v-model:choice="branchFilter.choice.value"
+                    :report="branchReport"
+                    id-prefix="day-book"
+                    @change="applyFilter"
+                />
                 <Button variant="primary" tone="purple" @click="applyFilter">Generate report</Button>
             </div>
             <p v-if="from && to" class="mt-2 text-[12px] text-text-muted">
                 Showing report for {{ formatBsDate(from) }} to {{ formatBsDate(to) }} BS
             </p>
+            <BranchReportNotes v-if="branchReport" :report="branchReport" show-narrowed-note />
         </Card>
 
         <Card variant="panel">
@@ -171,6 +198,7 @@ function voucherLabel(voucher) {
                         <div class="text-[13px] font-bold text-text-strong">
                             {{ formatBsDate(voucher.date) }} <span class="font-normal text-text-muted">({{ voucher.date }})</span> ·
                             {{ voucherLabel(voucher) }}
+                            <BranchBadge v-if="branchReport && voucher.branch" :branch="{ name: voucher.branch }" class="ml-1 align-middle" />
                         </div>
                         <div class="text-[12.5px] text-text-muted">{{ voucher.narration ?? '-' }}</div>
                     </div>

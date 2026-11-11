@@ -1,7 +1,7 @@
 <script setup>
-import { h, ref, watch } from 'vue';
-import { useForm, usePage } from '@inertiajs/vue3';
-import { Ban, Plus, Printer } from '@lucide/vue';
+import { computed, h, ref, watch } from 'vue';
+import { router, useForm, usePage } from '@inertiajs/vue3';
+import { Ban, PackageCheck, Plus, Printer } from '@lucide/vue';
 import AppLayout from '@/layouts/AppLayout.vue';
 import { useLayoutChrome } from '@/composables/useLayoutChrome';
 import PageHeader from '@/components/ui/PageHeader.vue';
@@ -17,7 +17,11 @@ import { usePermissions } from '@/composables/usePermissions';
 import { formatMoney, formatQuantity } from '@/lib/money.js';
 import { formatBsDate } from '@/lib/format.js';
 import Create from './Create.vue';
+import ReceiveModal from './ReceiveModal.vue';
 import { useOpenFiscalYear } from '@/composables/useOpenFiscalYear';
+import { useBranchListColumn } from '@/composables/useBranchListColumn';
+import BranchBadge from '@/components/branch/BranchBadge.vue';
+import { useBranchLabel } from '@/composables/useBranchLabel';
 
 defineOptions({ layout: AppLayout });
 
@@ -28,10 +32,101 @@ const props = defineProps({
     stockTransfers: { type: Array, default: () => [] },
     items: { type: Array, default: () => [] },
     stores: { type: Array, default: () => [] },
+    // Every active store of every active branch (BR18), null when the
+    // company is not multi-branch.
+    destinationStores: { type: Array, default: null },
+    // BR19, multi-branch only: the list's `status` filter ('in_transit' | 'received' | null) and the
+    // transfers in transit right now by direction ({ within|outgoing|incoming: { count, value } }, or null).
+    statusFilter: { type: [String, null], default: null },
+    inTransit: { type: [Object, null], default: null },
 });
+
+const { plural: branchPlural } = useBranchLabel();
+
+// Directions are relative to the branches this list shows (the switcher's
+// branch, else the user's own branches); the whole company is all 'within'.
+const TRANSIT_LINES = {
+    within: () => `between ${branchPlural('lower')}`,
+    outgoing: () => `dispatched to other ${branchPlural('lower')}, awaiting receipt`,
+    incoming: () => `incoming from other ${branchPlural('lower')}`,
+};
+
+const transitLines = computed(() =>
+    ['within', 'outgoing', 'incoming']
+        .filter((bucket) => props.inTransit?.[bucket])
+        .map((bucket) => ({ bucket, text: TRANSIT_LINES[bucket](), ...props.inTransit[bucket] })),
+);
+
+function showStatus(status) {
+    router.get('/stock-transfers', status ? { status } : {}, { preserveScroll: true });
+}
 
 const page = usePage();
 const { toast } = useToast();
+
+// Branches (plan 12, BR12): a transfer has a branch at each end, so instead
+// of one branch column each store names its branch, for a multi-branch
+// company viewing all branches (the server then loads the store branches).
+// A transfer between branches (BR18) always names both branches.
+const { showBranchColumn } = useBranchListColumn();
+
+function isCrossBranch(transfer) {
+    return transfer.from_branch_id !== transfer.to_branch_id;
+}
+
+function storeCell(store, transfer) {
+    if (!store) {
+        return '-';
+    }
+
+    if (!store.branch || !(showBranchColumn.value || isCrossBranch(transfer))) {
+        return store.name;
+    }
+
+    return h('div', { class: 'flex items-center gap-1.5' }, [h('span', store.name), h(BranchBadge, { branch: store.branch })]);
+}
+
+// The branches this user may post in (shared `branch.allowed`): receiving
+// needs the destination branch, cancelling a transfer in transit the
+// source branch. The server checks both again.
+function canUseBranch(branchId) {
+    return (page.props.branch?.allowed ?? []).some((branch) => branch.id === branchId);
+}
+
+// Posted and Cancelled look exactly as before; the two-step statuses (BR18)
+// follow the same text style.
+const STATUSES = {
+    posted: { label: 'Posted', class: 'text-success font-semibold' },
+    in_transit: { label: 'In transit', class: 'text-warning-text font-semibold' },
+    received: { label: 'Received', class: 'text-success font-semibold' },
+    cancelled: { label: 'Cancelled', class: 'text-danger font-semibold' },
+};
+
+function statusCell(transfer) {
+    const status = STATUSES[transfer.status] ?? { label: transfer.status ?? '-', class: 'text-text-muted' };
+
+    if (transfer.status !== 'received' || !transfer.received_on) {
+        return h('span', { class: status.class }, status.label);
+    }
+
+    return h('div', { class: 'whitespace-nowrap' }, [
+        h('span', { class: status.class }, status.label),
+        h('span', { class: 'ml-1 text-text-faint' }, formatBsDate(transfer.received_on)),
+    ]);
+}
+
+function canCancel(transfer) {
+    if (!can('stock_transfers.cancel')) return false;
+    if (transfer.status === 'posted') return true;
+
+    return transfer.status === 'in_transit' && canUseBranch(transfer.from_branch_id);
+}
+
+function canReceive(transfer) {
+    return transfer.status === 'in_transit' && can('stock_transfers.receive') && canUseBranch(transfer.to_branch_id);
+}
+
+const receiving = ref(null);
 useLayoutChrome('Stock Transfers');
 
 // Posting/cancelling redirects back to this same route + component, which
@@ -94,13 +189,13 @@ const columns = [
         id: 'from_store',
         header: 'From store',
         numeric: false,
-        cell: ({ row }) => row.original.from_store?.name ?? '-',
+        cell: ({ row }) => storeCell(row.original.from_store, row.original),
     },
     {
         id: 'to_store',
         header: 'To store',
         numeric: false,
-        cell: ({ row }) => row.original.to_store?.name ?? '-',
+        cell: ({ row }) => storeCell(row.original.to_store, row.original),
     },
     {
         id: 'note',
@@ -124,17 +219,7 @@ const columns = [
         id: 'status',
         header: 'Status',
         numeric: false,
-        cell: ({ row }) =>
-            h(
-                'span',
-                {
-                    class:
-                        row.original.status === 'cancelled'
-                            ? 'text-danger font-semibold'
-                            : 'text-success font-semibold',
-                },
-                row.original.status === 'cancelled' ? 'Cancelled' : 'Posted',
-            ),
+        cell: ({ row }) => statusCell(row.original),
     },
     {
         id: 'actions',
@@ -157,7 +242,21 @@ const columns = [
                         ),
                     )
                     : null,
-                row.original.status === 'cancelled' || !can('stock_transfers.cancel')
+                canReceive(row.original)
+                    ? h(Tooltip, { label: 'Receive transfer' }, () =>
+                          h(
+                              'button',
+                              {
+                                  type: 'button',
+                                  class: 'flex h-[26px] w-[26px] items-center justify-center bg-bg-subtle text-text-faint transition-colors duration-150 hover:bg-primary-tint hover:text-primary',
+                                  'aria-label': 'Receive transfer',
+                                  onClick: () => (receiving.value = row.original),
+                              },
+                              [h(PackageCheck, { class: 'h-[13px] w-[13px]' })],
+                          ),
+                      )
+                    : null,
+                !canCancel(row.original)
                     ? null
                     : h(Tooltip, { label: 'Cancel transfer' }, () =>
                           h(
@@ -182,6 +281,7 @@ const columns = [
             <Create
                 :items="items"
                 :stores="stores"
+                :destination-stores="destinationStores"
                 @cancel="showCreateForm = false"
                 @posted="showCreateForm = false"
             />
@@ -194,6 +294,20 @@ const columns = [
                     New transfer
                 </Button>
             </PageHeader>
+
+            <div v-if="transitLines.length > 0 || statusFilter" class="mb-3 flex flex-wrap items-center gap-x-4 gap-y-1 border-[1.5px] border-border bg-bg-subtle px-3 py-2 text-[12.5px] text-text-base">
+                <span v-for="line in transitLines" :key="line.bucket">
+                    <span class="font-semibold text-warning-text">In transit</span>
+                    {{ line.text }}: {{ line.count }} {{ line.count === 1 ? 'transfer' : 'transfers' }}, {{ formatMoney(line.value) }}
+                </span>
+                <span class="ml-auto flex items-center gap-2">
+                    <Button v-if="statusFilter !== 'in_transit' && transitLines.length > 0" variant="secondary" tone="purple" @click="showStatus('in_transit')">
+                        Show in transit only
+                    </Button>
+                    <span v-if="statusFilter" class="text-text-muted">Showing {{ statusFilter === 'in_transit' ? 'in-transit' : 'received' }} transfers only.</span>
+                    <Button v-if="statusFilter" variant="secondary" tone="neutral" @click="showStatus(null)">Show all</Button>
+                </span>
+            </div>
 
             <Card variant="panel" class="bg-white">
                 <div v-if="stockTransfers.length === 0" class="flex flex-col items-center gap-3 py-10 text-center">
@@ -210,7 +324,10 @@ const columns = [
 
         <Modal :open="!!cancelling" title="Cancel stock transfer" size="compact" @update:open="onCancelOpenChange">
             <form class="flex flex-col gap-4" @submit.prevent="submitCancel">
-                <p class="text-sm text-text-muted">
+                <p v-if="cancelling?.status === 'in_transit'" class="text-sm text-text-muted">
+                    This returns the goods to the source store and reverses the transfer's entry in the books. This cannot be undone.
+                </p>
+                <p v-else class="text-sm text-text-muted">
                     This reverts the quantity impact of this transfer at both stores. This cannot be undone.
                 </p>
                 <div>
@@ -227,5 +344,7 @@ const columns = [
                 </Button>
             </template>
         </Modal>
+
+        <ReceiveModal :transfer="receiving" @close="receiving = null" />
     </div>
 </template>

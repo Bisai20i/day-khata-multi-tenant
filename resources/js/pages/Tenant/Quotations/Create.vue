@@ -10,12 +10,28 @@ import NepaliDateInput from '@/components/ui/NepaliDateInput.vue';
 import Label from '@/components/ui/Label.vue';
 import { calculateDocument, formatMoney } from '@/lib/money';
 import { todayInKathmandu } from '@/lib/format';
+import BranchSelect from '@/components/branch/BranchSelect.vue';
+import BranchBadge from '@/components/branch/BranchBadge.vue';
+import { useBranchField } from '@/composables/useBranchField';
 
 const props = defineProps({
     customers: { type: Array, default: () => [] },
     items: { type: Array, default: () => [] },
     quotation: { type: Object, default: null },
+    // Branch picker of a new quotation (BranchFormOptions::props()).
+    branchOptions: { type: Array, default: () => [] },
+    defaultBranchId: { type: Number, default: null },
 });
+
+// Branch (plan 12, BR12): a new quotation picks one (hidden, and left out of
+// the payload, unless the company runs several branches and the user may
+// pick); an existing one keeps the branch it was created in, shown
+// read-only. A quotation has no store; converting it bills the sale in the
+// same branch.
+const { branchId, showPicker, withBranch } = useBranchField(
+    () => props.branchOptions,
+    () => props.defaultBranchId,
+);
 
 const emit = defineEmits(['cancel', 'saved']);
 
@@ -101,18 +117,23 @@ const previewError = computed(() => (!preview.value.ok && hasLineInput.value ? p
 const canSubmit = computed(() => preview.value.ok && !!form.customer_id && !!form.date && !form.processing);
 
 function submit() {
-    form.transform((data) => ({
-        ...data,
-        discount: orZero(data.discount),
-        vat_rate: orZero(data.vat_rate),
-        expected_total: totals.value?.total,
-        lines: data.lines.map((line) => ({
-            item_id: line.item_id,
-            quantity: orZero(line.quantity),
-            rate: orZero(line.rate),
-            discount: orZero(line.discount),
-        })),
-    }));
+    form.transform((data) => {
+        const payload = {
+            ...data,
+            discount: orZero(data.discount),
+            vat_rate: orZero(data.vat_rate),
+            expected_total: totals.value?.total,
+            lines: data.lines.map((line) => ({
+                item_id: line.item_id,
+                quantity: orZero(line.quantity),
+                rate: orZero(line.rate),
+                discount: orZero(line.discount),
+            })),
+        };
+
+        // An edit never moves the quotation to another branch.
+        return props.quotation ? payload : withBranch(payload);
+    });
 
     if (props.quotation) {
         form.put(`/quotations/${props.quotation.id}`, {
@@ -131,7 +152,10 @@ function submit() {
 <template>
     <div>
         <div class="mb-4 flex items-center justify-between">
-            <h3 class="text-base font-bold text-text-strong">{{ quotation ? 'Edit quotation' : 'New quotation' }}</h3>
+            <h3 class="flex items-center gap-2 text-base font-bold text-text-strong">
+                {{ quotation ? 'Edit quotation' : 'New quotation' }}
+                <BranchBadge v-if="quotation" :branch-id="quotation.branch_id ?? null" />
+            </h3>
             <Button variant="secondary" tone="purple" type="button" @click="emit('cancel')">Cancel</Button>
         </div>
 
@@ -140,6 +164,9 @@ function submit() {
         </p>
         <p v-if="form.errors.expected_total" class="mb-4 border-[1.5px] border-danger bg-danger-bg px-3 py-2 text-sm text-danger">
             {{ form.errors.expected_total }}
+        </p>
+        <p v-if="(quotation || !showPicker) && form.errors.branch_id" class="mb-4 border-[1.5px] border-danger bg-danger-bg px-3 py-2 text-sm text-danger" role="alert">
+            {{ form.errors.branch_id }}
         </p>
 
         <form class="flex flex-col gap-4" @submit.prevent="submit">
@@ -162,6 +189,9 @@ function submit() {
                 <div>
                     <Label class="mb-1">Reference #</Label>
                     <Input v-model="form.reference_number" type="text" placeholder="Optional" />
+                </div>
+                <div v-if="!quotation && showPicker">
+                    <BranchSelect v-model="branchId" :options="branchOptions" :error="form.errors.branch_id" />
                 </div>
             </Card>
 

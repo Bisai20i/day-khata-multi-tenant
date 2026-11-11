@@ -3,9 +3,11 @@
 namespace App\Http\Controllers\Tenant\Parties;
 
 use App\Exports\Samples\CustomerSampleExport;
+use App\Http\Controllers\Concerns\HandlesPartyAreas;
 use App\Http\Controllers\Concerns\ImportsCsv;
 use Maatwebsite\Excel\Facades\Excel;
 use App\Http\Controllers\Controller;
+use App\Models\Area;
 use App\Models\Customer;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
@@ -18,7 +20,7 @@ use Symfony\Component\HttpFoundation\StreamedResponse;
 
 class CustomerController extends Controller
 {
-    use ImportsCsv;
+    use HandlesPartyAreas, ImportsCsv;
 
     /**
      * Columns of the bulk-import template, in the order they're written to
@@ -27,12 +29,13 @@ class CustomerController extends Controller
      *
      * @var list<string>
      */
-    private const IMPORT_COLUMNS = ['name', 'address', 'mobile_no', 'email', 'tpin', 'citizenship'];
+    private const IMPORT_COLUMNS = ['name', 'address', 'mobile_no', 'email', 'tpin', 'citizenship', 'area'];
 
     public function index(): Response
     {
         return Inertia::render('Tenant/Parties/Customers/Index', [
-            'customers' => Customer::query()->with('account:id,code')->latest()->get(),
+            'customers' => Customer::query()->with(['account:id,code', 'area:id,name'])->latest()->get(),
+            'areas' => Area::options(),
         ]);
     }
 
@@ -45,7 +48,14 @@ class CustomerController extends Controller
 
     public function update(Request $request, Customer $customer): RedirectResponse
     {
-        $customer->update($this->validated($request, $customer));
+        $data = $this->validated($request, $customer);
+
+        // The walk-in customer is a system default with no real address.
+        if ($customer->is_walk_in) {
+            unset($data['area_id']);
+        }
+
+        $customer->update($data);
 
         return redirect()->route('tenant.customers.index')->with('status', 'Customer updated.');
     }
@@ -77,7 +87,7 @@ class CustomerController extends Controller
         return response()->streamDownload(function (): void {
             $handle = fopen('php://output', 'w');
             fputcsv($handle, self::IMPORT_COLUMNS);
-            fputcsv($handle, ['Ram Sharma', 'Kathmandu-10', '9800000001', 'ram@example.com', '123456789', '12-34-56-78901']);
+            fputcsv($handle, ['Ram Sharma', 'Kathmandu-10', '9800000001', 'ram@example.com', '123456789', '12-34-56-78901', '']);
             fclose($handle);
         }, 'customer-import-template.csv', ['Content-Type' => 'text/csv']);
     }
@@ -106,6 +116,7 @@ class CustomerController extends Controller
         $seenMobiles = [];
         $skipped = [];
         $validRows = [];
+        $areaIds = Area::idsByLowerName();
 
         foreach ($rows as $index => $row) {
             $data = [
@@ -116,6 +127,7 @@ class CustomerController extends Controller
                 'tpin' => $row['tpin'] ?? '',
                 'citizenship' => $row['citizenship'] ?? '',
             ];
+            $areaName = Area::normalizeName($row['area'] ?? '');
 
             $validator = Validator::make($data, [
                 'name' => ['required', 'string', 'max:255'],
@@ -134,6 +146,14 @@ class CustomerController extends Controller
                 continue;
             }
 
+            // Before the mobile is registered as seen: a row skipped for its area must not
+            // make a later, valid row with the same mobile look like a duplicate.
+            if ($areaName !== '' && ! isset($areaIds[mb_strtolower($areaName)])) {
+                $skipped[] = ['row' => $rowNumber, 'name' => $data['name'], 'reason' => "Unknown area \"{$areaName}\". Create it on the Areas page first."];
+
+                continue;
+            }
+
             $mobileKey = strtolower($data['mobile_no']);
 
             if ($mobileKey !== '' && isset($seenMobiles[$mobileKey])) {
@@ -146,7 +166,8 @@ class CustomerController extends Controller
                 $seenMobiles[$mobileKey] = true;
             }
 
-            $validRows[] = array_map(static fn (string $value): ?string => $value === '' ? null : $value, $data);
+            $validRows[] = array_map(static fn (string $value): ?string => $value === '' ? null : $value, $data)
+                + ['area_id' => $areaName === '' ? null : $areaIds[mb_strtolower($areaName)]];
         }
 
         $imported = 0;
@@ -168,6 +189,14 @@ class CustomerController extends Controller
     }
 
     /**
+     * Sets or clears the area of the selected customers (the walk-in customer is skipped).
+     */
+    public function assignArea(Request $request): RedirectResponse
+    {
+        return $this->bulkAssignArea($request, Customer::class, 'tenant.customers.index', 'customer', protectedFlag: 'is_walk_in');
+    }
+
+    /**
      * @return array<string, mixed>
      */
     private function validated(Request $request, ?Customer $customer = null): array
@@ -179,6 +208,7 @@ class CustomerController extends Controller
             'email' => ['nullable', 'email', 'max:255'],
             'tpin' => ['nullable', 'string', 'max:50'],
             'citizenship' => ['nullable', 'string', 'max:100'],
+            'area_id' => ['nullable', 'integer', 'exists:areas,id'],
         ]);
     }
 }

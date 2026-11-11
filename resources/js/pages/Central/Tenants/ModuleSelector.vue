@@ -75,6 +75,7 @@ function onToggle(module, checked) {
                     />
                     <span class="flex min-w-0 flex-col">
                         <span class="text-[13px] font-semibold text-text-strong">{{ module.label }}</span>
+                        <span v-if="module.description" class="text-xs text-text-muted">{{ module.description }}</span>
                         <span v-if="module.requires.length > 0" class="text-xs text-text-muted">Needs {{ requirementLabels(catalog, module.key).join(', ') }}</span>
                     </span>
                 </label>

@@ -6,6 +6,9 @@ use App\Http\Controllers\Controller;
 use App\Http\Requests\Tenant\Admin\TransferOwnershipRequest;
 use App\Models\Role;
 use App\Models\User;
+use App\Support\Branches\ActiveBranchSelection;
+use App\Support\Branches\BranchContext;
+use App\Support\Branches\UserBranchAccess;
 use App\Support\Permissions\OwnershipTransfer;
 use App\Support\Permissions\OwnershipTransferException;
 use App\Support\Permissions\PermissionCatalog;
@@ -59,7 +62,7 @@ class UserController extends Controller
         $reach = $this->reachOf($actor);
 
         $users = User::query()
-            ->with('role:id,name,slug,permissions')
+            ->with(['role:id,name,slug,permissions', 'branches:id'])
             ->orderBy('name')
             ->get()
             ->map(fn (User $user): array => [
@@ -71,6 +74,7 @@ class UserController extends Controller
                 'is_active' => (bool) $user->is_active,
                 'is_owner' => $user->isOwner(),
                 'editable' => $this->mayEdit($actor, $user, $reach),
+                ...UserBranchAccess::forUser($user),
             ])
             ->values();
 
@@ -81,10 +85,42 @@ class UserController extends Controller
             ->map(fn (Role $role): array => ['id' => $role->id, 'name' => $role->name, 'slug' => $role->slug])
             ->values();
 
+        $branchAccessEnabled = $this->showsBranchAccess($request);
+
         return Inertia::render('Tenant/Admin/Users', [
             'users' => $users,
             'roles' => $roles,
+            // Branch access fields show only while the tenant has the
+            // branches module and actually has branches to tell apart
+            // (plan 12, BR10, BR22); otherwise nothing changes. Hidden, the
+            // page sends no branch fields, so UserBranchAccess::apply() leaves
+            // the stored access alone.
+            'branchAccess' => [
+                'enabled' => $branchAccessEnabled,
+                'branches' => $branchAccessEnabled ? UserBranchAccess::options() : [],
+                'actorAllowedBranchIds' => $branchAccessEnabled ? BranchContext::allowedBranchIds($actor) : null,
+            ],
         ]);
+    }
+
+    /**
+     * Whether the users page shows the "Branch access" section (BR22
+     * parity). The module alone is not enough: a Main-only company (one
+     * active branch) has nothing to choose between, so it sees the page it
+     * saw before branches existed. The section stays while any user is
+     * already branch-restricted (all_branches off or assignment rows), even
+     * after the other branches were deactivated, so that restriction can
+     * still be seen and lifted.
+     */
+    private function showsBranchAccess(Request $request): bool
+    {
+        if (! UserBranchAccess::enabled()) {
+            return false;
+        }
+
+        return ActiveBranchSelection::isMultiBranch($request)
+            || User::query()->where('all_branches', false)->exists()
+            || DB::table('branch_user')->exists();
     }
 
     public function store(Request $request): RedirectResponse
@@ -94,6 +130,7 @@ class UserController extends Controller
             'email' => ['required', 'email', 'max:255', Rule::unique('users')],
             'password' => ['required', 'string', 'min:8', 'confirmed'],
             'role_id' => ['required', 'integer', 'exists:roles,id'],
+            ...UserBranchAccess::rules(),
         ]);
 
         /** @var User $actor */
@@ -107,14 +144,19 @@ class UserController extends Controller
                 $this->rejectRole($role);
             }
 
-            User::create([
+            $created = User::create([
                 'name' => $data['name'],
                 'email' => $data['email'],
                 'password' => $data['password'],
                 'role_id' => $data['role_id'],
                 'is_active' => true,
             ]);
+
+            UserBranchAccess::apply($actorNow, $created, $data, isNew: true);
         });
+
+        // branches()->sync() fires no model event (plan 12, BR10).
+        BranchContext::flush();
 
         return redirect()->route('tenant.admin.users')->with('status', 'Employee added.');
     }
@@ -136,6 +178,7 @@ class UserController extends Controller
             // the field must not be read as "remove the role".
             'role_id' => ['present', 'nullable', 'integer', 'exists:roles,id'],
             'is_active' => ['required', 'boolean'],
+            ...UserBranchAccess::rules(),
         ]);
 
         /** @var User $actor */
@@ -160,10 +203,15 @@ class UserController extends Controller
             }
 
             $target->save();
+
+            UserBranchAccess::apply($actorNow, $target, $data);
         });
 
         // The actor may have edited their own row through the locked copy.
         $actor->flushEffectivePermissions();
+        // branches()->sync() fires no model event, so the cached allowed
+        // sets are dropped here (plan 12, BR10).
+        BranchContext::flush();
 
         return redirect()->route('tenant.admin.users')->with('status', 'Employee updated.');
     }
@@ -249,6 +297,13 @@ class UserController extends Controller
             abort(403, "{$target->name}'s role includes permissions you do not have, so you cannot edit them.");
         }
 
+        // Unconditional, whatever the request changes (name, email, password,
+        // status, default branch): a branch-restricted actor may not touch a
+        // user who reaches further than they do (plan 12, BR10 review).
+        if (! UserBranchAccess::actorReachesUser($actor, $target)) {
+            abort(403, "{$target->name} has access to branches you cannot use, so you cannot edit them.");
+        }
+
         if ($changesRole) {
             $newRole = $this->roleById($newRoleId);
 
@@ -274,7 +329,11 @@ class UserController extends Controller
             return false;
         }
 
-        return $this->isSameUser($actor, $target) || $this->withinReach($target->role, $reach);
+        if ($this->isSameUser($actor, $target)) {
+            return true;
+        }
+
+        return $this->withinReach($target->role, $reach) && UserBranchAccess::actorReachesUser($actor, $target);
     }
 
     /**

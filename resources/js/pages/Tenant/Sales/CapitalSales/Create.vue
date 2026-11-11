@@ -12,18 +12,23 @@ import NepaliDateInput from '@/components/ui/NepaliDateInput.vue';
 import Label from '@/components/ui/Label.vue';
 import { addMoney, calculateDocument, formatMoney, moneyEquals, parseMoney } from '@/lib/money';
 import { todayInKathmandu } from '@/lib/format';
+import BranchSelect from '@/components/branch/BranchSelect.vue';
+import { useDocumentBranchStore } from '@/composables/useDocumentBranchStore';
 
 const props = defineProps({
     customers: { type: Array, default: () => [] },
     accounts: { type: Array, default: () => [] },
     stores: { type: Array, default: () => [] },
     defaultVatRate: { type: String, default: '13.00' },
+    // Branch picker (BranchFormOptions::props()); empty unless the company
+    // runs several branches.
+    branchOptions: { type: Array, default: () => [] },
+    defaultBranchId: { type: Number, default: null },
 });
 
 const emit = defineEmits(['cancel', 'posted']);
 
 const customerOptions = computed(() => props.customers.map((c) => ({ value: c.id, label: c.name })));
-const storeOptions = computed(() => props.stores.map((s) => ({ value: s.id, label: s.name })));
 const accountOptions = computed(() =>
     props.accounts.map((account) => ({
         value: account.id,
@@ -54,6 +59,20 @@ const form = useForm({
     vat_rate: props.defaultVatRate,
     lines: [emptyLine()],
 });
+
+// Branch of the invoice (plan 12, BR12): hidden, and left out of the payload,
+// unless the company runs several branches and the user may pick. The store
+// dropdown offers only the branch's stores and follows a branch change.
+const { branchId, showPicker, withBranch, storeChoices } = useDocumentBranchStore({
+    branchOptions: () => props.branchOptions,
+    defaultBranchId: () => props.defaultBranchId,
+    stores: () => props.stores,
+    getStoreId: () => form.store_id,
+    setStoreId: (id) => {
+        form.store_id = id;
+    },
+});
+const storeOptions = computed(() => storeChoices.value.map((s) => ({ value: s.id, label: s.name })));
 
 function addLine() {
     form.lines.push(emptyLine());
@@ -120,7 +139,7 @@ const canSubmit = computed(
 );
 
 function submit() {
-    form.transform((data) => ({
+    form.transform((data) => withBranch({
         ...data,
         vat_rate: orZero(data.vat_rate),
         expected_total: totals.value?.total,
@@ -155,6 +174,9 @@ function submit() {
         <p v-if="form.errors.expected_total" class="mb-4 border-[1.5px] border-danger bg-danger-bg px-3 py-2 text-sm text-danger">
             {{ form.errors.expected_total }}
         </p>
+        <p v-if="!showPicker && form.errors.branch_id" class="mb-4 border-[1.5px] border-danger bg-danger-bg px-3 py-2 text-sm text-danger" role="alert">
+            {{ form.errors.branch_id }}
+        </p>
 
         <form class="flex flex-col gap-4" @submit.prevent="submit">
             <Card variant="panel" class="!p-4">
@@ -185,6 +207,9 @@ function submit() {
                             @update:model-value="(v) => (form.store_id = v)"
                         />
                         <p v-if="form.errors.store_id" class="mt-1 text-sm text-danger">{{ form.errors.store_id }}</p>
+                    </div>
+                    <div v-if="showPicker">
+                        <BranchSelect v-model="branchId" :options="branchOptions" :error="form.errors.branch_id" />
                     </div>
                 </div>
             </Card>

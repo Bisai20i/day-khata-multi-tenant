@@ -263,6 +263,11 @@
         $printDateBs = $dateBs ?? \App\Support\NepaliCalendar::formatBs($printDateAd);
         $printFiscalYearName = $fiscalYearName ?? null;
         $printAmountInWords = $amountInWords ?? null;
+
+        // Header address, phone, email and PAN (plan 12, BR21): the company's
+        // own values, except where a multi-branch document's branch has its
+        // own. Supplied by the view composer in AppServiceProvider.
+        // $branchPrintDetails = ['address' => ..., 'phone' => ..., 'email' => ..., 'pan' => ...]
     @endphp
     <table class="header-table">
         <tr>
@@ -272,17 +277,17 @@
                 @endif
                 <div class="company-name">{{ $company->company_name }}</div>
                 <div class="company-meta">
-                    @if($company->address)
-                        {{ $company->address }}<br>
+                    @if($branchPrintDetails['address'])
+                        {{ $branchPrintDetails['address'] }}<br>
                     @endif
-                    @if($company->phone)
-                        Phone: {{ $company->phone }}<br>
+                    @if($branchPrintDetails['phone'])
+                        Phone: {{ $branchPrintDetails['phone'] }}<br>
                     @endif
-                    @if($company->email)
-                        {{ $company->email }}<br>
+                    @if($branchPrintDetails['email'])
+                        {{ $branchPrintDetails['email'] }}<br>
                     @endif
-                    @if($company->pan_vat_number)
-                        PAN/VAT: {{ $company->pan_vat_number }}
+                    @if($branchPrintDetails['pan'])
+                        PAN/VAT: {{ $branchPrintDetails['pan'] }}
                     @endif
                 </div>
             </td>

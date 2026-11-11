@@ -8,6 +8,9 @@ use App\Enums\FiscalYearStatus;
 use App\Enums\InventoryClass;
 use App\Enums\StockMovementType;
 use App\Enums\VoucherType;
+use App\Models\Concerns\BelongsToBranch;
+use App\Models\Concerns\PlacesStockDocument;
+use App\Support\Branches\BranchContext;
 use App\Support\ClosedFiscalYearGuard;
 use App\Support\Inventory\PerpetualCosting;
 use App\Support\Manufacturing\ManufacturingAccounts;
@@ -70,12 +73,20 @@ use Throwable;
  * latest restores exactly the per-item quantities and per-bucket values that
  * were there before it, so invariant P2 holds and the next posting costs as
  * if the cancelled one never happened.
+ *
+ * Branches (plan 12, BR08): the entry is filed in its store's branch (I5,
+ * PlacesStockDocument); only notes of that same store attach, so they share
+ * the branch. Every voucher the entry posts (direct cost, material return,
+ * completion, abandonment) is filed in the entry's branch on every line, and
+ * every reversal mirrors it there, so the branch's AS12 / AS13 / AS14 stay
+ * equal to its own stores and WIP rows (I8).
  */
 #[Fillable([
     'fiscal_year_id',
     'number',
     'date',
     'store_id',
+    'branch_id',
     'finished_item_id',
     'planned_quantity',
     'status',
@@ -88,7 +99,9 @@ use Throwable;
 ])]
 class ProductionEntry extends Model
 {
+    use BelongsToBranch;
     use HasFactory;
+    use PlacesStockDocument;
 
     public const STATUS_IN_PROGRESS = 'in_progress';
 
@@ -108,6 +121,7 @@ class ProductionEntry extends Model
             'planned_quantity' => Decimal::class.':4',
             'completed_at' => 'datetime',
             'cancelled_at' => 'datetime',
+            'branch_id' => 'integer',
         ];
     }
 
@@ -192,7 +206,7 @@ class ProductionEntry extends Model
      * into AS13; attaching only re-points their WIP rows at this entry. The
      * entry is numbered from its own header-only series
      * (VoucherType::ProductionEntry), claimed the same way
-     * JournalVoucher::nextVoucherNumber() claims a voucher number, after the
+     * VoucherSequence::claimNext() claims a voucher number, after the
      * fiscal year row is locked.
      *
      * Lock order: the notes (documents, ascending id) -> fiscal year ->
@@ -205,7 +219,7 @@ class ProductionEntry extends Model
      * in a closed year reopened for correction. Nothing posts to the GL
      * here, so the correction is logged by this method itself.
      *
-     * @param  array{date: string, store_id?: int|string|null, finished_item_id: int|string, planned_quantity: mixed, narration?: string|null, reason?: string|null}  $data
+     * @param  array{date: string, store_id?: int|string|null, branch_id?: int|string|null, finished_item_id: int|string, planned_quantity: mixed, narration?: string|null, reason?: string|null}  $data
      * @param  array<int, int|string>  $materialIssueNoteIds
      */
     public static function create(array $data, array $materialIssueNoteIds, User $actor): self
@@ -218,13 +232,8 @@ class ProductionEntry extends Model
             }
 
             $date = static::normaliseDate($data['date']);
-            $storeId = isset($data['store_id']) && $data['store_id'] !== ''
-                ? (int) $data['store_id']
-                : (int) Store::where('is_active', true)->orderBy('id')->value('id');
-
-            if (! Store::query()->whereKey($storeId)->exists()) {
-                throw new InvalidArgumentException('No such store is configured.');
-            }
+            $placement = static::placeStockDocument($actor, $data['branch_id'] ?? null, $data['store_id'] ?? null);
+            $storeId = $placement->requireStoreId();
 
             $finishedItem = Item::query()->find((int) $data['finished_item_id']);
 
@@ -252,6 +261,7 @@ class ProductionEntry extends Model
                 'number' => static::claimNumber($fiscalYear),
                 'date' => $date,
                 'store_id' => $storeId,
+                'branch_id' => $placement->branchId,
                 'finished_item_id' => $finishedItem->id,
                 'planned_quantity' => $planned,
                 'status' => self::STATUS_IN_PROGRESS,
@@ -348,6 +358,7 @@ class ProductionEntry extends Model
                 'narration' => $narration,
                 'fiscal_year_id' => $fiscalYear->id,
                 'reason' => $reason,
+                'branch_id' => $entry->branch_id,
             ], [
                 ['account_id' => ManufacturingAccounts::id(ManufacturingAccounts::WIP), 'debit' => $amount->toString(), 'credit' => '0.00'],
                 ['account_id' => $creditAccountId, 'debit' => '0.00', 'credit' => $amount->toString()],
@@ -402,7 +413,7 @@ class ProductionEntry extends Model
 
             if ($locked->journal_voucher_id !== null) {
                 JournalVoucher::reverse(
-                    JournalVoucher::query()->findOrFail($locked->journal_voucher_id),
+                    BranchContext::unrestricted(fn () => JournalVoucher::query()->findOrFail($locked->journal_voucher_id)),
                     $actor,
                     Str::limit("Cancelled direct cost - Production Entry #{$entry->number}: {$reason}", 250),
                 );
@@ -502,6 +513,7 @@ class ProductionEntry extends Model
                 'narration' => Str::limit("Material return of {$item->name} - Production Entry #{$entry->number}", 250),
                 'fiscal_year_id' => $fiscalYear->id,
                 'reason' => $reason,
+                'branch_id' => $entry->branch_id,
             ], [
                 ['account_id' => ManufacturingAccounts::id(ManufacturingAccounts::RAW_MATERIAL), 'debit' => $cost->toString(), 'credit' => '0.00'],
                 ['account_id' => ManufacturingAccounts::id(ManufacturingAccounts::WIP), 'debit' => '0.00', 'credit' => $cost->toString()],
@@ -608,6 +620,7 @@ class ProductionEntry extends Model
                 'narration' => Str::limit(($isFinal ? 'Final' : 'Partial')." completion of {$finishedItem->name} - Production Entry #{$entry->number}", 250),
                 'fiscal_year_id' => $fiscalYear->id,
                 'reason' => $reason,
+                'branch_id' => $entry->branch_id,
             ], [
                 ['account_id' => ManufacturingAccounts::id(ManufacturingAccounts::FINISHED_GOODS), 'debit' => $cost->toString(), 'credit' => '0.00'],
                 ['account_id' => ManufacturingAccounts::id(ManufacturingAccounts::WIP), 'debit' => '0.00', 'credit' => $cost->toString()],
@@ -710,7 +723,7 @@ class ProductionEntry extends Model
             );
 
             JournalVoucher::reverse(
-                JournalVoucher::query()->findOrFail($locked->journal_voucher_id),
+                BranchContext::unrestricted(fn () => JournalVoucher::query()->findOrFail($locked->journal_voucher_id)),
                 $actor,
                 Str::limit("Cancelled completion - Production Entry #{$entry->number}: {$reason}", 250),
             );
@@ -822,7 +835,7 @@ class ProductionEntry extends Model
             $entry->assertStockCanBeWithdrawn($item, $quantity, $value, $date, 'was returned to the store by this return');
 
             JournalVoucher::reverse(
-                JournalVoucher::query()->findOrFail($row->source_id),
+                BranchContext::unrestricted(fn () => JournalVoucher::query()->findOrFail($row->source_id)),
                 $actor,
                 Str::limit("Cancelled material return of {$item->name} - Production Entry #{$entry->number}: {$reason}", 250),
             );
@@ -875,6 +888,7 @@ class ProductionEntry extends Model
                     'date' => $date,
                     'narration' => Str::limit("Production Entry #{$entry->number} abandoned: {$reason}", 250),
                     'fiscal_year_id' => $fiscalYear->id,
+                    'branch_id' => $entry->branch_id,
                 ], [
                     ['account_id' => ManufacturingAccounts::id(ManufacturingAccounts::PRODUCTION_LOSS), 'debit' => $wipBalance->toString(), 'credit' => '0.00'],
                     ['account_id' => ManufacturingAccounts::id(ManufacturingAccounts::WIP), 'debit' => '0.00', 'credit' => $wipBalance->toString()],
@@ -963,7 +977,7 @@ class ProductionEntry extends Model
 
             foreach ($returnRows as $row) {
                 if ($row->source_type === (new JournalVoucher)->getMorphClass() && $row->source_id !== null) {
-                    JournalVoucher::reverse(JournalVoucher::query()->findOrFail($row->source_id), $actor, $narration);
+                    JournalVoucher::reverse(BranchContext::unrestricted(fn () => JournalVoucher::query()->findOrFail($row->source_id)), $actor, $narration);
                 }
             }
 
@@ -978,7 +992,7 @@ class ProductionEntry extends Model
 
             foreach ($costs as $cost) {
                 if ($cost->journal_voucher_id !== null) {
-                    JournalVoucher::reverse(JournalVoucher::query()->findOrFail($cost->journal_voucher_id), $actor, $narration);
+                    JournalVoucher::reverse(BranchContext::unrestricted(fn () => JournalVoucher::query()->findOrFail($cost->journal_voucher_id)), $actor, $narration);
                 }
 
                 $cost->update([
@@ -1473,29 +1487,18 @@ class ProductionEntry extends Model
     /**
      * Claims the next production entry number in $fiscalYear's
      * VoucherType::ProductionEntry series: a header-only series no voucher
-     * ever carries, claimed exactly like
-     * JournalVoucher::nextVoucherNumber() (insertOrIgnore so a first claim
+     * ever carries, claimed through the same VoucherSequence::claimNext()
+     * every voucher number goes through (insertOrIgnore so a first claim
      * cannot race, then increment under a row lock). The caller holds the
      * fiscal year lock.
+     *
+     * Always the shared series, also in a per_branch year (plan 12, BR20):
+     * a production entry is an internal manufacturing document, not a tax
+     * document, and production_entries keeps its UNIQUE(fiscal_year_id,
+     * number). The branch column on the entry tells branches apart.
      */
     private static function claimNumber(FiscalYear $fiscalYear): int
     {
-        VoucherSequence::query()->insertOrIgnore([
-            'fiscal_year_id' => $fiscalYear->id,
-            'voucher_type' => VoucherType::ProductionEntry->value,
-            'last_number' => 0,
-            'created_at' => now(),
-            'updated_at' => now(),
-        ]);
-
-        $sequence = VoucherSequence::query()
-            ->where('fiscal_year_id', $fiscalYear->id)
-            ->where('voucher_type', VoucherType::ProductionEntry)
-            ->lockForUpdate()
-            ->firstOrFail();
-
-        $sequence->increment('last_number');
-
-        return (int) $sequence->last_number;
+        return VoucherSequence::claimNext($fiscalYear, VoucherType::ProductionEntry, VoucherSequence::SHARED_SERIES);
     }
 }

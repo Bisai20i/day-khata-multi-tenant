@@ -10,6 +10,8 @@ import Input from '@/components/ui/Input.vue';
 import Combobox from '@/components/ui/Combobox.vue';
 import Select from '@/components/ui/Select.vue';
 import Label from '@/components/ui/Label.vue';
+import BranchSelect from '@/components/branch/BranchSelect.vue';
+import { useBranchField } from '@/composables/useBranchField';
 import NepaliDateInput from '@/components/ui/NepaliDateInput.vue';
 import IssueNoteLines from '@/components/manufacturing/IssueNoteLines.vue';
 import ManufacturingTotalsBar from '@/components/manufacturing/ManufacturingTotalsBar.vue';
@@ -28,6 +30,9 @@ const props = defineProps({
     costTypes: { type: Array, default: () => [] },
     // The closed year reopened for correction, { id, name, start_date, end_date }, or null.
     correctionFiscalYear: { type: Object, default: null },
+    // Branch picker (BranchFormOptions::props()).
+    branchOptions: { type: Array, default: () => [] },
+    defaultBranchId: { type: Number, default: null },
 });
 
 useLayoutChrome('New production entry');
@@ -43,13 +48,22 @@ const form = useForm({
     reason: '',
 });
 
+// Branches (plan 12, BR12): the store list follows the chosen branch, and a
+// store of another branch is replaced by the branch's first store. With the
+// picker hidden (one branch) every store is listed, as before.
+const { branchId, showPicker, withBranch, storesForBranch, keepStoreInBranch } = useBranchField(
+    () => props.branchOptions,
+    () => props.defaultBranchId,
+);
+keepStoreInBranch(() => props.stores, () => form.store_id, (id) => (form.store_id = id));
+
 // The entry and every up-front cost share one correction reason: any of
 // their dates in the reopened year needs it.
 const needsReason = computed(() =>
     [form.date, ...form.direct_costs.map((cost) => cost.date)].some((date) => isInCorrectionYear(date, props.correctionFiscalYear)),
 );
 
-const storeOptions = computed(() => props.stores.map((s) => ({ value: s.id, label: s.name })));
+const storeOptions = computed(() => storesForBranch(props.stores).map((s) => ({ value: s.id, label: s.name })));
 const itemOptions = computed(() => props.finishedItems.map((i) => ({ value: i.id, label: `${i.name} (${i.unit ?? ''})` })));
 const typeOptions = computed(() => props.costTypes);
 const accountOptions = computed(() => props.creditAccounts.map((a) => ({ value: a.id, label: a.code ? `${a.code} - ${a.name}` : a.name })));
@@ -118,7 +132,7 @@ function removeCost(index) {
 function submit() {
     if (!canSubmit.value) return;
 
-    form.transform((data) => ({ ...data, reason: needsReason.value ? data.reason : null })).post('/production-entries', { preserveScroll: true });
+    form.transform((data) => withBranch({ ...data, reason: needsReason.value ? data.reason : null })).post('/production-entries', { preserveScroll: true });
 }
 </script>
 
@@ -132,6 +146,7 @@ function submit() {
         <form class="flex flex-1 flex-col gap-4" @submit.prevent="submit">
             <Card variant="panel" class="!p-4">
                 <div class="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+                    <BranchSelect v-model="branchId" :options="branchOptions" :error="form.errors.branch_id" />
                     <div>
                         <Label class="mb-1">Date (BS) <span class="text-danger" aria-hidden="true">*</span></Label>
                         <NepaliDateInput v-model="form.date" required />
@@ -141,6 +156,7 @@ function submit() {
                         <Label class="mb-1">Store <span class="text-danger" aria-hidden="true">*</span></Label>
                         <Combobox :model-value="form.store_id" :options="storeOptions" placeholder="Select store" @update:model-value="(v) => (form.store_id = v)" />
                         <p v-if="form.errors.store_id" class="mt-1 text-sm text-danger" role="alert">{{ form.errors.store_id }}</p>
+                        <p v-if="!showPicker && form.errors.branch_id" class="mt-1 text-sm text-danger" role="alert">{{ form.errors.branch_id }}</p>
                     </div>
                     <div>
                         <Label class="mb-1">Finished good <span class="text-danger" aria-hidden="true">*</span></Label>
@@ -182,7 +198,7 @@ function submit() {
                 >
                     <label class="flex cursor-pointer flex-wrap items-center gap-x-3 gap-y-1 bg-bg-subtle px-3 py-2 text-sm">
                         <input type="checkbox" class="size-4 border-[1.5px] border-border" :checked="form.material_issue_note_ids.includes(note.id)" @change="toggleNote(note.id)" />
-                        <span class="font-semibold text-text-strong">MI-{{ note.number }}</span>
+                        <span class="font-semibold text-text-strong">{{ note.document_number ?? `MI-${note.number}` }}</span>
                         <span class="text-text-muted">{{ note.date }}</span>
                         <span class="ml-auto font-bold text-text-strong">{{ formatMoney(note.total_cost) }}</span>
                     </label>

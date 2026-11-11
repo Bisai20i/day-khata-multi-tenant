@@ -3,6 +3,7 @@
 namespace App\Http\Controllers\Tenant\Sales;
 
 use App\Enums\QuotationStatus;
+use App\Http\Controllers\Concerns\OffersDocumentBranch;
 use App\Http\Controllers\Controller;
 use App\Models\CompanySetting;
 use App\Models\Customer;
@@ -12,6 +13,9 @@ use App\Models\PrintLog;
 use App\Models\Quotation;
 use App\Support\Billing\BillingException;
 use App\Support\Billing\DocumentTotals;
+use App\Support\Branches\BranchFormOptions;
+use App\Support\Branches\BranchListFilter;
+use App\Support\Branches\DocumentBranch;
 use App\Support\Money\Money;
 use App\Support\NepaliCalendar;
 use Barryvdh\DomPDF\Facade\Pdf;
@@ -25,6 +29,8 @@ use InvalidArgumentException;
 
 class QuotationController extends Controller
 {
+    use OffersDocumentBranch;
+
     /**
      * Listing is server-side filtered (date range + customer) and paginated
      * - same `when()`/`paginate()->withQueryString()` shape
@@ -42,8 +48,11 @@ class QuotationController extends Controller
         $to = $request->filled('to') ? $request->string('to')->toString() : null;
         $customerId = $request->filled('customer_id') ? (int) $request->input('customer_id') : null;
 
-        $quotations = Quotation::query()
+        // Branches (plan 12, BR12): the list follows the top-bar switcher and
+        // names each row's branch only when several branches can appear.
+        $quotations = BranchListFilter::apply(Quotation::query(), $request)
             ->with(['customer:id,name', 'lines.item:id,name,unit', 'sale:id,journal_voucher_id'])
+            ->when(BranchListFilter::columnVisible($request), fn ($query) => $query->with('branch:id,name,code'))
             ->when($from, fn ($query, string $from) => $query->whereDate('date', '>=', $from))
             ->when($to, fn ($query, string $to) => $query->whereDate('date', '<=', $to))
             ->when($customerId, fn ($query, int $customerId) => $query->where('customer_id', $customerId))
@@ -61,6 +70,7 @@ class QuotationController extends Controller
             ],
             'customers' => Customer::query()->orderBy('name')->get(['id', 'name']),
             'items' => Item::query()->where('is_active', true)->orderBy('name')->get(['id', 'name', 'unit', 'is_vatable']),
+            ...BranchFormOptions::props($request),
         ]);
     }
 
@@ -69,9 +79,19 @@ class QuotationController extends Controller
         $data = $this->validated($request);
         $totals = $this->calculate($data);
 
+        // A quotation has no store: the requested branch, else the user's
+        // posting branch (plan 12, section 5.4). Converting it later bills
+        // the sale in this same branch.
+        try {
+            $branchId = DocumentBranch::forDocument($request->user(), $data['branch_id'] ?? null)->branchId;
+        } catch (InvalidArgumentException $e) {
+            throw ValidationException::withMessages(['branch_id' => $e->getMessage()]);
+        }
+
         $quotation = Quotation::create([
-            ...collect($data)->except(['lines', 'expected_total'])->all(),
+            ...collect($data)->except(['lines', 'expected_total', 'branch_id'])->all(),
             ...Quotation::storedTotals($totals),
+            'branch_id' => $branchId,
             'status' => QuotationStatus::Draft,
             'created_by' => $request->user()->id,
         ]);
@@ -98,8 +118,10 @@ class QuotationController extends Controller
         $data = $this->validated($request);
         $totals = $this->calculate($data);
 
+        // The branch is fixed when the quotation is created; an edit never
+        // moves it.
         $quotation->update([
-            ...collect($data)->except(['lines', 'expected_total'])->all(),
+            ...collect($data)->except(['lines', 'expected_total', 'branch_id'])->all(),
             ...Quotation::storedTotals($totals),
         ]);
         $quotation->lines()->delete();
@@ -202,6 +224,8 @@ class QuotationController extends Controller
             'dateAd' => $documentDate,
             'dateBs' => NepaliCalendar::formatBs($documentDate),
             'fiscalYearName' => $this->fiscalYearNameFor($documentDate),
+            // Multi-branch only; null keeps a single-branch quotation unchanged.
+            ...$this->printBranch($request, $quotation),
         ])->stream("quotation-{$quotation->id}.pdf");
     }
 
@@ -245,7 +269,7 @@ class QuotationController extends Controller
     }
 
     /**
-     * @return array{customer_id: int, date: string, discount: string, vat_rate: string, reference_number: ?string, narration: ?string, expected_total: ?string, lines: array<int, array{item_id: int, quantity: string, rate: string, discount: string}>}
+     * @return array{customer_id: int, date: string, discount: string, vat_rate: string, reference_number: ?string, narration: ?string, expected_total: ?string, branch_id?: ?int, lines: array<int, array{item_id: int, quantity: string, rate: string, discount: string}>}
      */
     private function validated(Request $request): array
     {
@@ -257,6 +281,9 @@ class QuotationController extends Controller
             'reference_number' => ['nullable', 'string', 'max:255'],
             'narration' => ['nullable', 'string', 'max:255'],
             'expected_total' => ['nullable', 'string'],
+            // Sent by the create form's branch picker of a multi-branch
+            // company (BR12); ignored on update (the branch never moves).
+            'branch_id' => ['nullable', 'integer', 'exists:branches,id'],
             'lines' => ['required', 'array', 'min:1'],
             'lines.*.item_id' => ['required', 'exists:items,id'],
             'lines.*.quantity' => ['required', 'numeric', 'min:0.0001', 'decimal:0,4'],

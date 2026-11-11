@@ -4,8 +4,13 @@ namespace App\Models;
 
 use App\Casts\Decimal;
 use App\Enums\VoucherType;
+use App\Models\Concerns\BelongsToBranch;
+use App\Support\Branches\BranchContext;
+use App\Support\Branches\BranchRuleViolation;
+use App\Support\Branches\DocumentBranch;
 use App\Support\Money\Money;
 use App\Support\SettlementNarration;
+use Illuminate\Auth\Access\AuthorizationException;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
@@ -18,15 +23,25 @@ use InvalidArgumentException;
  * through JournalVoucher::post(), capped at the bill's outstanding balance
  * computed under a row lock on the purchase. Cancelling reverses the voucher
  * and frees the amount again.
+ *
+ * Branches (plan 12, section 5.3 party-line rule, BR07): branch_id is where
+ * the money went out (default: the actor's posting branch). The supplier
+ * line is tagged with the bill's branch and the cash or bank line with the
+ * settlement's; when they differ the voucher is posted with autoBalance and
+ * Inter-Branch Clearing lines (hub = the settlement's branch) balance each
+ * branch (I1). Settling a bill of one's own branch posts the same two lines
+ * as before.
  */
 #[Fillable([
     'capital_purchase_id', 'supplier_id', 'date', 'amount', 'payment_mode',
     'bank_account_id', 'reference_number', 'narration', 'status',
     'journal_voucher_id', 'created_by',
-    'cancelled_at', 'cancelled_by', 'cancel_reason', 'reversal_journal_voucher_id',
+    'cancelled_at', 'cancelled_by', 'cancel_reason', 'reversal_journal_voucher_id', 'branch_id',
 ])]
 class CapitalPurchaseSettlement extends Model
 {
+    use BelongsToBranch;
+
     /**
      * @return array<string, string>
      */
@@ -36,6 +51,7 @@ class CapitalPurchaseSettlement extends Model
             'date' => 'date:Y-m-d',
             'cancelled_at' => 'datetime',
             'amount' => Decimal::class.':2',
+            'branch_id' => 'integer',
         ];
     }
 
@@ -80,7 +96,13 @@ class CapitalPurchaseSettlement extends Model
     }
 
     /**
-     * @param  array{date: string, amount: mixed, payment_mode: string, bank_account_id?: int|null, reference_number?: string|null, narration?: string|null}  $data
+     * Branch: $data['branch_id'] when given, else the actor's posting branch
+     * (DocumentBranch::forDocument()); it must be active and accessible, and
+     * so must the bill's branch (I6).
+     *
+     * @param  array{date: string, amount: mixed, payment_mode: string, bank_account_id?: int|null, reference_number?: string|null, narration?: string|null, branch_id?: int|string|null}  $data
+     *
+     * @throws InvalidArgumentException
      */
     public static function settle(CapitalPurchase $capitalPurchase, array $data, User $actor): self
     {
@@ -96,8 +118,11 @@ class CapitalPurchaseSettlement extends Model
                 ? Supplier::whereKey($capitalPurchase->supplier_id)->lockForUpdate()->first()
                 : null;
 
+            // Re-read outside the branch access scope, like every lock that
+            // decides a balance (plan 12, section 5.7); access to the bill's
+            // branch is checked explicitly below.
             /** @var CapitalPurchase $locked */
-            $locked = CapitalPurchase::query()->whereKey($capitalPurchase->getKey())->lockForUpdate()->firstOrFail();
+            $locked = BranchContext::unrestricted(fn () => CapitalPurchase::query()->whereKey($capitalPurchase->getKey())->lockForUpdate()->firstOrFail());
 
             if ($locked->status !== 'posted') {
                 throw new InvalidArgumentException('Only a posted capital purchase can be settled.');
@@ -106,6 +131,14 @@ class CapitalPurchaseSettlement extends Model
             if (! $supplier) {
                 throw new InvalidArgumentException('This capital purchase has no supplier, so there is nothing to settle.');
             }
+
+            $billBranchId = (int) $locked->branch_id;
+
+            if (! BranchContext::accessIsLifted() && ! BranchContext::canAccessBranch($billBranchId, $actor)) {
+                throw new InvalidArgumentException('This capital purchase is in a branch that is inactive or that you do not have access to.');
+            }
+
+            $branchId = DocumentBranch::forDocument($actor, $data['branch_id'] ?? null)->branchId;
 
             $amount = Money::of($data['amount'] ?? 0);
             if (! $amount->isPositive()) {
@@ -130,21 +163,30 @@ class CapitalPurchaseSettlement extends Model
                 throw new InvalidArgumentException('Settlement mode must be cash or bank.');
             }
 
-            $voucher = JournalVoucher::post(
-                [
-                    'voucher_type' => VoucherType::Payment->value,
-                    'date' => $data['date'],
-                    'narration' => $data['narration'] ?? "Settlement of capital purchase #{$locked->id} to {$supplier->name}",
-                ],
-                [
-                    ['account_id' => $supplier->account_id, 'debit' => $amount->toString(), 'credit' => '0.00'],
-                    ['account_id' => $settlementAccountId, 'debit' => '0.00', 'credit' => $amount->toString()],
-                ],
-                $actor,
-                lineNarration: fn (JournalVoucher $voucher): string => SettlementNarration::line("CPS-{$voucher->voucher_number}", $mode),
-            );
+            try {
+                $voucher = JournalVoucher::post(
+                    [
+                        'voucher_type' => VoucherType::Payment->value,
+                        'date' => $data['date'],
+                        'narration' => $data['narration'] ?? "Settlement of capital purchase #{$locked->id} to {$supplier->name}",
+                        'branch_id' => $branchId,
+                    ],
+                    [
+                        ['account_id' => $supplier->account_id, 'debit' => $amount->toString(), 'credit' => '0.00', 'branch_id' => $billBranchId],
+                        ['account_id' => $settlementAccountId, 'debit' => '0.00', 'credit' => $amount->toString(), 'branch_id' => $branchId],
+                    ],
+                    $actor,
+                    lineNarration: fn (JournalVoucher $voucher): string => SettlementNarration::line($voucher->printedNumber('CPS'), $mode),
+                    autoBalance: true,
+                );
+            } catch (BranchRuleViolation $exception) {
+                // A missing Inter-Branch Clearing account is a setup problem
+                // the user must see on the form, not a 500.
+                throw new InvalidArgumentException($exception->getMessage(), 0, $exception);
+            }
 
             return static::create([
+                'branch_id' => $branchId,
                 'capital_purchase_id' => $locked->id,
                 'supplier_id' => $supplier->id,
                 'date' => $data['date'],
@@ -160,6 +202,13 @@ class CapitalPurchaseSettlement extends Model
         });
     }
 
+    /**
+     * Reverses the settlement voucher in its branches (reverse() mirrors
+     * every line's branch and counterparty) and frees the amount on the bill.
+     *
+     * @throws InvalidArgumentException
+     * @throws AuthorizationException When the settlement touched a branch the actor may not post into.
+     */
     public function cancel(User $actor, string $reason): void
     {
         $reason = trim($reason);
@@ -175,7 +224,7 @@ class CapitalPurchaseSettlement extends Model
         DB::transaction(function () use ($actor, $reason): void {
             // Lock the parent purchase first (same order as settle()) so a
             // cancel and a new settlement cannot interleave.
-            CapitalPurchase::query()->whereKey($this->capital_purchase_id)->lockForUpdate()->firstOrFail();
+            BranchContext::unrestricted(fn () => CapitalPurchase::query()->whereKey($this->capital_purchase_id)->lockForUpdate()->firstOrFail());
 
             /** @var self $settlement */
             $settlement = static::query()->whereKey($this->getKey())->lockForUpdate()->firstOrFail();
@@ -185,7 +234,7 @@ class CapitalPurchaseSettlement extends Model
             }
 
             $reversal = JournalVoucher::reverse(
-                $settlement->journalVoucher()->firstOrFail(),
+                BranchContext::unrestricted(fn () => $settlement->journalVoucher()->firstOrFail()),
                 $actor,
                 "Cancellation of capital purchase settlement #{$settlement->id}: {$reason}",
             );

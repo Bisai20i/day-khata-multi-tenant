@@ -228,7 +228,7 @@ test('a PAN invoice charges no VAT and is numbered in its own SalePan series', f
             $admin,
         );
 
-        expect($full->invoice_number)->toBe('SL-1');
+        expect($full->invoice_number)->toBe('S-1');
     });
 
     $tenant->delete();
@@ -335,13 +335,13 @@ test('the stored invoice number does not change when the prefix setting changes'
             $admin,
         );
 
-        expect($sale->invoice_number)->toBe('SL-1');
+        expect($sale->invoice_number)->toBe('S-1');
 
         CompanySetting::current()->update(['sale_full_prefix' => 'INV']);
 
         // An already-issued invoice keeps its number forever (C7); only the
         // next one issued uses the new prefix.
-        expect($sale->fresh()->invoice_number)->toBe('SL-1');
+        expect($sale->fresh()->invoice_number)->toBe('S-1');
 
         $next = Sale::post(
             ['customer_id' => $customer->id, 'invoice_type' => 'full', 'date' => '2026-06-02', 'payment_mode' => 'credit'],
@@ -380,8 +380,8 @@ test('cancelling a sale leaves no gap in the invoice series and refuses a second
 
         // Audit P0-15: the reversal used to be posted as a SaleReturn voucher,
         // which consumed the next number in a printed series.
-        expect($first->fresh()->invoice_number)->toBe('SL-1')
-            ->and($second->invoice_number)->toBe('SL-2')
+        expect($first->fresh()->invoice_number)->toBe('S-1')
+            ->and($second->invoice_number)->toBe('S-2')
             ->and(JournalVoucher::where('voucher_type', VoucherType::Reversal)->count())->toBe(1);
 
         expect(fn () => $first->fresh()->cancel($admin, 'Again'))
@@ -626,7 +626,7 @@ test('posting a sale flashes the created document so the page can print it', fun
     expect($created['type'])->toBe('sale')
         ->and($created['id'])->toBeInt()
         ->and($created['print_url'])->toContain("/sales/{$created['id']}/print")
-        ->and($created['receipt']['invoice_number'])->toBe('SL-1')
+        ->and($created['receipt']['invoice_number'])->toBe('S-1')
         ->and($created['receipt']['total'])->toBe('100.00');
 
     $tenant->delete();

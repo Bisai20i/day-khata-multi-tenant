@@ -6,6 +6,7 @@ use App\Enums\FiscalYearStatus;
 use App\Exports\PurchaseListExport;
 use App\Http\Controllers\Controller;
 use App\Models\Account;
+use App\Models\Branch;
 use App\Models\CompanySetting;
 use App\Models\FiscalYear;
 use App\Models\Item;
@@ -17,6 +18,13 @@ use App\Models\Supplier;
 use App\Rules\AccountUnderHead;
 use App\Support\AmountInWords;
 use App\Support\Billing\BillingException;
+use App\Support\Billing\RoundOffAccountMissing;
+use App\Support\Billing\RoundOffPosting;
+use App\Support\Branches\ActiveBranchSelection;
+use App\Support\Branches\BranchAccounts;
+use App\Support\Branches\BranchFormOptions;
+use App\Support\Branches\BranchListFilter;
+use App\Support\Branches\BranchStoreOptions;
 use App\Support\Inventory\ItemPurchasePriceUpdater;
 use App\Support\Money\Money;
 use App\Support\NepaliCalendar;
@@ -61,8 +69,13 @@ class PurchaseController extends Controller
     {
         $filters = $this->listFilters($request);
 
-        $purchases = $this->filteredPurchasesQuery($filters)
+        // Branches (plan 12, BR12): the list, its totals row and the export
+        // all follow the top-bar switcher through filteredPurchasesQuery();
+        // each row names its branch only when several branches can appear.
+        // A tenant that is not multi-branch gets the same query as before.
+        $purchases = $this->filteredPurchasesQuery($filters, $request)
             ->with(['supplier:id,name', 'lines.item:id,name,unit', 'journalVoucher:id,voucher_number', 'canceller:id,name'])
+            ->when(BranchListFilter::columnVisible($request), fn ($query) => $query->with('branch:id,name,code'))
             ->orderBy(self::SORTABLE_COLUMNS[$filters['sort']], $filters['sort_dir'])
             ->orderByDesc('id')
             ->paginate(25)
@@ -75,7 +88,7 @@ class PurchaseController extends Controller
             'filters' => $filters,
             // Exact SQL sums over the whole filtered set (item 8, "totals
             // row") - never a page's worth of client-side addition.
-            'totals' => $this->filteredTotals($filters),
+            'totals' => $this->filteredTotals($filters, $request),
             // The Cancel action is gated by purchases.cancel at the route
             // (CONTRACTS C5); the page hides it for everyone else rather
             // than offering a 403.
@@ -96,10 +109,12 @@ class PurchaseController extends Controller
             // only be withheld into a liability.
             'bankAccounts' => $this->accountsUnderHead('Assets'),
             'tdsAccounts' => $this->accountsUnderHead('Liabilities'),
-            'stores' => Store::where('is_active', true)->orderBy('name')->get(['id', 'name']),
+            'stores' => $this->storeOptions($request),
             'settings' => [
                 'default_vat_rate' => $company->default_vat_rate,
                 'default_store_id' => $company->default_store_id,
+                'round_off_enabled' => $company->round_off_enabled,
+                'round_off_precision' => $company->round_off_precision,
             ],
             // The one closed year currently reopened for correction, if
             // any - lets Create.vue offer it as the only non-current
@@ -107,6 +122,9 @@ class PurchaseController extends Controller
             // ClosedFiscalYearGuard's docblock). Null hides the picker
             // entirely, same as before this feature existed.
             'correctionFiscalYear' => FiscalYear::openForCorrection()?->only(['id', 'name', 'reopen_reason']),
+            // Branch picker of the create form (plan 12, BR12); hidden, and
+            // nothing extra submitted, unless the company is multi-branch.
+            ...BranchFormOptions::props($request),
         ]);
     }
 
@@ -120,6 +138,9 @@ class PurchaseController extends Controller
             // what puts the message on the Bill Number field; Purchase::post()
             // repeats the check inside its transaction, behind the supplier row
             // lock, for the two-clerks-at-once race this cannot see.
+            // Company-wide for a branch-restricted clerk too (plan 12): the
+            // rule queries the table directly, not through the model, so the
+            // branch access scope never hides a bill filed in another branch.
             'bill_number' => [
                 'nullable', 'string', 'max:255',
                 Rule::unique('purchases', 'bill_number_key')
@@ -133,6 +154,10 @@ class PurchaseController extends Controller
             'bank_account_id' => ['nullable', 'exists:accounts,id', new AccountUnderHead('Assets')],
             // Retired stores and items cannot take new documents (flags G-13).
             'store_id' => ['nullable', 'integer', Rule::exists('stores', 'id')->where('is_active', true)],
+            // Optional (plan 12): Purchase::post() falls back to the store's
+            // branch, then the user's posting branch, and refuses a store of
+            // another branch.
+            'branch_id' => ['nullable', 'integer', 'exists:branches,id'],
             // decimal:0,N mirrors the column: a value with more decimals than
             // the column can hold used to be charged for and then silently
             // rounded on insert (audit P0-5).
@@ -155,6 +180,9 @@ class PurchaseController extends Controller
             // rejected bill further in.
             'tds_rate' => ['nullable', 'numeric', 'min:0', 'max:100', 'decimal:0,2'],
             'tds_amount' => ['nullable', 'numeric', 'min:0', 'decimal:0,2'],
+            // Signed (+ adds to the bill, - reduces it), so deliberately no
+            // `min`. Purchase::post() zeroes it unless the tenant enabled Round Off.
+            'round_off' => ['nullable', 'numeric', 'decimal:0,2', 'between:-'.CompanySetting::ROUND_OFF_LIMIT.','.CompanySetting::ROUND_OFF_LIMIT],
             // Required (flags G-16): the total the user saw is what gets booked.
             'expected_total' => ['required', 'numeric', 'decimal:0,2'],
             'narration' => ['nullable', 'string', 'max:255'],
@@ -204,15 +232,24 @@ class PurchaseController extends Controller
             // The browser sent the total it showed the user; anything else here
             // means the bill on screen was not the bill about to be saved
             // (CONTRACTS C8). Every other calculator complaint is a line error.
-            throw ValidationException::withMessages(
-                $e->reason === BillingException::REASON_TOTAL_MISMATCH
-                    ? ['expected_total' => 'The bill total changed. Please review it before saving.']
-                    : ['lines' => $e->getMessage()]
-            );
+            throw ValidationException::withMessages(match (true) {
+                $e->reason === BillingException::REASON_TOTAL_MISMATCH => ['expected_total' => 'The bill total changed. Please review it before saving.'],
+                // A negative Round Off that takes the bill to zero or below is the
+                // Round Off field's problem, not a line's.
+                $e->reason === BillingException::REASON_TOTAL_NOT_POSITIVE && RoundOffPosting::isNegativeInput($data['round_off'] ?? null) => ['round_off' => 'Round off cannot take the bill total to zero or below.'],
+                default => ['lines' => $e->getMessage()],
+            });
+        } catch (RoundOffAccountMissing $e) {
+            throw ValidationException::withMessages(['round_off' => $e->getMessage()]);
         } catch (InvalidArgumentException $e) {
-            return back()->withErrors(['lines' => $e->getMessage()])->withInput();
+            // A refused branch belongs on the branch picker and a store outside
+            // the bill's branch on the store field (plan 12, BR12); everything
+            // else stays under `lines` as before.
+            return back()->withErrors([BranchFormOptions::errorField($e, 'lines', storeField: 'store_id') => $e->getMessage()])->withInput();
         } catch (AuthorizationException $e) {
-            return back()->withErrors(['reason' => $e->getMessage()])->withInput();
+            // The reopened-year guard stays on `reason`; a branch access
+            // refusal raised this way goes to the branch picker.
+            return back()->withErrors([BranchFormOptions::errorField($e, 'reason') => $e->getMessage()])->withInput();
         }
 
         // CONTRACTS C11: the page opens this print URL itself instead of
@@ -233,14 +270,16 @@ class PurchaseController extends Controller
      * a client recomputation, the exported rows are the stored server values.
      * Rows stay in date order so the SN column reads chronologically.
      * `format=csv` streams a .csv instead of the default .xlsx - Laravel
-     * Excel infers the writer from the filename extension.
+     * Excel infers the writer from the filename extension. It also follows
+     * the top-bar branch switcher, so the file holds exactly the rows the
+     * list shows (plan 12, BR12).
      */
     public function export(Request $request)
     {
         $filters = $this->listFilters($request);
         $extension = $request->query('format') === 'csv' ? 'csv' : 'xlsx';
 
-        $purchases = $this->filteredPurchasesQuery($filters)
+        $purchases = $this->filteredPurchasesQuery($filters, $request)
             ->with(['supplier:id,name', 'canceller:id,name'])
             ->orderBy('date')
             ->orderBy('id')
@@ -275,7 +314,7 @@ class PurchaseController extends Controller
 
         try {
             $purchase->cancel($request->user(), $data['reason']);
-        } catch (InvalidArgumentException $e) {
+        } catch (InvalidArgumentException|AuthorizationException $e) {
             return back()->withErrors(['reason' => $e->getMessage()]);
         }
 
@@ -309,7 +348,47 @@ class PurchaseController extends Controller
             'dateBs' => NepaliCalendar::formatBs($purchase->date),
             'fiscalYearName' => $purchase->journalVoucher?->fiscalYear?->name,
             'amountInWords' => AmountInWords::rupees(Money::of($purchase->total)),
+            ...$this->branchHeader($request, $purchase->branch_id),
         ])->stream("purchase-{$purchase->id}.pdf");
+    }
+
+    /**
+     * The branch line of a printed bill's header (plan 12, BR12): the
+     * branch's name under the company's own word for it, only for a
+     * multi-branch company. Everyone else gets nulls and the header prints
+     * exactly as before.
+     *
+     * @return array{branchName: ?string, branchLabel: ?string}
+     */
+    private function branchHeader(Request $request, ?int $branchId): array
+    {
+        if ($branchId === null || ! ActiveBranchSelection::isMultiBranch($request)) {
+            return ['branchName' => null, 'branchLabel' => null];
+        }
+
+        return [
+            'branchName' => Branch::query()->whereKey($branchId)->value('name'),
+            'branchLabel' => ActiveBranchSelection::label(),
+        ];
+    }
+
+    /**
+     * Active stores for the create form's store picker. A multi-branch
+     * company also gets each store's branch_id, so the form offers only the
+     * chosen branch's stores (plan 12, section 5.5), and a branch-restricted
+     * user only sees stores of branches they may use. Anyone else gets the
+     * same list as before.
+     *
+     * @return Collection<int, Store>
+     */
+    private function storeOptions(Request $request): Collection
+    {
+        // BranchStoreOptions (BR22 C5) also skips stores of a deactivated
+        // branch, which nothing can post into; untouched when not
+        // multi-branch, and the same columns either way.
+        return BranchStoreOptions::apply(Store::where('is_active', true), $request)
+            ->orderBy('name')
+            ->get(BranchStoreOptions::columns($request, ['id', 'name']));
     }
 
     /**
@@ -333,12 +412,16 @@ class PurchaseController extends Controller
     }
 
     /**
+     * The list's filters plus the top-bar branch switcher (BranchListFilter,
+     * a no-op unless a multi-branch company is narrowed to one branch), so
+     * the page, its totals row and the export always agree.
+     *
      * @param  array{from: ?string, to: ?string, supplier_id: ?int, search: ?string, sort: string, sort_dir: string}  $filters
      * @return Builder<Purchase>
      */
-    private function filteredPurchasesQuery(array $filters): Builder
+    private function filteredPurchasesQuery(array $filters, Request $request): Builder
     {
-        return Purchase::query()
+        return BranchListFilter::apply(Purchase::query(), $request)
             ->when($filters['from'], fn ($query, string $from) => $query->whereDate('date', '>=', $from))
             ->when($filters['to'], fn ($query, string $to) => $query->whereDate('date', '<=', $to))
             ->when($filters['supplier_id'], fn ($query, int $supplierId) => $query->where('supplier_id', $supplierId))
@@ -349,14 +432,15 @@ class PurchaseController extends Controller
      * @param  array{from: ?string, to: ?string, supplier_id: ?int, search: ?string, sort: string, sort_dir: string}  $filters
      * @return array<string, string>
      */
-    private function filteredTotals(array $filters): array
+    private function filteredTotals(array $filters, Request $request): array
     {
         // Cancelled purchases stay in the list but never move the totals row,
         // the same as the sales list (SaleController::filteredTotals()).
-        $row = $this->filteredPurchasesQuery($filters)->where('status', '!=', 'cancelled')->toBase()->selectRaw(
+        $row = $this->filteredPurchasesQuery($filters, $request)->where('status', '!=', 'cancelled')->toBase()->selectRaw(
             'COALESCE(SUM(taxable_amount), 0) as taxable_amount, '
             .'COALESCE(SUM(nontaxable_amount), 0) as nontaxable_amount, '
             .'COALESCE(SUM(vat_amount), 0) as vat_amount, '
+            .'COALESCE(SUM(round_off), 0) as round_off, '
             .'COALESCE(SUM(total), 0) as total'
         )->first();
 
@@ -364,6 +448,7 @@ class PurchaseController extends Controller
             'taxable_amount' => Money::round($row->taxable_amount)->toString(),
             'nontaxable_amount' => Money::round($row->nontaxable_amount)->toString(),
             'vat_amount' => Money::round($row->vat_amount)->toString(),
+            'round_off' => Money::round($row->round_off)->toString(),
             'total' => Money::round($row->total)->toString(),
         ];
     }
@@ -385,13 +470,14 @@ class PurchaseController extends Controller
     /**
      * Accounts filed anywhere under one head of the chart, so the bank and TDS
      * pickers offer only accounts that can legitimately be used there instead
-     * of every account in the business.
+     * of every account in the business. Never the inter-branch control
+     * accounts, which AccountUnderHead refuses on submit (BranchAccounts).
      *
      * @return Collection<int, Account>
      */
     private function accountsUnderHead(string $head): Collection
     {
-        return Account::query()
+        return BranchAccounts::exclude(Account::query())
             ->where(fn ($query) => $query
                 ->whereHas('group.accountHead', fn ($q) => $q->where('name', $head))
                 ->orWhereHas('subgroup.accountGroup.accountHead', fn ($q) => $q->where('name', $head)))

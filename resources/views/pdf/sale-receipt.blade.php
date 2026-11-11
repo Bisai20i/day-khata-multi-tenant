@@ -149,14 +149,14 @@
 @endphp
     <div class="center">
         <div class="company-name">{{ $company->company_name }}</div>
-        @if($company->address)
-            <div class="meta">{{ $company->address }}</div>
+        @if($branchPrintDetails['address'])
+            <div class="meta">{{ $branchPrintDetails['address'] }}</div>
         @endif
-        @if($company->phone)
-            <div class="meta">Phone: {{ $company->phone }}</div>
+        @if($branchPrintDetails['phone'])
+            <div class="meta">Phone: {{ $branchPrintDetails['phone'] }}</div>
         @endif
-        @if($company->pan_vat_number)
-            <div class="meta">PAN/VAT: {{ $company->pan_vat_number }}</div>
+        @if($branchPrintDetails['pan'])
+            <div class="meta">PAN/VAT: {{ $branchPrintDetails['pan'] }}</div>
         @endif
         {{-- A thermal roll is still a legal document: a full tax invoice has
              to say so on its face, not just be titled "Receipt". --}}
@@ -179,6 +179,10 @@
         @endif
         @if(! empty($fiscalYearName))
             <div>Fiscal Year: {{ $fiscalYearName }}</div>
+        @endif
+        {{-- Multi-branch companies only (plan 12, BR12); null otherwise. --}}
+        @if(! empty($branchName))
+            <div>{{ $branchLabel ?? 'Branch' }}: {{ $branchName }}</div>
         @endif
         @unless($isAbbreviated)
             <div>Customer: {{ $buyerName }}</div>
@@ -245,6 +249,13 @@
             <tr>
                 <td>VAT ({{ Money::of($sale->vat_rate)->toString() }}%)</td>
                 <td class="text-right">{{ $vat->format() }}</td>
+            </tr>
+        @endif
+        @php($roundOff = Money::of($sale->round_off ?? '0'))
+        @if(! $roundOff->isZero())
+            <tr>
+                <td>Round Off</td>
+                <td class="text-right">{{ ($roundOff->isPositive() ? '+' : '').$roundOff->format() }}</td>
             </tr>
         @endif
         <tr class="grand-total">

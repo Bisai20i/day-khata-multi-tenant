@@ -9,7 +9,9 @@ use App\Models\FiscalYear;
 use App\Models\Item;
 use App\Models\ItemStockMovement;
 use App\Models\Store;
-use App\Support\Inventory\StockCosting;
+use App\Support\Branches\BranchFilter;
+use App\Support\Branches\BranchStock;
+use App\Support\Branches\StockInTransit;
 use App\Support\Money\Money;
 use App\Support\Money\Quantity;
 use Brick\Math\BigDecimal;
@@ -39,6 +41,22 @@ use Inertia\Response;
  * coming in or going out of the business, and counting both legs made the
  * movement columns look like double the real activity. With a single store
  * selected a transfer IS a real movement for that store, so it counts.
+ *
+ * Branches (plan 12, BR15): `branch` / `branches[]` narrow every column to
+ * the covered branches' stores (BranchFilter::stockScope()); values come
+ * from BranchStock::valuationRows() (year-end convention); a transfer
+ * counts in or out only when it crosses the covered stores' edge. A
+ * `store_id` outside the covered branches is dropped. Not multi-branch:
+ * unchanged, plus `branchReport: null` and `inTransit: null`.
+ *
+ * In transit (BR19): a transfer between branches takes its TransferOut leg
+ * at dispatch and its TransferIn leg at receipt, so while it is in transit
+ * Closing qty is lower than Opening + In - Out wherever both ends are inside
+ * the view (the all-stores view leaves transfers out of In and Out). Each
+ * row then carries `transit`: per bucket (StockInTransit::WITHIN, the
+ * difference; OUTGOING, already in Qty out; INCOMING, not yet in the view)
+ * the quantity and the value fixed at dispatch, as at `to`. `inTransit` is
+ * null unless some bucket has goods in it.
  */
 class InventoryReportController extends Controller
 {
@@ -48,7 +66,9 @@ class InventoryReportController extends Controller
 
         $from = ($request->date('from') ?? $openFiscalYear?->start_date ?? now()->subDays(30))->toDateString();
         $to = ($request->date('to') ?? $openFiscalYear?->end_date ?? now())->toDateString();
-        $storeId = $request->integer('store_id') ?: null;
+        $filter = BranchFilter::fromRequest($request);
+        $storeId = $filter->allowedStoreId($request->integer('store_id') ?: null);
+        $stockScope = $filter->stockScope($storeId);
 
         $items = Item::query()
             ->where('is_stockable', true)
@@ -58,13 +78,19 @@ class InventoryReportController extends Controller
         $itemIds = $items->modelKeys();
         $dayBefore = Carbon::parse($from)->subDay()->toDateString();
 
-        $opening = Item::currentStockByItem($itemIds, $storeId, $dayBefore);
-        $closing = Item::currentStockByItem($itemIds, $storeId, $to);
-        $movement = $this->movementTotals($itemIds, $from, $to, $storeId);
-        $values = StockCosting::valuationRows($to, $storeId, ['include_empty' => true])->keyBy('item_id');
+        $opening = Item::currentStockByItem($itemIds, $stockScope, $dayBefore);
+        $closing = Item::currentStockByItem($itemIds, $stockScope, $to);
+        $movement = $this->movementTotals($itemIds, $from, $to, $stockScope);
+        $values = BranchStock::valuationRows($filter, $to, $storeId, ['include_empty' => true])->keyBy('item_id');
+
+        // BR19: goods between branches on the last day of the window. Only
+        // read for a multi-branch company, and the columns only exist when
+        // something is in transit, so every other payload is unchanged.
+        $inTransit = $filter->isActive() ? StockInTransit::byItem($stockScope, $to) : [];
+        $transitBuckets = $this->transitBuckets($inTransit);
 
         $rows = $items
-            ->map(function (Item $item) use ($opening, $closing, $movement, $values) {
+            ->map(function (Item $item) use ($opening, $closing, $movement, $values, $inTransit, $transitBuckets) {
                 $itemOpening = $opening[$item->getKey()] ?? Quantity::zero();
                 $itemClosing = $closing[$item->getKey()] ?? Quantity::zero();
                 $itemMovement = $movement[$item->getKey()] ?? ['in' => Quantity::zero(), 'out' => Quantity::zero()];
@@ -80,14 +106,17 @@ class InventoryReportController extends Controller
                     'closing' => $itemClosing->toString(),
                     'avgCost' => $valuation['average_cost'] ?? Quantity::zero()->toString(),
                     'valuation' => ($valuation['value'] ?? Money::zero())->toString(),
+                    ...$this->transitFigures($inTransit[$item->getKey()] ?? [], $transitBuckets),
                 ];
             })
             // An item that neither held nor moved anything in the window is
-            // noise on a 5,000-item catalog; exact zero checks only.
+            // noise on a 5,000-item catalog; exact zero checks only. Goods
+            // in transit keep their item listed.
             ->reject(fn (array $row) => Quantity::of($row['opening'])->isZero()
                 && Quantity::of($row['closing'])->isZero()
                 && Quantity::of($row['qtyIn'])->isZero()
-                && Quantity::of($row['qtyOut'])->isZero())
+                && Quantity::of($row['qtyOut'])->isZero()
+                && ! isset($inTransit[$row['itemId']]))
             ->values();
 
         return Inertia::render('Tenant/Reports/StockSummary', [
@@ -95,19 +124,95 @@ class InventoryReportController extends Controller
             'to' => $to,
             'rows' => $rows,
             'grandTotalValuation' => Money::sum($rows->map(fn (array $row) => Money::of($row['valuation'])))->toString(),
-            'stores' => Store::where('is_active', true)->orderBy('name')->get(['id', 'name']),
+            'stores' => BranchStock::storeOptions($filter, Store::where('is_active', true))->orderBy('name')->get(['id', 'name']),
             'storeId' => $storeId,
+            'branchReport' => $filter->payload(),
+            'inTransit' => $transitBuckets === [] ? null : [
+                'buckets' => $transitBuckets,
+                'totals' => $this->transitTotals($inTransit, $transitBuckets),
+            ],
         ]);
+    }
+
+    /**
+     * The in-transit buckets that have anything in them, in display order
+     * (StockInTransit::WITHIN, OUTGOING, INCOMING).
+     *
+     * @param  array<int, array<string, array{quantity: Quantity, value: Money}>>  $inTransit
+     * @return list<string>
+     */
+    private function transitBuckets(array $inTransit): array
+    {
+        return array_values(array_filter(
+            [StockInTransit::WITHIN, StockInTransit::OUTGOING, StockInTransit::INCOMING],
+            fn (string $bucket): bool => array_filter($inTransit, fn (array $buckets): bool => isset($buckets[$bucket])) !== [],
+        ));
+    }
+
+    /**
+     * A row's in-transit figures, one `transit` entry per shown bucket
+     * (zero where the item has none). Nothing at all when no bucket is shown,
+     * so the row keeps its exact shape.
+     *
+     * @param  array<string, array{quantity: Quantity, value: Money}>  $itemTransit
+     * @param  list<string>  $buckets
+     * @return array{transit?: array<string, array{quantity: string, value: string}>}
+     */
+    private function transitFigures(array $itemTransit, array $buckets): array
+    {
+        if ($buckets === []) {
+            return [];
+        }
+
+        $figures = [];
+
+        foreach ($buckets as $bucket) {
+            $figures[$bucket] = [
+                'quantity' => ($itemTransit[$bucket]['quantity'] ?? Quantity::zero())->toString(),
+                'value' => ($itemTransit[$bucket]['value'] ?? Money::zero())->toString(),
+            ];
+        }
+
+        return ['transit' => $figures];
+    }
+
+    /**
+     * Value per shown bucket over every item (quantities are in different
+     * units and are not totalled).
+     *
+     * @param  array<int, array<string, array{quantity: Quantity, value: Money}>>  $inTransit
+     * @param  list<string>  $buckets
+     * @return array<string, string>
+     */
+    private function transitTotals(array $inTransit, array $buckets): array
+    {
+        $totals = [];
+
+        foreach ($buckets as $bucket) {
+            $totals[$bucket] = Money::sum(array_map(
+                fn (array $itemBuckets): Money => $itemBuckets[$bucket]['value'] ?? Money::zero(),
+                $inTransit,
+            ))->toString();
+        }
+
+        return $totals;
     }
 
     /**
      * Quantity in and quantity out per item within the window, summed in SQL
      * as scaled integers for the reason Item::currentStockByItem() documents.
      *
+     * $storeId is one store, the stores of the covered branches (BR15) or
+     * null for all. For a set of stores a transfer counts only when it
+     * crosses the set's edge (BranchStock::onlyCrossingTransfers()): moving
+     * goods between two stores of the same branch is no more stock in or out
+     * of that branch than it is of the company.
+     *
      * @param  array<int, int|string>  $itemIds
+     * @param  int|list<int>|null  $storeId
      * @return array<int, array{in: Quantity, out: Quantity}>
      */
-    private function movementTotals(array $itemIds, string $from, string $to, ?int $storeId): array
+    private function movementTotals(array $itemIds, string $from, string $to, int|array|null $storeId): array
     {
         $ids = array_values(array_unique(array_map('intval', $itemIds)));
 
@@ -137,7 +242,8 @@ class InventoryReportController extends Controller
             ->whereIn('item_id', $ids)
             ->where('cancelled', false)
             ->whereIn('movement_type', [...$inTypes, ...$outTypes])
-            ->when($storeId !== null, fn (Builder $query) => $query->where('store_id', $storeId))
+            ->when(is_int($storeId), fn (Builder $query) => $query->where('store_id', $storeId))
+            ->when(is_array($storeId), fn (Builder $query) => BranchStock::onlyCrossingTransfers($query->whereIn('store_id', $storeId), $storeId))
             ->whereDate('date', '>=', $from)
             ->whereDate('date', '<=', $to)
             ->groupBy('item_id')

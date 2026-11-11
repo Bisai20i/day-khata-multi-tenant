@@ -1,5 +1,5 @@
 <script setup>
-import { computed, ref } from 'vue';
+import { computed, ref, watch } from 'vue';
 import { router } from '@inertiajs/vue3';
 import AppLayout from '@/layouts/AppLayout.vue';
 import { useLayoutChrome } from '@/composables/useLayoutChrome';
@@ -14,6 +14,10 @@ import Label from '@/components/ui/Label.vue';
 import { usePermissions } from '@/composables/usePermissions';
 import { formatQuantity, formatRate } from '@/lib/money';
 import { formatBsDate } from '@/lib/format';
+import { storeLabel } from '@/lib/storeLabel.js';
+import { useBranchReportFilter } from '@/composables/useBranchReportFilter';
+import BranchReportFilter from '@/components/branch/BranchReportFilter.vue';
+import BranchReportNotes from '@/components/branch/BranchReportNotes.vue';
 
 defineOptions({ layout: AppLayout });
 
@@ -52,6 +56,11 @@ const props = defineProps({
         type: Array,
         default: () => [],
     },
+    // Branch filter; null when the company has no branches.
+    branchReport: {
+        type: [Object, null],
+        default: null,
+    },
 });
 
 useLayoutChrome(() => `Item Ledger - ${props.item.name}`);
@@ -63,13 +72,23 @@ const from = ref(props.from);
 const to = ref(props.to);
 const storeId = ref(props.storeId);
 
+// The server drops a store outside the chosen branches; follow what it applied.
+watch(
+    () => [props.storeId, props.stores],
+    () => {
+        storeId.value = props.storeId;
+    },
+);
+
+const branchFilter = useBranchReportFilter(() => props.branchReport);
+
 // The backend always echoes a from/to (the fiscal year by default), so the
 // props cannot tell a chosen window from the default one; the query string can.
 const hasExplicitFilters = ['from', 'to', 'store_id'].some((key) => new URLSearchParams(window.location.search).has(key));
 
 const storeOptions = computed(() => [
     { value: null, label: 'All stores' },
-    ...props.stores.map((store) => ({ value: store.id, label: store.name })),
+    ...props.stores.map((store) => ({ value: store.id, label: storeLabel(store) })),
 ]);
 
 function filterParams() {
@@ -81,7 +100,7 @@ function filterParams() {
 }
 
 function applyFilters() {
-    router.get(window.location.pathname, filterParams(), { preserveState: true, preserveScroll: true });
+    router.get(window.location.pathname, { ...filterParams(), ...branchFilter.toQuery() }, { preserveState: true, preserveScroll: true });
 }
 
 function clearFilters() {
@@ -95,6 +114,7 @@ function fileUrl(suffix) {
     const params = new URLSearchParams(
         Object.entries(filterParams()).filter(([, value]) => value !== undefined),
     );
+    branchFilter.appendTo(params);
     return `${window.location.pathname}/${suffix}?${params.toString()}`;
 }
 
@@ -166,9 +186,17 @@ const columns = [
                     <Label class="mb-1">Store</Label>
                     <Select v-model="storeId" :options="storeOptions" />
                 </div>
+                <BranchReportFilter
+                    v-if="branchReport"
+                    v-model:choice="branchFilter.choice.value"
+                    :report="branchReport"
+                    id-prefix="item-ledger-branch"
+                    @change="applyFilters"
+                />
                 <Button variant="primary" tone="purple" @click="applyFilters">Apply filters</Button>
                 <Button v-if="hasExplicitFilters" variant="secondary" tone="purple" @click="clearFilters">Clear filters</Button>
             </div>
+            <BranchReportNotes v-if="branchReport" :report="branchReport" />
         </Card>
 
         <Card variant="panel" class="mb-4">

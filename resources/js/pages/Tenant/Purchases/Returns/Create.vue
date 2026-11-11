@@ -1,6 +1,6 @@
 <script setup>
 import { computed, ref, watch } from 'vue';
-import { router, useForm } from '@inertiajs/vue3';
+import { router, useForm, usePage } from '@inertiajs/vue3';
 import { Search } from '@lucide/vue';
 import Card from '@/components/ui/Card.vue';
 import PageHeader from '@/components/ui/PageHeader.vue';
@@ -13,6 +13,7 @@ import Label from '@/components/ui/Label.vue';
 import { formatMoney, formatQuantity, formatRate } from '@/lib/money';
 import { todayInKathmandu } from '@/lib/format';
 import PurchaseReturnUnlinkedForm from '@/components/purchases/PurchaseReturnUnlinkedForm.vue';
+import BranchBadge from '@/components/branch/BranchBadge.vue';
 import { usePermissions } from '@/composables/usePermissions';
 
 const props = defineProps({
@@ -33,9 +34,14 @@ const props = defineProps({
     // names an item directly instead of pointing at a purchase line.
     items: { type: Array, default: () => [] },
     defaultVatRate: { type: String, default: '13.00' },
+    // Branch picker of the unlinked form only (BranchFormOptions::props()).
+    branchOptions: { type: Array, default: () => [] },
+    defaultBranchId: { type: Number, default: null },
 });
 
 const emit = defineEmits(['cancel', 'posted']);
+
+const page = usePage();
 
 const search = ref(props.purchaseSearch ?? '');
 const searching = ref(false);
@@ -77,8 +83,6 @@ const refundAccountOptions = computed(() =>
     })),
 );
 
-const storeOptions = computed(() => props.stores.map((s) => ({ value: s.id, label: s.name })));
-
 const form = useForm({
     purchase_id: null,
     // todayInKathmandu(), never new Date().toISOString(): before 05:45 Nepal
@@ -93,6 +97,21 @@ const form = useForm({
 const selectedPurchase = computed(
     () => props.searchablePurchases.data.find((purchase) => purchase.id === form.purchase_id) ?? null,
 );
+
+// A linked return is always filed in its purchase's branch (plan 12, section
+// 5.4): no picker, the branch is shown read-only beside the purchase, and a
+// multi-branch company is offered only that branch's stores. No branch_id is
+// submitted; the server inherits it (DocumentBranch::inherited()).
+const linkedStores = computed(() => {
+    const branchId = selectedPurchase.value?.branch_id ?? null;
+
+    if (page.props.branch?.isMulti !== true || branchId === null) {
+        return props.stores;
+    }
+
+    return props.stores.filter((store) => store.branch_id === branchId);
+});
+const storeOptions = computed(() => linkedStores.value.map((s) => ({ value: s.id, label: s.name })));
 
 watch(
     () => form.purchase_id,
@@ -225,6 +244,11 @@ function submit() {
                         @update:model-value="(v) => (form.purchase_id = v)"
                     />
                     <p v-if="form.errors.purchase_id" class="mt-1 text-sm text-danger">{{ form.errors.purchase_id }}</p>
+                    <!-- The purchase's branch, which the return inherits (multi-branch only). -->
+                    <div v-if="selectedPurchase && page.props.branch?.isMulti === true" class="mt-1">
+                        <BranchBadge :branch-id="selectedPurchase.branch_id ?? null" />
+                    </div>
+                    <p v-if="form.errors.branch_id" class="mt-1 text-sm text-danger" role="alert">{{ form.errors.branch_id }}</p>
                 </div>
                 <div>
                     <Label class="mb-1">Return date (BS) <span class="text-danger">*</span></Label>
@@ -330,6 +354,8 @@ function submit() {
             :bank-accounts="bankAccounts"
             :items="items"
             :default-vat-rate="defaultVatRate"
+            :branch-options="branchOptions"
+            :default-branch-id="defaultBranchId"
             @cancel="emit('cancel')"
             @posted="emit('posted')"
         />

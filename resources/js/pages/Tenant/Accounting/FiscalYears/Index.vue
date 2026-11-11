@@ -15,6 +15,7 @@ import Badge from '@/components/ui/Badge.vue';
 import Tooltip from '@/components/ui/Tooltip.vue';
 import InfoTip from '@/components/ui/InfoTip.vue';
 import Label from '@/components/ui/Label.vue';
+import NumberingScopeCard from '@/components/branch/NumberingScopeCard.vue';
 import { useToast } from '@/composables/useToast';
 import { useConfirm } from '@/composables/useConfirm';
 import { formatBsDate, todayInKathmandu } from '@/lib/format.js';
@@ -32,6 +33,12 @@ const props = defineProps({
     fiscalYearOptions: {
         type: Array,
         default: () => [],
+    },
+    // Per-branch numbering (plan 12, BR20); sent only to a multi-branch
+    // company, so everyone else renders exactly as before.
+    numbering: {
+        type: Object,
+        default: null,
     },
 });
 
@@ -337,6 +344,8 @@ const columns = [
             </div>
             <DataTable v-else :columns="columns" :data="fiscalYears" :page-size="10" empty-message="No fiscal years" />
         </Card>
+
+        <NumberingScopeCard v-if="numbering && fiscalYears.length" :fiscal-years="fiscalYears" :numbering="numbering" />
 
         <Modal :open="createModalOpen" title="New fiscal year" @update:open="onCreateModalOpenChange">
             <form class="flex flex-col gap-4" @submit.prevent="submitCreate">

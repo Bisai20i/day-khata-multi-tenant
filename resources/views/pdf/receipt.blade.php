@@ -66,9 +66,16 @@
             @forelse($receipt->allocations as $index => $allocation)
                 <tr>
                     <td class="text-center">{{ $index + 1 }}</td>
-                    <td>{{ $allocation->sale?->invoice_number ?? '#'.$allocation->sale_id }}</td>
-                    <td>{{ $allocation->sale?->date?->toDateString() }}</td>
-                    <td class="text-right">{{ $allocation->sale ? Money::of($allocation->sale->total)->format() : '' }}</td>
+                    {{-- A sale the viewer's branch access hides (plan 12, I6) prints no id, number, date or total. --}}
+                    @if ($allocation->sale)
+                        <td>{{ $allocation->sale->invoice_number ?? '#'.$allocation->sale_id }}</td>
+                        <td>{{ $allocation->sale->date?->toDateString() }}</td>
+                        <td class="text-right">{{ Money::of($allocation->sale->total)->format() }}</td>
+                    @else
+                        <td>Invoice in another branch</td>
+                        <td></td>
+                        <td class="text-right"></td>
+                    @endif
                     <td class="text-right">{{ Money::of($allocation->amount)->format() }}</td>
                 </tr>
             @empty

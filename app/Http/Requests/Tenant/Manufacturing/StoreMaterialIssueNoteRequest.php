@@ -27,6 +27,9 @@ class StoreMaterialIssueNoteRequest extends FormRequest
             // falls in a closed year reopened for correction.
             'reason' => ['nullable', 'string', 'max:255'],
             'store_id' => ['nullable', 'integer', 'exists:stores,id'],
+            // Optional (plan 12, BR08): MaterialIssueNote::post() files the
+            // note in the store's branch and refuses a mismatch.
+            'branch_id' => ['nullable', 'integer', 'exists:branches,id'],
             'production_entry_id' => ['nullable', 'integer', 'exists:production_entries,id'],
             'narration' => ['nullable', 'string', 'max:255'],
             'lines' => ['required', 'array', 'min:1'],

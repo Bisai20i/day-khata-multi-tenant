@@ -15,7 +15,7 @@ namespace App\Support\Permissions;
  * every gated route, so we normalise once and never touch the database.
  * Tests that swap the config call flush() so the next read rebuilds.
  *
- * @phpstan-type ModuleDef array{label: string, always_on: bool, requires: list<string>}
+ * @phpstan-type ModuleDef array{label: string, description: string, always_on: bool, requires: list<string>}
  * @phpstan-type PermissionDef array{module: string, group: string, label: string, owner_only: bool, legacy: list<string>}
  */
 class PermissionCatalog
@@ -40,7 +40,9 @@ class PermissionCatalog
     }
 
     /**
-     * Modules in config order, with the optional flags defaulted.
+     * Modules in config order, with the optional flags defaulted. `description`
+     * is an optional one-line explanation shown under the central module
+     * checkbox (empty when the config gives none).
      *
      * @return array<string, ModuleDef>
      */
@@ -51,6 +53,7 @@ class PermissionCatalog
             foreach ((array) config('permissions.modules', []) as $key => $def) {
                 $normalized[(string) $key] = [
                     'label' => (string) ($def['label'] ?? $key),
+                    'description' => (string) ($def['description'] ?? ''),
                     'always_on' => (bool) ($def['always_on'] ?? false),
                     'requires' => array_values(array_map('strval', $def['requires'] ?? [])),
                 ];
@@ -76,6 +79,7 @@ class PermissionCatalog
                     'module' => (string) ($def['module'] ?? ''),
                     'group' => (string) ($def['group'] ?? ''),
                     'label' => (string) ($def['label'] ?? $key),
+                    'description' => (string) ($def['description'] ?? ''),
                     'owner_only' => (bool) ($def['owner_only'] ?? false),
                     'legacy' => array_values(array_map('strval', $def['legacy'] ?? [])),
                 ];

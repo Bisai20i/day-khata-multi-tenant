@@ -8,7 +8,12 @@ use App\Models\Payment;
 use App\Models\Purchase;
 use App\Models\Supplier;
 use App\Rules\AccountUnderHead;
+use App\Support\Branches\ActiveBranchSelection;
+use App\Support\Branches\BranchAccounts;
+use App\Support\Branches\BranchFormOptions;
+use App\Support\Branches\BranchListFilter;
 use App\Support\Money\Money;
+use Illuminate\Auth\Access\AuthorizationException;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Carbon;
@@ -25,16 +30,22 @@ class PaymentController extends Controller
         return Inertia::render('Tenant/Purchases/Payments/Index', [
             // Paginated like receipts (flags G-17): the whole payment history
             // used to load on every visit.
-            'payments' => Payment::query()
+            // Branches (plan 12, BR12): follows the top-bar switcher, and
+            // names each row's branch only when several can appear. A tenant
+            // that is not multi-branch gets the same query as before.
+            'payments' => BranchListFilter::apply(Payment::query(), $request)
                 ->with(['supplier:id,name', 'allocations:id,payment_id,amount'])
+                ->when(BranchListFilter::columnVisible($request), fn ($query) => $query->with('branch:id,name,code'))
                 ->orderByDesc('date')
                 ->orderByDesc('id')
                 ->paginate(25)
                 ->withQueryString(),
             'suppliers' => Supplier::query()->orderBy('name')->get(['id', 'name']),
             // Money leaves through an asset account, so the bank picker only
-            // offers accounts filed under Assets rather than the whole chart.
-            'bankAccounts' => Account::query()
+            // offers accounts filed under Assets rather than the whole chart,
+            // less the inter-branch control accounts AccountUnderHead refuses
+            // (BranchAccounts).
+            'bankAccounts' => BranchAccounts::exclude(Account::query())
                 ->where(fn ($query) => $query
                     ->whereHas('group.accountHead', fn ($q) => $q->where('name', 'Assets'))
                     ->orWhereHas('subgroup.accountGroup.accountHead', fn ($q) => $q->where('name', 'Assets')))
@@ -43,7 +54,11 @@ class PaymentController extends Controller
             // Only for the supplier being paid, and only when the form asks
             // for it (a partial reload with supplier_id); it used to price
             // every posted bill in the system on every page load.
-            'outstandingPurchases' => Inertia::optional(fn () => $this->outstandingPurchases($request->integer('supplier_id') ?: null)),
+            'outstandingPurchases' => Inertia::optional(fn () => $this->outstandingPurchases(
+                $request->integer('supplier_id') ?: null,
+                ActiveBranchSelection::isMultiBranch($request),
+            )),
+            ...BranchFormOptions::props($request),
         ]);
     }
 
@@ -57,6 +72,9 @@ class PaymentController extends Controller
             'bank_account_id' => ['nullable', 'exists:accounts,id', new AccountUnderHead('Assets')],
             'reference_number' => ['nullable', 'string', 'max:255'],
             'narration' => ['nullable', 'string', 'max:255'],
+            // Where the money went out (plan 12, BR07); Payment::post()
+            // checks it is active and accessible, default the posting branch.
+            'branch_id' => ['nullable', 'integer', 'exists:branches,id'],
             'allocations' => ['nullable', 'array'],
             // `distinct` plus Payment::post()'s own aggregation: two rows
             // naming the same bill used to be checked separately against the
@@ -67,10 +85,14 @@ class PaymentController extends Controller
 
         $this->assertAllocationsNotBefore($data);
 
+        // AuthorizationException too: the fiscal-year guard and the branch
+        // access check raise it, and it belongs on the form, not a 403 page.
         try {
             Payment::post($data, $request->user());
-        } catch (InvalidArgumentException $e) {
-            return back()->withErrors(['amount' => $e->getMessage()])->withInput();
+        } catch (InvalidArgumentException|AuthorizationException $e) {
+            // A refused branch belongs on the branch picker; allocation,
+            // amount and clearing-account problems stay under `amount`.
+            return back()->withErrors([BranchFormOptions::errorField($e, 'amount') => $e->getMessage()])->withInput();
         }
 
         return redirect()->route('tenant.payments.index')->with('status', 'Payment recorded.');
@@ -84,7 +106,7 @@ class PaymentController extends Controller
 
         try {
             $payment->cancel($request->user(), $data['reason']);
-        } catch (InvalidArgumentException $e) {
+        } catch (InvalidArgumentException|AuthorizationException $e) {
             return back()->withErrors(['reason' => $e->getMessage()]);
         }
 
@@ -99,9 +121,12 @@ class PaymentController extends Controller
      * exact "is there anything left" on the Money value, not the old
      * `> 0.01` float test that hid a one-paisa residue (audit P0-4).
      *
+     * A multi-branch company also gets each bill's branch_id, so the form can
+     * show where an allocation lands (plan 12, BR12).
+     *
      * @return Collection<int, array<string, mixed>>
      */
-    private function outstandingPurchases(?int $supplierId): Collection
+    private function outstandingPurchases(?int $supplierId, bool $withBranch = false): Collection
     {
         if ($supplierId === null) {
             return collect();
@@ -126,6 +151,7 @@ class PaymentController extends Controller
                 'bill_number' => $purchase->bill_number,
                 'total' => $purchase->total,
                 'outstanding' => $outstanding[$purchase->id]->toString(),
+                ...($withBranch ? ['branch_id' => (int) $purchase->branch_id] : []),
             ])
             ->filter(fn (array $row): bool => Money::of($row['outstanding'])->isPositive())
             ->values();

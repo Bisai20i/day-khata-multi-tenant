@@ -16,11 +16,12 @@ import NepaliDateInput from '@/components/ui/NepaliDateInput.vue';
 import Combobox from '@/components/ui/Combobox.vue';
 import Label from '@/components/ui/Label.vue';
 import { useToast } from '@/composables/useToast';
-import { formatMoney, isZeroMoney } from '@/lib/money';
+import { formatMoney, isZeroMoney, parseMoney } from '@/lib/money';
 import { formatBsDate } from '@/lib/format';
 import Create from './Create.vue';
 import { useOpenFiscalYear } from '@/composables/useOpenFiscalYear';
 import { usePermissions } from '@/composables/usePermissions';
+import { useBranchListColumn } from '@/composables/useBranchListColumn';
 
 defineOptions({ layout: AppLayout });
 
@@ -40,7 +41,7 @@ const props = defineProps({
     // client-side addition (item 8, "totals row").
     totals: {
         type: Object,
-        default: () => ({ taxable_amount: '0.00', nontaxable_amount: '0.00', vat_amount: '0.00', total: '0.00' }),
+        default: () => ({ taxable_amount: '0.00', nontaxable_amount: '0.00', vat_amount: '0.00', round_off: '0.00', total: '0.00' }),
     },
     // One searched, paginated page of returnable purchases - the form used to
     // receive every posted purchase in the tenant with all of their lines.
@@ -57,7 +58,14 @@ const props = defineProps({
     // Stockable items for the unlinked return form (item 4).
     items: { type: Array, default: () => [] },
     defaultVatRate: { type: String, default: '13.00' },
+    // Branch picker of the unlinked return form (BranchFormOptions::props()).
+    branchOptions: { type: Array, default: () => [] },
+    defaultBranchId: { type: Number, default: null },
 });
+
+// Plan 12, BR12: a branch column only for a multi-branch company viewing all
+// branches; the server narrows the list (and totals, export) to the switcher.
+const { branchColumns } = useBranchListColumn();
 
 const supplierOptions = computed(() => props.suppliers.map((supplier) => ({ value: supplier.id, label: supplier.name })));
 
@@ -86,6 +94,15 @@ function clearFilters() {
         { preserveState: true, preserveScroll: true, onStart: () => (filtering.value = true), onFinish: () => (filtering.value = false) },
     );
 }
+
+// The Round Off sum only earns a cell once some linked return in the filtered
+// set gave back a share of one, so tenants without the feature see the same
+// totals row as before.
+const hasRoundOffTotal = computed(() => {
+    const parsed = props.totals.round_off == null ? null : parseMoney(props.totals.round_off);
+
+    return parsed !== null && parsed.ok && !isZeroMoney(parsed.value);
+});
 
 const hasActiveFilters = computed(() => !!(props.filters.from || props.filters.to || props.filters.supplier_id));
 
@@ -229,6 +246,7 @@ const columns = [
         numeric: false,
         cell: ({ row }) => purchaseSummary(row.original),
     },
+    ...branchColumns(),
     {
         id: 'items',
         header: 'Items',
@@ -316,6 +334,8 @@ const columns = [
                 :suppliers="suppliers"
                 :items="items"
                 :default-vat-rate="defaultVatRate"
+                :branch-options="branchOptions"
+                :default-branch-id="defaultBranchId"
                 @cancel="showCreateForm = false"
                 @posted="showCreateForm = false"
             />
@@ -407,7 +427,10 @@ const columns = [
 
                 <!-- Server-computed SQL sums for the whole filtered set, not
                      just this page (item 8, "totals row"). -->
-                <div class="mt-3 grid grid-cols-2 gap-3 sm:grid-cols-4 border-t-[1.5px] border-border pt-3 text-sm">
+                <div
+                    class="mt-3 grid grid-cols-2 gap-3 border-t-[1.5px] border-border pt-3 text-sm"
+                    :class="hasRoundOffTotal ? 'sm:grid-cols-5' : 'sm:grid-cols-4'"
+                >
                     <div>
                         <p class="text-[10px] font-bold tracking-[.8px] text-text-muted uppercase">Taxable (filtered)</p>
                         <p class="font-bold text-text-strong">{{ formatMoney(totals.taxable_amount) }}</p>
@@ -419,6 +442,10 @@ const columns = [
                     <div>
                         <p class="text-[10px] font-bold tracking-[.8px] text-text-muted uppercase">VAT (filtered)</p>
                         <p class="font-bold text-text-strong">{{ formatMoney(totals.vat_amount) }}</p>
+                    </div>
+                    <div v-if="hasRoundOffTotal">
+                        <p class="text-[10px] font-bold tracking-[.8px] text-text-muted uppercase">Round off (filtered)</p>
+                        <p class="font-bold text-text-strong">{{ formatMoney(totals.round_off) }}</p>
                     </div>
                     <div>
                         <p class="text-[10px] font-bold tracking-[.8px] text-text-muted uppercase">Total (filtered)</p>

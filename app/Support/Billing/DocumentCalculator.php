@@ -39,7 +39,7 @@ final class DocumentCalculator
      * @param  array<int, array<string, mixed>>  $lines  quantity, rate, discount, discount_type,
      *                                                   vatable, conversion_factor
      * @param  array<string, mixed>  $header  vat_rate, discount, discount_type, tds_amount,
-     *                                        force_non_taxable, expected_total
+     *                                        force_non_taxable, expected_total, round_off
      *
      * @throws BillingException
      */
@@ -95,7 +95,14 @@ final class DocumentCalculator
         self::assertGroupNotNegative($taxableAmount, $nontaxableAmount);
 
         $vatAmount = $taxableAmount->percent($vatRate);
-        $total = $taxableAmount->plus($nontaxableAmount)->plus($vatAmount);
+
+        // Round Off is a signed adjustment (+ adds to the bill, - reduces it)
+        // applied after VAT, so it never changes the VAT base or the TDS base.
+        // It is part of the payable total, which is what the party ledger,
+        // the cash/bank split and every report that reads `total` work from.
+        $roundOff = self::money($header['round_off'] ?? null, 'Round off', Money::zero());
+
+        $total = $taxableAmount->plus($nontaxableAmount)->plus($vatAmount)->plus($roundOff);
 
         if (! $total->isPositive()) {
             throw BillingException::totalNotPositive($total->toString());
@@ -119,6 +126,7 @@ final class DocumentCalculator
             nontaxableAmount: $nontaxableAmount,
             vatRate: $vatRate->toScale(self::PERCENTAGE_SCALE)->toString(),
             vatAmount: $vatAmount,
+            roundOff: $roundOff,
             total: $total,
             tdsAmount: $tdsAmount,
             settlementDue: $total->minus($tdsAmount),

@@ -6,6 +6,10 @@ use App\Casts\Decimal;
 use App\Enums\InventoryClass;
 use App\Enums\StockMovementType;
 use App\Enums\VoucherType;
+use App\Models\Concerns\BelongsToBranch;
+use App\Models\Concerns\PlacesStockDocument;
+use App\Support\Branches\BranchContext;
+use App\Support\Branches\SeriesNumber;
 use App\Support\ClosedFiscalYearGuard;
 use App\Support\Manufacturing\ManufacturingAccounts;
 use App\Support\Money\Money;
@@ -21,7 +25,7 @@ use InvalidArgumentException;
 
 /**
  * A posted issue of raw material from a store into work in process (MC5).
- * `number` is unique per fiscal year and is also the number of the
+ * `number` is unique per (fiscal year, series_branch_id) and is also the number of the
  * MaterialIssue voucher it posts (Dr AS13 Work in Process / Cr AS12 Raw
  * Material Inventory, for the sum of the movements' cost_value), so the
  * printed note, the voucher and the ledger all quote the same number.
@@ -32,12 +36,20 @@ use InvalidArgumentException;
  * material_in). A note posted unattached can be picked up later by a
  * production entry (which sets production_entry_id); once attached it can no
  * longer be cancelled here, because its value is part of that entry's cost.
+ *
+ * Branches (plan 12, BR08): the note is filed in its store's branch (I5,
+ * PlacesStockDocument) and both voucher lines post there, so the branch's
+ * AS12 falls by exactly the cost that left its store and its AS13 rises by
+ * the WIP it now holds (I8). An entry it is attached to has the same store,
+ * hence the same branch. Cancelling reverses the voucher in that branch.
  */
 #[Fillable([
     'fiscal_year_id',
     'number',
+    'series_branch_id',
     'date',
     'store_id',
+    'branch_id',
     'production_entry_id',
     'total_cost',
     'narration',
@@ -51,7 +63,14 @@ use InvalidArgumentException;
 ])]
 class MaterialIssueNote extends Model
 {
+    use BelongsToBranch;
     use HasFactory;
+    use PlacesStockDocument;
+
+    /**
+     * Memoised series code of a branch-series note (documentNumber()).
+     */
+    private ?string $seriesCode = null;
 
     public const STATUS_POSTED = 'posted';
 
@@ -66,6 +85,8 @@ class MaterialIssueNote extends Model
             'date' => 'date:Y-m-d',
             'total_cost' => Decimal::class.':2',
             'cancelled_at' => 'datetime',
+            'branch_id' => 'integer',
+            'series_branch_id' => 'integer',
         ];
     }
 
@@ -107,6 +128,55 @@ class MaterialIssueNote extends Model
     public function journalVoucher(): BelongsTo
     {
         return $this->belongsTo(JournalVoucher::class);
+    }
+
+    /**
+     * The printed note number: `MI-{n}` in the shared series (unchanged),
+     * `MI-{series_code}-{n}` when the note was numbered in a branch series
+     * of a per_branch year (plan 12, BR20), the same format its voucher
+     * prints. A shared note costs no query.
+     */
+    public function documentNumber(): string
+    {
+        $seriesBranchId = (int) $this->series_branch_id;
+
+        if ($seriesBranchId === 0) {
+            return SeriesNumber::format((int) $this->number, null, 'MI');
+        }
+
+        $this->seriesCode ??= trim((string) Branch::query()->whereKey($seriesBranchId)->value('series_code'));
+
+        return SeriesNumber::format((int) $this->number, $this->seriesCode !== '' ? $this->seriesCode : (string) $seriesBranchId, 'MI');
+    }
+
+    /**
+     * Resolves the series codes of every branch-series note in the list with
+     * one query (none when all are shared), so documentNumber() can be called
+     * per row without an N+1. Notes must carry series_branch_id.
+     *
+     * @param  iterable<self>  $notes
+     */
+    public static function loadSeriesCodes(iterable $notes): void
+    {
+        $pending = [];
+
+        foreach ($notes as $note) {
+            if ($note instanceof self && (int) $note->series_branch_id !== 0 && $note->seriesCode === null) {
+                $pending[] = $note;
+            }
+        }
+
+        if ($pending === []) {
+            return;
+        }
+
+        $codes = Branch::query()
+            ->whereIn('id', array_values(array_unique(array_map(fn (self $note): int => (int) $note->series_branch_id, $pending))))
+            ->pluck('series_code', 'id');
+
+        foreach ($pending as $note) {
+            $note->seriesCode = trim((string) $codes->get((int) $note->series_branch_id));
+        }
     }
 
     /**
@@ -159,7 +229,7 @@ class MaterialIssueNote extends Model
      * through JournalVoucher::reverse(), which only ever reverses a voucher
      * of the open year (C4/C5).
      *
-     * @param  array{date: string, store_id?: int|string|null, production_entry_id?: int|string|null, narration?: string|null, reason?: string|null}  $data
+     * @param  array{date: string, store_id?: int|string|null, branch_id?: int|string|null, production_entry_id?: int|string|null, narration?: string|null, reason?: string|null}  $data
      * @param  array<int, array{item_id: int|string, item_unit_id?: int|string|null, quantity: mixed}>  $lines
      */
     public static function post(array $data, array $lines, User $actor): self
@@ -174,14 +244,6 @@ class MaterialIssueNote extends Model
 
             $fiscalYear = ClosedFiscalYearGuard::assertDateInOpenYear($data['date'], $actor, $reason);
 
-            $storeId = isset($data['store_id']) && $data['store_id'] !== ''
-                ? (int) $data['store_id']
-                : Store::where('is_active', true)->orderBy('id')->value('id');
-
-            if (! $storeId) {
-                throw new InvalidArgumentException('No active store is configured.');
-            }
-
             $entry = null;
 
             if (! empty($data['production_entry_id'])) {
@@ -190,7 +252,22 @@ class MaterialIssueNote extends Model
                 if ($entry->status !== ProductionEntry::STATUS_IN_PROGRESS) {
                     throw new InvalidArgumentException('Materials can only be issued to a production entry that is in progress.');
                 }
+            }
 
+            // An issue to an entry with no store named defaults to the
+            // entry's store (and so its branch); otherwise the usual stock
+            // document default. Placement only reads stores and branches, so
+            // the lock order (entry -> items -> fiscal year) is unchanged.
+            $requestedStoreId = $data['store_id'] ?? null;
+
+            if (($requestedStoreId === null || $requestedStoreId === '') && $entry !== null) {
+                $requestedStoreId = (int) $entry->store_id;
+            }
+
+            $placement = static::placeStockDocument($actor, $data['branch_id'] ?? null, $requestedStoreId);
+            $storeId = $placement->requireStoreId();
+
+            if ($entry !== null) {
                 if ((int) $entry->store_id !== $storeId) {
                     throw new InvalidArgumentException('The material issue store must match the production entry store.');
                 }
@@ -271,16 +348,21 @@ class MaterialIssueNote extends Model
                 'narration' => 'Material issue to production',
                 'fiscal_year_id' => $fiscalYear->id,
                 'reason' => $reason,
+                'branch_id' => $placement->branchId,
             ], [
                 ['account_id' => ManufacturingAccounts::id(ManufacturingAccounts::WIP), 'debit' => $total->toString(), 'credit' => '0.00'],
                 ['account_id' => ManufacturingAccounts::id(ManufacturingAccounts::RAW_MATERIAL), 'debit' => '0.00', 'credit' => $total->toString()],
-            ], $actor, true, fn (JournalVoucher $voucher) => "Material Issue MI-{$voucher->voucher_number}");
+            ], $actor, true, fn (JournalVoucher $voucher) => "Material Issue {$voucher->printedNumber('MI')}");
 
             $note = static::create([
                 'fiscal_year_id' => $fiscalYear->id,
                 'number' => $voucher->voucher_number,
+                // Part of the note's unique key with number (BR08 F3, BR20):
+                // in a per_branch year every branch has its own MI series.
+                'series_branch_id' => $voucher->series_branch_id,
                 'date' => $data['date'],
                 'store_id' => $storeId,
+                'branch_id' => $placement->branchId,
                 'production_entry_id' => $entry?->id,
                 'total_cost' => $total,
                 'narration' => $data['narration'] ?? null,
@@ -360,9 +442,9 @@ class MaterialIssueNote extends Model
             Item::lockForStockOut($lines->pluck('item_id')->all());
 
             $reversal = JournalVoucher::reverse(
-                $fresh->journalVoucher()->firstOrFail(),
+                BranchContext::unrestricted(fn () => $fresh->journalVoucher()->firstOrFail()),
                 $actor,
-                "Cancelled Material Issue MI-{$fresh->number}: {$reason}",
+                "Cancelled Material Issue {$fresh->documentNumber()}: {$reason}",
             );
 
             ItemStockMovement::query()

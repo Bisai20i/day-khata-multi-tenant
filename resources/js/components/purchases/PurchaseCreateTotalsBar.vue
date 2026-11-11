@@ -2,13 +2,16 @@
 import { computed } from 'vue';
 import { ChevronDown, ChevronUp } from '@lucide/vue';
 import Button from '@/components/ui/Button.vue';
-import { addMoney, formatMoney, isZeroMoney } from '@/lib/money';
+import { addMoney, formatMoney, isZeroMoney, parseMoney } from '@/lib/money';
 
 // Same sticky bar as SaleCreateTotalsBar: the bill's figures in the order the
 // printed bill shows them, the "more options" toggle and the save buttons,
 // pinned to the bottom so a long bill never scrolls them out of view.
 const props = defineProps({
     totals: { type: Object, default: null },
+    // form.round_off as typed, '' when the feature is off (the calculator
+    // does not return it in totals).
+    roundOff: { type: [String, Number], default: '' },
     partialSplitError: { type: String, default: null },
     showMoreOptions: { type: Boolean, default: false },
     canSubmit: { type: Boolean, default: false },
@@ -20,6 +23,19 @@ defineEmits(['update:showMoreOptions', 'cancel', 'print']);
 // TDS never changes the bill total, only what is left to pay the supplier -
 // so those two columns only appear once something is actually withheld.
 const hasTds = computed(() => !!props.totals && !isZeroMoney(props.totals.tds_amount));
+
+// The signed Round Off to display, canonical 2dp, or null when there is none
+// (feature off, blank, zero or not a readable amount - the calculator then
+// shows no totals at all, so nothing is hidden here that matters).
+const roundOffShown = computed(() => {
+    if (props.roundOff === '' || props.roundOff === null) {
+        return null;
+    }
+
+    const parsed = parseMoney(props.roundOff);
+
+    return parsed.ok && !isZeroMoney(parsed.value) ? parsed.value : null;
+});
 </script>
 
 <template>
@@ -33,6 +49,7 @@ const hasTds = computed(() => !!props.totals && !isZeroMoney(props.totals.tds_am
                         <th class="px-3 py-1.5 text-left text-[10px] font-bold tracking-[.8px] text-text-muted uppercase" title="Amount on which VAT is charged">Taxable amount</th>
                         <th class="px-3 py-1.5 text-left text-[10px] font-bold tracking-[.8px] text-text-muted uppercase" title="Amount with no VAT">Non-taxable amount</th>
                         <th class="px-3 py-1.5 text-left text-[10px] font-bold tracking-[.8px] text-text-muted uppercase" title="Value Added Tax">VAT</th>
+                        <th v-if="roundOffShown !== null" class="px-3 py-1.5 text-left text-[10px] font-bold tracking-[.8px] text-text-muted uppercase" title="Manual rounding added to (+) or taken off (-) the bill">Round off</th>
                         <th
                             class="px-3 py-1.5 text-left text-[10px] font-bold tracking-[.8px] uppercase"
                             :class="hasTds ? 'text-text-muted' : 'bg-primary-tint text-primary'"
@@ -52,6 +69,9 @@ const hasTds = computed(() => !!props.totals && !isZeroMoney(props.totals.tds_am
                         <td class="px-3 py-1.5 font-bold text-text-strong">{{ formatMoney(totals.taxable_amount) }}</td>
                         <td class="px-3 py-1.5 font-bold text-text-strong">{{ formatMoney(totals.nontaxable_amount) }}</td>
                         <td class="px-3 py-1.5 font-bold text-text-strong">{{ formatMoney(totals.vat_amount) }}</td>
+                        <td v-if="roundOffShown !== null" class="px-3 py-1.5 font-bold text-text-strong">
+                            {{ roundOffShown[0] === '-' ? '' : '+' }}{{ formatMoney(roundOffShown) }}
+                        </td>
                         <td
                             class="px-3 py-1.5"
                             :class="hasTds ? 'font-bold text-text-strong' : 'bg-primary-tint text-base font-extrabold text-primary'"

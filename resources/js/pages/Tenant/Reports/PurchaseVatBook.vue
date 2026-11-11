@@ -14,6 +14,10 @@ import { FileSpreadsheet } from '@lucide/vue';
 import { formatMoney } from '@/lib/money';
 import { formatBsDate } from '@/lib/format';
 import { usePermissions } from '@/composables/usePermissions';
+import { useBranchReportFilter } from '@/composables/useBranchReportFilter';
+import { useBranchLabel } from '@/composables/useBranchLabel';
+import BranchReportFilter from '@/components/branch/BranchReportFilter.vue';
+import BranchReportNotes from '@/components/branch/BranchReportNotes.vue';
 
 defineOptions({ layout: AppLayout });
 
@@ -37,6 +41,8 @@ const props = defineProps({
     from: { type: String, required: true },
     to: { type: String, required: true },
     storeId: { type: [Number, null], default: null },
+    // Branch filter; null when the company has no branches.
+    branchReport: { type: [Object, null], default: null },
 });
 
 useLayoutChrome('Purchase VAT Book');
@@ -44,6 +50,9 @@ useLayoutChrome('Purchase VAT Book');
 const from = ref(props.from);
 const to = ref(props.to);
 const storeId = ref(props.storeId);
+
+const branchFilter = useBranchReportFilter(() => props.branchReport);
+const { label: branchWord } = useBranchLabel();
 
 const storeOptions = computed(() => [
     { value: null, label: 'All stores' },
@@ -66,7 +75,7 @@ function resetFilters() {
 function applyFilter() {
     router.get(
         window.location.pathname,
-        { from: from.value, to: to.value, store_id: storeId.value ?? undefined },
+        { from: from.value, to: to.value, store_id: storeId.value ?? undefined, ...branchFilter.toQuery() },
         {
             preserveState: true,
             preserveScroll: true,
@@ -81,11 +90,12 @@ const exportUrl = computed(() => {
     if (storeId.value) {
         params.set('store_id', storeId.value);
     }
+    branchFilter.appendTo(params);
 
     return `/reports/purchase-vat-book/export?${params.toString()}`;
 });
 
-const columns = [
+const baseColumns = [
     { accessorKey: 'sn', header: 'SN', numeric: true },
     { id: 'date_bs', header: 'Date (BS)', numeric: false, cell: ({ row }) => formatBsDate(row.original.date) },
     { accessorKey: 'date', header: 'Date (AD)' },
@@ -114,8 +124,26 @@ const columns = [
         numeric: true,
         cell: ({ row }) => formatMoney(row.original.fixed_asset_vat_amount),
     },
+    { id: 'round_off', header: 'Round Off', numeric: true, cell: ({ row }) => formatMoney(row.original.round_off ?? '0.00') },
     { id: 'total', header: 'Total amount', numeric: true, cell: ({ row }) => formatMoney(row.original.total) },
 ];
+
+// The branch column exists only for a multi-branch company.
+const columns = computed(() => {
+    if (!props.branchReport) {
+        return baseColumns;
+    }
+
+    const branchColumn = {
+        id: 'branch',
+        header: branchWord(),
+        numeric: false,
+        cell: ({ row }) => row.original.branch ?? '-',
+    };
+    const at = baseColumns.findIndex((column) => column.id === 'bill_number') + 1;
+
+    return [...baseColumns.slice(0, at), branchColumn, ...baseColumns.slice(at)];
+});
 </script>
 
 <template>
@@ -148,9 +176,17 @@ const columns = [
                     <Label class="mb-1">Store</Label>
                     <Select v-model="storeId" :options="storeOptions" />
                 </div>
+                <BranchReportFilter
+                    v-if="branchReport"
+                    v-model:choice="branchFilter.choice.value"
+                    :report="branchReport"
+                    id-prefix="purchase-vat-book"
+                    @change="applyFilter"
+                />
                 <Button variant="primary" tone="purple" :loading="isLoading" @click="applyFilter">Generate report</Button>
                 <Button v-if="hasActiveFilter" variant="secondary" tone="purple" :disabled="isLoading" @click="resetFilters">Reset</Button>
             </div>
+            <BranchReportNotes v-if="branchReport" :report="branchReport" />
         </Card>
 
         <Card variant="panel">
@@ -164,6 +200,7 @@ const columns = [
                 <div><span class="text-text-muted">VAT:</span> <span class="font-semibold">{{ formatMoney(totals.vat_amount) }}</span></div>
                 <div><span class="text-text-muted">Capital purchases:</span> <span class="font-semibold">{{ formatMoney(totals.capital_amount) }}</span></div>
                 <div><span class="text-text-muted">Fixed-asset VAT (of which):</span> <span class="font-semibold">{{ formatMoney(totals.fixed_asset_vat_amount) }}</span></div>
+                <div><span class="text-text-muted">Round Off:</span> <span class="font-semibold">{{ formatMoney(totals.round_off ?? '0.00') }}</span></div>
                 <div><span class="text-text-muted">Total amount:</span> <span class="font-bold">{{ formatMoney(totals.total) }}</span></div>
             </div>
         </Card>

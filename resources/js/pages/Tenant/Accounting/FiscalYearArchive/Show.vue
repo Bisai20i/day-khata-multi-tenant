@@ -60,7 +60,7 @@ const columns = [
             h(
                 Link,
                 { href: voucherHref(row.original.id), class: 'font-semibold text-primary hover:underline' },
-                { default: () => `${voucherTypeLabel(row.original.voucherType)} #${row.original.voucherNumber}` },
+                { default: () => `${voucherTypeLabel(row.original.voucherType)} #${row.original.seriesNumber ?? row.original.voucherNumber}` },
             ),
     },
     { accessorKey: 'narration', header: 'Narration' },

@@ -12,6 +12,11 @@ use App\Models\Item;
 use App\Models\PrintLog;
 use App\Models\StockAdjustment;
 use App\Models\Store;
+use App\Support\Branches\BranchContext;
+use App\Support\Branches\BranchFormOptions;
+use App\Support\Branches\BranchListFilter;
+use App\Support\Branches\BranchRuleViolation;
+use App\Support\Branches\BranchStoreOptions;
 use App\Support\Money\Quantity;
 use Barryvdh\DomPDF\Facade\Pdf;
 use Illuminate\Auth\Access\AuthorizationException;
@@ -57,12 +62,18 @@ class StockAdjustmentController extends Controller
         $from = $request->string('from')->toString() ?: $currentYear?->start_date?->toDateString();
         $to = $request->string('to')->toString() ?: $currentYear?->end_date?->toDateString();
 
+        // Branches (plan 12, BR12): the list follows the top-bar switcher and
+        // names each row's branch only when several branches can appear; the
+        // create form offers a branch picker and only the stores of the
+        // branches the user may use. A tenant that is not multi-branch gets
+        // the same queries and payload as before.
         return Inertia::render('Tenant/Inventory/StockAdjustments/Index', [
-            'stockAdjustments' => StockAdjustment::query()
+            'stockAdjustments' => BranchListFilter::apply(StockAdjustment::query(), $request)
                 // lines.itemUnit (item 7): the alternate unit a line was
                 // entered in, if any - the list shows the quantity as
                 // entered, not silently in base units.
                 ->with(['lines.item:id,name,unit', 'lines.itemUnit:id,name'])
+                ->when(BranchListFilter::columnVisible($request), fn ($query) => $query->with('branch:id,name,code'))
                 ->when($from !== null && $from !== '', fn ($query) => $query->whereDate('date', '>=', $from))
                 ->when($to !== null && $to !== '', fn ($query) => $query->whereDate('date', '<=', $to))
                 ->orderByDesc('date')
@@ -77,18 +88,43 @@ class StockAdjustmentController extends Controller
                 // inventory_class lets the form require a rate when a raw
                 // material or finished good comes in (manufacturing MC8).
                 ->get(['id', 'name', 'unit', 'inventory_class']),
-            'stores' => Store::where('is_active', true)->orderBy('name')->get(),
+            'stores' => BranchStoreOptions::apply(Store::where('is_active', true), $request)->orderBy('name')->get(),
+            ...BranchFormOptions::props($request),
             // See PurchaseController::index()'s identical prop for the
             // rationale - the one closed year currently reopened for
             // correction, if any.
             'correctionFiscalYear' => FiscalYear::openForCorrection()?->only(['id', 'name', 'reopen_reason']),
             // Warns before a re-import, which replaces the existing batch
-            // rather than adding to it (see importOpeningStock()).
+            // rather than adding to it (see importOpeningStock()). A batch
+            // only replaces its own branch's (plan 12, BR08), so the warning
+            // looks at the branch an import with no store lands in: the
+            // user's posting branch. With only Main that is every batch,
+            // exactly as before.
             'hasOpeningStockImport' => StockAdjustment::query()
                 ->where('is_opening_import', true)
                 ->where('status', 'posted')
+                ->when(
+                    $this->openingImportBranchId($request),
+                    fn ($query, int $branchId) => $query->where('branch_id', $branchId),
+                )
                 ->exists(),
         ]);
+    }
+
+    /**
+     * The branch an opening-stock import with no store named would land in
+     * (StockAdjustment::postOpeningImport() places it like any adjustment).
+     * Null when the user has no usable branch: the warning then falls back
+     * to any batch at all, the pre-branch behaviour, and the import itself
+     * is refused anyway.
+     */
+    private function openingImportBranchId(Request $request): ?int
+    {
+        try {
+            return BranchContext::postingBranchId($request->user());
+        } catch (BranchRuleViolation) {
+            return null;
+        }
     }
 
     public function store(Request $request): RedirectResponse
@@ -97,6 +133,9 @@ class StockAdjustmentController extends Controller
             'date' => ['required', 'date'],
             'note' => ['nullable', 'string', 'max:255'],
             'store_id' => ['nullable', 'integer', 'exists:stores,id'],
+            // Optional (plan 12, BR08): StockAdjustment::post() files the
+            // adjustment in the store's branch and refuses a mismatch.
+            'branch_id' => ['nullable', 'integer', 'exists:branches,id'],
             'fiscal_year_id' => ['nullable', 'integer', 'exists:fiscal_years,id'],
             'reason' => ['nullable', 'string', 'max:255'],
             'lines' => ['required', 'array', 'min:1'],
@@ -124,7 +163,10 @@ class StockAdjustmentController extends Controller
                 $request->user(),
             );
         } catch (InvalidArgumentException $e) {
-            return back()->withErrors(['lines' => $e->getMessage()])->withInput();
+            // A refused branch belongs on the branch picker and a store
+            // outside the branch on the store field; everything else stays
+            // under `lines`, where it always was.
+            return back()->withErrors([BranchFormOptions::errorField($e, 'lines', 'branch_id', 'store_id') => $e->getMessage()])->withInput();
         } catch (AuthorizationException $e) {
             return back()->withErrors(['reason' => $e->getMessage()])->withInput();
         }
@@ -222,6 +264,7 @@ class StockAdjustmentController extends Controller
             'file' => ['required', 'file', 'mimes:csv,txt,xlsx,xls'],
             'date' => ['required', 'date'],
             'store_id' => ['nullable', 'integer', 'exists:stores,id'],
+            'branch_id' => ['nullable', 'integer', 'exists:branches,id'],
             'fiscal_year_id' => ['nullable', 'integer', 'exists:fiscal_years,id'],
             'reason' => ['nullable', 'string', 'max:255'],
         ]);
@@ -317,12 +360,14 @@ class StockAdjustmentController extends Controller
         if ($lines !== []) {
             try {
                 ['replaced' => $replaced] = StockAdjustment::postOpeningImport(
-                    $request->only(['date', 'store_id', 'fiscal_year_id', 'reason']) + ['note' => 'Opening stock import'],
+                    $request->only(['date', 'store_id', 'branch_id', 'fiscal_year_id', 'reason']) + ['note' => 'Opening stock import'],
                     $lines,
                     $request->user(),
                 );
             } catch (InvalidArgumentException $e) {
-                return back()->withErrors(['lines' => $e->getMessage()])->withInput();
+                // The import form has no branch picker: a refused branch is
+                // reported on its store field, a store outside the branch too.
+                return back()->withErrors([BranchFormOptions::errorField($e, 'lines', 'store_id', 'store_id') => $e->getMessage()])->withInput();
             } catch (AuthorizationException $e) {
                 return back()->withErrors(['reason' => $e->getMessage()])->withInput();
             }

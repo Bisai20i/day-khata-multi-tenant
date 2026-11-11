@@ -19,6 +19,7 @@ import ItemsIndexBarcodeModal from '@/components/inventory/ItemsIndexBarcodeModa
 import { useToast } from '@/composables/useToast';
 import { useConfirm } from '@/composables/useConfirm';
 import { usePermissions } from '@/composables/usePermissions';
+import { useStockScopeLabel } from '@/composables/useStockScopeLabel';
 import { formatQuantity, formatRate } from '@/lib/money.js';
 import { todayInKathmandu } from '@/lib/format.js';
 import { itemLedgerUrl } from '@/lib/itemLedger.js';
@@ -116,11 +117,15 @@ function stockOnHand(item) {
     return props.stockByItem[item.id] ?? '0.0000';
 }
 
+// What stockByItem covers in a multi-branch company (server-sent
+// `stockScope`); no suffix otherwise, so the labels are unchanged.
+const { withStockScope } = useStockScopeLabel();
+
 async function markInactive(item) {
     const onHand = Number(stockOnHand(item));
     if (onHand !== 0) {
         toast({
-            message: `"${item.name}" still has ${formatQuantity(stockOnHand(item))} ${item.unit} in stock. Clear the stock first, or leave the item active.`,
+            message: `"${item.name}" still has ${formatQuantity(stockOnHand(item))} ${item.unit} ${withStockScope('in stock')}. Clear the stock first, or leave the item active.`,
             variant: 'danger',
         });
         return;
@@ -306,7 +311,7 @@ const columns = [
     },
     {
         id: 'stock',
-        header: 'In stock',
+        header: () => withStockScope('In stock'),
         numeric: true,
         // 4-decimal quantities shown as quantities, trailing zeros trimmed -
         // audit P3 found this column rendering a 4dp value at 2dp.

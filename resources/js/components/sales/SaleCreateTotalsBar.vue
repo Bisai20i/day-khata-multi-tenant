@@ -1,14 +1,21 @@
 <script setup>
-import { ref } from 'vue';
+import { computed, ref } from 'vue';
 import { ChevronDown, ChevronUp, FileText } from '@lucide/vue';
 import Button from '@/components/ui/Button.vue';
 import DropdownMenu from '@/components/ui/DropdownMenu.vue';
 import DropdownMenuItem from '@/components/ui/DropdownMenuItem.vue';
-import { addMoney, formatMoney } from '@/lib/money';
+import RoundOffField from '@/components/ui/RoundOffField.vue';
+import { addMoney, formatMoney, isZeroMoney, subtractMoney } from '@/lib/money';
 import { usePermissions } from '@/composables/usePermissions';
 
-defineProps({
+const props = defineProps({
     totals: { type: Object, default: null },
+    // Round Off: v-model, only rendered while the tenant has it switched on.
+    roundOff: { type: [String, Number], default: '' },
+    roundOffEnabled: { type: Boolean, default: false },
+    roundOffPrecision: { type: String, default: '1' },
+    totalBeforeRoundOff: { type: String, default: null },
+    roundOffError: { type: String, default: '' },
     showPartialFields: { type: Boolean, default: false },
     partialBalanced: { type: Boolean, default: true },
     showMoreOptions: { type: Boolean, default: false },
@@ -19,7 +26,19 @@ defineProps({
     isPan: { type: Boolean, default: false },
 });
 
-const emit = defineEmits(['update:showMoreOptions', 'cancel', 'print', 'estimate']);
+const emit = defineEmits(['update:showMoreOptions', 'update:roundOff', 'cancel', 'print', 'estimate']);
+
+// A separate cell before Total only when Round Off actually moves the bill.
+// Unreadable input (totalBeforeRoundOff null) shows nothing.
+const roundOffAmount = computed(() => {
+    if (!props.roundOffEnabled || !props.totals || props.totalBeforeRoundOff === null) return null;
+    const amount = subtractMoney(props.totals.total, props.totalBeforeRoundOff);
+
+    return isZeroMoney(amount) ? null : amount;
+});
+const signedRoundOff = computed(() =>
+    roundOffAmount.value === null ? '' : (roundOffAmount.value[0] === '-' ? '' : '+') + formatMoney(roundOffAmount.value),
+);
 
 // Save & Print opens GET /sales/{sale}/print (sales.print); without the key
 // the split button is hidden rather than saving and then opening a 403.
@@ -49,6 +68,21 @@ function submitAndPrint(copies) {
              cashier can reconcile the screen against the paper line by
              line instead of having to trust that Taxable + VAT reaches the
              Total on a mixed bill. -->
+        <!-- Round Off: visible without opening the More-options panel, right
+             above the figures it adjusts. Only while the tenant enabled it. -->
+        <div v-if="roundOffEnabled" class="flex justify-end">
+            <div class="w-full sm:w-56">
+                <RoundOffField
+                    id="sale_round_off"
+                    :model-value="roundOff"
+                    :total-before-round-off="totalBeforeRoundOff"
+                    :precision="roundOffPrecision"
+                    :error="roundOffError"
+                    @update:model-value="(v) => emit('update:roundOff', v)"
+                />
+            </div>
+        </div>
+
         <div v-if="totals" class="border-[1.5px] border-border">
             <table class="w-full table-auto border-collapse text-sm">
                 <thead>
@@ -58,6 +92,7 @@ function submitAndPrint(copies) {
                         <th class="px-3 py-1.5 text-left text-[10px] font-bold tracking-[.8px] text-text-muted uppercase" title="Amount on which VAT is charged">Taxable amount</th>
                         <th class="px-3 py-1.5 text-left text-[10px] font-bold tracking-[.8px] text-text-muted uppercase" title="Amount with no VAT">Non-taxable amount</th>
                         <th class="px-3 py-1.5 text-left text-[10px] font-bold tracking-[.8px] text-text-muted uppercase" title="Value Added Tax">VAT {{ isPan ? '(0% PAN)' : '' }}</th>
+                        <th v-if="roundOffAmount !== null" class="px-3 py-1.5 text-left text-[10px] font-bold tracking-[.8px] text-text-muted uppercase" title="Signed rounding adjustment">Round off</th>
                         <th class="bg-primary-tint px-3 py-1.5 text-left text-[10px] font-bold tracking-[.8px] text-primary uppercase">Total to pay</th>
                     </tr>
                 </thead>
@@ -68,6 +103,7 @@ function submitAndPrint(copies) {
                         <td class="px-3 py-1.5 font-bold text-text-strong">{{ formatMoney(totals.taxable_amount) }}</td>
                         <td class="px-3 py-1.5 font-bold text-text-strong">{{ formatMoney(totals.nontaxable_amount) }}</td>
                         <td class="px-3 py-1.5 font-bold text-text-strong">{{ formatMoney(totals.vat_amount) }}</td>
+                        <td v-if="roundOffAmount !== null" class="px-3 py-1.5 font-bold text-text-strong">{{ signedRoundOff }}</td>
                         <td class="bg-primary-tint px-3 py-1.5 text-base font-extrabold text-primary">{{ formatMoney(totals.total) }}</td>
                     </tr>
                 </tbody>

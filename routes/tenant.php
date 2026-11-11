@@ -61,6 +61,8 @@ Route::middleware([
 
         require base_path('routes/tenant-business.php');
         require base_path('routes/tenant-stores.php');
+        require base_path('routes/tenant-branches.php');
+        require base_path('routes/tenant-areas.php');
         require base_path('routes/tenant-ledger.php');
         require base_path('routes/tenant-sales.php');
         require base_path('routes/tenant-purchase.php');
@@ -70,6 +72,7 @@ Route::middleware([
         require base_path('routes/tenant-stock-transfers.php');
         require base_path('routes/tenant-stock-conversions.php');
         require base_path('routes/tenant-manufacturing.php');
+        require base_path('routes/tenant-hr.php');
         require base_path('routes/tenant-reports-accounting.php');
         require base_path('routes/tenant-reports-sales-purchase.php');
         require base_path('routes/tenant-reports-inventory.php');

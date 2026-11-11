@@ -564,7 +564,7 @@ function withDefault(value, fallback) {
  * Calculates a sale, purchase, quotation or capital document exactly as the server does.
  *
  * @param {Array<object>} lines each `{quantity, rate, discount?, discount_type?, vatable?, conversion_factor?}`
- * @param {object} header `{vat_rate, discount?, discount_type?, tds_amount?, force_non_taxable?, expected_total?}`
+ * @param {object} header `{vat_rate, discount?, discount_type?, tds_amount?, force_non_taxable?, expected_total?, round_off?}`
  * @returns {{ok: true, totals: object}|{ok: false, reason: string, message: string}}
  */
 export function calculateDocument(lines, header) {
@@ -753,7 +753,10 @@ function computeDocument(lines, header) {
     // --- Steps 6 and 7: VAT and total -----------------------------------------
     const vatRate = forceNonTaxable ? 0n : declaredVatRate;
     const vatAmount = divideRoundHalfUp(taxableAmount * vatRate, PERCENT_DIVISOR);
-    const total = taxableAmount + nontaxableAmount + vatAmount;
+    // Round Off: a signed adjustment (+ adds, - reduces) applied after VAT, so
+    // it never moves the VAT or TDS base. Mirrors DocumentCalculator.
+    const roundOff = parseField(withDefault(input.round_off, '0'), MONEY_SCALE, 'Round off');
+    const total = taxableAmount + nontaxableAmount + vatAmount + roundOff;
 
     if (total <= 0n) {
         throw new MoneyError('total_not_positive', 'The bill total must be more than zero.');

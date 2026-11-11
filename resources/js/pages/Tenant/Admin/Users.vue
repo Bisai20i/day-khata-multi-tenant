@@ -15,6 +15,7 @@ import Tooltip from '@/components/ui/Tooltip.vue';
 import InfoTip from '@/components/ui/InfoTip.vue';
 import PageHeader from '@/components/ui/PageHeader.vue';
 import Label from '@/components/ui/Label.vue';
+import UserBranchAccessFields from '@/components/admin/UserBranchAccessFields.vue';
 import { useToast } from '@/composables/useToast';
 import { useConfirm } from '@/composables/useConfirm';
 import { usePermissions } from '@/composables/usePermissions';
@@ -29,6 +30,12 @@ const props = defineProps({
     roles: {
         type: Array,
         default: () => [],
+    },
+    // { enabled, branches, actorAllowedBranchIds } (plan 12, BR10). When the
+    // branches module is off, the fields are hidden and never submitted.
+    branchAccess: {
+        type: Object,
+        default: () => ({ enabled: false, branches: [], actorAllowedBranchIds: null }),
     },
 });
 
@@ -96,13 +103,33 @@ const form = useForm({
     password_confirmation: '',
     role_id: null,
     is_active: true,
+    all_branches: true,
+    branch_ids: [],
+    default_branch_id: null,
 });
+
+// Branch access is only sent while the module is on, so the server leaves the
+// stored access alone otherwise.
+form.transform((data) => {
+    if (props.branchAccess.enabled) return data;
+    const { all_branches: _all, branch_ids: _ids, default_branch_id: _default, ...rest } = data;
+    return rest;
+});
+
+// A user limited to some branches cannot hand out "All branches", so a new
+// employee they create starts limited to the branches they hold.
+const actorIsRestricted = computed(() => Array.isArray(props.branchAccess.actorAllowedBranchIds));
+
+const branchAccessLocked = computed(() => Boolean(editing.value) && !editing.value.is_owner && !isOwner.value && editing.value.id === currentUserId.value);
 
 function openCreate() {
     editing.value = null;
     form.reset();
     form.clearErrors();
     form.is_active = true;
+    form.all_branches = !actorIsRestricted.value;
+    form.branch_ids = [];
+    form.default_branch_id = null;
     modalOpen.value = true;
 }
 
@@ -115,6 +142,9 @@ function openEdit(user) {
     form.password_confirmation = '';
     form.role_id = user.role_id ?? null;
     form.is_active = user.is_active;
+    form.all_branches = user.all_branches ?? true;
+    form.branch_ids = [...(user.branch_ids ?? [])];
+    form.default_branch_id = user.default_branch_id ?? null;
     modalOpen.value = true;
 }
 
@@ -317,6 +347,18 @@ const columns = [
                     <Select id="is_active" v-model="isActiveOption" :options="statusOptions" :disabled="roleAndStatusLocked" />
                     <p v-if="form.errors.is_active" class="mt-1 text-sm text-danger">{{ form.errors.is_active }}</p>
                 </div>
+
+                <UserBranchAccessFields
+                    v-if="branchAccess.enabled"
+                    v-model:all-branches="form.all_branches"
+                    v-model:branch-ids="form.branch_ids"
+                    v-model:default-branch-id="form.default_branch_id"
+                    :branches="branchAccess.branches"
+                    :actor-allowed-branch-ids="branchAccess.actorAllowedBranchIds"
+                    :is-owner-row="Boolean(editing?.is_owner)"
+                    :locked="branchAccessLocked"
+                    :errors="form.errors"
+                />
 
                 <div>
                     <div class="mb-1 flex items-center gap-1">

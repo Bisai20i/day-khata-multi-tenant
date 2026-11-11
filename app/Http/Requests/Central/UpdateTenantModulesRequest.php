@@ -2,9 +2,13 @@
 
 namespace App\Http\Requests\Central;
 
+use App\Models\Tenant;
+use App\Support\Branches\BranchModuleGuard;
 use App\Support\Permissions\PermissionCatalog;
+use Closure;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Validation\Rule;
+use Illuminate\Validation\Validator;
 
 /**
  * Validates a central "which modules may this tenant use" selection.
@@ -22,6 +26,8 @@ use Illuminate\Validation\Rule;
  */
 class UpdateTenantModulesRequest extends FormRequest
 {
+    public const BRANCHES_MODULE = 'branches';
+
     public function authorize(): bool
     {
         return true;
@@ -33,6 +39,59 @@ class UpdateTenantModulesRequest extends FormRequest
     public function rules(): array
     {
         return self::moduleRules(required: true);
+    }
+
+    /**
+     * Refuses switching the `branches` module off while the tenant uses more
+     * than Main (BranchModuleGuard, plan 12 BR24): that switch-off would hide
+     * data and strand goods in transit. Only an actual switch-off is checked
+     * (entitled before, not entitled after resolution, which also catches
+     * branches being unticked); keeping or enabling the module never reads
+     * the tenant database.
+     *
+     * @return array<int, Closure(Validator): void>
+     */
+    public function after(): array
+    {
+        return [
+            function (Validator $validator): void {
+                $tenant = $this->route('tenant');
+
+                if ($validator->errors()->isNotEmpty() || ! $tenant instanceof Tenant || ! $this->switchesOffBranches($tenant)) {
+                    return;
+                }
+
+                $blockers = BranchModuleGuard::forTenant($tenant);
+
+                if ($blockers === []) {
+                    return;
+                }
+
+                $label = PermissionCatalog::modules()[self::BRANCHES_MODULE]['label'] ?? self::BRANCHES_MODULE;
+
+                $validator->errors()->add(
+                    'enabled_modules',
+                    "{$label} cannot be switched off while this company uses more than Main. ".implode(' ', array_values($blockers)),
+                );
+            },
+        ];
+    }
+
+    /**
+     * Whether this save takes the branches module away from a tenant that
+     * has it today.
+     */
+    private function switchesOffBranches(Tenant $tenant): bool
+    {
+        $selected = $this->input('enabled_modules', []);
+
+        if (! is_array($selected)) {
+            return false;
+        }
+
+        $after = PermissionCatalog::resolveModules(array_values(array_filter($selected, 'is_string')));
+
+        return $tenant->hasModule(self::BRANCHES_MODULE) && ! in_array(self::BRANCHES_MODULE, $after, true);
     }
 
     /**

@@ -11,6 +11,8 @@ use App\Models\ItemCategory;
 use App\Models\ItemSubcategory;
 use App\Models\PurchaseLine;
 use App\Models\Store;
+use App\Support\Branches\BranchFilter;
+use App\Support\Branches\BranchStock;
 use App\Support\Money\Money;
 use App\Support\Money\Quantity;
 use Illuminate\Database\Eloquent\Builder;
@@ -62,6 +64,7 @@ class ItemWisePurchaseReportController extends Controller
         $categoryId = $request->integer('category_id') ?: null;
         $subcategoryId = $request->integer('subcategory_id') ?: null;
         $brandId = $request->integer('brand_id') ?: null;
+        $branchFilter = BranchFilter::fromRequest($request);
 
         $lines = PurchaseLine::query()
             ->join('purchases', 'purchases.id', '=', 'purchase_lines.purchase_id')
@@ -70,6 +73,7 @@ class ItemWisePurchaseReportController extends Controller
             ->whereDate('purchases.date', '>=', $from)
             ->whereDate('purchases.date', '<=', $to)
             ->when($storeId, fn (Builder $query) => $query->where('purchases.store_id', $storeId))
+            ->tap(fn (Builder $query) => $branchFilter->applyToDocuments($query, 'purchases.branch_id'))
             ->when($categoryId, fn (Builder $query) => $query->where('items.item_category_id', $categoryId))
             ->when($subcategoryId, fn (Builder $query) => $query->where('items.item_subcategory_id', $subcategoryId))
             ->when($brandId, fn (Builder $query) => $query->where('items.brand_id', $brandId))
@@ -91,7 +95,7 @@ class ItemWisePurchaseReportController extends Controller
                 'total_value' => Money::sum($items->map(fn (array $row) => Money::of($row['total_value'])))->toString(),
                 'quantities' => $this->quantitiesByUnit($items),
             ],
-            'lines' => $itemId ? $this->itemLineDetail($itemId, $from, $to, $storeId) : [],
+            'lines' => $itemId ? $this->itemLineDetail($itemId, $from, $to, $storeId, $branchFilter) : [],
             'itemsList' => Item::query()
                 ->when($categoryId, fn (Builder $query) => $query->where('item_category_id', $categoryId))
                 ->when($subcategoryId, fn (Builder $query) => $query->where('item_subcategory_id', $subcategoryId))
@@ -101,7 +105,7 @@ class ItemWisePurchaseReportController extends Controller
             'categories' => ItemCategory::query()->orderBy('name')->get(['id', 'name']),
             'subcategories' => ItemSubcategory::query()->orderBy('name')->get(['id', 'name', 'item_category_id']),
             'brands' => Brand::query()->orderBy('name')->get(['id', 'name']),
-            'stores' => Store::where('is_active', true)->orderBy('name')->get(['id', 'name']),
+            'stores' => BranchStock::storeOptions($branchFilter, Store::where('is_active', true))->orderBy('name')->get(['id', 'name']),
             'from' => $from,
             'to' => $to,
             'storeId' => $storeId,
@@ -109,6 +113,7 @@ class ItemWisePurchaseReportController extends Controller
             'categoryId' => $categoryId,
             'subcategoryId' => $subcategoryId,
             'brandId' => $brandId,
+            'branchReport' => $branchFilter->payload(),
         ]);
     }
 
@@ -120,7 +125,7 @@ class ItemWisePurchaseReportController extends Controller
      *
      * @return Collection<int, array<string, mixed>>
      */
-    private function itemLineDetail(int $itemId, string $from, string $to, ?int $storeId): Collection
+    private function itemLineDetail(int $itemId, string $from, string $to, ?int $storeId, BranchFilter $branchFilter): Collection
     {
         return PurchaseLine::query()
             ->join('purchases', 'purchases.id', '=', 'purchase_lines.purchase_id')
@@ -130,6 +135,7 @@ class ItemWisePurchaseReportController extends Controller
             ->whereDate('purchases.date', '>=', $from)
             ->whereDate('purchases.date', '<=', $to)
             ->when($storeId, fn (Builder $query) => $query->where('purchases.store_id', $storeId))
+            ->tap(fn (Builder $query) => $branchFilter->applyToDocuments($query, 'purchases.branch_id'))
             ->orderBy('purchases.date')
             ->orderBy('purchases.id')
             ->get([
@@ -140,6 +146,7 @@ class ItemWisePurchaseReportController extends Controller
                 'purchase_lines.quantity as quantity',
                 'purchase_lines.line_total as line_total',
                 'purchase_lines.vatable as vatable',
+                ...($branchFilter->isActive() ? ['purchases.branch_id as branch_id'] : []),
             ])
             ->map(fn (Model $line) => [
                 'date' => (string) $line->date,
@@ -149,6 +156,7 @@ class ItemWisePurchaseReportController extends Controller
                 'quantity' => Quantity::of($line->quantity)->toString(),
                 'line_total' => Money::of($line->line_total)->toString(),
                 'vatable' => (bool) $line->vatable,
+                ...$branchFilter->rowBranch($line->getAttribute('branch_id')),
             ])
             ->values();
     }

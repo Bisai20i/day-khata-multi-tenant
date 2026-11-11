@@ -22,7 +22,7 @@ use PhpOffice\PhpSpreadsheet\Style\NumberFormat;
 class JournalVoucherListExport implements FromCollection, WithColumnFormatting, WithHeadings, WithMapping
 {
     /**
-     * @param  Collection<int, array{date: string, voucher_type: string, voucher_number: int, narration: ?string, fiscal_year: ?string, amount: string, created_by: ?string, status: string}>  $rows
+     * @param  Collection<int, array{date: string, voucher_type: string, voucher_number: int|string, narration: ?string, fiscal_year: ?string, amount: string, created_by: ?string, status: string}>  $rows
      */
     public function __construct(
         private readonly Collection $rows,

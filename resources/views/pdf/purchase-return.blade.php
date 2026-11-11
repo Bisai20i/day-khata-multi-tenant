@@ -3,6 +3,10 @@
 @section('title', 'Purchase Return / Debit Note')
 
 @section('doc-meta-extra')
+    {{-- Multi-branch companies only (plan 12, BR12); single-branch notes print as before. --}}
+    @if(! empty($branchName))
+        <div><strong>{{ $branchLabel ?? 'Branch' }}:</strong> {{ $branchName }}</div>
+    @endif
     @if($purchaseReturn->purchase_id)
         <div><strong>Against Purchase #:</strong> {{ $purchaseReturn->purchase_id }}</div>
         @if($purchaseReturn->purchase->bill_number)
@@ -100,6 +104,13 @@
             <td>VAT</td>
             <td class="text-right">{{ \App\Support\Money\Money::of($purchaseReturn->vat_amount)->format() }}</td>
         </tr>
+        @php($roundOff = \App\Support\Money\Money::of($purchaseReturn->round_off ?? '0'))
+        @if(! $roundOff->isZero())
+            <tr>
+                <td>Round Off</td>
+                <td class="text-right">{{ ($roundOff->isPositive() ? '+' : '').$roundOff->format() }}</td>
+            </tr>
+        @endif
         <tr class="grand-total">
             <td>Grand Total</td>
             <td class="text-right">{{ \App\Support\Money\Money::of($purchaseReturn->total)->format() }}</td>

@@ -5,6 +5,8 @@ namespace App\Models;
 use App\Casts\Decimal;
 use App\Enums\StockConversionType;
 use App\Enums\StockMovementType;
+use App\Models\Concerns\BelongsToBranch;
+use App\Models\Concerns\PlacesStockDocument;
 use App\Support\ClosedFiscalYearGuard;
 use App\Support\Money\Money;
 use App\Support\Money\Quantity;
@@ -66,10 +68,17 @@ use ValueError;
  * entries (old rows still load) and raw materials / finished goods are refused
  * outright, because a typed output rate cannot keep their perpetual value
  * equal to the GL.
+ *
+ * Branches (plan 12, BR08): a conversion is filed in its store's branch
+ * (I5, PlacesStockDocument). It posts no voucher, so the branch only decides
+ * who may see and post it.
  */
-#[Fillable(['type', 'date', 'store_id', 'note', 'total_value', 'status', 'cancelled_by', 'cancelled_at', 'cancel_reason', 'created_by'])]
+#[Fillable(['type', 'date', 'store_id', 'branch_id', 'note', 'total_value', 'status', 'cancelled_by', 'cancelled_at', 'cancel_reason', 'created_by'])]
 class StockConversion extends Model
 {
+    use BelongsToBranch;
+    use PlacesStockDocument;
+
     /**
      * @return array<string, string>
      */
@@ -80,6 +89,7 @@ class StockConversion extends Model
             'date' => 'date:Y-m-d',
             'total_value' => Decimal::class.':2',
             'cancelled_at' => 'datetime',
+            'branch_id' => 'integer',
         ];
     }
 
@@ -126,7 +136,7 @@ class StockConversion extends Model
      * sum. The old version rounded a float difference to 4 decimals, which
      * is the comparison audit P1 flagged.
      *
-     * @param  array{type: string, date: string, note?: string|null, store_id?: int|null}  $data
+     * @param  array{type: string, date: string, note?: string|null, store_id?: int|null, branch_id?: int|null}  $data
      * @param  array<int, array{item_id: int, quantity: mixed, unit_cost_rate?: mixed, remarks?: string|null}>  $inputLines
      * @param  array<int, array{item_id: int, quantity: mixed, unit_cost_rate?: mixed, remarks?: string|null}>  $outputLines
      */
@@ -160,11 +170,8 @@ class StockConversion extends Model
 
             ClosedFiscalYearGuard::assertDateInOpenYear($data['date'], $actor);
 
-            $storeId = isset($data['store_id']) ? (int) $data['store_id'] : Store::where('is_active', true)->orderBy('id')->value('id');
-
-            if (! $storeId) {
-                throw new InvalidArgumentException('No active store is configured.');
-            }
+            $placement = static::placeStockDocument($actor, $data['branch_id'] ?? null, $data['store_id'] ?? null);
+            $storeId = $placement->requireStoreId();
 
             $items = Item::whereIn('id', collect([...$inputLines, ...$outputLines])->pluck('item_id'))->get()->keyBy('id');
 
@@ -246,6 +253,7 @@ class StockConversion extends Model
                 'type' => $type->value,
                 'date' => $data['date'],
                 'store_id' => $storeId,
+                'branch_id' => $placement->branchId,
                 'note' => $data['note'] ?? null,
                 'total_value' => $totalValue,
                 'status' => 'posted',

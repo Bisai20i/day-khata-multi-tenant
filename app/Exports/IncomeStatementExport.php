@@ -21,12 +21,14 @@ class IncomeStatementExport implements FromCollection, WithColumnFormatting, Wit
     /**
      * @param  array<int, array{code: ?string, name: string, amount: string, computed: bool}>  $income
      * @param  array<int, array{code: ?string, name: string, amount: string, computed: bool}>  $expenses
+     * @param  string|null  $branchLabel  BranchFilter::label() in a multi-branch tenant, else null (no extra heading row)
      */
     public function __construct(
         private readonly array $income,
         private readonly array $expenses,
         private readonly string $grossProfit,
         private readonly string $netProfit,
+        private readonly ?string $branchLabel = null,
     ) {}
 
     public function collection(): Collection
@@ -48,11 +50,13 @@ class IncomeStatementExport implements FromCollection, WithColumnFormatting, Wit
     }
 
     /**
-     * @return array<int, string>
+     * @return array<int, string>|list<list<string>>
      */
     public function headings(): array
     {
-        return ['Section', 'Code', 'Account', 'Amount'];
+        $headings = ['Section', 'Code', 'Account', 'Amount'];
+
+        return $this->branchLabel === null ? $headings : [[$this->branchLabel], $headings];
     }
 
     /**

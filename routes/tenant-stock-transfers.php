@@ -25,6 +25,11 @@ Route::name('tenant.')->group(function () {
         Route::post('/{stock_transfer}/cancel', [StockTransferController::class, 'cancel'])
             ->middleware('can:stock_transfers.cancel')
             ->name('cancel');
+        // Second step of a transfer between branches: the receiving branch
+        // books the goods in. Own key, granted to the receiving branch's staff.
+        Route::post('/{stock_transfer}/receive', [StockTransferController::class, 'receive'])
+            ->middleware('can:stock_transfers.receive')
+            ->name('receive');
         Route::get('/{stock_transfer}/print', [StockTransferController::class, 'print'])->middleware('can:stock_transfers.print')->name('print');
     });
 });

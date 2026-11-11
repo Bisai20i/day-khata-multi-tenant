@@ -10,18 +10,29 @@ import InfoTip from '@/components/ui/InfoTip.vue';
 import Combobox from '@/components/ui/Combobox.vue';
 import NepaliDateInput from '@/components/ui/NepaliDateInput.vue';
 import Label from '@/components/ui/Label.vue';
+import BranchSelect from '@/components/branch/BranchSelect.vue';
+import { useBranchField } from '@/composables/useBranchField';
 import { formatMoney, multiplyMoney, sumMoney } from '@/lib/money.js';
 import { todayInKathmandu } from '@/lib/format.js';
 
 const props = defineProps({
     items: { type: Array, default: () => [] },
     stores: { type: Array, default: () => [] },
+    // Branch picker (BranchFormOptions::props()).
+    branchOptions: { type: Array, default: () => [] },
+    defaultBranchId: { type: Number, default: null },
 });
 
 const emit = defineEmits(['cancel', 'posted']);
 
 const itemOptions = computed(() => props.items.map((i) => ({ value: i.id, label: `${i.name} (${i.unit})` })));
-const storeOptions = computed(() => props.stores.map((s) => ({ value: s.id, label: s.name })));
+// Branches (plan 12, BR12): the store list follows the chosen branch. With
+// the picker hidden (one branch) every store is listed, as before.
+const { branchId, showPicker, withBranch, storesForBranch, keepStoreInBranch } = useBranchField(
+    () => props.branchOptions,
+    () => props.defaultBranchId,
+);
+const storeOptions = computed(() => storesForBranch(props.stores).map((s) => ({ value: s.id, label: s.name })));
 
 // Production is no longer offered for new entries: raw materials and
 // finished goods now go through Material Issue Notes and Production Entries,
@@ -58,6 +69,10 @@ const form = useForm({
     input_lines: [emptyLine()],
     output_lines: [emptyLine()],
 });
+
+// A store of another branch goes back to blank, which the server reads as
+// "the branch's default store".
+keepStoreInBranch(() => props.stores, () => form.store_id, (id) => (form.store_id = id), () => null);
 
 const labels = computed(() => sectionLabels[form.type]);
 
@@ -107,7 +122,7 @@ function payloadLine(line) {
 }
 
 function submit() {
-    form.transform((data) => ({
+    form.transform((data) => withBranch({
         ...data,
         input_lines: data.input_lines.map(payloadLine),
         output_lines: data.output_lines.map(payloadLine),
@@ -134,6 +149,7 @@ function submit() {
 
         <form class="flex flex-col gap-4" @submit.prevent="submit">
             <Card variant="panel" class="grid grid-cols-4 gap-4 !p-4">
+                <BranchSelect v-model="branchId" :options="branchOptions" :error="form.errors.branch_id" />
                 <div>
                     <Label class="mb-1">Type <span class="text-danger">*</span></Label>
                     <Select :model-value="form.type" :options="typeOptions" @update:model-value="(v) => (form.type = v)" />
@@ -155,6 +171,7 @@ function submit() {
                         @update:model-value="(v) => (form.store_id = v)"
                     />
                     <p v-if="form.errors.store_id" class="mt-1 text-sm text-danger">{{ form.errors.store_id }}</p>
+                    <p v-if="!showPicker && form.errors.branch_id" class="mt-1 text-sm text-danger" role="alert">{{ form.errors.branch_id }}</p>
                 </div>
                 <div>
                     <Label class="mb-1">Note</Label>

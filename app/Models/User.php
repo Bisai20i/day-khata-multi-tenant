@@ -9,6 +9,7 @@ use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Attributes\Hidden;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Foundation\Auth\User as Authenticatable;
 use Illuminate\Notifications\Notifiable;
 
@@ -46,7 +47,26 @@ class User extends Authenticatable
             'password' => 'hashed',
             'is_active' => 'boolean',
             'is_owner' => 'boolean',
+            'all_branches' => 'boolean',
         ];
+    }
+
+    /**
+     * Branches this user is assigned to; only meaningful when all_branches is false.
+     *
+     * @return BelongsToMany<Branch, $this>
+     */
+    public function branches(): BelongsToMany
+    {
+        return $this->belongsToMany(Branch::class, 'branch_user');
+    }
+
+    /**
+     * @return BelongsTo<Branch, $this>
+     */
+    public function defaultBranch(): BelongsTo
+    {
+        return $this->belongsTo(Branch::class, 'default_branch_id');
     }
 
     /**

@@ -23,6 +23,8 @@ import { usePosEstimate } from '@/composables/usePosEstimate';
 import { usePosShortcuts } from '@/composables/usePosShortcuts';
 import { usePosSplit } from '@/composables/usePosSplit';
 import { usePosTotals } from '@/composables/usePosTotals';
+import { usePosBranch } from '@/composables/usePosBranch';
+import { useStockScopeLabel } from '@/composables/useStockScopeLabel';
 import { formatQuantity } from '@/lib/money';
 import { addQuantity, compareQuantity, stepQuantity } from '@/lib/quantity';
 
@@ -87,6 +89,9 @@ const props = defineProps({
             active_invoice_type: 'full',
         }),
     },
+    // The terminal's branch (BranchFormOptions::props(), see usePosBranch).
+    branchOptions: { type: Array, default: () => [] },
+    defaultBranchId: { type: Number, default: null },
 });
 
 const { toast } = useToast();
@@ -99,7 +104,6 @@ const { confirm } = useConfirm();
 const customerOptions = computed(() =>
     props.customers.map((c) => ({ value: c.id, label: c.name, searchValue: `${c.name} ${c.mobile_no ?? ''}`.trim() })),
 );
-const storeOptions = computed(() => props.stores.map((s) => ({ value: s.id, label: s.name })));
 const bankAccountOptions = computed(() =>
     props.bankAccounts.map((a) => ({ value: a.id, label: a.code ? `${a.code} - ${a.name}` : a.name })),
 );
@@ -135,6 +139,9 @@ const {
     restoreCartsFromStorage,
     holdCarts,
 } = usePosCarts({ props, searchQuery, confirm, toast, closeMergeModal });
+
+// One branch per terminal; held carts' stores are re-checked against it.
+const { branchId, withBranch, storeOptions, revalidateAndTell, stockBlocksSale } = usePosBranch({ props, form, carts, activeCartIndex, toast });
 
 /** Clears every line from the active cart after confirming. */
 async function clearCart() {
@@ -226,6 +233,9 @@ function totalQuantityAcrossCarts(itemId) {
     }, '0.0000');
 }
 
+// Names what the tiles' stock covers in a multi-branch company (BR22 C1).
+const { stockScopeSuffix } = useStockScopeLabel();
+
 function warnIfOverstock(itemId) {
     const item = itemsById.value[itemId];
     if (!item || !item.is_stockable || item.current_stock == null) return;
@@ -233,7 +243,7 @@ function warnIfOverstock(itemId) {
     const total = totalQuantityAcrossCarts(itemId);
     if (compareQuantity(total, item.current_stock) > 0) {
         toast({
-            message: `Warning: ${item.name} quantity across carts (${formatQuantity(total)}) exceeds available stock (${formatQuantity(item.current_stock)}).`,
+            message: `Warning: ${item.name} quantity across carts (${formatQuantity(total)}) exceeds available stock (${formatQuantity(item.current_stock)})${stockScopeSuffix.value}.`,
             variant: 'danger',
         });
     }
@@ -269,7 +279,7 @@ function onBarcodeSubmit() {
 
 // --- Cart (form.lines) ---------------------------------------------------
 function addToCart(item) {
-    if (isOutOfStock(item)) {
+    if (stockBlocksSale.value && isOutOfStock(item)) {
         toast({ message: `${item.name} is out of stock.`, variant: 'danger' });
         return;
     }
@@ -430,6 +440,7 @@ const { receiptOpen, receipt, completeSale, applyPendingReceipt, closeReceipt } 
     searchQuery,
     syncActiveCartFromForm,
     persistCartsNow,
+    withBranch,
 });
 
 // --- Estimate: the bill this cart would become, previewed without posting ---
@@ -520,6 +531,7 @@ onMounted(() => {
     // otherwise always keeps some padding on <main>, even in fullscreen mode.
     layoutChrome.padded = false;
     restoreCartsFromStorage();
+    revalidateAndTell();
     applyPendingCustomer();
     applyPendingReceipt();
     attachShortcuts();
@@ -572,6 +584,7 @@ onUnmounted(() => {
                 :tile-cap="ITEM_TILE_CAP"
                 :lines="form.lines"
                 :is-out-of-stock="isOutOfStock"
+                :block-out-of-stock="stockBlocksSale"
                 @select-category="selectCategory"
                 @search-keydown="onSearchKeydown"
                 @barcode-submit="onBarcodeSubmit"
@@ -600,6 +613,8 @@ onUnmounted(() => {
                 />
 
                 <PosPaymentPanel
+                    v-model:branch-id="branchId"
+                    :branch-options="branchOptions"
                     :form="form"
                     :totals="totals"
                     :preview-error="previewError"

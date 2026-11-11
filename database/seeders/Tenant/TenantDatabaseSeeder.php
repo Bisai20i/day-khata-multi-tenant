@@ -3,6 +3,7 @@
 namespace Database\Seeders\Tenant;
 
 use App\Models\AccountSubgroup;
+use App\Models\Branch;
 use App\Models\Customer;
 use App\Models\Role;
 use App\Models\Store;
@@ -48,7 +49,11 @@ class TenantDatabaseSeeder extends Seeder
             'permissions' => RoleTemplates::forModules(RoleTemplates::CASHIER, $entitled),
         ]);
 
-        Store::create(['name' => 'Main Store', 'is_active' => true]);
+        // The branches migration already inserted Main; ensureMain() only
+        // covers a database that skipped it, and never adds a second Main.
+        $main = Branch::ensureMain();
+
+        Store::create(['name' => 'Main Store', 'branch_id' => $main->id, 'is_active' => true]);
 
         $this->call(ChartOfAccountsSeeder::class);
 

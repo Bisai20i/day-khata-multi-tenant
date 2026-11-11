@@ -9,6 +9,7 @@ import Tooltip from '@/components/ui/Tooltip.vue';
 import Toaster from '@/components/ui/Toaster.vue';
 import ConfirmDialog from '@/components/ui/ConfirmDialog.vue';
 import SidebarNav from '@/components/layout/SidebarNav.vue';
+import BranchSwitcher from '@/components/layout/BranchSwitcher.vue';
 import logoMark from '@/assets/brand/logo-mark.png';
 import { navGroups, centralNavItems } from '@/lib/nav-items';
 import { filterNavByPermission } from '@/lib/filterNavByPermission';
@@ -191,7 +192,7 @@ const navCommands = computed(() => {
     if (!page.props.auth?.user || isPlatformAdmin.value) return commands;
 
     const known = new Set(commands.map((command) => command.href));
-    const reports = filterNavByPermission(reportCategories(), layoutPermissions.value.can)
+    const reports = filterNavByPermission(reportCategories({ branchLabel: page.props.branchLabel || 'Branch', isMultiBranch: page.props.branch?.isMulti === true }), layoutPermissions.value.can)
         .flatMap((category) => category.items)
         .filter((item) => !known.has(item.href))
         .map((item) => ({ label: item.label, href: item.href, icon: ReportIcon, group: 'Reports' }));
@@ -411,6 +412,8 @@ function selectActiveCommand() {
                 <div v-else class="mx-auto hidden max-w-[340px] flex-1 items-center md:flex"></div>
 
                 <div class="flex shrink-0 items-center gap-3 sm:gap-4">
+                    <BranchSwitcher v-if="page.props.auth?.user" />
+
                     <DropdownMenu v-if="page.props.auth?.user && quickActions.length > 0" align="end">
                         <template #trigger>
                             <button type="button" title="Quick Create" aria-label="Quick Create" class="flex cursor-pointer items-center justify-center text-text-muted focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary">

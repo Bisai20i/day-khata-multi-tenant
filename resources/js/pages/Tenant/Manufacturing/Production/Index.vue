@@ -17,6 +17,7 @@ import ProductionStatusBadge from '@/components/manufacturing/ProductionStatusBa
 import { useToast } from '@/composables/useToast';
 import { usePermissions } from '@/composables/usePermissions';
 import { useOpenFiscalYear } from '@/composables/useOpenFiscalYear';
+import { useBranchListColumn } from '@/composables/useBranchListColumn';
 import { formatQuantity } from '@/lib/money.js';
 import { formatBsDate } from '@/lib/format.js';
 
@@ -32,6 +33,7 @@ const props = defineProps({
 });
 
 const page = usePage();
+const { branchColumns } = useBranchListColumn();
 const { toast } = useToast();
 const { can } = usePermissions();
 const { hasOpenFiscalYear } = useOpenFiscalYear();
@@ -125,6 +127,8 @@ const columns = [
             ]),
     },
     { id: 'finished_item', header: 'Finished item', numeric: false, cell: ({ row }) => row.original.finished_item?.name ?? '-' },
+    // Only for a multi-branch company viewing all branches.
+    ...branchColumns(),
     { id: 'store', header: 'Store', numeric: false, cell: ({ row }) => row.original.store?.name ?? '-' },
     {
         id: 'planned_quantity',

@@ -34,6 +34,11 @@ Route::name('tenant.')->group(function () {
         Route::post('/{fiscalYear}/lock', [FiscalYearController::class, 'relock'])
             ->middleware('can:fiscal_year.close_archive')
             ->name('lock');
+        // Shared or per-branch voucher numbering (plan 12, BR20): an owner
+        // decision about the year's legal numbering, so the same owner-only key.
+        Route::post('/{fiscalYear}/numbering-scope', [FiscalYearController::class, 'updateNumberingScope'])
+            ->middleware('can:fiscal_year.close_archive')
+            ->name('numbering-scope');
     });
 
     // Posting and cancelling a manual journal voucher have their own keys

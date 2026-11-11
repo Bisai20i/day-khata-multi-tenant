@@ -7,9 +7,10 @@ use App\Models\AccountGroup;
 use App\Models\AccountHead;
 use App\Models\ActivityLog;
 use App\Models\JournalVoucherLine;
-use Illuminate\Support\Facades\DB;
+use App\Support\Branches\BranchContext;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\Rule;
 use Illuminate\Validation\ValidationException;
 use Inertia\Inertia;
@@ -83,12 +84,14 @@ class AccountGroupController extends Controller
             return;
         }
 
-        $hasPostings = JournalVoucherLine::query()
+        // Unrestricted: postings in a branch the actor cannot see still pin
+        // the group's head (plan 12, section 5.7).
+        $hasPostings = BranchContext::unrestricted(fn (): bool => JournalVoucherLine::query()
             ->whereHas('account', function ($query) use ($accountGroup) {
                 $query->where('account_group_id', $accountGroup->id)
                     ->orWhereHas('subgroup', fn ($subgroup) => $subgroup->where('account_group_id', $accountGroup->id));
             })
-            ->exists();
+            ->exists());
 
         if ($hasPostings) {
             throw ValidationException::withMessages([

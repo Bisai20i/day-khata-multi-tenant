@@ -1,12 +1,13 @@
 import { computed } from 'vue';
 import { addMoney, calculateDocument, moneyEquals } from '@/lib/money';
 import { enteredAmount, toggleDiscountTypeOn } from '@/lib/saleCreate';
+import { totalBeforeRoundOff as totalBeforeRoundOffOf } from '@/lib/roundOff';
 
 /**
  * The single totals preview for Sales/Create.vue, mirroring the server step
  * for step (calculateDocument), plus the submit-gating state derived from it.
  */
-export function useSaleCreatePreview(form, { itemsById, isPanInvoice, effectiveVatRate }) {
+export function useSaleCreatePreview(form, { itemsById, isPanInvoice, effectiveVatRate, roundOffEnabled = computed(() => false) }) {
     const preview = computed(() =>
         calculateDocument(
             form.lines.map((line) => {
@@ -28,11 +29,20 @@ export function useSaleCreatePreview(form, { itemsById, isPanInvoice, effectiveV
                 discount_type: form.discount_type,
                 tds_amount: form.tds_amount,
                 force_non_taxable: isPanInvoice.value,
+                // Signed manual adjustment; ignored (blank) while the tenant
+                // has the feature off, matching the server which forces 0.
+                round_off: roundOffEnabled.value ? form.round_off : '',
             },
         ),
     );
 
     const totals = computed(() => (preview.value.ok ? preview.value.totals : null));
+
+    // The bill total with Round Off taken back out - what the "Suggested"
+    // chip rounds. null while the bill can't be totalled or the box is unreadable.
+    const totalBeforeRoundOff = computed(() =>
+        totals.value ? totalBeforeRoundOffOf(totals.value.total, roundOffEnabled.value ? form.round_off : '') : null,
+    );
 
     // A half-typed line is not an error worth shouting about: the calculator says
     // "the quantity is required" for every empty row, which would put a red box on
@@ -89,6 +99,7 @@ export function useSaleCreatePreview(form, { itemsById, isPanInvoice, effectiveV
 
     return {
         totals,
+        totalBeforeRoundOff,
         previewError,
         toggleHeaderDiscountType,
         showBankField,

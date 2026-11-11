@@ -19,6 +19,7 @@ const ROUTE_AUDIT_ALLOWLIST = [
     'tenant.profile.edit' => 'A user editing their own profile.',
     'tenant.profile.update' => 'A user editing their own profile.',
     'tenant.profile.password' => 'A user changing their own password.',
+    'tenant.active-branch.update' => 'A user choosing their own active branch (session only; re-validated by SetBranchContext).',
 ];
 
 /**

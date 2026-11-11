@@ -12,6 +12,11 @@ use App\Models\Item;
 use App\Models\ItemCategory;
 use App\Models\ItemSubcategory;
 use App\Models\ItemUnit;
+use App\Support\Branches\ActiveBranchSelection;
+use App\Support\Branches\BranchAccounts;
+use App\Support\Branches\BranchContext;
+use App\Support\Branches\BranchStockDisplay;
+use App\Support\Money\Quantity;
 use Closure;
 use Illuminate\Database\QueryException;
 use Illuminate\Http\JsonResponse;
@@ -71,7 +76,7 @@ class ItemController extends Controller
         'posting_account', 'inventory_class',
     ];
 
-    public function index(): Response
+    public function index(Request $request): Response
     {
         $items = Item::query()
             ->with(['category:id,name', 'subcategory:id,name', 'brand:id,name', 'account:id,code,name', 'units' => fn ($q) => $q->orderBy('name')])
@@ -81,7 +86,10 @@ class ItemController extends Controller
             ->latest()
             ->get();
 
-        $stock = Item::currentStockByItem($items->modelKeys());
+        // Branches (BR22 C1): the stores the actor may see and the switcher
+        // covers; every store when not multi-branch (parity).
+        $stockDisplay = BranchStockDisplay::fromRequest($request);
+        $stock = Item::currentStockByItem($items->modelKeys(), $stockDisplay->storeIds());
 
         return Inertia::render('Tenant/Inventory/Items/Index', [
             'categories' => ItemCategory::query()->orderBy('name')->get(['id', 'name']),
@@ -94,6 +102,9 @@ class ItemController extends Controller
             'stockByItem' => $items->mapWithKeys(fn (Item $item) => [
                 $item->id => (string) ($stock[$item->id] ?? '0.0000'),
             ]),
+            // What the figures cover ('all'|'branch'|'branches'), null when
+            // not multi-branch so the column keeps its plain label.
+            'stockScope' => $stockDisplay->scope(),
             'postingAccounts' => $this->postingAccountOptions()->values(),
             'inventoryClasses' => collect(InventoryClass::cases())->map(fn (InventoryClass $class) => [
                 'value' => $class->value,
@@ -169,14 +180,14 @@ class ItemController extends Controller
      * sales, purchase, and stock entry forms. Marking an item inactive requires
      * its closing stock on hand to be zero so inventory cannot be orphaned.
      */
-    public function toggleActive(Item $item): RedirectResponse
+    public function toggleActive(Request $request, Item $item): RedirectResponse
     {
         if ($item->is_active) {
             $onHand = $item->currentStock();
 
             if (! $onHand->isZero()) {
                 return back()->withErrors([
-                    'item' => "\"{$item->name}\" still has {$onHand->formatQuantity()} {$item->unit} in stock. Clear the stock first, or leave the item active.",
+                    'item' => $this->stillStockedMessage($request, $item, $onHand),
                 ]);
             }
 
@@ -588,7 +599,7 @@ class ItemController extends Controller
             'image' => ['nullable', 'image', 'max:2048'],
             'is_vatable' => ['boolean'],
             'is_stockable' => ['boolean'],
-            'is_active' => ['boolean', $this->stillStockedRule($item)],
+            'is_active' => ['boolean', $this->stillStockedRule($request, $item)],
             'inventory_class' => ['nullable', Rule::enum(InventoryClass::class)],
         ]);
     }
@@ -599,9 +610,9 @@ class ItemController extends Controller
      * sit in the valuation and the Balance Sheet with no way to sell, adjust
      * or transfer it out. The item has to be emptied first.
      */
-    private function stillStockedRule(?Item $item): Closure
+    private function stillStockedRule(Request $request, ?Item $item): Closure
     {
-        return function (string $attribute, mixed $value, Closure $fail) use ($item): void {
+        return function (string $attribute, mixed $value, Closure $fail) use ($request, $item): void {
             // Nothing to guard when creating, when the item is staying (or
             // becoming) active, or when it was already inactive.
             if ($item === null || filter_var($value, FILTER_VALIDATE_BOOLEAN) || ! $item->is_active) {
@@ -611,9 +622,25 @@ class ItemController extends Controller
             $onHand = $item->currentStock();
 
             if (! $onHand->isZero()) {
-                $fail("\"{$item->name}\" still has {$onHand->formatQuantity()} {$item->unit} in stock. Clear the stock first, or leave the item active.");
+                $fail($this->stillStockedMessage($request, $item, $onHand));
             }
         };
+    }
+
+    /**
+     * The deactivate guard's refusal. The guard needs the company-wide
+     * quantity (stock in any store keeps the item active), but quoting that
+     * number to a branch-restricted user of a multi-branch company would tell
+     * them what the other branches hold (BR22 C1), so they get the same
+     * refusal without the figure. Everyone else gets today's exact text.
+     */
+    private function stillStockedMessage(Request $request, Item $item, Quantity $onHand): string
+    {
+        if (ActiveBranchSelection::isMultiBranch($request) && BranchContext::allowedBranchIds() !== null) {
+            return "\"{$item->name}\" still has stock. Clear the stock first, or leave the item active.";
+        }
+
+        return "\"{$item->name}\" still has {$onHand->formatQuantity()} {$item->unit} in stock. Clear the stock first, or leave the item active.";
     }
 
     /**
@@ -716,13 +743,16 @@ class ItemController extends Controller
      * capital item). Resolved in PHP rather than SQL because an account hangs
      * off either a group or a subgroup, never both (see Account::booted()),
      * so the head is two different joins away and the table is small enough
-     * that one eager-loaded read is cheaper than the union.
+     * that one eager-loaded read is cheaper than the union. Never the
+     * inter-branch control accounts (Stock Received from Branches sits under
+     * Purchase Accounts): only the system posts them (BranchAccounts). The
+     * picker, postingAccountRule() and the import all read this list.
      *
      * @return SupportCollection<int, array{id: int, code: ?string, name: string, label: string}>
      */
     private function postingAccountOptions(): SupportCollection
     {
-        return $this->postingAccounts ??= Account::query()
+        return $this->postingAccounts ??= BranchAccounts::exclude(Account::query())
             ->with(['group.accountHead', 'subgroup.accountGroup.accountHead'])
             ->orderBy('name')
             ->get()

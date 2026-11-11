@@ -6,7 +6,8 @@ use App\Http\Controllers\Controller;
 use App\Models\Brand;
 use App\Models\Item;
 use App\Models\Store;
-use App\Support\Inventory\StockCosting;
+use App\Support\Branches\BranchFilter;
+use App\Support\Branches\BranchStock;
 use App\Support\Money\Money;
 use App\Support\Money\Quantity;
 use Illuminate\Http\Request;
@@ -42,10 +43,11 @@ class BrandWiseReportController extends Controller
     public function stockByBrand(Request $request): Response
     {
         $asOf = $this->resolveAsOf($request);
-        $storeId = $request->integer('store_id') ?: null;
+        $filter = BranchFilter::fromRequest($request);
+        $storeId = $filter->allowedStoreId($request->integer('store_id') ?: null);
 
         $brands = Brand::query()->orderBy('name')->get();
-        $aggregates = $this->brandAggregatesFromStock($asOf, $storeId);
+        $aggregates = $this->brandAggregatesFromStock($asOf, $storeId, $filter);
 
         ['rows' => $rows, 'grandTotal' => $grandTotal] = $this->buildBrandStockRows($brands, $aggregates);
 
@@ -54,15 +56,19 @@ class BrandWiseReportController extends Controller
             'rows' => $rows,
             'grandTotal' => $grandTotal,
             'grandTotalValuation' => $grandTotal['value'],
-            'stores' => Store::where('is_active', true)->orderBy('name')->get(['id', 'name']),
+            'stores' => BranchStock::storeOptions($filter, Store::where('is_active', true))->orderBy('name')->get(['id', 'name']),
             'storeId' => $storeId,
+            'branchReport' => $filter->payload(),
         ]);
     }
 
     /**
+     * Narrowed to the covered branches' stores by BranchStock (BR15); one
+     * store or the whole company exactly as before otherwise.
+     *
      * @return array<string, array{value: Money, quantities: array<string, Quantity>}> keyed by brand_id, empty string for items with none
      */
-    private function brandAggregatesFromStock(string $asOf, ?int $storeId): array
+    private function brandAggregatesFromStock(string $asOf, ?int $storeId, BranchFilter $filter): array
     {
         $items = Item::query()
             ->where('is_stockable', true)
@@ -71,7 +77,7 @@ class BrandWiseReportController extends Controller
 
         $aggregates = [];
 
-        foreach (StockCosting::valuationRows($asOf, $storeId) as $row) {
+        foreach (BranchStock::valuationRows($filter, $asOf, $storeId) as $row) {
             $item = $items->get($row['item_id']);
 
             if ($item === null) {

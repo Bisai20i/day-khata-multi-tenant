@@ -20,15 +20,23 @@ use PhpOffice\PhpSpreadsheet\Style\NumberFormat;
  *
  * The balance cell is a real number with a 2-decimal format;
  * `Money::toFloat()` is used at that boundary and nowhere else (C1).
+ *
+ * In a multi-branch tenant the sheet opens with the branch filter's label
+ * (plan 12, BR14) above the headings and the balances are that filter's;
+ * with no label the layout is exactly what it always was.
  */
 class CreditorsExport implements FromCollection, WithColumnFormatting, WithHeadings, WithMapping
 {
     /**
      * @param  Collection<int, array<string, mixed>>  $rows
+     * @param  list<array{area: string, rows: list<array<string, mixed>>, totals: array<string, string>}>|null  $groups  the report's "Group by area" layout, when it was on
+     * @param  string|null  $branchLabel  BranchFilter::label() in a multi-branch tenant, else null
      */
     public function __construct(
         private readonly Collection $rows,
         private readonly string $total,
+        private readonly ?array $groups = null,
+        private readonly ?string $branchLabel = null,
     ) {}
 
     /**
@@ -36,20 +44,17 @@ class CreditorsExport implements FromCollection, WithColumnFormatting, WithHeadi
      */
     public function collection(): Collection
     {
-        return $this->rows->values()->push([
-            'name' => 'Total',
-            'address' => null,
-            'mobile_no' => null,
-            'balance' => $this->total,
-        ]);
+        return PartyBalanceRows::build($this->rows, $this->total, $this->groups);
     }
 
     /**
-     * @return array<int, string>
+     * @return array<int, string>|list<list<string>>
      */
     public function headings(): array
     {
-        return ['Supplier', 'Address', 'Mobile', 'Balance'];
+        $headings = ['Supplier', 'Address', 'Mobile', 'Area', 'Balance'];
+
+        return $this->branchLabel === null ? $headings : [[$this->branchLabel], $headings];
     }
 
     /**
@@ -57,7 +62,7 @@ class CreditorsExport implements FromCollection, WithColumnFormatting, WithHeadi
      */
     public function columnFormats(): array
     {
-        return ['D' => NumberFormat::FORMAT_NUMBER_00];
+        return ['E' => NumberFormat::FORMAT_NUMBER_00];
     }
 
     /**
@@ -70,7 +75,9 @@ class CreditorsExport implements FromCollection, WithColumnFormatting, WithHeadi
             $row['name'] ?? '',
             $row['address'] ?? '',
             $row['mobile_no'] ?? '',
-            Money::of($row['balance'])->toFloat(),
+            $row['area'] ?? '',
+            // Heading rows of the grouped layout carry no balance.
+            ($row['balance'] ?? null) === null ? null : Money::of($row['balance'])->toFloat(),
         ];
     }
 }

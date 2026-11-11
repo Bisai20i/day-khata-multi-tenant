@@ -1,6 +1,6 @@
 <script setup>
 import { computed, ref } from 'vue';
-import { Link } from '@inertiajs/vue3';
+import { Link, router } from '@inertiajs/vue3';
 import {
     Users,
     Truck,
@@ -9,23 +9,25 @@ import {
     Megaphone,
     AlertTriangle,
     X,
-    Receipt,
-    ScanBarcode,
     ArrowRight,
     Wallet,
     Boxes,
     Landmark,
     HandCoins,
-    ReceiptText,
-    Percent,
 } from '@lucide/vue';
 import AppLayout from '@/layouts/AppLayout.vue';
 import { useLayoutChrome } from '@/composables/useLayoutChrome';
 import Card from '@/components/ui/Card.vue';
-import Button from '@/components/ui/Button.vue';
-import { formatMoney, formatQuantity, compareMoney, parseMoney } from '@/lib/money.js';
+import { formatMoney, formatQuantity } from '@/lib/money.js';
 import { holdsAll } from '@/lib/quickActions';
 import { usePermissions } from '@/composables/usePermissions';
+import { useBranchReportFilter } from '@/composables/useBranchReportFilter';
+import BranchReportFilter from '@/components/branch/BranchReportFilter.vue';
+import BranchReportNotes from '@/components/branch/BranchReportNotes.vue';
+import DashboardSalesColumn from '@/components/dashboard/DashboardSalesColumn.vue';
+import DashboardTrends from '@/components/dashboard/DashboardTrends.vue';
+import DashboardTopLists from '@/components/dashboard/DashboardTopLists.vue';
+import DashboardBranchComparison from '@/components/dashboard/DashboardBranchComparison.vue';
 
 defineOptions({ layout: AppLayout });
 
@@ -81,6 +83,17 @@ const props = defineProps({
         type: [Array, null],
         default: null,
     },
+    // Branch filter (plan 12, BR16): null for a company that is not
+    // multi-branch, which then sees no branch control at all.
+    branchReport: {
+        type: [Object, null],
+        default: null,
+    },
+    // Per-branch sales/purchases this month; null unless 2+ branches are covered.
+    branchComparison: {
+        type: [Object, null],
+        default: null,
+    },
 });
 
 // Dismissal is in-page only, not persisted anywhere - an active notice
@@ -95,6 +108,36 @@ function dismissNotice(id) {
 }
 
 useLayoutChrome('Dashboard');
+
+const branchFilter = useBranchReportFilter(() => props.branchReport);
+
+/**
+ * Reloads the dashboard for the picked branch, keeping any other query
+ * params the URL carries (the server re-checks every id).
+ */
+function reloadForBranch() {
+    const params = {};
+
+    for (const [key, value] of new URLSearchParams(window.location.search)) {
+        if (key !== 'branch' && key !== 'branches' && !key.startsWith('branches[')) {
+            params[key] = value;
+        }
+    }
+
+    router.get(window.location.pathname, { ...params, ...branchFilter.toQuery() }, { preserveScroll: true, preserveState: true });
+}
+
+/**
+ * A report link that opens on the branches the dashboard shows: the branch
+ * picked here, if any. Unchanged otherwise (the report then follows the
+ * top-bar switcher, as the dashboard does) and always unchanged for a
+ * company without branches.
+ */
+function withBranchQuery(href) {
+    const query = branchFilter.appendTo(new URLSearchParams()).toString();
+
+    return query === '' ? href : `${href}?${query}`;
+}
 
 const kpiCards = computed(() =>
     [
@@ -125,42 +168,6 @@ const financialCards = computed(() =>
 const taxSummary = computed(() => props.kpis.tax?.thisWeek ?? null);
 
 const hasSalesColumn = computed(() => Boolean(props.kpis.sales || props.kpis.purchases || taxSummary.value || canStartPosSale.value));
-
-/**
- * Tallest bar in the two trend strips, picked by exact money comparison.
- * Only the bar GEOMETRY below leaves the decimal world - the same narrow
- * exemption CONTRACTS C1 grants Money::toFloat() for chart data. No amount
- * a user reads is ever produced this way.
- */
-const maxTrendTotal = computed(() => {
-    let max = '0.00';
-
-    for (const day of [...(props.salesTrend ?? []), ...(props.purchaseTrend ?? [])]) {
-        if (compareMoney(day.total, max) > 0) {
-            max = day.total;
-        }
-    }
-
-    return max;
-});
-
-function trendBarWidth(total) {
-    const max = parseMoney(maxTrendTotal.value);
-    const value = parseMoney(total ?? '0.00');
-
-    // parseMoney returns canonical strings, so a zero maximum must be caught
-    // with an exact comparison: dividing by it gave "NaN%", which the browser
-    // ignored, drawing every bar full width on a week with no sales.
-    if (!max.ok || !value.ok || compareMoney(max.value, '0.00') <= 0) {
-        return '0%';
-    }
-
-    return `${Math.min(100, (Number(value.value) / Number(max.value)) * 100)}%`;
-}
-
-function trendDayLabel(dateString) {
-    return new Date(`${dateString}T00:00:00`).toLocaleDateString(undefined, { weekday: 'short', day: 'numeric' });
-}
 
 const { can } = usePermissions();
 
@@ -214,6 +221,16 @@ function formatAmount(amount) {
             </div>
         </div>
 
+        <div v-if="branchReport" class="mb-5">
+            <BranchReportFilter
+                v-model:choice="branchFilter.choice.value"
+                :report="branchReport"
+                id-prefix="dashboard-branch"
+                @change="reloadForBranch"
+            />
+            <BranchReportNotes :report="branchReport" />
+        </div>
+
         <div v-if="kpiCards.length" class="mb-5 grid grid-cols-2 gap-4 lg:grid-cols-4">
             <Link v-for="card in kpiCards" :key="card.key" :href="card.href" class="block">
             <Card variant="panel" class="h-full transition-colors hover:border-primary">
@@ -243,7 +260,7 @@ function formatAmount(amount) {
         </template>
 
         <div v-if="financialCards.length" class="mb-5 grid grid-cols-2 gap-4 lg:grid-cols-4">
-            <Link v-for="card in financialCards" :key="card.key" :href="card.href" class="block">
+            <Link v-for="card in financialCards" :key="card.key" :href="withBranchQuery(card.href)" class="block">
             <Card variant="panel" class="h-full transition-colors hover:border-primary">
                 <div class="flex size-9 items-center justify-center bg-primary-tint">
                     <component :is="card.icon" class="size-5 text-primary" />
@@ -254,6 +271,8 @@ function formatAmount(amount) {
             </Card>
             </Link>
         </div>
+
+        <DashboardBranchComparison v-if="branchComparison" :comparison="branchComparison" />
 
         <Card v-if="expiringItemsCount > 0" variant="panel" class="mb-5">
             <div class="flex items-center gap-3">
@@ -332,74 +351,12 @@ function formatAmount(amount) {
                 </div>
             </Card>
 
-            <div v-if="hasSalesColumn" class="flex flex-col gap-5">
-                <Card v-if="kpis.sales" variant="panel">
-                    <div class="flex items-start justify-between">
-                        <div class="flex size-9 items-center justify-center bg-primary-tint">
-                            <Receipt class="size-5 text-primary" />
-                        </div>
-                        <span
-                            v-if="kpis.sales.thisWeek.count"
-                            class="bg-success-bg px-2 py-0.5 text-[11px] font-semibold text-success"
-                        >
-                            {{ kpis.sales.thisWeek.count }} this week
-                        </span>
-                    </div>
-                    <p class="mt-3 text-2xl font-bold text-text-strong">{{ formatAmount(kpis.sales.today.total) }}</p>
-                    <p class="text-sm text-text-muted">Today's Sales - {{ kpis.sales.today.count }} bills</p>
-                </Card>
-
-                <Card v-if="kpis.purchases" variant="panel">
-                    <div class="flex items-start justify-between">
-                        <div class="flex size-9 items-center justify-center bg-primary-tint">
-                            <ReceiptText class="size-5 text-primary" />
-                        </div>
-                        <span
-                            v-if="kpis.purchases.thisWeek.count"
-                            class="bg-success-bg px-2 py-0.5 text-[11px] font-semibold text-success"
-                        >
-                            {{ kpis.purchases.thisWeek.count }} this week
-                        </span>
-                    </div>
-                    <p class="mt-3 text-2xl font-bold text-text-strong">{{ formatAmount(kpis.purchases.today.total) }}</p>
-                    <p class="text-sm text-text-muted">Today's Purchases - {{ kpis.purchases.today.count }} bills</p>
-                </Card>
-
-                <Card v-if="taxSummary" variant="panel">
-                    <div class="flex items-start justify-between">
-                        <div class="flex size-9 items-center justify-center bg-primary-tint">
-                            <Percent class="size-5 text-primary" />
-                        </div>
-                    </div>
-                    <p class="mt-3 text-sm font-bold text-text-strong">Tax Summary (This Week)</p>
-                    <dl class="mt-2 flex flex-col gap-1 text-sm">
-                        <div class="flex items-center justify-between">
-                            <dt class="text-text-muted">Taxable</dt>
-                            <dd class="font-semibold text-text-strong">{{ formatAmount(taxSummary.taxable) }}</dd>
-                        </div>
-                        <div class="flex items-center justify-between">
-                            <dt class="text-text-muted">Non-taxable</dt>
-                            <dd class="font-semibold text-text-strong">{{ formatAmount(taxSummary.nontaxable) }}</dd>
-                        </div>
-                        <div class="flex items-center justify-between">
-                            <dt class="text-text-muted">VAT</dt>
-                            <dd class="font-semibold text-text-strong">{{ formatAmount(taxSummary.vat) }}</dd>
-                        </div>
-                    </dl>
-                </Card>
-
-                <Card v-if="canStartPosSale" variant="panel">
-                    <div class="flex size-9 items-center justify-center bg-primary-tint">
-                        <ScanBarcode class="size-5 text-primary" aria-hidden="true" />
-                    </div>
-                    <p class="mt-3 text-sm font-bold text-text-strong">Start a new sale</p>
-                    <p class="text-xs text-text-muted">Jump straight into POS for a quick walk-in sale.</p>
-                    <Button :as="Link" href="/pos" variant="primary" tone="purple" class="mt-3 w-full justify-center">
-                        <ScanBarcode class="size-4" aria-hidden="true" />
-                        Go to POS
-                    </Button>
-                </Card>
-            </div>
+            <DashboardSalesColumn
+                v-if="hasSalesColumn"
+                :kpis="kpis"
+                :tax-summary="taxSummary"
+                :can-start-pos-sale="canStartPosSale"
+            />
         </div>
 
         <div
@@ -466,84 +423,12 @@ function formatAmount(amount) {
             </Card>
         </div>
 
-        <div
-            v-if="salesTrend || purchaseTrend"
-            class="mb-5 grid grid-cols-1 gap-5"
-            :class="{ 'md:grid-cols-2': salesTrend && purchaseTrend }"
-        >
-            <Card v-if="salesTrend" variant="panel" title="Sales Trend (Last 7 Days)">
-                <div v-if="salesTrend.length === 0" class="py-6 text-center text-sm text-text-muted">
-                    No sales in the last 7 days.
-                    <Link href="/sales" class="font-semibold text-primary hover:underline">Record a sale</Link>
-                </div>
-                <ul v-else class="flex flex-col gap-2">
-                    <li v-for="day in salesTrend" :key="day.date" class="flex items-center gap-3 text-sm">
-                        <span class="w-14 shrink-0 text-xs text-text-muted">{{ trendDayLabel(day.date) }}</span>
-                        <span class="h-2 flex-1 overflow-hidden rounded-full bg-border-soft">
-                            <span class="block h-full bg-primary" :style="{ width: trendBarWidth(day.total) }" />
-                        </span>
-                        <span class="w-20 shrink-0 text-right font-semibold text-text-strong">{{ formatAmount(day.total) }}</span>
-                    </li>
-                </ul>
-            </Card>
+        <DashboardTrends v-if="salesTrend || purchaseTrend" :sales-trend="salesTrend" :purchase-trend="purchaseTrend" />
 
-            <Card v-if="purchaseTrend" variant="panel" title="Purchase Trend (Last 7 Days)">
-                <div v-if="purchaseTrend.length === 0" class="py-6 text-center text-sm text-text-muted">
-                    No purchases in the last 7 days.
-                    <Link href="/purchases" class="font-semibold text-primary hover:underline">Record a purchase</Link>
-                </div>
-                <ul v-else class="flex flex-col gap-2">
-                    <li v-for="day in purchaseTrend" :key="day.date" class="flex items-center gap-3 text-sm">
-                        <span class="w-14 shrink-0 text-xs text-text-muted">{{ trendDayLabel(day.date) }}</span>
-                        <span class="h-2 flex-1 overflow-hidden rounded-full bg-border-soft">
-                            <span class="block h-full bg-[#F59E0B]" :style="{ width: trendBarWidth(day.total) }" />
-                        </span>
-                        <span class="w-20 shrink-0 text-right font-semibold text-text-strong">{{ formatAmount(day.total) }}</span>
-                    </li>
-                </ul>
-            </Card>
-        </div>
-
-        <div
+        <DashboardTopLists
             v-if="topItemsThisMonth || topCustomersThisMonth"
-            class="grid grid-cols-1 gap-5"
-            :class="{ 'md:grid-cols-2': topItemsThisMonth && topCustomersThisMonth }"
-        >
-            <Card v-if="topItemsThisMonth" variant="panel" title="Top 5 Items This Month">
-                <div v-if="topItemsThisMonth.length === 0" class="py-6 text-center text-sm text-text-muted">
-                    No sales this month yet.
-                    <Link v-if="can('sales.view')" href="/sales" class="font-semibold text-primary hover:underline">Record a sale</Link>
-                </div>
-                <ol v-else class="flex flex-col gap-3">
-                    <li v-for="(item, index) in topItemsThisMonth" :key="item.name" class="flex items-center justify-between text-sm">
-                        <span class="flex items-center gap-2 text-text-base">
-                            <span class="flex size-5 items-center justify-center rounded-full bg-primary-tint text-[11px] font-bold text-primary">
-                                {{ index + 1 }}
-                            </span>
-                            {{ item.name }}
-                        </span>
-                        <span class="font-semibold text-text-strong">{{ formatAmount(item.total) }}</span>
-                    </li>
-                </ol>
-            </Card>
-
-            <Card v-if="topCustomersThisMonth" variant="panel" title="Top 5 Customers This Month">
-                <div v-if="topCustomersThisMonth.length === 0" class="py-6 text-center text-sm text-text-muted">
-                    No sales this month yet.
-                    <Link v-if="can('sales.view')" href="/sales" class="font-semibold text-primary hover:underline">Record a sale</Link>
-                </div>
-                <ol v-else class="flex flex-col gap-3">
-                    <li v-for="(customer, index) in topCustomersThisMonth" :key="customer.name" class="flex items-center justify-between text-sm">
-                        <span class="flex items-center gap-2 text-text-base">
-                            <span class="flex size-5 items-center justify-center rounded-full bg-primary-tint text-[11px] font-bold text-primary">
-                                {{ index + 1 }}
-                            </span>
-                            {{ customer.name }}
-                        </span>
-                        <span class="font-semibold text-text-strong">{{ formatAmount(customer.total) }}</span>
-                    </li>
-                </ol>
-            </Card>
-        </div>
+            :top-items-this-month="topItemsThisMonth"
+            :top-customers-this-month="topCustomersThisMonth"
+        />
     </div>
 </template>

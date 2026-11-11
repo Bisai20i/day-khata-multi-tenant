@@ -47,15 +47,42 @@ class TenantModuleController extends Controller
         // backfilled, which reads as core only), `after` the new stored value.
         // added/removed compare what the tenant could actually use, so the log
         // reads correctly even when `before` was not in canonical form.
+        $added = array_values(array_diff($afterEntitled, $beforeEntitled));
+        $removed = array_values(array_diff($beforeEntitled, $afterEntitled));
+
         PlatformAdminActivityLog::record('tenant.update_modules', $tenant, [
             'before' => $before,
             'after' => $after,
-            'added' => array_values(array_diff($afterEntitled, $beforeEntitled)),
-            'removed' => array_values(array_diff($beforeEntitled, $afterEntitled)),
+            'added' => $added,
+            'removed' => $removed,
         ]);
+
+        $this->recordBranchesToggle($tenant, $added, $removed);
 
         return redirect()
             ->route('central.tenants.show', $tenant)
             ->with('status', 'Modules updated.');
+    }
+
+    /**
+     * Multiple branches is the one module whose switch changes how a
+     * company's books are split, so its toggle also gets its own audit entry
+     * (plan 12 BR24), searchable by action without unpacking the generic
+     * update_modules diff. The switch-off was already cleared by
+     * BranchModuleGuard in UpdateTenantModulesRequest. platform_admin_id on
+     * the row records who did it.
+     *
+     * @param  list<string>  $added
+     * @param  list<string>  $removed
+     */
+    private function recordBranchesToggle(Tenant $tenant, array $added, array $removed): void
+    {
+        $module = UpdateTenantModulesRequest::BRANCHES_MODULE;
+
+        if (in_array($module, $added, true)) {
+            PlatformAdminActivityLog::record('tenant.module_branches_enabled', $tenant, ['module' => $module]);
+        } elseif (in_array($module, $removed, true)) {
+            PlatformAdminActivityLog::record('tenant.module_branches_disabled', $tenant, ['module' => $module]);
+        }
     }
 }

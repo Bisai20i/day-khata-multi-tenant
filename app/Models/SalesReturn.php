@@ -5,8 +5,13 @@ namespace App\Models;
 use App\Casts\Decimal;
 use App\Enums\StockMovementType;
 use App\Enums\VoucherType;
+use App\Models\Concerns\BelongsToBranch;
 use App\Support\Billing\DocumentCalculator;
 use App\Support\Billing\LineTotals;
+use App\Support\Billing\RoundOffPosting;
+use App\Support\Branches\BranchAccounts;
+use App\Support\Branches\BranchContext;
+use App\Support\Branches\DocumentBranch;
 use App\Support\ClosedFiscalYearGuard;
 use App\Support\Inventory\PerpetualCosting;
 use App\Support\Inventory\PerpetualStockGuard;
@@ -61,7 +66,9 @@ use InvalidArgumentException;
  * components themselves are split across lines with `Money::allocate()`, so
  * they sum back to the invoice exactly; the last-quantity rule then makes
  * the credits sum back to the components exactly. A return that completes
- * the whole invoice therefore reverses its VAT and TDS to the paisa.
+ * the whole invoice therefore reverses its VAT, TDS and Round Off to the paisa
+ * (Round Off is a fourth component, allocated by net like TDS; the return's
+ * share is inside its total and debits/credits INI31 in the credit note).
  *
  * Immutable once posted, EXCEPT via cancel() (see its own docblock) - same
  * append-only correction philosophy as every other voucher-backed document
@@ -83,11 +90,14 @@ use InvalidArgumentException;
 #[Fillable([
     'sale_id', 'customer_id', 'is_unlinked', 'journal_voucher_id', 'fiscal_year_id', 'credit_note_number',
     'date', 'store_id', 'reason', 'taxable_amount', 'nontaxable_amount', 'vat_amount', 'vat_rate', 'tds_amount',
-    'total', 'status', 'refund_account_id', 'refund_cash_amount', 'refund_bank_amount', 'refund_journal_voucher_id',
+    'round_off', 'total', 'status', 'refund_account_id', 'refund_cash_amount', 'refund_bank_amount', 'refund_journal_voucher_id',
     'rejection_reason', 'created_by', 'cancelled_at', 'cancelled_by', 'cancel_reason', 'reversal_journal_voucher_id',
+    'branch_id',
 ])]
 class SalesReturn extends Model
 {
+    use BelongsToBranch;
+
     /**
      * The fallback credit-note series prefix, used only when the tenant has
      * no company settings row at all. It is the literal the print view used
@@ -127,10 +137,12 @@ class SalesReturn extends Model
             'vat_amount' => Decimal::class.':2',
             'vat_rate' => Decimal::class.':2',
             'tds_amount' => Decimal::class.':2',
+            'round_off' => Decimal::class.':2',
             'total' => Decimal::class.':2',
             'refund_cash_amount' => Decimal::class.':2',
             'refund_bank_amount' => Decimal::class.':2',
             'cancelled_at' => 'datetime',
+            'branch_id' => 'integer',
         ];
     }
 
@@ -248,7 +260,7 @@ class SalesReturn extends Model
         $prefix = static::creditNotePrefix();
 
         return $this->journalVoucher
-            ? "{$prefix}-{$this->journalVoucher->voucher_number}"
+            ? $this->journalVoucher->printedNumber($prefix)
             : "{$prefix}-{$this->id}";
     }
 
@@ -274,7 +286,7 @@ class SalesReturn extends Model
      */
     private static function creditNoteNumberFor(JournalVoucher $voucher): string
     {
-        return static::creditNotePrefix()."-{$voucher->voucher_number}";
+        return $voucher->printedNumber(static::creditNotePrefix());
     }
 
     /**
@@ -297,7 +309,7 @@ class SalesReturn extends Model
      * in step. The two credits always sum to the return's own `total`, so
      * the voucher balances whatever the share turns out to be.
      *
-     * @param  array{sale_id: int, date: string, reason?: string|null, refund_account_id?: int|null, store_id?: int|null, expected_total?: string|null}  $data
+     * @param  array{sale_id: int, date: string, reason?: string|null, refund_account_id?: int|null, store_id?: int|null, branch_id?: int|null, expected_total?: string|null}  $data
      * @param  array<int, array{sale_line_id: int, quantity: string|float}>  $lines
      */
     public static function post(array $data, array $lines, User $actor): self
@@ -325,7 +337,7 @@ class SalesReturn extends Model
      * for a pending request's reserved quantity, so a later return can never
      * credit a paisa this one has claimed.
      *
-     * @param  array{sale_id: int, date: string, reason?: string|null, refund_account_id?: int|null, refund_cash_amount?: string|null, refund_bank_amount?: string|null, store_id?: int|null, expected_total?: string|null}  $data
+     * @param  array{sale_id: int, date: string, reason?: string|null, refund_account_id?: int|null, refund_cash_amount?: string|null, refund_bank_amount?: string|null, store_id?: int|null, branch_id?: int|null, expected_total?: string|null}  $data
      * @param  array<int, array{sale_line_id: int, quantity: string|float, bonus_quantity?: string|float}>  $lines
      */
     public static function request(array $data, array $lines, User $actor): self
@@ -337,7 +349,7 @@ class SalesReturn extends Model
      * Shared body of post() and request(): everything except whether the
      * money side is written now or deferred to approve().
      *
-     * @param  array{sale_id: int, date: string, reason?: string|null, refund_account_id?: int|null, refund_cash_amount?: string|null, refund_bank_amount?: string|null, store_id?: int|null, expected_total?: string|null}  $data
+     * @param  array{sale_id: int, date: string, reason?: string|null, refund_account_id?: int|null, refund_cash_amount?: string|null, refund_bank_amount?: string|null, store_id?: int|null, branch_id?: int|null, expected_total?: string|null}  $data
      * @param  array<int, array{sale_line_id: int, quantity: string|float, bonus_quantity?: string|float}>  $lines
      */
     private static function record(array $data, array $lines, User $actor, bool $post): self
@@ -354,7 +366,11 @@ class SalesReturn extends Model
             }
 
             $date = static::validatedDate($data['date'], $sale, $actor);
-            $storeId = static::resolveStoreId($data, $sale);
+            // A linked return lands in its sale's branch (plan 12, section
+            // 5.4) and its goods come back into a store of that branch,
+            // defaulting to the store the sale went out of.
+            $placement = DocumentBranch::inherited($actor, (int) $sale->branch_id, $sale->store_id, $data['branch_id'] ?? null, $data['store_id'] ?? null);
+            $storeId = $placement->requireStoreId();
             $refundAccountId = static::validatedRefundAccountId($data['refund_account_id'] ?? null);
             $refundCashAmount = static::validatedRefundSplitAmount($data['refund_cash_amount'] ?? null);
             $refundBankAmount = static::validatedRefundSplitAmount($data['refund_bank_amount'] ?? null);
@@ -383,7 +399,7 @@ class SalesReturn extends Model
             }
 
             $voucher = $post
-                ? static::postCreditNote($sale, $prepared, $date, $data['reason'] ?? null, $actor, static::inventoryReturnLines($prepared['lines'], $costs))
+                ? static::postCreditNote($sale, $prepared, $date, $data['reason'] ?? null, $actor, $placement->branchId, static::inventoryReturnLines($prepared['lines'], $costs))
                 : null;
 
             $salesReturn = static::create([
@@ -393,11 +409,13 @@ class SalesReturn extends Model
                 'credit_note_number' => $voucher ? static::creditNoteNumberFor($voucher) : null,
                 'date' => $date,
                 'store_id' => $storeId,
+                'branch_id' => $placement->branchId,
                 'reason' => $data['reason'] ?? null,
                 'taxable_amount' => $prepared['taxable'],
                 'nontaxable_amount' => $prepared['nontaxable'],
                 'vat_amount' => $prepared['vat'],
                 'tds_amount' => $prepared['tds'],
+                'round_off' => $prepared['roundOff'],
                 'total' => $prepared['total'],
                 'status' => $post ? 'posted' : 'pending',
                 'refund_account_id' => $refundAccountId,
@@ -416,6 +434,7 @@ class SalesReturn extends Model
                     'net_amount' => $line['net'],
                     'vat_amount' => $line['vat'],
                     'tds_amount' => $line['tds'],
+                    'round_off' => $line['round_off'],
                 ]);
 
                 if ($post && $line['moves_stock']) {
@@ -455,7 +474,7 @@ class SalesReturn extends Model
      * Goods only ever move INTO stock on a return, so - unlike a sale -
      * there is no negative-stock check to make.
      *
-     * @param  array{customer_id: int, date: string, reason?: string|null, store_id?: int|null, refund_account_id?: int|null, refund_cash_amount?: string|null, refund_bank_amount?: string|null, expected_total?: string|null}  $data
+     * @param  array{customer_id: int, date: string, reason?: string|null, store_id?: int|null, branch_id?: int|null, refund_account_id?: int|null, refund_cash_amount?: string|null, refund_bank_amount?: string|null, expected_total?: string|null}  $data
      * @param  array<int, array{item_id: int, item_unit_id?: int|null, quantity: string|float, rate: string|float, bonus_quantity?: string|float}>  $lines
      */
     public static function postUnlinked(array $data, array $lines, User $actor): self
@@ -463,7 +482,9 @@ class SalesReturn extends Model
         return DB::transaction(function () use ($data, $lines, $actor) {
             $customer = Customer::findOrFail($data['customer_id']);
             $date = static::validatedUnlinkedDate($data['date'], $actor);
-            $storeId = static::resolveUnlinkedStoreId($data['store_id'] ?? null);
+            // No parent to inherit from: placed like a fresh sale.
+            $placement = DocumentBranch::forStoreDocument($actor, $data['branch_id'] ?? null, $data['store_id'] ?? null);
+            $storeId = $placement->requireStoreId();
             $refundAccountId = static::validatedRefundAccountId($data['refund_account_id'] ?? null);
             $refundCashAmount = static::validatedRefundSplitAmount($data['refund_cash_amount'] ?? null);
             $refundBankAmount = static::validatedRefundSplitAmount($data['refund_bank_amount'] ?? null);
@@ -519,6 +540,7 @@ class SalesReturn extends Model
                     'voucher_type' => VoucherType::SaleReturn->value,
                     'date' => $date,
                     'narration' => $data['reason'] ?? "Unlinked return from {$customer->name}",
+                    'branch_id' => $placement->branchId,
                 ],
                 $voucherLines,
                 $actor,
@@ -534,6 +556,7 @@ class SalesReturn extends Model
                 'credit_note_number' => static::creditNoteNumberFor($voucher),
                 'date' => $date,
                 'store_id' => $storeId,
+                'branch_id' => $placement->branchId,
                 'reason' => $data['reason'] ?? null,
                 'taxable_amount' => $totals->taxableAmount,
                 'nontaxable_amount' => $totals->nontaxableAmount,
@@ -670,25 +693,6 @@ class SalesReturn extends Model
     }
 
     /**
-     * The store an unlinked return's goods come back into: the explicit
-     * choice, else the tenant's configured default store, else the
-     * lowest-id active store - same fallback chain Sale::resolveStoreId()
-     * uses (there is no parent document here to default to instead).
-     */
-    private static function resolveUnlinkedStoreId(mixed $storeId): int
-    {
-        $storeId = $storeId !== null && $storeId !== ''
-            ? (int) $storeId
-            : (CompanySetting::current()->default_store_id ?? Store::where('is_active', true)->orderBy('id')->value('id'));
-
-        if (! $storeId) {
-            throw new InvalidArgumentException('No active store is configured.');
-        }
-
-        return (int) $storeId;
-    }
-
-    /**
      * An unlinked return is dated inside a fiscal year that is open (or
      * deliberately reopened for correction) - same guard every dated
      * posting in this app goes through (C4). There is no parent sale date
@@ -744,6 +748,7 @@ class SalesReturn extends Model
                 'nontaxable' => Money::of($salesReturn->nontaxable_amount),
                 'vat' => Money::of($salesReturn->vat_amount),
                 'tds' => Money::of($salesReturn->tds_amount),
+                'roundOff' => Money::of($salesReturn->round_off ?? '0'),
                 'total' => Money::of($salesReturn->total),
                 'lines' => $storedLines->map(fn (SaleReturnLine $line): array => [
                     'sale_line' => $line->saleLine,
@@ -772,7 +777,9 @@ class SalesReturn extends Model
                 ->all();
             $costs = static::linkedReturnCosts($movementLines, $date);
 
-            $voucher = static::postCreditNote($sale, $prepared, $date, $salesReturn->reason, $actor, static::inventoryReturnLines($movementLines, $costs));
+            // Posted into the branch stored at request time, whoever
+            // approves: approval never moves a return to another branch.
+            $voucher = static::postCreditNote($sale, $prepared, $date, $salesReturn->reason, $actor, $salesReturn->branch_id, static::inventoryReturnLines($movementLines, $costs));
 
             $salesReturn->update([
                 'journal_voucher_id' => $voucher->id,
@@ -869,12 +876,19 @@ class SalesReturn extends Model
 
             static::assertPerpetualStockRemovable($salesReturn);
 
-            $original = $salesReturn->journalVoucher()->firstOrFail();
+            // Voucher lookups are unrestricted (plan 12, section 5.7): the
+            // return's own voucher must be found whoever cancels; reverse()
+            // itself still runs under the actor's access.
+            $original = BranchContext::unrestricted(fn (): JournalVoucher => $salesReturn->journalVoucher()->firstOrFail());
             $reversal = JournalVoucher::reverse($original, $actor, "Cancellation of {$salesReturn->documentNumber()}: {$reason}");
 
             if ($salesReturn->refund_journal_voucher_id) {
+                $refundVoucher = BranchContext::unrestricted(
+                    fn (): JournalVoucher => JournalVoucher::findOrFail($salesReturn->refund_journal_voucher_id)
+                );
+
                 JournalVoucher::reverse(
-                    JournalVoucher::findOrFail($salesReturn->refund_journal_voucher_id),
+                    $refundVoucher,
                     $actor,
                     "Cancellation of the refund for {$salesReturn->documentNumber()}: {$reason}",
                 );
@@ -909,7 +923,7 @@ class SalesReturn extends Model
      * screen and the number posted cannot disagree - and the posted document
      * still renders stored server values, never this preview (C8).
      *
-     * @return list<array{sale_line_id: int, item: string, unit: string, quantity: string, rate: string, returned: string, remaining: string, vatable: bool, net: string, vat: string, tds: string, credited_net: string, credited_vat: string, credited_tds: string}>
+     * @return list<array{sale_line_id: int, item: string, unit: string, quantity: string, rate: string, returned: string, remaining: string, vatable: bool, net: string, vat: string, tds: string, round_off: string, credited_net: string, credited_vat: string, credited_tds: string, credited_round_off: string}>
      */
     public static function returnableLines(Sale $sale): array
     {
@@ -952,9 +966,11 @@ class SalesReturn extends Model
                 'net' => $components[$saleLine->id]['net']->toString(),
                 'vat' => $components[$saleLine->id]['vat']->toString(),
                 'tds' => $components[$saleLine->id]['tds']->toString(),
+                'round_off' => $components[$saleLine->id]['round_off']->toString(),
                 'credited_net' => $credited[$saleLine->id]['net']->toString(),
                 'credited_vat' => $credited[$saleLine->id]['vat']->toString(),
                 'credited_tds' => $credited[$saleLine->id]['tds']->toString(),
+                'credited_round_off' => $credited[$saleLine->id]['round_off']->toString(),
             ];
         }
 
@@ -975,7 +991,7 @@ class SalesReturn extends Model
      *
      * @param  array<int, array{sale_line_id: int, quantity: string|float, bonus_quantity?: string|float}>  $lines
      * @param  int|null  $excludeReturnId  Ignore this return's own reserved quantity (re-validating an approval).
-     * @return array{lines: list<array{sale_line: SaleLine, quantity: Quantity, bonus_quantity: Quantity, net: Money, vat: Money, tds: Money, moves_stock: bool}>, taxable: Money, nontaxable: Money, vat: Money, tds: Money, total: Money}
+     * @return array{lines: list<array{sale_line: SaleLine, quantity: Quantity, bonus_quantity: Quantity, net: Money, vat: Money, tds: Money, round_off: Money, moves_stock: bool}>, taxable: Money, nontaxable: Money, vat: Money, tds: Money, roundOff: Money, total: Money}
      */
     private static function prepareLines(Sale $sale, array $lines, ?int $excludeReturnId = null): array
     {
@@ -1036,6 +1052,7 @@ class SalesReturn extends Model
         $nontaxable = Money::zero();
         $vat = Money::zero();
         $tds = Money::zero();
+        $roundOff = Money::zero();
 
         foreach ($requested as $saleLineId => $quantity) {
             $saleLine = $saleLines[$saleLineId];
@@ -1081,6 +1098,7 @@ class SalesReturn extends Model
             $net = $share('net');
             $lineVat = $share('vat');
             $lineTds = $share('tds');
+            $lineRoundOff = $share('round_off');
 
             if ($saleLine->vatable) {
                 $taxable = $taxable->plus($net);
@@ -1090,6 +1108,7 @@ class SalesReturn extends Model
 
             $vat = $vat->plus($lineVat);
             $tds = $tds->plus($lineTds);
+            $roundOff = $roundOff->plus($lineRoundOff);
 
             $preparedLines[] = [
                 'sale_line' => $saleLine,
@@ -1098,11 +1117,15 @@ class SalesReturn extends Model
                 'net' => $net,
                 'vat' => $lineVat,
                 'tds' => $lineTds,
+                'round_off' => $lineRoundOff,
                 'moves_stock' => in_array($saleLineId, $movedStock, true),
             ];
         }
 
-        $total = $taxable->plus($nontaxable)->plus($vat);
+        // The sale's Round Off is already inside its total, so the share of it
+        // this return gives back is inside the credit note total too (signed:
+        // a negative Round Off shrinks the credit).
+        $total = $taxable->plus($nontaxable)->plus($vat)->plus($roundOff);
 
         if (! $total->isPositive()) {
             throw new InvalidArgumentException('This return has no value left to credit.');
@@ -1118,12 +1141,13 @@ class SalesReturn extends Model
             'nontaxable' => $nontaxable,
             'vat' => $vat,
             'tds' => $tds,
+            'roundOff' => $roundOff,
             'total' => $total,
         ];
     }
 
     /**
-     * The three returnable components of every line of the original sale,
+     * The returnable components of every line of the original sale,
      * keyed by sale line id:
      *
      * - `net`: the line's value after its own discount AND its share of the
@@ -1137,9 +1161,12 @@ class SalesReturn extends Model
      * - `vat`: the invoice's VAT allocated across the vatable lines by net.
      * - `tds`: the invoice's TDS allocated across every line by net (TDS is
      *   withheld on the taxable + exempt base, C3 step 8).
+     * - `round_off`: the invoice's signed Round Off allocated across every
+     *   line by net, so a return gives back its share of it (it is part of
+     *   the invoice total the customer owes).
      *
      * @param  EloquentCollection<int, SaleLine>  $saleLines
-     * @return array<int, array{net: Money, vat: Money, tds: Money}>
+     * @return array<int, array{net: Money, vat: Money, tds: Money, round_off: Money}>
      */
     private static function saleComponents(Sale $sale, EloquentCollection $saleLines): array
     {
@@ -1177,6 +1204,14 @@ class SalesReturn extends Model
 
         $tds = static::shareByLine(Money::of($sale->tds_amount), $net);
 
+        // Round Off is spread over the returnable lines by net, like TDS. A
+        // sale whose returnable lines are all worth nothing has no weight to
+        // spread it by (allocate() refuses all-zero weights), so those lines
+        // carry none.
+        $roundOff = Money::sum($net)->isZero()
+            ? array_map(static fn (): Money => Money::zero(), $net)
+            : static::shareByLine(Money::of($sale->round_off ?? '0'), $net);
+
         $components = [];
 
         foreach ($net as $saleLineId => $lineNet) {
@@ -1184,6 +1219,7 @@ class SalesReturn extends Model
                 'net' => $lineNet,
                 'vat' => $vat[$saleLineId] ?? Money::zero(),
                 'tds' => $tds[$saleLineId] ?? Money::zero(),
+                'round_off' => $roundOff[$saleLineId] ?? Money::zero(),
             ];
         }
 
@@ -1257,7 +1293,7 @@ class SalesReturn extends Model
      * class of error this whole change exists to remove.
      *
      * @param  array<int, int>  $saleLineIds
-     * @return array<int, array{quantity: Quantity, bonus_quantity: Quantity, net: Money, vat: Money, tds: Money}>
+     * @return array<int, array{quantity: Quantity, bonus_quantity: Quantity, net: Money, vat: Money, tds: Money, round_off: Money}>
      */
     private static function alreadyCredited(array $saleLineIds, ?int $excludeReturnId = null): array
     {
@@ -1270,14 +1306,18 @@ class SalesReturn extends Model
                 'net' => Money::zero(),
                 'vat' => Money::zero(),
                 'tds' => Money::zero(),
+                'round_off' => Money::zero(),
             ];
         }
 
-        $rows = SaleReturnLine::query()
+        // The quantity cap and the C6 last-return remainder must count every
+        // earlier return of the line, so they are read outside the branch
+        // access scope (plan 12, section 5.7; mirrors PurchaseReturn).
+        $rows = BranchContext::unrestricted(fn () => SaleReturnLine::query()
             ->whereIn('sale_line_id', $saleLineIds)
             ->whereHas('salesReturn', fn ($query) => $query->whereIn('status', self::ACTIVE_STATUSES))
             ->when($excludeReturnId !== null, fn ($query) => $query->where('sales_return_id', '!=', $excludeReturnId))
-            ->get();
+            ->get());
 
         foreach ($rows as $row) {
             $credited[$row->sale_line_id]['quantity'] = $credited[$row->sale_line_id]['quantity']->plus(Quantity::of($row->quantity));
@@ -1285,6 +1325,7 @@ class SalesReturn extends Model
             $credited[$row->sale_line_id]['net'] = $credited[$row->sale_line_id]['net']->plus(Money::of($row->net_amount));
             $credited[$row->sale_line_id]['vat'] = $credited[$row->sale_line_id]['vat']->plus(Money::of($row->vat_amount));
             $credited[$row->sale_line_id]['tds'] = $credited[$row->sale_line_id]['tds']->plus(Money::of($row->tds_amount));
+            $credited[$row->sale_line_id]['round_off'] = $credited[$row->sale_line_id]['round_off']->plus(Money::of($row->round_off ?? '0'));
         }
 
         return $credited;
@@ -1625,10 +1666,11 @@ class SalesReturn extends Model
     }
 
     /**
-     * @param  array{taxable: Money, nontaxable: Money, vat: Money, tds: Money, total: Money, lines: list<array{sale_line: SaleLine, net: Money}>}  $prepared
+     * @param  array{taxable: Money, nontaxable: Money, vat: Money, tds: Money, roundOff: Money, total: Money, lines: list<array{sale_line: SaleLine, net: Money}>}  $prepared
+     * @param  int  $branchId  The return's own branch (its sale's), which the whole voucher posts into.
      * @param  list<array{account_id: int, debit: string, credit: string, narration: string}>  $inventoryLines  See inventoryReturnLines().
      */
-    private static function postCreditNote(Sale $sale, array $prepared, string $date, ?string $reason, User $actor, array $inventoryLines = []): JournalVoucher
+    private static function postCreditNote(Sale $sale, array $prepared, string $date, ?string $reason, User $actor, int $branchId, array $inventoryLines = []): JournalVoucher
     {
         $sale->loadMissing('customer');
 
@@ -1653,6 +1695,16 @@ class SalesReturn extends Model
                 'credit' => '0',
                 'narration' => 'VAT reversed',
             ];
+        }
+
+        // The sale credited INI31 for a positive Round Off, so giving its share
+        // back debits INI31 (and credits it for a negative one). Together with
+        // net + VAT it makes the debit side equal the return total the
+        // customer leg below credits.
+        $roundOffLine = RoundOffPosting::line($prepared['roundOff'], creditWhenPositive: false);
+
+        if ($roundOffLine !== null) {
+            $voucherLines[] = $roundOffLine;
         }
 
         $customerCredit = $prepared['total']->minus($prepared['tds']);
@@ -1692,6 +1744,7 @@ class SalesReturn extends Model
                 'voucher_type' => VoucherType::SaleReturn->value,
                 'date' => $date,
                 'narration' => "Return against sale #{$sale->id}".($reason ? ": {$reason}" : ''),
+                'branch_id' => $branchId,
             ],
             $voucherLines,
             $actor,
@@ -1749,19 +1802,21 @@ class SalesReturn extends Model
 
         $commissionExpenseId = Account::where('code', 'EXE22')->firstOrFail()->id;
 
-        $postedReturns = static::query()
+        // The commission remainder (SAL-07) counts every earlier return and
+        // its voucher lines, so both are read outside the branch access scope.
+        $postedReturns = BranchContext::unrestricted(fn () => static::query()
             ->where('sale_id', $sale->id)
             ->where('status', 'posted')
-            ->get(['id', 'total', 'journal_voucher_id']);
+            ->get(['id', 'total', 'journal_voucher_id']));
 
         $returnedValue = Money::sum($postedReturns->map(fn (self $salesReturn): Money => Money::of($salesReturn->total)))
             ->plus($returnTotal);
 
         $alreadyReversed = Money::sum(
-            JournalVoucherLine::query()
+            BranchContext::unrestricted(fn () => JournalVoucherLine::query()
                 ->whereIn('journal_voucher_id', $postedReturns->pluck('journal_voucher_id')->filter()->all())
                 ->where('account_id', $commissionExpenseId)
-                ->get(['credit'])
+                ->get(['credit']))
                 ->map(fn (JournalVoucherLine $line): Money => Money::of($line->credit))
         );
 
@@ -1804,11 +1859,12 @@ class SalesReturn extends Model
             return null;
         }
 
-        $accountId = JournalVoucherLine::query()
+        // Unrestricted: the sale's voucher is read whole whoever asks.
+        $accountId = BranchContext::unrestricted(fn (): mixed => JournalVoucherLine::query()
             ->where('journal_voucher_id', $sale->journal_voucher_id)
             ->where('credit', '>', 0)
             ->whereHas('account.subgroup', fn (Builder $query) => $query->where('name', 'Sales Agents'))
-            ->value('account_id');
+            ->value('account_id'));
 
         return $accountId === null ? null : (int) $accountId;
     }
@@ -1888,6 +1944,10 @@ class SalesReturn extends Model
                 'voucher_type' => VoucherType::Journal->value,
                 'date' => $date,
                 'narration' => "Refund for {$salesReturn->documentNumber()}",
+                // The refund is paid out where the return was taken, and it
+                // settles that branch's credit note, so both legs sit in the
+                // return's branch (plan 12, section 5.3 party-line rule).
+                'branch_id' => $salesReturn->branch_id,
             ],
             $voucherLines,
             $actor,
@@ -1961,26 +2021,6 @@ class SalesReturn extends Model
     }
 
     /**
-     * The store the goods come back into. Defaults to the store the sale
-     * went out of, not "the first active store": a two-store tenant used to
-     * silently restock returns in the wrong branch.
-     *
-     * @param  array{store_id?: int|null}  $data
-     */
-    private static function resolveStoreId(array $data, Sale $sale): int
-    {
-        $storeId = isset($data['store_id']) && $data['store_id'] !== ''
-            ? (int) $data['store_id']
-            : ($sale->store_id ?? Store::where('is_active', true)->orderBy('id')->value('id'));
-
-        if (! $storeId) {
-            throw new InvalidArgumentException('No active store is configured.');
-        }
-
-        return (int) $storeId;
-    }
-
-    /**
      * Money can only be refunded out of a cash or bank account: anything
      * under Current Assets except the party (Sundry Debtors) and Stock
      * subgroups, which are the two Current Asset subgroups this app's chart
@@ -2041,7 +2081,10 @@ class SalesReturn extends Model
                 $query->whereHas('group', fn (Builder $group) => $group->where('name', 'Current Assets'))
                     ->orWhereHas('subgroup.accountGroup', fn (Builder $group) => $group->where('name', 'Current Assets'));
             })
-            ->whereDoesntHave('subgroup', fn (Builder $subgroup) => $subgroup->whereIn('name', self::NON_MONEY_SUBGROUPS));
+            ->whereDoesntHave('subgroup', fn (Builder $subgroup) => $subgroup->whereIn('name', self::NON_MONEY_SUBGROUPS))
+            // Inter-Branch Clearing sits under Current Assets but is not
+            // money: only the system posts it (BranchAccounts, invariant I3).
+            ->where(fn (Builder $query) => $query->whereNull('code')->orWhereNotIn('code', BranchAccounts::CONTROL_CODES));
     }
 
     /**

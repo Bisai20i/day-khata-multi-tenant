@@ -5,7 +5,11 @@ namespace App\Models;
 use App\Casts\Decimal;
 use App\Enums\StockMovementType;
 use App\Enums\VoucherType;
+use App\Models\Concerns\BelongsToBranch;
 use App\Support\Billing\DocumentCalculator;
+use App\Support\Billing\RoundOffPosting;
+use App\Support\Branches\BranchContext;
+use App\Support\Branches\DocumentBranch;
 use App\Support\ClosedFiscalYearGuard;
 use App\Support\Inventory\PerpetualCosting;
 use App\Support\Inventory\PerpetualStockGuard;
@@ -56,11 +60,14 @@ use InvalidArgumentException;
 #[Fillable([
     'purchase_id', 'supplier_id', 'journal_voucher_id', 'fiscal_year_id', 'debit_note_number', 'is_unlinked',
     'date', 'store_id', 'reason', 'taxable_amount', 'nontaxable_amount', 'vat_rate', 'vat_amount', 'tds_amount',
-    'total', 'status', 'refund_account_id', 'refund_journal_voucher_id', 'cash_amount', 'bank_amount',
+    'total', 'round_off', 'status', 'refund_account_id', 'refund_journal_voucher_id', 'cash_amount', 'bank_amount',
     'bank_account_id', 'created_by', 'cancelled_at', 'cancelled_by', 'cancel_reason', 'reversal_journal_voucher_id',
+    'branch_id',
 ])]
 class PurchaseReturn extends Model
 {
+    use BelongsToBranch;
+
     /**
      * @return array<string, string>
      */
@@ -76,8 +83,11 @@ class PurchaseReturn extends Model
             'vat_amount' => Decimal::class.':2',
             'tds_amount' => Decimal::class.':2',
             'total' => Decimal::class.':2',
+            // Signed Round Off this (linked) return reverses; already INCLUDED in `total`.
+            'round_off' => Decimal::class.':2',
             'cash_amount' => Decimal::class.':2',
             'bank_amount' => Decimal::class.':2',
+            'branch_id' => 'integer',
         ];
     }
 
@@ -212,7 +222,12 @@ class PurchaseReturn extends Model
     }
 
     /**
-     * @param  array{purchase_id: int, date: string, reason?: string|null, refund_account_id?: int|null, store_id?: int|null}  $data
+     * A linked return is filed in its purchase's branch (plan 12, section
+     * 5.4): the debit note voucher and the optional refund voucher both post
+     * there, and the goods leave a store of that branch, by default the store
+     * the purchase brought them into.
+     *
+     * @param  array{purchase_id: int, date: string, reason?: string|null, refund_account_id?: int|null, store_id?: int|null, branch_id?: int|null}  $data
      * @param  array<int, array{purchase_line_id: int, quantity: mixed}>  $lines
      */
     public static function post(array $data, array $lines, User $actor): self
@@ -226,7 +241,8 @@ class PurchaseReturn extends Model
             }
 
             $date = static::validatedDate($data['date'], $purchase, $actor);
-            $storeId = static::resolveStoreId($data['store_id'] ?? null, $purchase);
+            $placement = DocumentBranch::inherited($actor, (int) $purchase->branch_id, $purchase->store_id, $data['branch_id'] ?? null, $data['store_id'] ?? null);
+            $storeId = $placement->requireStoreId();
 
             $requested = static::aggregatedQuantities($lines);
 
@@ -261,7 +277,9 @@ class PurchaseReturn extends Model
             ));
             $vat = Money::sum(array_map(static fn (array $line): Money => $line['vat'], $prepared));
             $tds = Money::sum(array_map(static fn (array $line): Money => $line['tds'], $prepared));
-            $total = $taxable->plus($nonTaxable)->plus($vat);
+            // The slice of the original bill's Round Off these lines give back (signed).
+            $roundOff = Money::sum(array_map(static fn (array $line): Money => $line['roundOff'], $prepared));
+            $total = $taxable->plus($nonTaxable)->plus($vat)->plus($roundOff);
 
             if (! $total->isPositive()) {
                 throw new InvalidArgumentException('A purchase return must credit more than zero.');
@@ -277,6 +295,13 @@ class PurchaseReturn extends Model
                     'credit' => $vat->toString(),
                     'narration' => 'VAT receivable reversed',
                 ];
+            }
+
+            // The purchase debited INI31 for a positive Round Off, so giving it
+            // back CREDITS it (and the other way round for a negative one). The
+            // supplier leg below already carries it inside `$total`.
+            if ($roundOffLine = RoundOffPosting::line($roundOff, creditWhenPositive: true)) {
+                $voucherLines[] = $roundOffLine;
             }
 
             $voucherLines[] = [
@@ -300,6 +325,7 @@ class PurchaseReturn extends Model
                     'voucher_type' => VoucherType::PurchaseReturn->value,
                     'date' => $date,
                     'narration' => $data['reason'] ?? "Return against purchase #{$purchase->id}",
+                    'branch_id' => $placement->branchId,
                 ],
                 $voucherLines,
                 $actor,
@@ -318,12 +344,14 @@ class PurchaseReturn extends Model
                 'debit_note_number' => static::debitNoteNumber($voucher),
                 'date' => $date,
                 'store_id' => $storeId,
+                'branch_id' => $placement->branchId,
                 'reason' => $data['reason'] ?? null,
                 'taxable_amount' => $taxable,
                 'nontaxable_amount' => $nonTaxable,
                 'vat_amount' => $vat,
                 'tds_amount' => $tds,
                 'total' => $total,
+                'round_off' => $roundOff,
                 'status' => 'posted',
                 'refund_account_id' => $data['refund_account_id'] ?? null,
                 'created_by' => $actor->id,
@@ -341,6 +369,7 @@ class PurchaseReturn extends Model
                     'net_value' => $line['net'],
                     'vat_amount' => $line['vat'],
                     'tds_amount' => $line['tds'],
+                    'round_off' => $line['roundOff'],
                 ]);
 
                 if ($purchaseLine->item->is_stockable && $purchaseLine->item->isPerpetual()) {
@@ -381,6 +410,11 @@ class PurchaseReturn extends Model
                         'voucher_type' => VoucherType::Journal->value,
                         'date' => $date,
                         'narration' => "Refund for purchase return #{$purchaseReturn->id}",
+                        // The refund is received where the return was made,
+                        // and it settles that branch's debit note, so both
+                        // legs sit in the return's branch (plan 12, section
+                        // 5.3 party-line rule).
+                        'branch_id' => $placement->branchId,
                     ],
                     [
                         ['account_id' => $data['refund_account_id'], 'debit' => $supplierDebit->toString(), 'credit' => '0', 'narration' => 'Refund received'],
@@ -523,7 +557,7 @@ class PurchaseReturn extends Model
      * return usually has no ongoing supplier ledger relationship to leave a
      * balance sitting on.
      *
-     * @param  array{date: string, supplier_id?: int|null, vat_rate?: mixed, payment_mode: string, bank_account_id?: int|null, cash_amount?: mixed, bank_amount?: mixed, store_id?: int|null, reason?: string|null, expected_total?: string|null}  $data
+     * @param  array{date: string, supplier_id?: int|null, vat_rate?: mixed, payment_mode: string, bank_account_id?: int|null, cash_amount?: mixed, bank_amount?: mixed, store_id?: int|null, branch_id?: int|null, reason?: string|null, expected_total?: string|null}  $data
      * @param  array<int, array{item_id: int, item_unit_id?: int|null, quantity: mixed, rate?: mixed}>  $lines
      */
     public static function postUnlinked(array $data, array $lines, User $actor): self
@@ -545,8 +579,12 @@ class PurchaseReturn extends Model
                 ? Supplier::whereKey($data['supplier_id'])->lockForUpdate()->first()
                 : null;
 
-            $storeId = static::resolveUnlinkedStoreId($data['store_id'] ?? null);
             $company = CompanySetting::current();
+            // No parent to inherit from: placed like a fresh purchase, by the
+            // requested branch, else the store's, else the actor's posting
+            // branch (plan 12, I5/I6).
+            $placement = DocumentBranch::forStoreDocument($actor, $data['branch_id'] ?? null, $data['store_id'] ?? null, $company);
+            $storeId = $placement->requireStoreId();
             $vatRate = $data['vat_rate'] ?? $company->default_vat_rate ?? '13';
 
             static::lockItemsBeforePerpetualPricing($lines);
@@ -602,6 +640,7 @@ class PurchaseReturn extends Model
                     'voucher_type' => VoucherType::PurchaseReturn->value,
                     'date' => $date,
                     'narration' => $data['reason'] ?? ($supplier ? "Unlinked purchase return - {$supplier->name}" : 'Unlinked purchase return (opening stock)'),
+                    'branch_id' => $placement->branchId,
                 ],
                 $voucherLines,
                 $actor,
@@ -620,6 +659,7 @@ class PurchaseReturn extends Model
                 'is_unlinked' => true,
                 'date' => $date,
                 'store_id' => $storeId,
+                'branch_id' => $placement->branchId,
                 'reason' => $data['reason'] ?? null,
                 'vat_rate' => $vatRate,
                 'taxable_amount' => $taxable,
@@ -699,15 +739,18 @@ class PurchaseReturn extends Model
                 throw new InvalidArgumentException('This purchase return has already been cancelled.');
             }
 
+            // Both reversals stay in the return's branch: reverse() keeps the
+            // original's origin branch and every line's branch, and still
+            // checks that the actor may post there.
             $reversal = JournalVoucher::reverse(
-                $return->journalVoucher()->firstOrFail(),
+                BranchContext::unrestricted(fn () => $return->journalVoucher()->firstOrFail()),
                 $actor,
                 "Cancellation of purchase return #{$return->id}: {$reason}",
             );
 
             if ($return->refund_journal_voucher_id) {
                 JournalVoucher::reverse(
-                    $return->refundJournalVoucher()->firstOrFail(),
+                    BranchContext::unrestricted(fn () => $return->refundJournalVoucher()->firstOrFail()),
                     $actor,
                     "Cancellation of refund for purchase return #{$return->id}: {$reason}",
                 );
@@ -748,7 +791,7 @@ class PurchaseReturn extends Model
      * first, so a return that empties the line always ends up crediting
      * exactly the line's remaining value, never a paisa more or less.
      *
-     * @return array{purchaseLine: PurchaseLine, quantity: Quantity, bonusQuantity: Quantity, baseQuantity: Quantity, net: Money, vat: Money, tds: Money}
+     * @return array{purchaseLine: PurchaseLine, quantity: Quantity, bonusQuantity: Quantity, baseQuantity: Quantity, net: Money, vat: Money, tds: Money, roundOff: Money}
      */
     private static function prepareLine(PurchaseLine $purchaseLine, Quantity $quantity): array
     {
@@ -760,7 +803,10 @@ class PurchaseReturn extends Model
         $bonusReceived = Quantity::of($purchaseLine->bonus_quantity ?? '0');
         $totalReceived = $paidQuantity->plus($bonusReceived);
 
-        $reserved = static::quantityReturned($purchaseLine, postedOnly: false);
+        // The quantity cap and the C6 last-return remainder must count every
+        // earlier return of the line, so those reads (and only those) run
+        // outside the branch access scope (plan 12, section 5.7).
+        $reserved = BranchContext::unrestricted(fn () => static::quantityReturned($purchaseLine, postedOnly: false));
 
         if ($quantity->plus($reserved)->isGreaterThan($totalReceived)) {
             $remaining = $totalReceived->minus($reserved);
@@ -771,7 +817,7 @@ class PurchaseReturn extends Model
             );
         }
 
-        $paidAlreadyCredited = static::paidQuantityCredited($purchaseLine);
+        $paidAlreadyCredited = BranchContext::unrestricted(fn () => static::paidQuantityCredited($purchaseLine));
         $paidRemaining = Quantity::max($paidQuantity->minus($paidAlreadyCredited), Quantity::zero());
         $thisPaidPortion = Quantity::min($quantity, $paidRemaining);
         $thisBonusPortion = $quantity->minus($thisPaidPortion);
@@ -786,6 +832,9 @@ class PurchaseReturn extends Model
             'net' => static::share($purchaseLine, 'net_value', 'line_total', $thisPaidPortion, $paidQuantity, $isFinalReturn),
             'vat' => static::share($purchaseLine, 'vat_amount', null, $thisPaidPortion, $paidQuantity, $isFinalReturn),
             'tds' => static::share($purchaseLine, 'tds_amount', null, $thisPaidPortion, $paidQuantity, $isFinalReturn),
+            // Signed: HalfUp is symmetric about zero, and the final return takes
+            // "slice minus already credited", which holds for a negative slice too.
+            'roundOff' => static::share($purchaseLine, 'round_off', null, $thisPaidPortion, $paidQuantity, $isFinalReturn),
         ];
     }
 
@@ -804,7 +853,7 @@ class PurchaseReturn extends Model
         $component = Money::of($purchaseLine->{$column} ?? ($fallbackColumn ? $purchaseLine->{$fallbackColumn} : '0') ?? '0');
 
         if ($isFinalReturn) {
-            return $component->minus(static::amountCredited($purchaseLine, $column));
+            return $component->minus(BranchContext::unrestricted(fn () => static::amountCredited($purchaseLine, $column)));
         }
 
         return $component->multipliedByFraction($quantity, $lineQuantity);
@@ -967,25 +1016,6 @@ class PurchaseReturn extends Model
     }
 
     /**
-     * Returns leave from the store the goods were received into unless the form
-     * says otherwise, so a multi-store tenant cannot silently take stock out of
-     * a warehouse that never held it.
-     */
-    private static function resolveStoreId(mixed $storeId, Purchase $purchase): int
-    {
-        $storeId = $storeId !== null && $storeId !== ''
-            ? (int) $storeId
-            : ($purchase->store_id ?? CompanySetting::current()->default_store_id
-                ?? Store::where('is_active', true)->orderBy('id')->value('id'));
-
-        if (! $storeId) {
-            throw new InvalidArgumentException('No active store is configured.');
-        }
-
-        return (int) $storeId;
-    }
-
-    /**
      * Refuses to send back stock the store no longer holds. The item rows are
      * locked in ascending id first, so the reads below cannot move underneath
      * this transaction (CONTRACTS C10).
@@ -1059,7 +1089,7 @@ class PurchaseReturn extends Model
     {
         $prefix = CompanySetting::current()->purchase_return_prefix ?: 'PR';
 
-        return "{$prefix}-{$voucher->voucher_number}";
+        return $voucher->printedNumber($prefix);
     }
 
     /**
@@ -1076,25 +1106,6 @@ class PurchaseReturn extends Model
         return Quantity::of(
             $value->toBigDecimal()->dividedBy($baseQuantity->toBigDecimal(), 4, RoundingMode::HalfUp)
         );
-    }
-
-    /**
-     * The store an unlinked return leaves from when the form does not name
-     * one: the tenant's configured default, else the oldest active store -
-     * there is no parent purchase to fall back to (see resolveStoreId()'s
-     * linked-return equivalent).
-     */
-    private static function resolveUnlinkedStoreId(mixed $storeId): int
-    {
-        $storeId = $storeId !== null && $storeId !== ''
-            ? (int) $storeId
-            : (CompanySetting::current()->default_store_id ?? Store::where('is_active', true)->orderBy('id')->value('id'));
-
-        if (! $storeId) {
-            throw new InvalidArgumentException('No active store is configured.');
-        }
-
-        return (int) $storeId;
     }
 
     /**

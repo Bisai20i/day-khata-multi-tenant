@@ -1,8 +1,11 @@
 <script setup>
+import { computed } from 'vue';
 import { X } from '@lucide/vue';
 import Input from '@/components/ui/Input.vue';
 import Combobox from '@/components/ui/Combobox.vue';
 import InfoTip from '@/components/ui/InfoTip.vue';
+import Select from '@/components/ui/Select.vue';
+import { useBranchLabel } from '@/composables/useBranchLabel';
 import { isZeroMoney } from '@/lib/money';
 import { voucherAmountOf } from '@/lib/journalVoucherCreate';
 
@@ -13,6 +16,9 @@ const props = defineProps({
     lines: { type: Array, default: () => [] },
     errors: { type: Object, default: () => ({}) },
     accountOptions: { type: Array, default: () => [] },
+    // Branches a line may be moved to (plan 12, BR12). Empty (the default,
+    // and always for a single-branch company) hides the branch column.
+    branchOptions: { type: Array, default: () => [] },
 });
 
 defineEmits(['remove']);
@@ -31,7 +37,25 @@ function setCredit(index, value) {
     if (amount !== null && !isZeroMoney(amount)) props.lines[index].debit = '';
 }
 
-const LINE_GRID = 'grid-cols-[1fr_130px_130px_1fr_28px]';
+const { label: branchLabel } = useBranchLabel();
+
+// reka-ui's Select cannot hold an empty value, so "no override" (the line
+// follows the voucher's branch) is a sentinel option, stored back as null.
+const SAME_AS_VOUCHER = 'voucher';
+
+const showBranch = computed(() => props.branchOptions.length > 0);
+const lineBranchOptions = computed(() => [
+    { value: SAME_AS_VOUCHER, label: 'Same as voucher' },
+    ...props.branchOptions.map((branch) => ({ value: branch.id, label: branch.name })),
+]);
+
+function setLineBranch(index, value) {
+    props.lines[index].branch_id = value === SAME_AS_VOUCHER ? null : value;
+}
+
+const LINE_GRID = computed(() => (showBranch.value
+    ? 'grid-cols-[1fr_150px_130px_130px_1fr_28px]'
+    : 'grid-cols-[1fr_130px_130px_1fr_28px]'));
 </script>
 
 <template>
@@ -51,6 +75,7 @@ const LINE_GRID = 'grid-cols-[1fr_130px_130px_1fr_28px]';
         <div v-else>
             <div class="mb-2 grid gap-2 text-[10px] font-bold tracking-[.8px] text-text-muted uppercase" :class="LINE_GRID">
                 <span>Account</span>
+                <span v-if="showBranch">{{ branchLabel() }}</span>
                 <span class="text-right">Debit (Dr)</span>
                 <span class="text-right">Credit (Cr)</span>
                 <span>Line narration</span>
@@ -66,6 +91,14 @@ const LINE_GRID = 'grid-cols-[1fr_130px_130px_1fr_28px]';
                         @update:model-value="(v) => (line.account_id = v)"
                     />
                     <p v-if="errors[`lines.${index}.account_id`]" class="mt-1 text-xs text-danger">{{ errors[`lines.${index}.account_id`] }}</p>
+                </div>
+                <div v-if="showBranch">
+                    <Select
+                        :model-value="line.branch_id ?? SAME_AS_VOUCHER"
+                        :options="lineBranchOptions"
+                        @update:model-value="(v) => setLineBranch(index, v)"
+                    />
+                    <p v-if="errors[`lines.${index}.branch_id`]" class="mt-1 text-xs text-danger">{{ errors[`lines.${index}.branch_id`] }}</p>
                 </div>
                 <div>
                     <Input

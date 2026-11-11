@@ -13,6 +13,9 @@ import Label from '@/components/ui/Label.vue';
 import { formatMoney, isZeroMoney } from '@/lib/money.js';
 import { formatBsDate } from '@/lib/format.js';
 import { usePermissions } from '@/composables/usePermissions';
+import { useBranchReportFilter } from '@/composables/useBranchReportFilter';
+import BranchReportFilter from '@/components/branch/BranchReportFilter.vue';
+import BranchReportNotes from '@/components/branch/BranchReportNotes.vue';
 
 defineOptions({ layout: AppLayout });
 
@@ -28,6 +31,8 @@ const props = defineProps({
     closingBalance: { type: String, default: '0.00' },
     from: { type: [String, null], default: null },
     to: { type: [String, null], default: null },
+    // Branch filter; null when the company has no branches.
+    branchReport: { type: [Object, null], default: null },
 });
 
 useLayoutChrome('Bank Book');
@@ -48,6 +53,8 @@ const from = ref(props.from);
 const to = ref(props.to);
 const accountId = ref(props.accountId);
 
+const branchFilter = useBranchReportFilter(() => props.branchReport);
+
 // See CashBook.vue: a book is only ever read inside one fiscal year.
 watch(fiscalYear, (value) => {
     const chosen = props.fiscalYears.find((year) => year.id === value);
@@ -64,6 +71,7 @@ function applyFilter() {
             from: from.value ?? undefined,
             to: to.value ?? undefined,
             account_id: accountId.value ?? undefined,
+            ...branchFilter.toQuery(),
         },
         { preserveState: true, preserveScroll: true },
     );
@@ -108,6 +116,7 @@ function printUrl() {
         to: to.value ?? '',
         account_id: accountId.value ?? '',
     });
+    branchFilter.appendTo(params);
     return `/reports/bank-book/print?${params.toString()}`;
 }
 
@@ -118,6 +127,7 @@ function exportUrl() {
         to: to.value ?? '',
         account_id: accountId.value ?? '',
     });
+    branchFilter.appendTo(params);
     return `/reports/bank-book/export?${params.toString()}`;
 }
 
@@ -158,11 +168,19 @@ const columns = [
                     <Label class="mb-1">To date (BS)</Label>
                     <NepaliDateInput v-model="to" />
                 </div>
+                <BranchReportFilter
+                    v-if="branchReport"
+                    v-model:choice="branchFilter.choice.value"
+                    :report="branchReport"
+                    id-prefix="bank-book"
+                    @change="applyFilter"
+                />
                 <Button variant="primary" tone="purple" @click="applyFilter">Generate report</Button>
             </div>
             <p v-if="from && to" class="mt-2 text-[12px] text-text-muted">
                 Showing report for {{ formatBsDate(from) }} to {{ formatBsDate(to) }} BS
             </p>
+            <BranchReportNotes v-if="branchReport" :report="branchReport" />
         </Card>
 
         <Card variant="panel">

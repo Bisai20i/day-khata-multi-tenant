@@ -13,6 +13,10 @@ import DataTable from '@/components/ui/DataTable.vue';
 import Label from '@/components/ui/Label.vue';
 import { formatMoney } from '@/lib/money';
 import { formatBsDate } from '@/lib/format';
+import { useBranchReportFilter } from '@/composables/useBranchReportFilter';
+import { useBranchLabel } from '@/composables/useBranchLabel';
+import BranchReportFilter from '@/components/branch/BranchReportFilter.vue';
+import BranchReportNotes from '@/components/branch/BranchReportNotes.vue';
 
 defineOptions({ layout: AppLayout });
 
@@ -30,6 +34,8 @@ const props = defineProps({
     storeId: { type: [Number, null], default: null },
     paymentMode: { type: [String, null], default: null },
     search: { type: String, default: '' },
+    // Branch filter; null when the company has no branches.
+    branchReport: { type: [Object, null], default: null },
 });
 
 useLayoutChrome('Sales Register');
@@ -40,6 +46,9 @@ const customerId = ref(props.customerId);
 const storeId = ref(props.storeId);
 const paymentMode = ref(props.paymentMode);
 const search = ref(props.search);
+
+const branchFilter = useBranchReportFilter(() => props.branchReport);
+const { label: branchWord } = useBranchLabel();
 
 const customerOptions = computed(() => [
     { value: null, label: 'All customers' },
@@ -86,6 +95,7 @@ function applyFilter() {
             store_id: storeId.value ?? undefined,
             payment_mode: paymentMode.value ?? undefined,
             search: search.value || undefined,
+            ...branchFilter.toQuery(),
         },
         {
             preserveState: true,
@@ -107,11 +117,12 @@ function cellClasses(row) {
     return row.original.status === 'cancelled' ? 'text-text-faint line-through decoration-1' : '';
 }
 
-const columns = [
+const baseColumns = [
     { id: 'date', header: 'Date (BS)', numeric: false, cell: ({ row }) => h('span', { class: cellClasses(row) }, formatBsDate(row.original.date)) },
     { accessorKey: 'date', header: 'Date (AD)', cell: ({ row }) => h('span', { class: cellClasses(row) }, row.original.date) },
     // The stored invoice number (C7), never rebuilt from the current prefix.
     { id: 'invoice_number', header: 'Invoice #', numeric: false, cell: ({ row }) => h('span', { class: cellClasses(row) }, row.original.invoice_number ?? '-') },
+    { id: 'chalani_number', header: 'Chalani No', numeric: false, cell: ({ row }) => h('span', { class: cellClasses(row) }, row.original.chalani_number ?? '-') },
     {
         id: 'invoice_type',
         header: 'Type',
@@ -123,6 +134,7 @@ const columns = [
     { id: 'nontaxable_amount', header: 'Non-Taxable', numeric: true, cell: ({ row }) => h('span', { class: cellClasses(row) }, formatMoney(row.original.nontaxable_amount)) },
     { id: 'taxable_amount', header: 'Taxable', numeric: true, cell: ({ row }) => h('span', { class: cellClasses(row) }, formatMoney(row.original.taxable_amount)) },
     { id: 'vat_amount', header: 'VAT', numeric: true, cell: ({ row }) => h('span', { class: cellClasses(row) }, formatMoney(row.original.vat_amount)) },
+    { id: 'round_off', header: 'Round Off', numeric: true, cell: ({ row }) => h('span', { class: cellClasses(row) }, formatMoney(row.original.round_off ?? '0.00')) },
     { id: 'total', header: 'Total amount', numeric: true, cell: ({ row }) => h('span', { class: cellClasses(row) }, formatMoney(row.original.total)) },
     {
         id: 'payment_mode',
@@ -142,6 +154,23 @@ const columns = [
             ),
     },
 ];
+
+// The branch column exists only for a multi-branch company, after the invoice number.
+const columns = computed(() => {
+    if (!props.branchReport) {
+        return baseColumns;
+    }
+
+    const branchColumn = {
+        id: 'branch',
+        header: branchWord(),
+        numeric: false,
+        cell: ({ row }) => h('span', { class: cellClasses(row) }, row.original.branch ?? '-'),
+    };
+    const at = baseColumns.findIndex((column) => column.id === 'invoice_number') + 1;
+
+    return [...baseColumns.slice(0, at), branchColumn, ...baseColumns.slice(at)];
+});
 </script>
 
 <template>
@@ -174,11 +203,19 @@ const columns = [
                 </div>
                 <div class="w-56">
                     <Label class="mb-1">Search</Label>
-                    <Input v-model="search" placeholder="Invoice # or customer..." @keydown.enter.prevent="applyFilter" />
+                    <Input v-model="search" placeholder="Invoice #, chalani # or customer..." @keydown.enter.prevent="applyFilter" />
                 </div>
+                <BranchReportFilter
+                    v-if="branchReport"
+                    v-model:choice="branchFilter.choice.value"
+                    :report="branchReport"
+                    id-prefix="sales-register"
+                    @change="applyFilter"
+                />
                 <Button variant="primary" tone="purple" :loading="isLoading" @click="applyFilter">Generate report</Button>
                 <Button v-if="hasActiveFilter" variant="secondary" tone="purple" :disabled="isLoading" @click="resetFilters">Reset</Button>
             </div>
+            <BranchReportNotes v-if="branchReport" :report="branchReport" />
         </Card>
 
         <Card variant="panel">
@@ -190,6 +227,7 @@ const columns = [
                 <div><span class="text-text-muted">Non-Taxable:</span> <span class="font-semibold">{{ formatMoney(totals.nontaxable_amount) }}</span></div>
                 <div><span class="text-text-muted">Taxable:</span> <span class="font-semibold">{{ formatMoney(totals.taxable_amount) }}</span></div>
                 <div><span class="text-text-muted">VAT:</span> <span class="font-semibold">{{ formatMoney(totals.vat_amount) }}</span></div>
+                <div><span class="text-text-muted">Round Off:</span> <span class="font-semibold">{{ formatMoney(totals.round_off ?? '0.00') }}</span></div>
                 <div><span class="text-text-muted">Total amount:</span> <span class="font-bold text-primary">{{ formatMoney(totals.total) }}</span></div>
             </div>
 

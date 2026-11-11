@@ -5,6 +5,7 @@ import Badge from '@/components/ui/Badge.vue';
 import Input from '@/components/ui/Input.vue';
 import { formatQuantity, formatRate, parseQuantity } from '@/lib/money';
 import { compareQuantity, toScaledQuantity } from '@/lib/quantity';
+import { useStockScopeLabel } from '@/composables/useStockScopeLabel';
 
 /**
  * POS left panel: product search + barcode inputs, category chips and the item
@@ -23,6 +24,9 @@ const props = defineProps({
     tileCap: { type: Number, required: true },
     lines: { type: Array, default: () => [] },
     isOutOfStock: { type: Function, required: true },
+    // False when the figure is advisory only (see usePosBranch.stockBlocksSale):
+    // the Out badge stays but the tile is never disabled.
+    blockOutOfStock: { type: Boolean, default: true },
 });
 
 const emit = defineEmits([
@@ -35,6 +39,9 @@ const emit = defineEmits([
     'search-wrapper',
     'barcode-wrapper',
 ]);
+
+// "Stock (this branch):" in a multi-branch company, plain "Stock:" otherwise.
+const { withStockScope } = useStockScopeLabel();
 
 const bindSearchWrapper = (element) => emit('search-wrapper', element);
 const bindBarcodeWrapper = (element) => emit('barcode-wrapper', element);
@@ -117,7 +124,7 @@ function hasQuantityInCart(itemId) {
                 variant="product"
                 class="relative"
                 :class="[
-                    isOutOfStock(item) ? 'pointer-events-none opacity-50' : 'cursor-pointer select-none',
+                    blockOutOfStock && isOutOfStock(item) ? 'pointer-events-none opacity-50' : 'cursor-pointer select-none',
                     hasQuantityInCart(item.id) ? 'border-primary hover:border-primary' : '',
                 ]"
                 @click="emit('add-item', item)"
@@ -153,7 +160,7 @@ function hasQuantityInCart(itemId) {
                 <p v-else class="mt-1 inline-block bg-warning-bg px-1.5 py-0.5 text-[11px] font-bold text-warning-text">No price set</p>
                 <p v-if="isOutOfStock(item)" class="mt-1 text-[10px] font-bold text-danger uppercase">Out of stock</p>
                 <p v-else-if="item.is_stockable" class="mt-1 text-[10px] text-text-faint">
-                    Stock: {{ formatQuantity(item.current_stock) }}
+                    {{ withStockScope('Stock') }}: {{ formatQuantity(item.current_stock) }}
                 </p>
             </Card>
             <div v-if="filteredItems.length === 0" class="col-span-full flex flex-col items-center gap-1 py-8 text-center">

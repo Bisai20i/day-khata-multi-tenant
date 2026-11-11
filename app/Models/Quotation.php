@@ -4,6 +4,7 @@ namespace App\Models;
 
 use App\Casts\Decimal;
 use App\Enums\QuotationStatus;
+use App\Models\Concerns\BelongsToBranch;
 use App\Support\Billing\BillingException;
 use App\Support\Billing\DocumentCalculator;
 use App\Support\Billing\DocumentTotals;
@@ -39,10 +40,12 @@ use InvalidArgumentException;
 #[Fillable([
     'customer_id', 'date', 'discount', 'vat_rate', 'reference_number',
     'narration', 'status', 'sale_id', 'created_by',
-    'taxable_amount', 'nontaxable_amount', 'vat_amount', 'total',
+    'taxable_amount', 'nontaxable_amount', 'vat_amount', 'total', 'branch_id',
 ])]
 class Quotation extends Model
 {
+    use BelongsToBranch;
+
     /**
      * @return array<string, string>
      */
@@ -57,6 +60,7 @@ class Quotation extends Model
             'vat_amount' => Decimal::class.':2',
             'total' => Decimal::class.':2',
             'status' => QuotationStatus::class,
+            'branch_id' => 'integer',
         ];
     }
 
@@ -226,6 +230,9 @@ class Quotation extends Model
                     'discount_type' => 'flat',
                     'vat_rate' => $quotation->vat_rate,
                     'narration' => $quotation->narration ?? "Converted from quotation #{$quotation->id}",
+                    // The sale is billed in the quotation's branch, from that
+                    // branch's default store (plan 12, section 5.4).
+                    'branch_id' => $quotation->branch_id,
                 ],
                 $lines->map(fn (QuotationLine $line): array => [
                     'item_id' => $line->item_id,

@@ -10,9 +10,12 @@ use App\Models\Account;
 use App\Models\FiscalYear;
 use App\Models\JournalVoucherLine;
 use App\Models\Store;
+use App\Support\Branches\BranchFilter;
+use App\Support\Branches\BranchStock;
 use App\Support\Money\Money;
 use Brick\Math\BigDecimal;
 use Brick\Math\RoundingMode;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Http\Request;
 use Illuminate\Support\Collection;
 use Inertia\Inertia;
@@ -43,6 +46,16 @@ use Maatwebsite\Excel\Facades\Excel;
  * else means VAT reached those accounts by a route this report does not
  * model - almost always a hand-written journal voucher - and the tenant
  * needs to see that before filing, not after.
+ *
+ * **Branches** (plan 12, BR14). The branch filter (`branch`, `branches[]`,
+ * BranchFilter) is handed to the same four book payloads, which narrow on
+ * each document's own branch_id, so the summary still sums exactly the rows
+ * the books render. The reconciliation narrows the VAT control accounts'
+ * ledger lines on journal_voucher_lines.branch_id: a sale, purchase or
+ * return is single-branch and posts its VAT line under its own branch (and a
+ * cancellation's Reversal mirrors it), so a branch's ledger VAT ties to that
+ * branch's books exactly as the company figure does. A tenant that is not
+ * multi-branch, or a view of every branch, runs exactly the old queries.
  */
 class VatSummaryReportController extends Controller
 {
@@ -68,11 +81,13 @@ class VatSummaryReportController extends Controller
 
     public function index(Request $request): Response
     {
-        $summary = $this->computeSummary($request);
+        $branchFilter = BranchFilter::fromRequest($request);
+        $summary = $this->computeSummary($request, $branchFilter);
 
         return Inertia::render('Tenant/Reports/VatSummary', [
             ...$summary,
-            'stores' => Store::where('is_active', true)->orderBy('name')->get(['id', 'name']),
+            'stores' => BranchStock::storeOptions($branchFilter, Store::where('is_active', true))->orderBy('name')->get(['id', 'name']),
+            'branchReport' => $branchFilter->payload(),
         ]);
     }
 
@@ -83,10 +98,17 @@ class VatSummaryReportController extends Controller
      */
     public function export(Request $request)
     {
-        $summary = $this->computeSummary($request);
+        $branchFilter = BranchFilter::fromRequest($request);
+        $summary = $this->computeSummary($request, $branchFilter);
 
         return Excel::download(
-            new VatSummaryExport($summary['outputVat'], $summary['inputVat'], $summary['netVatPayable'], $summary['reconciliation']),
+            new VatSummaryExport(
+                $summary['outputVat'],
+                $summary['inputVat'],
+                $summary['netVatPayable'],
+                $summary['reconciliation'],
+                $branchFilter->isActive() ? $branchFilter->label() : null,
+            ),
             "vat-summary-{$summary['from']}-to-{$summary['to']}.xlsx",
         );
     }
@@ -94,7 +116,7 @@ class VatSummaryReportController extends Controller
     /**
      * @return array<string, mixed>
      */
-    private function computeSummary(Request $request): array
+    private function computeSummary(Request $request, BranchFilter $branchFilter): array
     {
         [$from, $to] = $this->resolveDateRange($request);
         $storeId = $request->integer('store_id') ?: null;
@@ -102,13 +124,13 @@ class VatSummaryReportController extends Controller
         $books = new SalesPurchaseReportController;
 
         $outputVat = $this->side(
-            $books->salesVatBookPayload($from, $to, $storeId)['rows'],
-            $books->salesReturnRegisterPayload($from, $to, $storeId)['rows'],
+            $books->salesVatBookPayload($from, $to, $storeId, $branchFilter)['rows'],
+            $books->salesReturnRegisterPayload($from, $to, $storeId, $branchFilter)['rows'],
         );
 
         $inputVat = $this->side(
-            $books->purchaseVatBookPayload($from, $to, $storeId)['rows'],
-            $books->purchaseReturnRegisterPayload($from, $to, $storeId)['rows'],
+            $books->purchaseVatBookPayload($from, $to, $storeId, $branchFilter)['rows'],
+            $books->purchaseReturnRegisterPayload($from, $to, $storeId, $branchFilter)['rows'],
         );
 
         $netVatPayable = Money::of($outputVat['net'])->minus(Money::of($inputVat['net']));
@@ -117,7 +139,7 @@ class VatSummaryReportController extends Controller
             'outputVat' => $outputVat,
             'inputVat' => $inputVat,
             'netVatPayable' => $netVatPayable->toString(),
-            'reconciliation' => $this->reconciliation($from, $to, $storeId, $outputVat['net'], $inputVat['net'], $netVatPayable),
+            'reconciliation' => $this->reconciliation($from, $to, $storeId, $branchFilter, $outputVat['net'], $inputVat['net'], $netVatPayable),
             'from' => $from,
             'to' => $to,
             'storeId' => $storeId,
@@ -182,18 +204,20 @@ class VatSummaryReportController extends Controller
      * A store filter has no ledger counterpart (the chart of accounts is not
      * store-scoped), so the comparison is only meaningful for the whole
      * business; with a store selected the block reports itself as not
-     * applicable rather than showing a difference that means nothing.
+     * applicable rather than showing a difference that means nothing. A
+     * branch filter does have one (every ledger line carries a branch_id),
+     * so the block stays applicable and compares like with like.
      *
      * @return array<string, mixed>
      */
-    private function reconciliation(string $from, string $to, ?int $storeId, string $reportOutput, string $reportInput, Money $reportNet): array
+    private function reconciliation(string $from, string $to, ?int $storeId, BranchFilter $branchFilter, string $reportOutput, string $reportInput, Money $reportNet): array
     {
         if ($storeId !== null) {
             return ['applicable' => false];
         }
 
-        $ledgerOutput = $this->ledgerMovement(self::OUTPUT_VAT_ACCOUNT_CODE, $from, $to, creditNormal: true);
-        $ledgerInput = $this->ledgerMovement(self::INPUT_VAT_ACCOUNT_CODE, $from, $to, creditNormal: false);
+        $ledgerOutput = $this->ledgerMovement(self::OUTPUT_VAT_ACCOUNT_CODE, $from, $to, $branchFilter, creditNormal: true);
+        $ledgerInput = $this->ledgerMovement(self::INPUT_VAT_ACCOUNT_CODE, $from, $to, $branchFilter, creditNormal: false);
         $ledgerNet = $ledgerOutput->minus($ledgerInput);
 
         return [
@@ -222,8 +246,12 @@ class VatSummaryReportController extends Controller
      * Every voucher line counts regardless of `journal_vouchers.status`:
      * status is informational, and a cancellation posts its own mirrored
      * Reversal voucher rather than deleting the original lines.
+     *
+     * The branch predicate goes straight onto the lines (plan 12, section
+     * 8) and is added only when the filter narrows something the access
+     * scope does not already narrow.
      */
-    private function ledgerMovement(string $accountCode, string $from, string $to, bool $creditNormal): Money
+    private function ledgerMovement(string $accountCode, string $from, string $to, BranchFilter $branchFilter, bool $creditNormal): Money
     {
         $accountId = Account::query()->where('code', $accountCode)->value('id');
 
@@ -242,6 +270,7 @@ class VatSummaryReportController extends Controller
             ->whereDate('journal_vouchers.date', '>=', $from)
             ->whereDate('journal_vouchers.date', '<=', $to)
             ->whereNotIn('journal_vouchers.voucher_type', self::RESTATEMENT_VOUCHER_TYPES)
+            ->tap(fn (Builder $lines) => $branchFilter->applyToLines($lines))
             ->selectRaw("{$expression} as net_scaled")
             ->value('net_scaled');
 

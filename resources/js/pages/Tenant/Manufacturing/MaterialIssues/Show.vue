@@ -57,7 +57,7 @@ function submitCancel() {
 <template>
     <div>
         <PageHeader
-            :title="`Material Issue MI-${note.number}`"
+            :title="`Material Issue ${note.document_number ?? `MI-${note.number}`}`"
             description="Raw material issued from a store into work in process."
             back-href="/material-issues"
             back-label="Material Issues"

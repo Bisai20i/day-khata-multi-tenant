@@ -11,6 +11,9 @@ import Label from '@/components/ui/Label.vue';
 import JournalVoucherStagingRow from '@/components/accounting/JournalVoucherStagingRow.vue';
 import JournalVoucherLinesTable from '@/components/accounting/JournalVoucherLinesTable.vue';
 import JournalVoucherTotalsBar from '@/components/accounting/JournalVoucherTotalsBar.vue';
+import BranchSelect from '@/components/branch/BranchSelect.vue';
+import { useBranchField } from '@/composables/useBranchField';
+import { useBranchLabel } from '@/composables/useBranchLabel';
 import { useConfirm } from '@/composables/useConfirm';
 import { usePermissions } from '@/composables/usePermissions';
 import { isZeroMoney, moneyEquals, subtractMoney, sumMoney } from '@/lib/money';
@@ -36,6 +39,9 @@ const props = defineProps({
         type: Object,
         default: null,
     },
+    // Branch picker options and default (BranchFormOptions::props()).
+    branchOptions: { type: Array, default: () => [] },
+    defaultBranchId: { type: Number, default: null },
 });
 
 const emit = defineEmits(['cancel', 'posted']);
@@ -75,6 +81,20 @@ const form = useForm({
     // (JournalVoucherStagingRow) - no starter blank rows here.
     lines: [],
 });
+
+// Branches (plan 12, BR12): the voucher's branch (header) and an optional
+// per-line override; a line left on "same as voucher" posts in the header's
+// branch. Lines in other branches get Inter-Branch Clearing lines from the
+// server (autoBalance). Nothing of this shows, or is sent, unless the
+// company is multi-branch and the user may pick.
+const { branchId, showPicker, withBranch } = useBranchField(
+    () => props.branchOptions,
+    () => props.defaultBranchId,
+);
+const { label: branchLabel, plural: branchPlural } = useBranchLabel();
+const spansBranches = computed(
+    () => showPicker.value && form.lines.some((line) => (line.branch_id ?? null) !== null && line.branch_id !== branchId.value),
+);
 
 const isClosedYearSelected = computed(
     () => !!props.correctionFiscalYear && form.fiscal_year_id === props.correctionFiscalYear.id,
@@ -130,7 +150,7 @@ async function requestCancel() {
 function submit(print = false) {
     if (!canSubmit.value) return;
 
-    form.transform((data) => ({
+    form.transform((data) => withBranch({
         ...data,
         fiscal_year_id: data.fiscal_year_id || undefined,
         reason: isClosedYearSelected.value ? data.reason : undefined,
@@ -139,6 +159,9 @@ function submit(print = false) {
             debit: voucherAmountOf(line.debit) ?? '0.00',
             credit: voucherAmountOf(line.credit) ?? '0.00',
             narration: line.narration || undefined,
+            // Only an explicit override, and only with the picker showing:
+            // a single-branch company's lines are sent exactly as before.
+            ...(showPicker.value && (line.branch_id ?? null) !== null ? { branch_id: line.branch_id } : {}),
         })),
     })).post('/journal-vouchers', {
         preserveScroll: true,
@@ -167,6 +190,9 @@ function submit(print = false) {
     <p v-if="form.errors.lines" class="mb-4 border-[1.5px] border-danger bg-danger-bg px-3 py-2 text-sm text-danger">
         {{ form.errors.lines }}
     </p>
+    <p v-if="!showPicker && form.errors.branch_id" class="mb-4 border-[1.5px] border-danger bg-danger-bg px-3 py-2 text-sm text-danger" role="alert">
+        {{ form.errors.branch_id }}
+    </p>
 
     <form class="flex flex-1 flex-col gap-4" @submit.prevent="submit(false)">
         <Card variant="panel" class="!p-4">
@@ -185,6 +211,12 @@ function submit(print = false) {
                     <p id="jv-narration-help" class="sr-only">Printed on the voucher and shown in every ledger it touches.</p>
                     <p v-if="form.errors.narration" class="mt-1 text-sm text-danger" role="alert">{{ form.errors.narration }}</p>
                 </div>
+                <BranchSelect
+                    v-model="branchId"
+                    :options="branchOptions"
+                    :error="form.errors.branch_id"
+                    :help="`Lines post in this ${branchLabel('lower')} unless a line names another.`"
+                />
                 <div v-if="canPostCorrection && correctionFiscalYear">
                     <div class="mb-1 flex items-center gap-1">
                         <Label for="jv-fiscal-year">Fiscal year</Label>
@@ -231,8 +263,13 @@ function submit(print = false) {
                 :lines="form.lines"
                 :errors="form.errors"
                 :account-options="accountOptions"
+                :branch-options="showPicker ? branchOptions : []"
                 @remove="(index) => form.lines.splice(index, 1)"
             />
+            <p v-if="spansBranches" class="mt-2 text-xs text-text-muted">
+                This entry spans more than one {{ branchLabel('lower') }}. Each {{ branchLabel('lower') }} must balance on its own, so
+                Inter-Branch Clearing lines are added when it is posted (your {{ branchPlural('lower') }} then owe each other the difference).
+            </p>
         </Card>
 
         <JournalVoucherTotalsBar

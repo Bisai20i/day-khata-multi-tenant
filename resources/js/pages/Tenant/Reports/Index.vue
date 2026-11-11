@@ -5,6 +5,8 @@ import { ChevronRight, Search, X } from '@lucide/vue';
 import AppLayout from '@/layouts/AppLayout.vue';
 import { useLayoutChrome } from '@/composables/useLayoutChrome';
 import { usePermissions } from '@/composables/usePermissions';
+import { useBranchLabel } from '@/composables/useBranchLabel';
+import { useBranch } from '@/composables/useBranch';
 import PageHeader from '@/components/ui/PageHeader.vue';
 import Card from '@/components/ui/Card.vue';
 import { filterNavByPermission } from '@/lib/filterNavByPermission';
@@ -15,11 +17,13 @@ defineOptions({ layout: AppLayout });
 useLayoutChrome('Reports');
 
 const { can } = usePermissions();
+const { branchLabel } = useBranchLabel();
+const { isMultiBranch } = useBranch();
 const query = ref('');
 
 // Only the reports this user may open. A category with none left is dropped,
 // so a role limited to sales reports sees just that card.
-const allowedCategories = computed(() => filterNavByPermission(reportCategories(), can));
+const allowedCategories = computed(() => filterNavByPermission(reportCategories({ branchLabel: branchLabel.value, isMultiBranch: isMultiBranch.value }), can));
 
 const categories = computed(() => {
     const needle = query.value.trim().toLowerCase();

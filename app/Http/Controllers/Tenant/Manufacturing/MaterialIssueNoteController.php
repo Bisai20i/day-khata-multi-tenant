@@ -13,6 +13,9 @@ use App\Models\MaterialIssueNote;
 use App\Models\PrintLog;
 use App\Models\Store;
 use App\Support\AmountInWords;
+use App\Support\Branches\BranchFormOptions;
+use App\Support\Branches\BranchListFilter;
+use App\Support\Branches\BranchStoreOptions;
 use App\Support\Inventory\PerpetualCosting;
 use App\Support\Money\Money;
 use App\Support\NepaliCalendar;
@@ -41,16 +44,27 @@ class MaterialIssueNoteController extends Controller
         $to = $request->string('to')->toString() ?: $openYear?->end_date?->toDateString();
         $status = $request->string('status')->toString();
 
+        // Branches (plan 12, BR12): the list follows the top-bar switcher and
+        // names each row's branch only when several branches can appear. Not
+        // multi-branch: same query and payload as before.
+        $notes = BranchListFilter::apply(MaterialIssueNote::query(), $request)
+            ->with(['store:id,name', 'productionEntry:id,number'])
+            ->when(BranchListFilter::columnVisible($request), fn ($query) => $query->with('branch:id,name,code'))
+            ->when($from, fn ($query) => $query->whereDate('date', '>=', $from))
+            ->when($to, fn ($query) => $query->whereDate('date', '<=', $to))
+            ->when(in_array($status, [MaterialIssueNote::STATUS_POSTED, MaterialIssueNote::STATUS_CANCELLED], true), fn ($query) => $query->where('status', $status))
+            ->orderByDesc('date')
+            ->orderByDesc('id')
+            ->paginate(20)
+            ->withQueryString();
+
+        // The printed number per row (MI-{n}, MI-{code}-{n} in a per_branch
+        // year, BR20); one query for the page's series codes, none when shared.
+        MaterialIssueNote::loadSeriesCodes($notes->getCollection());
+        $notes->getCollection()->each(fn (MaterialIssueNote $note) => $note->setAttribute('document_number', $note->documentNumber()));
+
         return Inertia::render('Tenant/Manufacturing/MaterialIssues/Index', [
-            'notes' => MaterialIssueNote::query()
-                ->with(['store:id,name', 'productionEntry:id,number'])
-                ->when($from, fn ($query) => $query->whereDate('date', '>=', $from))
-                ->when($to, fn ($query) => $query->whereDate('date', '<=', $to))
-                ->when(in_array($status, [MaterialIssueNote::STATUS_POSTED, MaterialIssueNote::STATUS_CANCELLED], true), fn ($query) => $query->where('status', $status))
-                ->orderByDesc('date')
-                ->orderByDesc('id')
-                ->paginate(20)
-                ->withQueryString(),
+            'notes' => $notes,
             'filters' => ['from' => $from, 'to' => $to, 'status' => $status ?: null],
         ]);
     }
@@ -59,11 +73,18 @@ class MaterialIssueNoteController extends Controller
      * Raw materials only, each with the store-by-store on-hand quantity and
      * today's moving-average rate (a preview: the server costs the issue
      * under the item locks and its figure is the one that posts).
+     *
+     * Branches (plan 12, BR12): a multi-branch company gets a branch picker
+     * and only the stores of the branches the user may use, each with its
+     * branch_id so the store list follows the picker (the note is filed in
+     * its store's branch, I5). Not multi-branch: same props as before.
      */
-    public function create(): Response
+    public function create(Request $request): Response
     {
         $today = now()->setTimezone('Asia/Kathmandu')->toDateString();
-        $stores = Store::where('is_active', true)->orderBy('name')->get(['id', 'name']);
+        $stores = BranchStoreOptions::apply(Store::where('is_active', true), $request)
+            ->orderBy('name')
+            ->get(BranchStoreOptions::columns($request, ['id', 'name']));
 
         $items = Item::query()
             ->where('is_stockable', true)
@@ -95,6 +116,7 @@ class MaterialIssueNoteController extends Controller
                 'average_rate' => PerpetualCosting::movingAverage($item, $today)?->toScale(4, RoundingMode::HalfUp)->__toString(),
             ])->values(),
             'correctionFiscalYear' => $this->correctionFiscalYear(),
+            ...BranchFormOptions::props($request),
         ]);
     }
 
@@ -124,18 +146,20 @@ class MaterialIssueNoteController extends Controller
 
         try {
             $note = MaterialIssueNote::post(
-                collect($data)->only(['date', 'store_id', 'production_entry_id', 'narration', 'reason'])->all(),
+                collect($data)->only(['date', 'store_id', 'branch_id', 'production_entry_id', 'narration', 'reason'])->all(),
                 $data['lines'],
                 $request->user(),
             );
         } catch (InvalidArgumentException|AuthorizationException $e) {
             // Both: the closed-year guard throws AuthorizationException for a
             // non-admin aiming at a reopened year, and letting it escape would
-            // render a 403 page instead of a field error.
-            return back()->withErrors(['lines' => $e->getMessage()])->withInput();
+            // render a 403 page instead of a field error. A refused branch
+            // goes on the branch picker and a store outside the branch on the
+            // store field (plan 12, BR12).
+            return back()->withErrors([BranchFormOptions::errorField($e, 'lines', 'branch_id', 'store_id') => $e->getMessage()])->withInput();
         }
 
-        return redirect()->route('tenant.material-issues.show', $note)->with('status', "Material issue note MI-{$note->number} posted.");
+        return redirect()->route('tenant.material-issues.show', $note)->with('status', "Material issue note {$note->documentNumber()} posted.");
     }
 
     public function show(MaterialIssueNote $material_issue): Response
@@ -148,6 +172,8 @@ class MaterialIssueNoteController extends Controller
             'creator:id,name',
             'canceller:id,name',
         ]);
+
+        $material_issue->setAttribute('document_number', $material_issue->documentNumber());
 
         return Inertia::render('Tenant/Manufacturing/MaterialIssues/Show', [
             'note' => $material_issue,
@@ -180,7 +206,7 @@ class MaterialIssueNoteController extends Controller
         $pdf = Pdf::loadView('pdf.material-issue-note', [
             'note' => $material_issue,
             'company' => CompanySetting::current(),
-            'documentNumber' => "MI-{$material_issue->number}",
+            'documentNumber' => $material_issue->documentNumber(),
             'documentDate' => $material_issue->date->format('Y-m-d'),
             'dateAd' => $material_issue->date->format('Y-m-d'),
             'dateBs' => NepaliCalendar::formatBs($material_issue->date),

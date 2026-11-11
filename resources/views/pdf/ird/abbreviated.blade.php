@@ -43,7 +43,7 @@
             <td>
                 <table class="pan-boxes">
                     <tr>
-                        @foreach(str_split(str_pad((string) $company->pan_vat_number, 9, ' ', STR_PAD_LEFT)) as $digit)
+                        @foreach(str_split(str_pad((string) $branchPrintDetails['pan'], 9, ' ', STR_PAD_LEFT)) as $digit)
                             <td>{{ $digit }}</td>
                         @endforeach
                     </tr>
@@ -60,6 +60,9 @@
             <td style="width: 50%; padding: 0; border-left: 1.5px solid #000;">
                 <table class="totals">
                     <tr><td>Discount</td><td>{{ $totalDiscount->format() }}</td></tr>
+                    @if(! $roundOff->isZero())
+                        <tr><td>Round Off</td><td>{{ $roundOffLabel }}</td></tr>
+                    @endif
                     <tr class="net"><td>Grand Total</td><td>{{ $total->format() }}</td></tr>
                 </table>
             </td>

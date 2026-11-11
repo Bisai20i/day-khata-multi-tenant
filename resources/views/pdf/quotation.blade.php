@@ -3,6 +3,11 @@
 @section('title', 'Quotation')
 
 @section('doc-meta-extra')
+    {{-- Multi-branch companies only (plan 12, BR12): the controller passes
+         a null branchName otherwise, so single-branch output is unchanged. --}}
+    @if(! empty($branchName))
+        <div><strong>{{ $branchLabel ?? 'Branch' }}:</strong> {{ $branchName }}</div>
+    @endif
     @if($quotation->status->value === 'converted')
         <div style="margin-top: 4px;"><span class="status-badge">Converted</span></div>
         <div style="margin-top: 4px;">Converted to Sale #: {{ $quotation->sale_id }}</div>

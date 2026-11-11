@@ -19,6 +19,7 @@ import { formatBsDate } from '@/lib/format';
 import Create from './Create.vue';
 import { useOpenFiscalYear } from '@/composables/useOpenFiscalYear';
 import { usePermissions } from '@/composables/usePermissions';
+import { useBranchListColumn } from '@/composables/useBranchListColumn';
 
 defineOptions({ layout: AppLayout });
 
@@ -32,7 +33,12 @@ defineProps({
     accounts: { type: Array, default: () => [] },
     stores: { type: Array, default: () => [] },
     defaultVatRate: { type: String, default: '13.00' },
+    // Branch picker of the create form (BranchFormOptions::props()).
+    branchOptions: { type: Array, default: () => [] },
+    defaultBranchId: { type: Number, default: null },
 });
+
+const { branchColumns } = useBranchListColumn();
 
 const page = usePage();
 const { toast } = useToast();
@@ -104,6 +110,8 @@ const columns = [
         numeric: false,
         cell: ({ row }) => formatBsDate(row.original.date),
     },
+    // Only for a multi-branch company viewing all branches.
+    ...branchColumns(),
     {
         id: 'invoice_number',
         header: 'Invoice #',
@@ -201,6 +209,8 @@ const columns = [
                 :accounts="accounts"
                 :stores="stores"
                 :default-vat-rate="defaultVatRate"
+                :branch-options="branchOptions"
+                :default-branch-id="defaultBranchId"
                 @cancel="showCreateForm = false"
                 @posted="showCreateForm = false"
             />

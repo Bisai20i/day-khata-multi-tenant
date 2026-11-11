@@ -13,6 +13,9 @@ import Label from '@/components/ui/Label.vue';
 import { formatMoney, isZeroMoney } from '@/lib/money.js';
 import { formatBsDate } from '@/lib/format.js';
 import { usePermissions } from '@/composables/usePermissions';
+import { useBranchReportFilter } from '@/composables/useBranchReportFilter';
+import BranchReportFilter from '@/components/branch/BranchReportFilter.vue';
+import BranchReportNotes from '@/components/branch/BranchReportNotes.vue';
 
 defineOptions({ layout: AppLayout });
 
@@ -27,6 +30,8 @@ const props = defineProps({
     closingBalance: { type: String, default: '0.00' },
     from: { type: [String, null], default: null },
     to: { type: [String, null], default: null },
+    // Branch filter; null when the company has no branches.
+    branchReport: { type: [Object, null], default: null },
 });
 
 useLayoutChrome('Cash Book');
@@ -42,6 +47,8 @@ const fiscalYear = ref(props.fiscalYearId);
 const from = ref(props.from);
 const to = ref(props.to);
 
+const branchFilter = useBranchReportFilter(() => props.branchReport);
+
 // A cash book is only ever read inside one fiscal year: summing across a
 // boundary counted the new year's Opening Balance voucher on top of the old
 // year's own lines and doubled the opening balance (audit P0-18).
@@ -55,7 +62,12 @@ watch(fiscalYear, (value) => {
 function applyFilter() {
     router.get(
         window.location.pathname,
-        { fiscal_year_id: fiscalYear.value ?? undefined, from: from.value ?? undefined, to: to.value ?? undefined },
+        {
+            fiscal_year_id: fiscalYear.value ?? undefined,
+            from: from.value ?? undefined,
+            to: to.value ?? undefined,
+            ...branchFilter.toQuery(),
+        },
         { preserveState: true, preserveScroll: true },
     );
 }
@@ -94,11 +106,13 @@ function voucherLabel(entry) {
 
 function printUrl() {
     const params = new URLSearchParams({ fiscal_year_id: fiscalYear.value ?? '', from: from.value ?? '', to: to.value ?? '' });
+    branchFilter.appendTo(params);
     return `/reports/cash-book/print?${params.toString()}`;
 }
 
 function exportUrl() {
     const params = new URLSearchParams({ fiscal_year_id: fiscalYear.value ?? '', from: from.value ?? '', to: to.value ?? '' });
+    branchFilter.appendTo(params);
     return `/reports/cash-book/export?${params.toString()}`;
 }
 
@@ -136,11 +150,19 @@ const columns = [
                     <Label class="mb-1">To date (BS)</Label>
                     <NepaliDateInput v-model="to" />
                 </div>
+                <BranchReportFilter
+                    v-if="branchReport"
+                    v-model:choice="branchFilter.choice.value"
+                    :report="branchReport"
+                    id-prefix="cash-book"
+                    @change="applyFilter"
+                />
                 <Button variant="primary" tone="purple" @click="applyFilter">Generate report</Button>
             </div>
             <p v-if="from && to" class="mt-2 text-[12px] text-text-muted">
                 Showing report for {{ formatBsDate(from) }} to {{ formatBsDate(to) }} BS
             </p>
+            <BranchReportNotes v-if="branchReport" :report="branchReport" />
         </Card>
 
         <Card variant="panel">

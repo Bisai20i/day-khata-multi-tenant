@@ -12,6 +12,9 @@ import DataTable from '@/components/ui/DataTable.vue';
 import Label from '@/components/ui/Label.vue';
 import { formatMoney } from '@/lib/money';
 import { formatBsDate } from '@/lib/format';
+import { useBranchReportFilter } from '@/composables/useBranchReportFilter';
+import BranchReportFilter from '@/components/branch/BranchReportFilter.vue';
+import BranchReportNotes from '@/components/branch/BranchReportNotes.vue';
 
 defineOptions({ layout: AppLayout });
 
@@ -19,6 +22,11 @@ const props = defineProps({
     account: {
         type: Object,
         required: true,
+    },
+    // Area of the customer / supplier this account belongs to, when it has one.
+    partyArea: {
+        type: [String, null],
+        default: null,
     },
     fiscalYears: {
         type: Array,
@@ -59,6 +67,11 @@ const props = defineProps({
         type: Boolean,
         default: false,
     },
+    // Branch filter (opening balance and lines); null when the company has no branches.
+    branchReport: {
+        type: [Object, null],
+        default: null,
+    },
 });
 
 useLayoutChrome(() => `Ledger - ${props.account.name}`);
@@ -69,11 +82,12 @@ useLayoutChrome(() => `Ledger - ${props.account.name}`);
 // zero), so a mid-year "From" still opens at the right running total.
 const from = ref(props.from);
 const to = ref(props.to);
+const branchFilter = useBranchReportFilter(() => props.branchReport);
 
 function applyWindow() {
     router.get(
         window.location.pathname,
-        { fiscal_year_id: props.fiscalYearId, from: from.value ?? undefined, to: to.value ?? undefined },
+        { fiscal_year_id: props.fiscalYearId, from: from.value ?? undefined, to: to.value ?? undefined, ...branchFilter.toQuery() },
         { preserveState: true, preserveScroll: true },
     );
 }
@@ -90,6 +104,7 @@ function printUrl() {
         from: from.value ?? '',
         to: to.value ?? '',
     });
+    branchFilter.appendTo(params);
     return `${window.location.pathname}/print?${params.toString()}`;
 }
 
@@ -99,6 +114,7 @@ function exportUrl() {
         from: from.value ?? '',
         to: to.value ?? '',
     });
+    branchFilter.appendTo(params);
     return `${window.location.pathname}/export?${params.toString()}`;
 }
 
@@ -117,8 +133,26 @@ const voucherTypeLabels = {
     sale_return: 'Sales Return',
     purchase: 'Purchase',
     purchase_return: 'Purchase Return',
+    capital_purchase: 'Capital Purchase',
+    capital_sale: 'Capital Sale',
+    fixed_asset_purchase: 'Fixed Asset Purchase',
+    depreciation: 'Depreciation',
+    asset_disposal: 'Asset Disposal',
     receipt: 'Receipt',
     payment: 'Payment',
+    cash_receipt: 'Cash Receipt',
+    cash_payment: 'Cash Payment',
+    bank_receipt: 'Bank Receipt',
+    bank_payment: 'Bank Payment',
+    contra: 'Contra',
+    material_issue: 'Material Issue',
+    production: 'Production',
+    production_entry: 'Production Entry',
+    inventory_cost: 'Inventory Cost',
+    payroll: 'Payroll',
+    salary_payment: 'Salary Payment',
+    staff_advance: 'Staff Advance',
+    branch_stock_transfer: 'Branch Stock Transfer',
 };
 
 function voucherLabel(entry) {
@@ -140,7 +174,7 @@ function onFiscalYearChange(value) {
     to.value = null;
     router.get(
         window.location.pathname,
-        { fiscal_year_id: value },
+        { fiscal_year_id: value, ...branchFilter.toQuery() },
         { preserveState: true, preserveScroll: true },
     );
 }
@@ -211,6 +245,10 @@ const columns = [
             </template>
         </PageHeader>
 
+        <p v-if="partyArea" class="mb-3 text-[13px] text-text-muted">
+            Area: <span class="font-semibold text-text-strong">{{ partyArea }}</span>
+        </p>
+
         <Card v-if="fiscalYearId !== null" variant="panel" class="mb-4">
             <div class="flex flex-wrap items-end gap-3">
                 <div class="w-56">
@@ -225,10 +263,18 @@ const columns = [
                     <Label class="mb-1">To date</Label>
                     <NepaliDateInput v-model="to" />
                 </div>
+                <BranchReportFilter
+                    v-if="branchReport"
+                    v-model:choice="branchFilter.choice.value"
+                    :report="branchReport"
+                    id-prefix="account-ledger"
+                    @change="applyWindow"
+                />
                 <Button variant="primary" tone="purple" @click="applyWindow">Apply filters</Button>
                 <Button v-if="from || to" variant="secondary" tone="purple" @click="clearWindow">Clear filters</Button>
             </div>
             <p class="mt-2 text-xs text-text-muted">Dates outside the chosen fiscal year are trimmed to its start and end. The opening balance adjusts to your From date.</p>
+            <BranchReportNotes v-if="branchReport" :report="branchReport" />
         </Card>
 
         <Card v-if="fiscalYearId !== null" variant="panel" class="mb-4">

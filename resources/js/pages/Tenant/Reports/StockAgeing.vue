@@ -1,5 +1,5 @@
 <script setup>
-import { computed, ref } from 'vue';
+import { computed, ref, watch } from 'vue';
 import { router } from '@inertiajs/vue3';
 import AppLayout from '@/layouts/AppLayout.vue';
 import { useLayoutChrome } from '@/composables/useLayoutChrome';
@@ -12,6 +12,9 @@ import DataTable from '@/components/ui/DataTable.vue';
 import Label from '@/components/ui/Label.vue';
 import { formatMoney, formatQuantity } from '@/lib/money';
 import { formatBsDate } from '@/lib/format';
+import { useBranchReportFilter } from '@/composables/useBranchReportFilter';
+import BranchReportFilter from '@/components/branch/BranchReportFilter.vue';
+import BranchReportNotes from '@/components/branch/BranchReportNotes.vue';
 import { itemLedgerColumn } from '@/lib/itemLedger';
 
 defineOptions({ layout: AppLayout });
@@ -25,12 +28,24 @@ const props = defineProps({
     excludedNonStockCount: { type: Number, default: 0 },
     stores: { type: Array, default: () => [] },
     storeId: { type: [Number, null], default: null },
+    // Branch filter; null when the company has no branches.
+    branchReport: { type: [Object, null], default: null },
 });
 
 useLayoutChrome('Stock Ageing');
 
 const asOfInput = ref(props.asOf);
 const storeId = ref(props.storeId);
+
+// The server drops a store outside the chosen branches; follow what it applied.
+watch(
+    () => [props.storeId, props.stores],
+    () => {
+        storeId.value = props.storeId;
+    },
+);
+
+const branchFilter = useBranchReportFilter(() => props.branchReport);
 const isLoading = ref(false);
 
 const storeOptions = computed(() => [
@@ -43,7 +58,7 @@ const asOfLabel = computed(() => `As of BS ${formatBsDate(props.asOf)} (AD ${pro
 function applyFilter() {
     router.get(
         window.location.pathname,
-        { as_of: asOfInput.value, store_id: storeId.value ?? undefined },
+        { as_of: asOfInput.value, store_id: storeId.value ?? undefined, ...branchFilter.toQuery() },
         {
             preserveState: true,
             preserveScroll: true,
@@ -98,7 +113,18 @@ const reconciles = computed(() => props.totals.value === props.valuationTotal);
                 <Label class="mb-1 text-[11px]">Store</Label>
                 <Select v-model="storeId" :options="storeOptions" />
             </div>
+            <BranchReportFilter
+                v-if="branchReport"
+                v-model:choice="branchFilter.choice.value"
+                :report="branchReport"
+                id-prefix="stock-ageing-branch"
+                @change="applyFilter"
+            />
             <Button variant="primary" tone="purple" :loading="isLoading" @click="applyFilter">Generate report</Button>
+        </div>
+
+        <div v-if="branchReport" class="-mt-2 mb-4">
+            <BranchReportNotes :report="branchReport" />
         </div>
 
         <Card variant="panel">

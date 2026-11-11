@@ -8,6 +8,10 @@ use App\Models\Account;
 use App\Models\FiscalYear;
 use App\Models\FixedAsset;
 use App\Models\Supplier;
+use App\Support\Branches\BranchAccounts;
+use App\Support\Branches\BranchContext;
+use App\Support\Branches\BranchFormOptions;
+use App\Support\Branches\BranchListFilter;
 use App\Support\Money\Money;
 use Illuminate\Auth\Access\AuthorizationException;
 use Illuminate\Http\RedirectResponse;
@@ -29,24 +33,35 @@ use InvalidArgumentException;
  */
 class FixedAssetController extends Controller
 {
-    public function index(): Response
+    /**
+     * Branches (plan 12, BR12): the register follows the top-bar switcher
+     * and names each asset's branch only when several branches can appear;
+     * the create form offers a branch picker (the asset's branch, where its
+     * purchase, depreciation and disposal post, BR09). Not multi-branch:
+     * same query and payload as before.
+     */
+    public function index(Request $request): Response
     {
         return Inertia::render('Tenant/Assets/FixedAssets/Index', [
-            'fixedAssets' => FixedAsset::query()
+            'fixedAssets' => BranchListFilter::apply(FixedAsset::query(), $request)
                 ->with(['account:id,code,name', 'journalVoucher:id,voucher_number'])
+                ->when(BranchListFilter::columnVisible($request), fn ($query) => $query->with('branch:id,name,code'))
                 ->orderByDesc('purchase_date')
                 ->orderByDesc('id')
                 ->get(),
             // No is_bank flag exists anywhere on Account (see mem.md's Bank
             // Book report finding) - same plain full-account-list picker
-            // Purchases/Sales already use for their own bank_account_id field.
-            'accounts' => Account::query()->orderBy('name')->get(['id', 'code', 'name']),
+            // Purchases/Sales already use for their own bank_account_id field,
+            // less the inter-branch control accounts only the system posts
+            // (BranchAccounts).
+            'accounts' => BranchAccounts::exclude(Account::query())->orderBy('name')->get(['id', 'code', 'name']),
             'suppliers' => Supplier::query()->orderBy('name')->get(['id', 'name']),
             'pools' => collect(DepreciationPool::cases())->map(fn (DepreciationPool $pool) => [
                 'value' => $pool->value,
                 'label' => $pool->value,
                 'defaultRate' => $pool->defaultRate(),
             ]),
+            ...BranchFormOptions::props($request),
         ]);
     }
 
@@ -62,9 +77,12 @@ class FixedAssetController extends Controller
             'depreciation_method' => ['required', 'in:slm,wdv'],
             'depreciation_rate' => ['required', 'numeric', 'decimal:0,2', 'min:0', 'max:100'],
             'payment_mode' => ['required', 'in:cash,bank,credit'],
-            'bank_account_id' => ['nullable', 'required_if:payment_mode,bank', 'exists:accounts,id'],
+            'bank_account_id' => ['nullable', 'required_if:payment_mode,bank', 'exists:accounts,id', BranchAccounts::notControlAccountRule()],
             'supplier_id' => ['nullable', 'required_if:payment_mode,credit', 'exists:suppliers,id'],
             'narration' => ['nullable', 'string', 'max:255'],
+            // The asset's branch (plan 12, BR09); FixedAsset::post() checks it
+            // against the actor and defaults it to the posting branch.
+            'branch_id' => ['nullable', 'integer', 'exists:branches,id'],
         ], [
             'category.in' => 'Please choose a depreciation pool (Pool A to Pool E).',
             'cost.decimal' => 'The cost may have at most 2 decimal places.',
@@ -76,7 +94,8 @@ class FixedAssetController extends Controller
         try {
             FixedAsset::post($data, $request->user());
         } catch (InvalidArgumentException|AuthorizationException $e) {
-            return back()->withErrors(['cost' => $e->getMessage()])->withInput();
+            // A refused branch belongs on the branch picker (plan 12, BR12).
+            return back()->withErrors([BranchFormOptions::errorField($e, 'cost') => $e->getMessage()])->withInput();
         }
 
         return redirect()->route('tenant.fixed-assets.index')->with('status', 'Fixed asset added.');
@@ -100,6 +119,7 @@ class FixedAssetController extends Controller
             'depreciation_method' => ['required', 'in:slm,wdv'],
             'depreciation_rate' => ['required', 'numeric', 'decimal:0,2', 'min:0', 'max:100'],
             'narration' => ['nullable', 'string', 'max:255'],
+            'branch_id' => ['nullable', 'integer', 'exists:branches,id'],
         ], [
             'category.in' => 'Please choose a depreciation pool (Pool A to Pool E).',
             'cost.decimal' => 'The cost may have at most 2 decimal places.',
@@ -111,7 +131,7 @@ class FixedAssetController extends Controller
         try {
             FixedAsset::registerExisting($data, $request->user());
         } catch (InvalidArgumentException|AuthorizationException $e) {
-            return back()->withErrors(['cost' => $e->getMessage()])->withInput();
+            return back()->withErrors([BranchFormOptions::errorField($e, 'cost') => $e->getMessage()])->withInput();
         }
 
         return redirect()->route('tenant.fixed-assets.index')->with('status', 'Existing asset registered.');
@@ -123,7 +143,7 @@ class FixedAssetController extends Controller
             'disposal_date' => ['required', 'date'],
             'disposal_amount' => ['nullable', 'numeric', 'decimal:0,2', 'min:0', 'max:9999999999999'],
             'disposal_mode' => ['required', 'in:cash,bank'],
-            'bank_account_id' => ['nullable', 'required_if:disposal_mode,bank', 'exists:accounts,id'],
+            'bank_account_id' => ['nullable', 'required_if:disposal_mode,bank', 'exists:accounts,id', BranchAccounts::notControlAccountRule()],
         ], [
             'disposal_amount.decimal' => 'The disposal amount may have at most 2 decimal places.',
         ]);
@@ -153,8 +173,22 @@ class FixedAssetController extends Controller
 
         $message = $result['posted'] > 0
             ? "Depreciation posted for {$result['posted']} asset(s), totaling ".Money::of($result['total'])->format().'.'
-            : 'No depreciation was due - all assets are already posted for this fiscal year or fully depreciated.';
+            : $this->nothingDueMessage();
 
         return redirect()->route('tenant.fixed-assets.index')->with('status', $message);
+    }
+
+    /**
+     * A restricted user's run only sees the assets of the branches they may
+     * use (FixedAsset's access scope), so "all assets" would overstate what
+     * was checked for them. The unrestricted wording is unchanged.
+     */
+    private function nothingDueMessage(): string
+    {
+        if (BranchContext::isUnrestricted()) {
+            return 'No depreciation was due - all assets are already posted for this fiscal year or fully depreciated.';
+        }
+
+        return 'No depreciation was due for the branches you can access - their assets are already posted for this fiscal year or fully depreciated.';
     }
 }

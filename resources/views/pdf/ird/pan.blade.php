@@ -53,6 +53,9 @@
                 <table class="totals">
                     <tr><td>Sub Total</td><td>{{ $grossSubtotal->format() }}</td></tr>
                     <tr><td>Discount</td><td>{{ $totalDiscount->format() }}</td></tr>
+                    @if(! $roundOff->isZero())
+                        <tr><td>Round Off</td><td>{{ $roundOffLabel }}</td></tr>
+                    @endif
                     <tr class="net"><td>Grand Total</td><td>{{ $total->format() }}</td></tr>
                     @if($tds->isPositive())
                         <tr><td>TDS Withheld</td><td>-{{ $tds->format() }}</td></tr>

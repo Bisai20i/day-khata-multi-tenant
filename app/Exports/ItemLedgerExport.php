@@ -24,11 +24,13 @@ class ItemLedgerExport implements FromCollection, WithColumnFormatting, WithHead
 
     /**
      * @param  array<int, array{date: string, type: string, storeName: ?string, quantity: string, unitCostRate: ?string, balance: string, reference: string}>  $entries
+     * @param  string|null  $branchLabel  BranchFilter::label() in a multi-branch tenant, else null (no extra heading row)
      */
     public function __construct(
         private readonly array $entries,
         private readonly string $openingBalance,
         private readonly string $closingBalance,
+        private readonly ?string $branchLabel = null,
     ) {}
 
     public function collection(): Collection
@@ -55,11 +57,13 @@ class ItemLedgerExport implements FromCollection, WithColumnFormatting, WithHead
     }
 
     /**
-     * @return array<int, string>
+     * @return array<int, string>|list<list<string>>
      */
     public function headings(): array
     {
-        return ['Date', 'Type', 'Store', 'Reference', 'Quantity', 'Unit Cost', 'Balance'];
+        $headings = ['Date', 'Type', 'Store', 'Reference', 'Quantity', 'Unit Cost', 'Balance'];
+
+        return $this->branchLabel === null ? $headings : [[$this->branchLabel], $headings];
     }
 
     /**

@@ -3,14 +3,25 @@
 namespace App\Models;
 
 use App\Casts\Decimal;
+use App\Models\Concerns\BelongsToBranch;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use LogicException;
 
-#[Fillable(['journal_voucher_id', 'account_id', 'debit', 'credit', 'narration'])]
+/**
+ * branch_id is the source of truth for every branch report (plan 12, section
+ * 2): JournalVoucher::write() always sets it, defaulting to the voucher's
+ * header branch. counterparty_branch_id is set only on Inter-Branch Clearing
+ * lines (BranchBalancer) and names the other end of the clearing pair. Both
+ * are fillable on purpose: mass assignment drops an unlisted column, and the
+ * column default (Main) would then hide the loss.
+ */
+#[Fillable(['journal_voucher_id', 'account_id', 'debit', 'credit', 'narration', 'branch_id', 'counterparty_branch_id'])]
 class JournalVoucherLine extends Model
 {
+    use BelongsToBranch;
+
     /**
      * Ledger lines are immutable once written (audit JE-01). Bulk query-builder
      * writes bypass model events, so the lines FK is also restrictOnDelete
@@ -43,6 +54,8 @@ class JournalVoucherLine extends Model
         return [
             'debit' => Decimal::class.':2',
             'credit' => Decimal::class.':2',
+            'branch_id' => 'integer',
+            'counterparty_branch_id' => 'integer',
         ];
     }
 
@@ -60,5 +73,16 @@ class JournalVoucherLine extends Model
     public function account(): BelongsTo
     {
         return $this->belongsTo(Account::class);
+    }
+
+    /**
+     * The other branch of an Inter-Branch Clearing line; null on every other
+     * line.
+     *
+     * @return BelongsTo<Branch, $this>
+     */
+    public function counterpartyBranch(): BelongsTo
+    {
+        return $this->belongsTo(Branch::class, 'counterparty_branch_id');
     }
 }

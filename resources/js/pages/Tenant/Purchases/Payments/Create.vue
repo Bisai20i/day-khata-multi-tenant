@@ -10,6 +10,9 @@ import Combobox from '@/components/ui/Combobox.vue';
 import InfoTip from '@/components/ui/InfoTip.vue';
 import NepaliDateInput from '@/components/ui/NepaliDateInput.vue';
 import Label from '@/components/ui/Label.vue';
+import BranchSelect from '@/components/branch/BranchSelect.vue';
+import BranchBadge from '@/components/branch/BranchBadge.vue';
+import { useBranchField } from '@/composables/useBranchField';
 import { compareMoney, formatMoney, parseMoney, sumMoney } from '@/lib/money';
 import { formatBsDate, todayInKathmandu } from '@/lib/format';
 
@@ -18,6 +21,8 @@ const props = defineProps({
     // Only accounts money can actually leave through, filtered server-side.
     bankAccounts: { type: Array, default: () => [] },
     outstandingPurchases: { type: Array, default: () => [] },
+    branchOptions: { type: Array, default: () => [] },
+    defaultBranchId: { type: Number, default: null },
 });
 
 const emit = defineEmits(['cancel', 'posted']);
@@ -49,6 +54,13 @@ const form = useForm({
 });
 
 const showBankAccount = computed(() => form.payment_mode === 'bank');
+
+// Where the money went out (plan 12, BR12). Hidden, and left out of the
+// payload, unless the company runs several branches and the user may pick.
+const { branchId, showPicker, withBranch } = useBranchField(
+    () => props.branchOptions,
+    () => props.defaultBranchId,
+);
 
 // Purchase id -> allocation amount string. Reset whenever the supplier
 // changes so a stale allocation against a different supplier's invoice can
@@ -127,7 +139,7 @@ const paymentAmount = computed(() => {
 const overAllocated = computed(() => compareMoney(totalAllocated.value, paymentAmount.value) > 0);
 
 function submit() {
-    form.transform((data) => ({
+    form.transform((data) => withBranch({
         ...data,
         // The typed string, not Number(): the server's decimal rules reject
         // over-precise input rather than letting MySQL round it away.
@@ -168,7 +180,9 @@ function submit() {
                     <Label class="mb-1">Amount paid (Rs.) <span class="text-danger">*</span></Label>
                     <Input v-model="form.amount" type="number" min="0.01" step="0.01" placeholder="0.00" required />
                     <p v-if="form.errors.amount" class="mt-1 text-sm text-danger">{{ form.errors.amount }}</p>
+                    <p v-if="!showPicker && form.errors.branch_id" class="mt-1 text-sm text-danger" role="alert">{{ form.errors.branch_id }}</p>
                 </div>
+                <BranchSelect v-model="branchId" :options="branchOptions" :error="form.errors.branch_id" />
                 <div>
                     <Label class="mb-1">Paid by <span class="text-danger">*</span></Label>
                     <Select
@@ -221,8 +235,9 @@ function submit() {
                         class="grid grid-cols-[120px_1fr_110px_110px_130px] items-center gap-2"
                     >
                         <span class="text-sm text-text-base">{{ formatBsDate(purchase.date) }}</span>
-                        <span class="text-sm text-text-base">
-                            {{ purchase.bill_number ? purchase.bill_number : (purchase.purchase_number ?? `Purchase #${purchase.id}`) }}
+                        <span class="flex min-w-0 flex-wrap items-center gap-2 text-sm text-text-base">
+                            <span>{{ purchase.bill_number ? purchase.bill_number : (purchase.purchase_number ?? `Purchase #${purchase.id}`) }}</span>
+                            <BranchBadge :branch-id="purchase.branch_id ?? null" />
                         </span>
                         <span class="text-sm text-text-base">{{ formatMoney(purchase.total) }}</span>
                         <span class="text-sm text-text-base">{{ formatMoney(purchase.outstanding) }}</span>

@@ -85,6 +85,12 @@ final class RoleTemplates
      *   returns with no source bill bypass the quantity and price checks a
      *   bill gives, so they stay an explicit grant.
      * - fixed_assets.manage: disposal and depreciation posting move the books.
+     * - branches.manage, branches.report: adding or deactivating a branch is
+     *   an owner decision, and the inter-branch and comparison reports show
+     *   every branch's figures. branches.view and stock_transfers.receive
+     *   (taking in goods another branch sent, plan 12 BR18) are operational
+     *   and included; RoleTemplates::forModules() drops them for a tenant
+     *   without the branches module.
      *
      * @var list<string>
      */
@@ -101,6 +107,8 @@ final class RoleTemplates
         'party_ledger.view',
         'party_ledger.print',
         'party_ledger.export',
+        'areas.view',
+        'areas.manage',
         'items.view',
         'items.create',
         'items.edit',
@@ -168,12 +176,14 @@ final class RoleTemplates
         'stock_transfers.create',
         'stock_transfers.print',
         'stock_transfers.cancel',
+        'stock_transfers.receive',
         'stock_conversions.view',
         'stock_conversions.create',
         'stock_conversions.print',
         'stock_conversions.cancel',
         'stores.view',
         'stores.manage',
+        'branches.view',
         'item_varieties.view',
         'item_varieties.manage',
         'journal_vouchers.view',

@@ -14,6 +14,9 @@ import NepaliDateInput from '@/components/ui/NepaliDateInput.vue';
 import DataTable from '@/components/ui/DataTable.vue';
 import { formatMoney, formatQuantity } from '@/lib/money';
 import { formatBsDate } from '@/lib/format';
+import { useBranchReportFilter } from '@/composables/useBranchReportFilter';
+import BranchReportFilter from '@/components/branch/BranchReportFilter.vue';
+import BranchReportNotes from '@/components/branch/BranchReportNotes.vue';
 
 defineOptions({ layout: AppLayout });
 
@@ -26,9 +29,13 @@ const props = defineProps({
     items: { type: Array, default: () => [] },
     from: { type: String, required: true },
     to: { type: String, required: true },
+    // Branch filter; null when the company has no branches.
+    branchReport: { type: [Object, null], default: null },
 });
 
 useLayoutChrome('Manufacturing Stock Ledger');
+
+const branchFilter = useBranchReportFilter(() => props.branchReport);
 
 const classValue = ref(props.class);
 const itemValue = ref(props.itemId);
@@ -62,11 +69,12 @@ function params() {
 }
 
 function apply() {
-    router.get(window.location.pathname, params(), { preserveState: true, preserveScroll: true });
+    router.get(window.location.pathname, { ...params(), ...branchFilter.toQuery() }, { preserveState: true, preserveScroll: true });
 }
 
 function fileUrl(suffix) {
     const query = new URLSearchParams(Object.entries(params()).filter(([, value]) => value !== undefined));
+    branchFilter.appendTo(query);
     return `${window.location.pathname}/${suffix}?${query.toString()}`;
 }
 
@@ -115,8 +123,16 @@ const columns = [
                     <Label class="mb-1">To date</Label>
                     <NepaliDateInput v-model="to" />
                 </div>
+                <BranchReportFilter
+                    v-if="branchReport"
+                    v-model:choice="branchFilter.choice.value"
+                    :report="branchReport"
+                    id-prefix="mfg-stock-ledger"
+                    @change="apply"
+                />
                 <Button variant="primary" tone="purple" @click="apply">Apply filters</Button>
             </div>
+            <BranchReportNotes v-if="branchReport" :report="branchReport" />
         </Card>
 
         <Card variant="panel" class="mb-4">

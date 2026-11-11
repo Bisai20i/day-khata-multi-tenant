@@ -21,6 +21,8 @@ import { usePermissions } from '@/composables/usePermissions';
 import PosEstimateModal from '@/components/pos/PosEstimateModal.vue';
 import { useSaleEstimate } from '@/composables/useSaleEstimate';
 import { useToast } from '@/composables/useToast';
+import BranchSelect from '@/components/branch/BranchSelect.vue';
+import { useDocumentBranchStore } from '@/composables/useDocumentBranchStore';
 
 /**
  * Every rupee shown on this form comes from calculateDocument(), the exact
@@ -54,6 +56,8 @@ const props = defineProps({
             default_vat_rate: '13.00',
             default_store_id: null,
             active_invoice_type: 'full',
+            round_off_enabled: false,
+            round_off_precision: '1',
         }),
     },
     // Set by the parent Index page when it bounces back here after the
@@ -61,6 +65,10 @@ const props = defineProps({
     // useSaleCreateCustomer()) - restores the in-progress draft that would
     // otherwise be lost when Index re-mounts this component.
     initialDraft: { type: Object, default: null },
+    // Branch picker (BranchFormOptions::props()); empty unless the company
+    // runs several branches.
+    branchOptions: { type: Array, default: () => [] },
+    defaultBranchId: { type: Number, default: null },
 });
 
 const emit = defineEmits(['cancel', 'posted']);
@@ -99,6 +107,7 @@ function defaultFormData() {
         bank_account_id: null,
         discount: '',
         discount_type: 'flat',
+        round_off: '',
         cash_amount: '',
         bank_amount: '',
         tds_account_id: null,
@@ -112,7 +121,37 @@ function defaultFormData() {
     };
 }
 
-const form = useForm(props.initialDraft ?? defaultFormData());
+// A restored draft may predate the Round Off field.
+const form = useForm(props.initialDraft ? { round_off: '', ...props.initialDraft } : defaultFormData());
+
+const roundOffEnabled = computed(() => !!props.invoiceSettings.round_off_enabled);
+
+// Branch of the bill (plan 12, BR12): hidden, and left out of the payload,
+// unless the company runs several branches and the user may pick. The store
+// follows the branch; a restored draft keeps the store it was saved with.
+const { branchId, showPicker, withBranch, storeChoices } = useDocumentBranchStore({
+    branchOptions: () => props.branchOptions,
+    defaultBranchId: () => props.defaultBranchId,
+    stores: () => props.stores,
+    getStoreId: () => form.store_id,
+    setStoreId: (id) => {
+        form.store_id = id;
+    },
+    preferredStoreId: () => props.invoiceSettings.default_store_id,
+    adoptStoreBranch: props.initialDraft !== null,
+});
+
+// A store the branch picked for a fresh form is not something the user
+// typed, so it must not make Cancel ask about unsaved changes.
+if (!props.initialDraft) {
+    form.defaults('store_id', form.store_id);
+}
+
+// The create payload, with Round Off always '' while the tenant has the
+// feature off so a stale value can never be submitted or estimated.
+function buildPayload(data) {
+    return { ...toSaleCreatePayload(data), round_off: roundOffEnabled.value ? data.round_off : '' };
+}
 
 const { isPanInvoice, effectiveVatRate, itemOptions, itemsById, selectLineUnit, selectLineItem, applyLineMrp } =
     useSaleCreateItems(props, computed(() => form.invoice_type));
@@ -120,8 +159,8 @@ const isAbitOverCeiling = computed(() => {
     return form.invoice_type === 'abbreviated' && totals.value && Number(totals.value.total) > 10000;
 });
 
-const { totals, previewError, toggleHeaderDiscountType, showBankField, showPartialFields, partialBalanced, canSubmit } =
-    useSaleCreatePreview(form, { itemsById, isPanInvoice, effectiveVatRate });
+const { totals, totalBeforeRoundOff, previewError, toggleHeaderDiscountType, showBankField, showPartialFields, partialBalanced, canSubmit } =
+    useSaleCreatePreview(form, { itemsById, isPanInvoice, effectiveVatRate, roundOffEnabled });
 const { customerModalOpen, customerForm, openCustomerModal, closeCustomerModal, submitCustomer } = useSaleCreateCustomer(form, props);
 
 // Estimate: the bill this form would post, previewed without saving. Sent
@@ -132,7 +171,7 @@ const { estimateOpen, estimateUrl, estimateLoading, openEstimate, closeEstimate 
     previewError,
     toast: useToast().toast,
     url: '/sales/estimate',
-    buildPayload: () => toSaleCreatePayload(form.data()),
+    buildPayload: () => buildPayload(form.data()),
 });
 
 // Progressive disclosure for the remaining rare fields (Store, header
@@ -160,7 +199,7 @@ function submit(print = false, copies = 1) {
 
     const expectedTotal = totals.value.total;
 
-    form.transform((data) => ({ ...toSaleCreatePayload(data), expected_total: expectedTotal })).post('/sales', {
+    form.transform((data) => withBranch({ ...buildPayload(data), expected_total: expectedTotal })).post('/sales', {
         preserveScroll: true,
         onSuccess: () => {
             // C11: the server flashes exactly which document it just created,
@@ -191,6 +230,14 @@ function submit(print = false, copies = 1) {
     </p>
     <p v-if="form.errors.expected_total" class="mb-4 border-[1.5px] border-danger bg-danger-bg px-3 py-2 text-sm text-danger">
         {{ form.errors.expected_total }}
+    </p>
+    <!-- Branch and store refusals: shown here whenever their own field is
+         not on screen (picker hidden, More options closed). -->
+    <p v-if="!showPicker && form.errors.branch_id" class="mb-4 border-[1.5px] border-danger bg-danger-bg px-3 py-2 text-sm text-danger" role="alert">
+        {{ form.errors.branch_id }}
+    </p>
+    <p v-if="!showMoreOptions && form.errors.store_id" class="mb-4 border-[1.5px] border-danger bg-danger-bg px-3 py-2 text-sm text-danger" role="alert">
+        {{ form.errors.store_id }}
     </p>
 
     <form class="flex flex-1 flex-col gap-4" @submit.prevent="submit(false)">
@@ -235,6 +282,9 @@ function submit(print = false, copies = 1) {
         <div v-if="isAbitOverCeiling" class="border-[1.5px] border-danger bg-danger-bg px-4 py-3 text-sm text-danger">
             <strong>ABIT Bill Exceeds Statutory Limit:</strong> Abbreviated tax invoices cannot exceed NPR 10,000.00 under IRD Rule 18. Current total is NPR {{ totals?.total }}. Please switch to VAT Invoice or reduce quantities before posting.
         </div>
+            <div v-if="showPicker" class="border-[1.5px] border-border bg-white px-4 py-2.5 sm:max-w-sm">
+                <BranchSelect v-model="branchId" :options="branchOptions" :error="form.errors.branch_id" />
+            </div>
             <SaleCreateCustomerCard :form="form" :customers="customers" @add-customer="openCustomerModal" />
 
             <!-- Items: staging row + the bill's committed lines, merged into
@@ -294,7 +344,7 @@ function submit(print = false, copies = 1) {
                 <SaleCreateMoreOptions
                     v-if="showMoreOptions"
                     :form="form"
-                    :stores="stores"
+                    :stores="storeChoices"
                     :tds-accounts="tdsAccounts"
                     :agents="agents"
                     @toggle-discount-type="toggleHeaderDiscountType"
@@ -304,7 +354,12 @@ function submit(print = false, copies = 1) {
 
             <SaleCreateTotalsBar
                 v-model:show-more-options="showMoreOptions"
+                v-model:round-off="form.round_off"
                 :totals="totals"
+                :round-off-enabled="roundOffEnabled"
+                :round-off-precision="String(invoiceSettings.round_off_precision ?? '1')"
+                :total-before-round-off="totalBeforeRoundOff"
+                :round-off-error="form.errors.round_off"
                 :show-partial-fields="showPartialFields"
                 :partial-balanced="partialBalanced"
                 :can-submit="canSubmit && !isAbitOverCeiling"

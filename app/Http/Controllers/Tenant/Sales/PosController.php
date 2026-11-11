@@ -3,6 +3,7 @@
 namespace App\Http\Controllers\Tenant\Sales;
 
 use App\Enums\FiscalYearStatus;
+use App\Http\Controllers\Concerns\OffersDocumentBranch;
 use App\Http\Controllers\Controller;
 use App\Models\Account;
 use App\Models\CompanySetting;
@@ -10,8 +11,11 @@ use App\Models\Customer;
 use App\Models\FiscalYear;
 use App\Models\Item;
 use App\Models\ItemCategory;
-use App\Models\Store;
+use App\Support\Branches\BranchAccounts;
+use App\Support\Branches\BranchFormOptions;
+use App\Support\Branches\BranchStockDisplay;
 use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Http\Request;
 use Illuminate\Support\Collection;
 use Inertia\Inertia;
 use Inertia\Response;
@@ -26,9 +30,21 @@ use Inertia\Response;
  * quantity so the item tiles can show a stock badge and warn the cashier
  * when a cart's quantity would exceed it (mirroring the legacy POS's
  * "Total in all carts exceeds available stock" warning).
+ *
+ * Branches (plan 12, BR12): a terminal sells into one branch at a time, the
+ * top-bar switcher's branch (else the user's default branch). A multi-branch
+ * user who may use several branches can change it from the checkout panel;
+ * every cart's store must then be one of that branch's stores, so the page
+ * clears a held cart's store that falls outside it (the server would refuse
+ * it) and the sale takes the branch's default store. The item tiles' stock
+ * badge covers the switcher's branch (else a restricted user's own branches,
+ * else the whole company for an unrestricted user on "All branches"); see
+ * BranchStockDisplay (BR22 C1).
  */
 class PosController extends Controller
 {
+    use OffersDocumentBranch;
+
     /**
      * Party ledgers are never a settlement account - see
      * SaleController::settlementAccounts() for the full reasoning. Duplicated
@@ -37,14 +53,15 @@ class PosController extends Controller
      */
     private const PARTY_SUBGROUPS = ['Sundry Debtors', 'Sundry Creditors', 'Sales Agents'];
 
-    public function index(): Response
+    public function index(Request $request): Response
     {
         $settings = CompanySetting::current();
 
         $items = Item::query()->where('is_active', true)->orderBy('name')
             ->get(['id', 'name', 'unit', 'is_vatable', 'is_stockable', 'item_category_id', 'sale_rate', 'image_path', 'barcode']);
 
-        $stock = Item::currentStockByItem($items->pluck('id')->all());
+        $stockDisplay = BranchStockDisplay::fromRequest($request);
+        $stock = Item::currentStockByItem($items->pluck('id')->all(), $stockDisplay->storeIds());
 
         $items = $items->map(function (Item $item) use ($stock) {
             // An exact 4dp string, not a float: the cashier's screen compares
@@ -60,10 +77,12 @@ class PosController extends Controller
         return Inertia::render('Tenant/Sales/Pos', [
             'customers' => Customer::query()->orderBy('name')->get(['id', 'name', 'mobile_no']),
             'items' => $items,
+            // What the tile badges cover; null when not multi-branch.
+            'stockScope' => $stockDisplay->scope(),
             'categories' => ItemCategory::query()->where('is_active', true)->orderBy('name')->get(['id', 'name']),
             'bankAccounts' => $this->settlementAccounts(),
             'tdsAccounts' => $this->settlementAccounts(),
-            'stores' => Store::where('is_active', true)->orderBy('name')->get(['id', 'name']),
+            'stores' => $this->branchStoreOptions($request),
             // POS defaults every new cart to the walk-in customer (audit
             // section 3 "Sales") - a quick counter sale usually has nobody
             // to name.
@@ -82,18 +101,20 @@ class PosController extends Controller
                 'default_store_id' => $settings->default_store_id,
                 'active_invoice_type' => $settings->active_invoice_type ?? 'full',
             ],
+            ...BranchFormOptions::props($request),
         ]);
     }
 
     /**
      * Cash, bank and TDS ledgers: every balance-sheet account that is not a
-     * party ledger.
+     * party ledger, nor an inter-branch control account (BranchAccounts;
+     * SaleController::settlementAccountQuery() refuses those on submit).
      *
      * @return Collection<int, Account>
      */
     private function settlementAccounts(): Collection
     {
-        return Account::query()
+        return BranchAccounts::exclude(Account::query())
             ->where(function (Builder $query) {
                 $query->whereHas('group.accountHead', fn (Builder $head) => $head->where('is_profit_and_loss', false))
                     ->orWhereHas('subgroup.accountGroup.accountHead', fn (Builder $head) => $head->where('is_profit_and_loss', false));

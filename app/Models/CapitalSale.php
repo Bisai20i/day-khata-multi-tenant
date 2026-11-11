@@ -4,9 +4,12 @@ namespace App\Models;
 
 use App\Casts\Decimal;
 use App\Enums\VoucherType;
+use App\Models\Concerns\BelongsToBranch;
 use App\Support\Billing\BillingException;
 use App\Support\Billing\DocumentCalculator;
 use App\Support\Billing\DocumentTotals;
+use App\Support\Branches\BranchContext;
+use App\Support\Branches\DocumentBranch;
 use App\Support\Money\InvalidAmount;
 use App\Support\Money\Money;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
@@ -43,10 +46,12 @@ use InvalidArgumentException;
     'payment_mode', 'bank_account_id', 'cash_amount', 'bank_amount',
     'taxable_amount', 'nontaxable_amount', 'vat_rate', 'vat_amount',
     'total', 'status', 'created_by',
-    'cancelled_at', 'cancelled_by', 'cancel_reason', 'reversal_journal_voucher_id',
+    'cancelled_at', 'cancelled_by', 'cancel_reason', 'reversal_journal_voucher_id', 'branch_id',
 ])]
 class CapitalSale extends Model
 {
+    use BelongsToBranch;
+
     /** The invoice prefix used when the tenant has not configured one. */
     public const DEFAULT_INVOICE_PREFIX = 'CS';
 
@@ -65,6 +70,7 @@ class CapitalSale extends Model
             'vat_rate' => Decimal::class.':2',
             'vat_amount' => Decimal::class.':2',
             'total' => Decimal::class.':2',
+            'branch_id' => 'integer',
         ];
     }
 
@@ -174,7 +180,7 @@ class CapitalSale extends Model
      * carries no items and no units, so quantity and conversion factor are
      * both fixed at 1 and the line's gross is the amount itself, exactly.
      *
-     * @param  array{customer_id?: int|null, date: string, narration?: string|null, payment_mode: string, bank_account_id?: int|null, cash_amount?: mixed, bank_amount?: mixed, vat_rate?: mixed, expected_total?: mixed, store_id?: int}  $data
+     * @param  array{customer_id?: int|null, date: string, narration?: string|null, payment_mode: string, bank_account_id?: int|null, cash_amount?: mixed, bank_amount?: mixed, vat_rate?: mixed, expected_total?: mixed, store_id?: int, branch_id?: int|null}  $data
      * @param  array<int, array{account_id: int, amount: mixed, narration?: string|null, vatable?: bool}>  $lines
      */
     public static function post(array $data, array $lines, User $actor): self
@@ -184,10 +190,13 @@ class CapitalSale extends Model
                 throw new InvalidArgumentException('A capital sale needs at least one line.');
             }
 
-            $storeId = isset($data['store_id']) ? (int) $data['store_id'] : Store::where('is_active', true)->orderBy('id')->value('id');
-            if (! $storeId) {
-                throw new InvalidArgumentException('No active store is configured.');
-            }
+            // Branch and store together (plan 12, I5/I6): the requested
+            // branch, else the store's, else the actor's posting branch; the
+            // store defaults inside that branch (the company default store
+            // while it belongs there, like every other document). No stock
+            // moves, but the store still pins the invoice to its branch.
+            $placement = DocumentBranch::forStoreDocument($actor, $data['branch_id'] ?? null, $data['store_id'] ?? null);
+            $storeId = $placement->requireStoreId();
 
             $customerId = $data['customer_id'] ?? null;
             $customer = $customerId ? Customer::findOrFail($customerId) : null;
@@ -290,6 +299,7 @@ class CapitalSale extends Model
                     'voucher_type' => VoucherType::CapitalSale->value,
                     'date' => $data['date'],
                     'narration' => $data['narration'] ?? ($customer ? "Capital sale to {$customer->name}" : 'Capital sale'),
+                    'branch_id' => $placement->branchId,
                 ],
                 $voucherLines,
                 $actor,
@@ -303,9 +313,10 @@ class CapitalSale extends Model
                 'buyer_pan' => $customer?->tpin,
                 'buyer_address' => $customer?->address,
                 'store_id' => $storeId,
+                'branch_id' => $placement->branchId,
                 'journal_voucher_id' => $voucher->id,
                 'fiscal_year_id' => $voucher->fiscal_year_id,
-                'invoice_number' => static::invoicePrefix()."-{$voucher->voucher_number}",
+                'invoice_number' => $voucher->printedNumber(static::invoicePrefix()),
                 'date' => $data['date'],
                 'narration' => $data['narration'] ?? null,
                 'payment_mode' => $paymentMode,
@@ -402,8 +413,11 @@ class CapitalSale extends Model
                 throw new InvalidArgumentException('The cancellation reason cannot be longer than 500 characters.');
             }
 
+            // The reversal stays in the invoice's branch: reverse() keeps the
+            // original's origin branch and every line's branch, and still
+            // checks that the actor may post there.
             $reversal = JournalVoucher::reverse(
-                $capitalSale->journalVoucher()->firstOrFail(),
+                BranchContext::unrestricted(fn () => $capitalSale->journalVoucher()->firstOrFail()),
                 $actor,
                 "Cancellation of capital sale {$capitalSale->documentNumber()}: {$reason}",
             );

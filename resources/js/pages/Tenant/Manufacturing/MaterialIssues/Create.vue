@@ -13,6 +13,8 @@ import InfoTip from '@/components/ui/InfoTip.vue';
 import Combobox from '@/components/ui/Combobox.vue';
 import NepaliDateInput from '@/components/ui/NepaliDateInput.vue';
 import Label from '@/components/ui/Label.vue';
+import BranchSelect from '@/components/branch/BranchSelect.vue';
+import { useBranchField } from '@/composables/useBranchField';
 import { calculateDocument, formatMoney, formatQuantity, formatRate, sumMoney } from '@/lib/money.js';
 import { todayInKathmandu } from '@/lib/format.js';
 import CorrectionReasonField from '@/components/manufacturing/CorrectionReasonField.vue';
@@ -26,6 +28,9 @@ const props = defineProps({
     stores: { type: Array, default: () => [] },
     // The closed year reopened for correction, { id, name, start_date, end_date }, or null.
     correctionFiscalYear: { type: Object, default: null },
+    // Branch picker (BranchFormOptions::props()).
+    branchOptions: { type: Array, default: () => [] },
+    defaultBranchId: { type: Number, default: null },
 });
 
 useLayoutChrome('New Material Issue');
@@ -41,12 +46,21 @@ const form = useForm({
 
 const needsReason = computed(() => isInCorrectionYear(form.date, props.correctionFiscalYear));
 
+// Branches (plan 12, BR12): the store list follows the chosen branch, and a
+// store of another branch is replaced by the branch's first store. With the
+// picker hidden (one branch) every store is listed, as before.
+const { branchId, showPicker, withBranch, storesForBranch, keepStoreInBranch } = useBranchField(
+    () => props.branchOptions,
+    () => props.defaultBranchId,
+);
+keepStoreInBranch(() => props.stores, () => form.store_id, (id) => (form.store_id = id));
+
 function emptyLine() {
     return { item_id: null, item_unit_id: 'base', quantity: '' };
 }
 
 const itemsById = computed(() => Object.fromEntries(props.items.map((item) => [item.id, item])));
-const storeOptions = computed(() => props.stores.map((s) => ({ value: s.id, label: s.name })));
+const storeOptions = computed(() => storesForBranch(props.stores).map((s) => ({ value: s.id, label: s.name })));
 
 const itemOptions = computed(() =>
     props.items.map((item) => {
@@ -118,7 +132,7 @@ function submit() {
     if (!canSubmit.value) return;
 
     form
-        .transform((data) => ({
+        .transform((data) => withBranch({
             ...data,
             reason: needsReason.value ? data.reason : null,
             lines: data.lines.map((line) => ({
@@ -141,7 +155,8 @@ function submit() {
 
         <form class="flex flex-1 flex-col gap-4" @submit.prevent="submit">
             <Card variant="panel" class="!p-4">
-                <div class="grid grid-cols-1 gap-4 sm:grid-cols-3">
+                <div class="grid grid-cols-1 gap-4" :class="showPicker ? 'sm:grid-cols-4' : 'sm:grid-cols-3'">
+                    <BranchSelect v-model="branchId" :options="branchOptions" :error="form.errors.branch_id" />
                     <div>
                         <Label class="mb-1">Date (BS) <span class="text-danger" aria-hidden="true">*</span></Label>
                         <NepaliDateInput v-model="form.date" required />
@@ -154,6 +169,7 @@ function submit() {
                         </div>
                         <Combobox :model-value="form.store_id" :options="storeOptions" placeholder="Select store" @update:model-value="(v) => (form.store_id = v)" />
                         <p v-if="form.errors.store_id" class="mt-1 text-sm text-danger" role="alert">{{ form.errors.store_id }}</p>
+                        <p v-if="!showPicker && form.errors.branch_id" class="mt-1 text-sm text-danger" role="alert">{{ form.errors.branch_id }}</p>
                     </div>
                     <div>
                         <Label class="mb-1">Narration</Label>

@@ -33,6 +33,9 @@ class StoreProductionEntryRequest extends FormRequest
             // falls in a closed year reopened for correction.
             'reason' => ['nullable', 'string', 'max:255'],
             'store_id' => ['required', 'integer', 'exists:stores,id'],
+            // Optional (plan 12, BR08): ProductionEntry::create() files the
+            // entry in the store's branch and refuses a mismatch.
+            'branch_id' => ['nullable', 'integer', 'exists:branches,id'],
             'finished_item_id' => [
                 'required',
                 'integer',

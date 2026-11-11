@@ -64,7 +64,7 @@ const paperSizeOptions = [
 // single fixed choice, not independent toggles, so the sales screen never
 // needs to show a picker at all.
 const invoiceTypeOptions = [
-    { value: 'full', label: 'Full tax invoice', prefixKey: 'sale_full_prefix', prefixPlaceholder: 'SL' },
+    { value: 'full', label: 'Full tax invoice', prefixKey: 'sale_full_prefix', prefixPlaceholder: 'S' },
     { value: 'abbreviated', label: 'Abbreviated tax invoice', prefixKey: 'sale_abbreviated_prefix', prefixPlaceholder: 'SLA' },
     { value: 'pan', label: 'PAN invoice', prefixKey: 'sale_pan_prefix', prefixPlaceholder: 'SLP' },
 ];
@@ -99,7 +99,7 @@ const form = useForm({
     default_vat_rate: props.settings.default_vat_rate ?? '13.00',
     allow_negative_stock: props.settings.allow_negative_stock ?? false,
     default_store_id: props.settings.default_store_id ?? null,
-    sale_full_prefix: props.settings.sale_full_prefix ?? 'SL',
+    sale_full_prefix: props.settings.sale_full_prefix ?? 'S',
     sale_abbreviated_prefix: props.settings.sale_abbreviated_prefix ?? 'SLA',
     sale_pan_prefix: props.settings.sale_pan_prefix ?? 'SLP',
     active_invoice_type: props.settings.active_invoice_type ?? 'full',
@@ -388,7 +388,8 @@ function submitLogo() {
                                     <tr v-for="row in invoiceNumbering" :key="row.voucher_type" class="border-t border-border">
                                         <td class="px-2 py-2">{{ row.label }}</td>
                                         <td class="px-2 py-2">{{ row.prefix }}</td>
-                                        <td class="px-2 py-2 [font-variant-numeric:tabular-nums]">{{ row.prefix }}-{{ row.next_number }}</td>
+                                        <td v-if="row.per_branch" class="px-2 py-2 text-text-muted">Separate series per branch</td>
+                                        <td v-else class="px-2 py-2 [font-variant-numeric:tabular-nums]">{{ row.prefix }}-{{ row.next_number }}</td>
                                         <td class="px-2 py-2 text-right">
                                             <div v-if="editingSeries === row.voucher_type" class="flex items-center justify-end gap-2">
                                                 <div class="w-32">
@@ -415,6 +416,7 @@ function submitLogo() {
                                                 <Button v-if="row.can_set" variant="secondary" tone="purple" type="button" @click="openStartingNumber(row)">
                                                     Set starting number
                                                 </Button>
+                                                <span v-else-if="row.per_branch" class="text-text-muted">Not available when numbering per branch</span>
                                                 <span v-else class="text-text-muted">Locked - already in use</span>
                                             </template>
                                         </td>

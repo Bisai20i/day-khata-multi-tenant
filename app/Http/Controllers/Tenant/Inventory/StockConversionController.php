@@ -10,6 +10,9 @@ use App\Models\Item;
 use App\Models\PrintLog;
 use App\Models\StockConversion;
 use App\Models\Store;
+use App\Support\Branches\BranchFormOptions;
+use App\Support\Branches\BranchListFilter;
+use App\Support\Branches\BranchStoreOptions;
 use Barryvdh\DomPDF\Facade\Pdf;
 use Illuminate\Auth\Access\AuthorizationException;
 use Illuminate\Http\RedirectResponse;
@@ -22,11 +25,17 @@ use InvalidArgumentException;
 
 class StockConversionController extends Controller
 {
-    public function index(): Response
+    public function index(Request $request): Response
     {
+        // Branches (plan 12, BR12): the list follows the top-bar switcher and
+        // names each row's branch only when several branches can appear; the
+        // create form offers a branch picker and only the stores of the
+        // branches the user may use. Not multi-branch: same queries and
+        // payload as before.
         return Inertia::render('Tenant/Inventory/StockConversions/Index', [
-            'stockConversions' => StockConversion::query()
+            'stockConversions' => BranchListFilter::apply(StockConversion::query(), $request)
                 ->with(['lines.item:id,name,unit', 'store:id,name'])
+                ->when(BranchListFilter::columnVisible($request), fn ($query) => $query->with('branch:id,name,code'))
                 ->orderByDesc('date')
                 ->orderByDesc('id')
                 ->get(),
@@ -36,7 +45,10 @@ class StockConversionController extends Controller
             'items' => Item::query()->where('is_stockable', true)
                 ->where('inventory_class', InventoryClass::Trading->value)
                 ->orderBy('name')->get(['id', 'name', 'unit']),
-            'stores' => Store::where('is_active', true)->orderBy('name')->get(['id', 'name']),
+            'stores' => BranchStoreOptions::apply(Store::where('is_active', true), $request)
+                ->orderBy('name')
+                ->get(BranchStoreOptions::columns($request, ['id', 'name'])),
+            ...BranchFormOptions::props($request),
         ]);
     }
 
@@ -49,6 +61,9 @@ class StockConversionController extends Controller
             'date' => ['required', 'date'],
             'note' => ['nullable', 'string', 'max:255'],
             'store_id' => ['nullable', 'integer', 'exists:stores,id'],
+            // Optional (plan 12, BR08): StockConversion::post() files the
+            // conversion in the store's branch and refuses a mismatch.
+            'branch_id' => ['nullable', 'integer', 'exists:branches,id'],
             'input_lines' => ['required', 'array', 'min:1'],
             'input_lines.*.item_id' => ['required', 'exists:items,id'],
             'input_lines.*.quantity' => ['required', 'numeric', 'min:0.0001', 'decimal:0,4'],
@@ -63,7 +78,7 @@ class StockConversionController extends Controller
 
         try {
             StockConversion::post(
-                Arr::only($data, ['type', 'date', 'note', 'store_id']),
+                Arr::only($data, ['type', 'date', 'note', 'store_id', 'branch_id']),
                 $data['input_lines'],
                 $data['output_lines'],
                 $request->user(),
@@ -73,8 +88,10 @@ class StockConversionController extends Controller
             // StockConversion::post() now runs the date through
             // ClosedFiscalYearGuard (CONTRACTS C4), which throws the former
             // when a non-admin aims at a reopened closed year. Letting it
-            // escape would render a 403 page instead of a field error.
-            return back()->withErrors(['input_lines' => $e->getMessage()])->withInput();
+            // escape would render a 403 page instead of a field error. A
+            // refused branch goes on the branch picker and a store outside
+            // the branch on the store field (plan 12, BR12).
+            return back()->withErrors([BranchFormOptions::errorField($e, 'input_lines', 'branch_id', 'store_id') => $e->getMessage()])->withInput();
         }
 
         return redirect()->route('tenant.stock-conversions.index')->with('status', 'Stock conversion posted.');

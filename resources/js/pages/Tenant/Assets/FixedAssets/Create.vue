@@ -9,14 +9,27 @@ import Combobox from '@/components/ui/Combobox.vue';
 import InfoTip from '@/components/ui/InfoTip.vue';
 import NepaliDateInput from '@/components/ui/NepaliDateInput.vue';
 import Label from '@/components/ui/Label.vue';
+import BranchSelect from '@/components/branch/BranchSelect.vue';
+import { useBranchField } from '@/composables/useBranchField';
 
 const props = defineProps({
     accounts: { type: Array, default: () => [] },
     suppliers: { type: Array, default: () => [] },
     pools: { type: Array, default: () => [] },
+    // Branch picker (BranchFormOptions::props()): the asset's branch.
+    branchOptions: { type: Array, default: () => [] },
+    defaultBranchId: { type: Number, default: null },
 });
 
 const emit = defineEmits(['cancel', 'posted']);
+
+// Branches (plan 12, BR12): the asset's branch, where its purchase,
+// depreciation and disposal post. Hidden (and not submitted) unless the
+// company runs several branches and the user may pick.
+const { branchId, showPicker, withBranch } = useBranchField(
+    () => props.branchOptions,
+    () => props.defaultBranchId,
+);
 
 const accountOptions = computed(() =>
     props.accounts.map((account) => ({
@@ -92,7 +105,7 @@ const showSupplier = computed(() => form.payment_mode === 'credit');
  */
 function submit() {
     if (registeringExisting.value) {
-        form.transform((data) => ({
+        form.transform((data) => withBranch({
             asset_name: data.asset_name,
             category: data.category,
             purchase_date: data.purchase_date,
@@ -110,7 +123,7 @@ function submit() {
         return;
     }
 
-    form.transform((data) => ({
+    form.transform((data) => withBranch({
         ...data,
         cost: String(data.cost ?? '').trim(),
         vat_rate: String(data.vat_rate ?? '').trim() === '' ? '0' : String(data.vat_rate).trim(),
@@ -140,6 +153,7 @@ function submit() {
         <form class="flex flex-col gap-4" @submit.prevent="submit">
             <Card variant="panel" class="!p-4">
                 <div class="grid grid-cols-1 gap-4 md:grid-cols-3">
+                    <BranchSelect v-model="branchId" :options="branchOptions" :error="form.errors.branch_id" />
                     <div>
                         <Label class="mb-1">Asset Name <span class="text-danger">*</span></Label>
                         <Input v-model="form.asset_name" type="text" placeholder="e.g. Office Laptop" required />
@@ -170,6 +184,7 @@ function submit() {
                         </div>
                         <Input v-model="form.cost" type="number" min="0.01" step="0.01" placeholder="e.g. 50000" required />
                         <p v-if="form.errors.cost" class="mt-1 text-sm text-danger">{{ form.errors.cost }}</p>
+                        <p v-if="!showPicker && form.errors.branch_id" class="mt-1 text-sm text-danger" role="alert">{{ form.errors.branch_id }}</p>
                     </div>
                     <div v-if="registeringExisting">
                         <div class="mb-1 flex items-center gap-1">

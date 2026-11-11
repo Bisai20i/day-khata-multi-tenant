@@ -5,6 +5,8 @@ namespace App\Rules;
 use App\Models\Account;
 use App\Models\Customer;
 use App\Models\Supplier;
+use App\Support\Branches\BranchAccounts;
+use App\Support\Hr\HrAccounts;
 use Closure;
 use Illuminate\Contracts\Validation\ValidationRule;
 
@@ -40,6 +42,23 @@ class AccountUnderHead implements ValidationRule
 
         if (Supplier::where('account_id', $value)->exists() || Customer::where('account_id', $value)->exists()) {
             $fail('The selected :attribute cannot be a customer or supplier account.');
+
+            return;
+        }
+
+        // The HR control accounts move only through payroll, salary payment and
+        // staff advance documents, or the HR sub-ledger stops matching them.
+        if (Account::query()->whereKey($value)->whereIn('code', HrAccounts::CONTROL_CODES)->exists()) {
+            $fail('The selected :attribute is controlled by the HR module and cannot be chosen here.');
+
+            return;
+        }
+
+        // Inter-Branch Clearing and the two branch stock transfer accounts are
+        // posted only by the system; a one-sided line in one of them breaks
+        // invariant I3 and blocks the year-end close (BranchAccounts).
+        if (BranchAccounts::isControlAccount($value)) {
+            $fail('The selected :attribute is posted only by the system for inter-branch entries and cannot be chosen here.');
         }
     }
 }

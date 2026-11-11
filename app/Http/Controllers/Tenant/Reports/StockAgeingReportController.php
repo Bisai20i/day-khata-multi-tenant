@@ -8,9 +8,12 @@ use App\Models\Item;
 use App\Models\ItemStockMovement;
 use App\Models\Store;
 use App\Support\AsOfDate;
+use App\Support\Branches\BranchFilter;
+use App\Support\Branches\BranchStock;
 use App\Support\Inventory\StockCosting;
 use App\Support\Money\Money;
 use App\Support\Money\Quantity;
+use Carbon\CarbonInterface;
 use Illuminate\Http\Request;
 use Illuminate\Support\Collection;
 use Inertia\Inertia;
@@ -43,6 +46,12 @@ use Inertia\Response;
  *
  * Non-stockable items (services, capital items) never carry stock and are
  * excluded; the page says so.
+ *
+ * Branches (plan 12, BR15): `branch` / `branches[]` age only the covered
+ * branches' stores (values from BranchStock::valuationRows()); a transfer
+ * from a store outside them is a lot, one between their own stores is not.
+ * A `store_id` outside them is dropped. Not multi-branch: unchanged, plus
+ * `branchReport: null`.
  */
 class StockAgeingReportController extends Controller
 {
@@ -52,17 +61,20 @@ class StockAgeingReportController extends Controller
     {
         $asOfDate = AsOfDate::resolveCarbon($request->input('as_of'));
         $asOf = $asOfDate->toDateString();
+        $filter = BranchFilter::fromRequest($request);
         $storeId = $request->integer('store_id') ?: null;
         $storeId = $storeId !== null && Store::query()->whereKey($storeId)->exists() ? $storeId : null;
+        $storeId = $filter->allowedStoreId($storeId);
+        $stockScope = $filter->stockScope($storeId);
 
-        $valuation = StockCosting::valuationRows($asOf, $storeId);
+        $valuation = BranchStock::valuationRows($filter, $asOf, $storeId);
 
         $positiveIds = $valuation
             ->filter(fn (array $row) => $row['quantity']->isPositive())
             ->pluck('item_id')
             ->all();
 
-        $lots = $this->inboundLotsByItem($positiveIds, $asOf, $storeId);
+        $lots = $this->inboundLotsByItem($positiveIds, $asOf, $stockScope);
         $details = Item::query()
             ->whereIn('id', $valuation->pluck('item_id')->all())
             ->get(['id', 'barcode'])
@@ -127,11 +139,16 @@ class StockAgeingReportController extends Controller
             'asOf' => $asOf,
             'rows' => $rows,
             'totals' => $totals,
-            'valuationTotal' => StockCosting::totalClosingValue($asOf, $storeId)->toString(),
+            // The branch view's total is its own rows' (same convention);
+            // otherwise the figure the report always showed.
+            'valuationTotal' => (is_array($stockScope)
+                ? Money::sum($valuation->map(fn (array $row) => $row['value']))
+                : StockCosting::totalClosingValue($asOf, $storeId))->toString(),
             'negativeStockCount' => $rows->filter(fn (array $r) => Quantity::of($r['quantity'])->isNegative())->count(),
             'excludedNonStockCount' => Item::query()->where('is_stockable', false)->count(),
-            'stores' => Store::where('is_active', true)->orderBy('name')->get(['id', 'name']),
+            'stores' => BranchStock::storeOptions($filter, Store::where('is_active', true))->orderBy('name')->get(['id', 'name']),
             'storeId' => $storeId,
+            'branchReport' => $filter->payload(),
         ]);
     }
 
@@ -169,12 +186,16 @@ class StockAgeingReportController extends Controller
     }
 
     /**
-     * Inbound lots per item, newest first.
+     * Inbound lots per item, newest first. $storeId is one store, the
+     * covered branches' stores (BR15: a TransferIn is a lot only when it
+     * comes from outside the set, BranchStock::onlyCrossingTransfers()) or
+     * null for all stores.
      *
      * @param  list<int>  $itemIds
-     * @return array<int, list<array{date: \Carbon\CarbonInterface, quantity: Quantity}>>
+     * @param  int|list<int>|null  $storeId
+     * @return array<int, list<array{date: CarbonInterface, quantity: Quantity}>>
      */
-    private function inboundLotsByItem(array $itemIds, string $asOf, ?int $storeId): array
+    private function inboundLotsByItem(array $itemIds, string $asOf, int|array|null $storeId): array
     {
         if ($itemIds === []) {
             return [];
@@ -194,7 +215,8 @@ class StockAgeingReportController extends Controller
             ->whereIn('movement_type', $inTypes)
             ->where('cancelled', false)
             ->whereDate('date', '<=', $asOf)
-            ->when($storeId !== null, fn ($query) => $query->where('store_id', $storeId))
+            ->when(is_int($storeId), fn ($query) => $query->where('store_id', $storeId))
+            ->when(is_array($storeId), fn ($query) => BranchStock::onlyCrossingTransfers($query->whereIn('store_id', $storeId), $storeId))
             ->orderByDesc('date')
             ->orderByDesc('id')
             ->get(['id', 'item_id', 'quantity', 'date'])

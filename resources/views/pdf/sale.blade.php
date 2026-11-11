@@ -29,6 +29,11 @@
     $tds = Money::of($sale->tds_amount);
     $total = Money::of($sale->total);
 
+    // Signed adjustment already included in $total; printed as its own row
+    // before the grand total and never added to it again.
+    $roundOff = Money::of($sale->round_off ?? '0');
+    $roundOffLabel = ($roundOff->isPositive() ? '+' : '').$roundOff->format();
+
     // The legacy bill has one Discount row, so it is every discount on the
     // document: each line's own plus the header one. Sub Total is then what the
     // lines came to before any of it (C3 steps 4 and 5 give the group totals

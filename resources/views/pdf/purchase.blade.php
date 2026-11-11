@@ -3,6 +3,10 @@
 @section('title', 'Purchase Bill')
 
 @section('doc-meta-extra')
+    {{-- Multi-branch companies only (plan 12, BR12); single-branch bills print as before. --}}
+    @if(! empty($branchName))
+        <div><strong>{{ $branchLabel ?? 'Branch' }}:</strong> {{ $branchName }}</div>
+    @endif
     <div><strong>Payment:</strong> {{ ucfirst($purchase->payment_mode) }}</div>
     @if($purchase->bill_number)
         <div><strong>Supplier Bill #:</strong> {{ $purchase->bill_number }}</div>
@@ -133,6 +137,13 @@
             <td>VAT ({{ \App\Support\Money\Money::of($purchase->vat_rate)->toString() }}%)</td>
             <td class="text-right">{{ \App\Support\Money\Money::of($purchase->vat_amount)->format() }}</td>
         </tr>
+        @php($roundOff = \App\Support\Money\Money::of($purchase->round_off ?? '0'))
+        @if(! $roundOff->isZero())
+            <tr>
+                <td>Round Off</td>
+                <td class="text-right">{{ ($roundOff->isPositive() ? '+' : '').$roundOff->format() }}</td>
+            </tr>
+        @endif
         <tr class="grand-total">
             <td>Grand Total</td>
             <td class="text-right">{{ \App\Support\Money\Money::of($purchase->total)->format() }}</td>

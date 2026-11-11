@@ -12,10 +12,14 @@ import Select from '@/components/ui/Select.vue';
 import Label from '@/components/ui/Label.vue';
 import { formatBsDate } from '@/lib/format.js';
 import { usePermissions } from '@/composables/usePermissions';
+import { useBranchListColumn } from '@/composables/useBranchListColumn';
 
 defineOptions({ layout: AppLayout });
 
 const { can } = usePermissions();
+// A Branch column only for a multi-branch company viewed as "All branches";
+// the server then sends each row's `branch` (plan 12, BR22).
+const { branchColumns } = useBranchListColumn();
 
 const props = defineProps({
     rows: { type: Array, default: () => [] },
@@ -90,6 +94,7 @@ function cancelledDateBs(value) {
 const columns = [
     { accessorKey: 'type', header: 'Type' },
     { accessorKey: 'number', header: 'Number' },
+    ...branchColumns(),
     {
         id: 'dateBs',
         header: 'Date (BS)',

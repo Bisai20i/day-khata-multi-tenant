@@ -11,6 +11,9 @@ use App\Models\FiscalYear;
 use App\Models\Item;
 use App\Models\ItemStockMovement;
 use App\Models\Store;
+use App\Support\Branches\BranchFilter;
+use App\Support\Branches\BranchStock;
+use App\Support\Branches\BranchStoreOptions;
 use App\Support\Money\Quantity;
 use App\Support\NepaliCalendar;
 use Barryvdh\DomPDF\Facade\Pdf;
@@ -40,17 +43,27 @@ class ItemLedgerController extends Controller
 
     public function show(Request $request, Item $item): Response
     {
-        $data = $this->ledgerData($request, $item);
+        $filter = BranchFilter::fromRequest($request);
+        $data = $this->ledgerData($request, $item, $filter);
 
         return Inertia::render('Tenant/Inventory/Items/Ledger', array_merge([
             'item' => $item->only(['id', 'name', 'unit', 'barcode']),
-            'stores' => Store::where('is_active', true)->orderBy('name')->get(['id', 'name']),
+            // Branches (plan 12, BR12): a multi-branch company is offered only
+            // the stores of the branches the user may use, each named
+            // "Store (Branch)"; BR15 narrows that further to the stores of
+            // the branches the ledger covers. Not multi-branch: the same list
+            // as before.
+            'stores' => BranchStock::storeOptions($filter, BranchStoreOptions::apply(Store::where('is_active', true), $request, withBranch: true))
+                ->orderBy('name')
+                ->get(BranchStoreOptions::columns($request, ['id', 'name'])),
+            'branchReport' => $filter->payload(),
         ], $data));
     }
 
     public function print(Request $request, Item $item): HttpResponse
     {
-        $data = $this->ledgerData($request, $item);
+        $filter = BranchFilter::fromRequest($request);
+        $data = $this->ledgerData($request, $item, $filter);
         $storeName = $data['storeId'] ? Store::whereKey($data['storeId'])->value('name') : null;
 
         $pdf = Pdf::loadView('pdf.item-ledger', [
@@ -67,6 +80,8 @@ class ItemLedgerController extends Controller
             'openingBalance' => $data['openingBalance'],
             'closingBalance' => $data['closingBalance'],
             'entries' => $data['entries'],
+            // Printed from BR16 on; null when not multi-branch.
+            'branchFilterLabel' => $this->branchFilterLabel($filter),
         ]);
 
         return $pdf->stream("item-ledger-{$item->id}.pdf");
@@ -74,12 +89,22 @@ class ItemLedgerController extends Controller
 
     public function export(Request $request, Item $item): BinaryFileResponse
     {
-        $data = $this->ledgerData($request, $item);
+        $filter = BranchFilter::fromRequest($request);
+        $data = $this->ledgerData($request, $item, $filter);
 
         return Excel::download(
-            new ItemLedgerExport($data['entries'], $data['openingBalance'], $data['closingBalance']),
+            new ItemLedgerExport($data['entries'], $data['openingBalance'], $data['closingBalance'], $this->branchFilterLabel($filter)),
             "item-ledger-{$item->id}.xlsx",
         );
+    }
+
+    /**
+     * The branch label for the PDF and Excel header, or null for a tenant
+     * that is not multi-branch.
+     */
+    private function branchFilterLabel(BranchFilter $filter): ?string
+    {
+        return $filter->isActive() ? $filter->label() : null;
     }
 
     /**
@@ -89,9 +114,15 @@ class ItemLedgerController extends Controller
      * still opens at the right quantity instead of zero. Cancelled movements
      * are excluded from both the opening sum and the rows.
      *
+     * Branches (plan 12, BR15): `branch` / `branches[]` narrow the opening
+     * sum and the rows to the SAME set, the covered branches' stores
+     * (BranchFilter::stockScope()), so the running balance stays true. A
+     * transfer between two of those stores shows both legs, which net to
+     * zero. A `store_id` outside the covered branches is dropped.
+     *
      * @return array{entries: array<int, array{date: string, type: string, storeName: ?string, quantity: string, unitCostRate: ?string, balance: string, reference: string}>, openingBalance: string, closingBalance: string, from: string, to: string, storeId: ?int}
      */
-    private function ledgerData(Request $request, Item $item): array
+    private function ledgerData(Request $request, Item $item, BranchFilter $filter): array
     {
         $validated = $request->validate([
             'from' => ['nullable', 'date'],
@@ -100,17 +131,19 @@ class ItemLedgerController extends Controller
         ]);
 
         [$from, $to] = $this->resolveDateRange($validated['from'] ?? null, $validated['to'] ?? null);
-        $storeId = isset($validated['store_id']) ? (int) $validated['store_id'] : null;
+        $storeId = $filter->allowedStoreId(isset($validated['store_id']) ? (int) $validated['store_id'] : null);
+        $stockScope = $filter->stockScope($storeId);
 
         $dayBefore = Carbon::parse($from)->subDay()->toDateString();
-        $openingBalance = Item::currentStockByItem([$item->id], $storeId, $dayBefore)[$item->id] ?? Quantity::zero();
+        $openingBalance = Item::currentStockByItem([$item->id], $stockScope, $dayBefore)[$item->id] ?? Quantity::zero();
 
         $movements = ItemStockMovement::query()
             ->where('item_id', $item->id)
             ->where('cancelled', false)
             ->whereDate('date', '>=', $from)
             ->whereDate('date', '<=', $to)
-            ->when($storeId !== null, fn ($query) => $query->where('store_id', $storeId))
+            ->when(is_int($stockScope), fn ($query) => $query->where('store_id', $stockScope))
+            ->when(is_array($stockScope), fn ($query) => $query->whereIn('store_id', $stockScope))
             ->with('store:id,name')
             ->with($this->stockMovementReferenceEagerLoad())
             ->orderBy('date')

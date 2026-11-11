@@ -2,6 +2,7 @@
 
 declare(strict_types=1);
 
+use App\Http\Controllers\Tenant\ActiveBranchController;
 use App\Http\Controllers\Tenant\ProfileController;
 use Illuminate\Support\Facades\Route;
 
@@ -22,4 +23,9 @@ Route::name('tenant.')->group(function () {
         Route::put('/', [ProfileController::class, 'update'])->name('update');
         Route::put('/password', [ProfileController::class, 'updatePassword'])->name('password');
     });
+
+    // A user choosing which branch they are working in. Session only and
+    // re-validated against their allowed branches on every request by
+    // SetBranchContext, so it needs no permission key.
+    Route::put('/active-branch', [ActiveBranchController::class, 'update'])->name('active-branch.update');
 });

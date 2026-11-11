@@ -12,9 +12,11 @@ import Tabs from '@/components/ui/Tabs.vue';
 import FormActions from '@/components/ui/FormActions.vue';
 import PageHeader from '@/components/ui/PageHeader.vue';
 import InfoTip from '@/components/ui/InfoTip.vue';
+import RoundOffSettings from '@/components/admin/RoundOffSettings.vue';
 import Label from '@/components/ui/Label.vue';
 import { useToast } from '@/composables/useToast';
 import { useConfirm } from '@/composables/useConfirm';
+import { useBranchLabel } from '@/composables/useBranchLabel';
 
 defineOptions({ layout: AppLayout });
 
@@ -31,11 +33,17 @@ const props = defineProps({
         type: Array,
         default: () => [],
     },
+    roundOffPrecisions: {
+        type: Array,
+        default: () => [],
+    },
 });
 
 const page = usePage();
 const { toast } = useToast();
 const { confirm } = useConfirm();
+// Per-branch numbering years (plan 12, BR20) send rows with per_branch set.
+const { label: branchLabel } = useBranchLabel();
 
 useLayoutChrome('Company Setup');
 
@@ -56,7 +64,7 @@ const paperSizeOptions = [
 ];
 
 const invoiceTypeOptions = [
-    { value: 'full', label: 'Full tax invoice', prefixKey: 'sale_full_prefix', prefixPlaceholder: 'SL' },
+    { value: 'full', label: 'Full tax invoice', prefixKey: 'sale_full_prefix', prefixPlaceholder: 'S' },
     { value: 'abbreviated', label: 'Abbreviated tax invoice', prefixKey: 'sale_abbreviated_prefix', prefixPlaceholder: 'SLA' },
     { value: 'pan', label: 'PAN invoice', prefixKey: 'sale_pan_prefix', prefixPlaceholder: 'SLP' },
 ];
@@ -85,7 +93,9 @@ const form = useForm({
     default_vat_rate: props.settings.default_vat_rate ?? '13.00',
     allow_negative_stock: props.settings.allow_negative_stock ?? false,
     default_store_id: props.settings.default_store_id ?? null,
-    sale_full_prefix: props.settings.sale_full_prefix ?? 'SL',
+    round_off_enabled: Boolean(props.settings.round_off_enabled),
+    round_off_precision: String(props.settings.round_off_precision ?? '1'),
+    sale_full_prefix: props.settings.sale_full_prefix ?? 'S',
     sale_abbreviated_prefix: props.settings.sale_abbreviated_prefix ?? 'SLA',
     sale_pan_prefix: props.settings.sale_pan_prefix ?? 'SLP',
     active_invoice_type: props.settings.active_invoice_type ?? 'full',
@@ -413,6 +423,13 @@ async function deleteLogo() {
                                     </div>
                                 </div>
                             </div>
+
+                            <RoundOffSettings
+                                v-model:enabled="form.round_off_enabled"
+                                v-model:precision="form.round_off_precision"
+                                :precisions="roundOffPrecisions"
+                                :errors="form.errors"
+                            />
                         </div>
                     </Card>
                 </div>
@@ -447,7 +464,8 @@ async function deleteLogo() {
                                     <tr v-for="row in invoiceNumbering" :key="row.voucher_type" class="border-t border-border">
                                         <td class="px-2 py-2">{{ row.label }}</td>
                                         <td class="px-2 py-2">{{ row.prefix }}</td>
-                                        <td class="px-2 py-2 [font-variant-numeric:tabular-nums]">{{ row.prefix }}-{{ row.next_number }}</td>
+                                        <td v-if="row.per_branch" class="px-2 py-2 text-text-muted">Separate series per {{ branchLabel('lower') }}</td>
+                                        <td v-else class="px-2 py-2 [font-variant-numeric:tabular-nums]">{{ row.prefix }}-{{ row.next_number }}</td>
                                         <td class="px-2 py-2 text-right">
                                             <div v-if="editingSeries === row.voucher_type" class="flex items-center justify-end gap-2">
                                                 <div class="w-32">
@@ -474,6 +492,7 @@ async function deleteLogo() {
                                                 <Button v-if="row.can_set" variant="secondary" tone="purple" type="button" @click="openStartingNumber(row)">
                                                     Set starting number
                                                 </Button>
+                                                <span v-else-if="row.per_branch" class="text-text-muted">Not available when numbering per {{ branchLabel('lower') }}</span>
                                                 <span v-else class="text-text-muted">Locked - already in use</span>
                                             </template>
                                         </td>

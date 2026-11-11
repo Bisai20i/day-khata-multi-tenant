@@ -38,7 +38,7 @@ const voucherTypeLabels = {
 const voucherLabel = computed(() => {
     const label = voucherTypeLabels[props.voucher.voucherType] ?? props.voucher.voucherType;
 
-    return `${label} #${props.voucher.voucherNumber}`;
+    return `${label} #${props.voucher.seriesNumber ?? props.voucher.voucherNumber}`;
 });
 
 useLayoutChrome(() => voucherLabel.value);

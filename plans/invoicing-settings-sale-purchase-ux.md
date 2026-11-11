@@ -93,7 +93,7 @@ Confirmed by direct code reading, not just the research agents' word:
 **`company_settings` gains** (one migration): `logo_path` (nullable string, storage-relative path),
 `default_vat_rate` (decimal 5,2, default `13.00`), `allow_negative_stock` (boolean, default `false`),
 `default_store_id` (nullable FK `stores`), and three enable/prefix pairs for the three existing sale
-invoice types - `sale_full_prefix` (default `SL`), `sale_full_enabled` (default `true`),
+invoice types - `sale_full_prefix` (column default `SL`; new tenants are seeded with `S` by `CompanySetting::current()`), `sale_full_enabled` (default `true`),
 `sale_abbreviated_prefix` (default `SLA`), `sale_abbreviated_enabled` (default `true`),
 `sale_pan_prefix` (default `SLP`), `sale_pan_enabled` (default `true`), plus `purchase_prefix` (default
 `PU`). Real typed columns, not a generic settings table - this project's established "no speculative

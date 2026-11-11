@@ -21,6 +21,7 @@ import { formatMoney, formatQuantity } from '@/lib/money.js';
 import { formatBsDate, todayInKathmandu } from '@/lib/format.js';
 import Create from './Create.vue';
 import { useOpenFiscalYear } from '@/composables/useOpenFiscalYear';
+import { useBranchListColumn } from '@/composables/useBranchListColumn';
 
 defineOptions({ layout: AppLayout });
 
@@ -38,7 +39,12 @@ const props = defineProps({
     // True once an opening-stock CSV has been imported, so the import modal
     // can warn that a second one replaces the first.
     hasOpeningStockImport: { type: Boolean, default: false },
+    // Branch picker of the create form (BranchFormOptions::props()).
+    branchOptions: { type: Array, default: () => [] },
+    defaultBranchId: { type: Number, default: null },
 });
+
+const { branchColumns } = useBranchListColumn();
 
 const page = usePage();
 const { toast } = useToast();
@@ -212,6 +218,8 @@ const columns = [
                 h('span', { class: 'ml-1 text-text-faint' }, `(${String(row.original.date ?? '').slice(0, 10)})`),
             ]),
     },
+    // Only for a multi-branch company viewing all branches.
+    ...branchColumns(),
     {
         id: 'note',
         header: 'Note',
@@ -293,6 +301,8 @@ const columns = [
                 :items="items"
                 :stores="stores"
                 :correction-fiscal-year="correctionFiscalYear"
+                :branch-options="branchOptions"
+                :default-branch-id="defaultBranchId"
                 @cancel="showCreateForm = false"
                 @posted="showCreateForm = false"
             />

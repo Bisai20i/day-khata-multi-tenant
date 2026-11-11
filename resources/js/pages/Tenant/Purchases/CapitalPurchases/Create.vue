@@ -13,6 +13,8 @@ import NepaliDateInput from '@/components/ui/NepaliDateInput.vue';
 import Label from '@/components/ui/Label.vue';
 import { addMoney, calculateDocument, formatMoney, moneyEquals, parseMoney } from '@/lib/money';
 import { todayInKathmandu } from '@/lib/format';
+import BranchSelect from '@/components/branch/BranchSelect.vue';
+import { useBranchField } from '@/composables/useBranchField';
 
 const props = defineProps({
     suppliers: { type: Array, default: () => [] },
@@ -21,12 +23,23 @@ const props = defineProps({
     defaultVatRate: { type: String, default: '13.00' },
     depreciationCategories: { type: Array, default: () => [] },
     depreciationMethods: { type: Array, default: () => [] },
+    // Branch picker (BranchFormOptions::props() on the server, plan 12).
+    branchOptions: { type: Array, default: () => [] },
+    defaultBranchId: { type: Number, default: null },
 });
 
 const emit = defineEmits(['cancel', 'posted']);
 
+// Branches (plan 12, BR12): a multi-branch company picks the bill's branch and
+// the store list follows it; a tracked asset gets the bill's branch on the
+// server. Everyone else submits exactly what they did before (withBranch()).
+const { branchId, branchOptions, showPicker, withBranch, storesForBranch, keepStoreInBranch } = useBranchField(
+    () => props.branchOptions,
+    () => props.defaultBranchId,
+);
+
 const supplierOptions = computed(() => props.suppliers.map((s) => ({ value: s.id, label: s.name })));
-const storeOptions = computed(() => props.stores.map((s) => ({ value: s.id, label: s.name })));
+const storeOptions = computed(() => storesForBranch(props.stores).map((s) => ({ value: s.id, label: s.name })));
 const accountOptions = computed(() =>
     props.accounts.map((account) => ({
         value: account.id,
@@ -90,6 +103,17 @@ const form = useForm({
     vat_rate: props.defaultVatRate,
     lines: [emptyLine()],
 });
+
+// Another branch clears a store that is not one of its stores back to blank
+// ("Default store": the server takes the branch's default store).
+keepStoreInBranch(
+    () => props.stores,
+    () => form.store_id,
+    (storeId) => {
+        form.store_id = storeId;
+    },
+    () => null,
+);
 
 // The PAN claimed against is snapshotted on the purchase, so it is prefilled
 // from the supplier and stays editable for the case where the bill carries a
@@ -168,7 +192,8 @@ const canSubmit = computed(
 );
 
 function submit() {
-    form.transform((data) => ({
+    // withBranch(): branch_id only when the picker shows (plan 12, BR12).
+    form.transform((data) => withBranch({
         ...data,
         vat_rate: orZero(data.vat_rate),
         bill_number: data.bill_number || undefined,
@@ -250,6 +275,7 @@ function submit() {
                         <Input v-model="form.supplier_pan" type="text" placeholder="From the supplier record" />
                         <p v-if="form.errors.supplier_pan" class="mt-1 text-sm text-danger">{{ form.errors.supplier_pan }}</p>
                     </div>
+                    <BranchSelect v-model="branchId" :options="branchOptions" :error="form.errors.branch_id" />
                     <div>
                         <Label class="mb-1">Store</Label>
                         <Combobox
@@ -259,6 +285,7 @@ function submit() {
                             @update:model-value="(v) => (form.store_id = v)"
                         />
                         <p v-if="form.errors.store_id" class="mt-1 text-sm text-danger">{{ form.errors.store_id }}</p>
+                        <p v-if="!showPicker && form.errors.branch_id" class="mt-1 text-sm text-danger" role="alert">{{ form.errors.branch_id }}</p>
                     </div>
                 </div>
             </Card>

@@ -20,6 +20,7 @@ import { formatBsDate } from '@/lib/format';
 import Create from './Create.vue';
 import { useOpenFiscalYear } from '@/composables/useOpenFiscalYear';
 import { usePermissions } from '@/composables/usePermissions';
+import { useBranchListColumn } from '@/composables/useBranchListColumn';
 
 defineOptions({ layout: AppLayout });
 
@@ -34,7 +35,12 @@ const props = defineProps({
     suppliers: { type: Array, default: () => [] },
     bankAccounts: { type: Array, default: () => [] },
     outstandingPurchases: { type: Array, default: () => [] },
+    // Branch picker of the create form (BranchFormOptions::props()).
+    branchOptions: { type: Array, default: () => [] },
+    defaultBranchId: { type: Number, default: null },
 });
+
+const { branchColumns } = useBranchListColumn();
 
 const page = usePage();
 const { toast } = useToast();
@@ -97,6 +103,8 @@ const columns = [
         numeric: false,
         cell: ({ row }) => `${formatBsDate(row.original.date)} (${String(row.original.date).slice(0, 10)})`,
     },
+    // Only for a multi-branch company viewing all branches.
+    ...branchColumns(),
     {
         id: 'payment_number',
         header: 'Payment #',
@@ -165,6 +173,8 @@ const columns = [
                 :suppliers="suppliers"
                 :bank-accounts="bankAccounts"
                 :outstanding-purchases="outstandingPurchases"
+                :branch-options="branchOptions"
+                :default-branch-id="defaultBranchId"
                 @cancel="showCreateForm = false"
                 @posted="showCreateForm = false"
             />

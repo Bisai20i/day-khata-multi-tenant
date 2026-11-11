@@ -113,6 +113,10 @@ export function useSaleReturnCreateLinked(props, form) {
             net: component(line.net, line.credited_net),
             vat: component(line.vat, line.credited_vat),
             tds: component(line.tds, line.credited_tds),
+            // The line's slice of the sale's signed Round Off: a fourth component, shared out
+            // exactly like the others (a negative amount is handled by allocateMoney, as the
+            // server's Money::allocate() does).
+            round_off: component(line.round_off ?? '0.00', line.credited_round_off ?? '0.00'),
         };
     }
 
@@ -179,6 +183,7 @@ export function useSaleReturnCreateLinked(props, form) {
         let nontaxable = '0.00';
         let vat = '0.00';
         let tds = '0.00';
+        let roundOff = '0.00';
 
         for (const credit of Object.values(credits.value)) {
             if (!credit || credit.error) {
@@ -193,11 +198,14 @@ export function useSaleReturnCreateLinked(props, form) {
 
             vat = addMoney(vat, credit.vat);
             tds = addMoney(tds, credit.tds);
+            roundOff = addMoney(roundOff, credit.round_off);
         }
 
-        const total = addMoney(addMoney(taxable, nontaxable), vat);
+        // Round Off is already inside the sale's total, so its returned share is inside the
+        // credit note total (signed).
+        const total = addMoney(addMoney(addMoney(taxable, nontaxable), vat), roundOff);
 
-        return { taxable, nontaxable, vat, tds, total, credited: subtractMoney(total, tds) };
+        return { taxable, nontaxable, vat, tds, roundOff, total, credited: subtractMoney(total, tds) };
     });
 
     const payloadLines = computed(() =>

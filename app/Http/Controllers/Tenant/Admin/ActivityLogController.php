@@ -4,14 +4,19 @@ namespace App\Http\Controllers\Tenant\Admin;
 
 use App\Http\Controllers\Controller;
 use App\Models\ActivityLog;
+use App\Models\Area;
 use App\Models\CapitalPurchase;
 use App\Models\CapitalSale;
+use App\Models\Customer;
 use App\Models\FiscalYear;
 use App\Models\FixedAsset;
 use App\Models\Item;
 use App\Models\JournalVoucher;
 use App\Models\MaterialIssueNote;
+use App\Models\PayComponent;
 use App\Models\Payment;
+use App\Models\PayrollPayment;
+use App\Models\PayrollRun;
 use App\Models\ProductionCompletion;
 use App\Models\ProductionDirectCost;
 use App\Models\ProductionEntry;
@@ -22,8 +27,14 @@ use App\Models\Receipt;
 use App\Models\Role;
 use App\Models\Sale;
 use App\Models\SalesReturn;
+use App\Models\StaffAdvance;
+use App\Models\StaffMember;
+use App\Models\StaffPayItem;
 use App\Models\StockAdjustment;
+use App\Models\StockTransfer;
+use App\Models\Supplier;
 use App\Models\User;
+use App\Support\Branches\BranchMorphVisibility;
 use Illuminate\Http\Request;
 use Inertia\Inertia;
 use Inertia\Response;
@@ -51,6 +62,7 @@ class ActivityLogController extends Controller
             SalesReturn::class,
             PurchaseReturn::class,
             StockAdjustment::class,
+            StockTransfer::class,
             Receipt::class,
             Payment::class,
             JournalVoucher::class,
@@ -62,9 +74,19 @@ class ActivityLogController extends Controller
             ProductionEntry::class,
             ProductionDirectCost::class,
             ProductionCompletion::class,
+            StaffMember::class,
+            PayrollRun::class,
+            PayrollPayment::class,
+            StaffAdvance::class,
+            PayComponent::class,
+            StaffPayItem::class,
             User::class,
             FiscalYear::class,
             Role::class,
+            Area::class,
+            // Bulk area assignments (HandlesPartyAreas) - logged by hand, not by the observer.
+            Customer::class,
+            Supplier::class,
             // Saved purchase price changes made from a purchase bill
             // (ItemPurchasePriceUpdater) - logged by hand, not by the observer.
             Item::class,
@@ -82,7 +104,15 @@ class ActivityLogController extends Controller
         $from = $request->string('from')->toString() ?: null;
         $to = $request->string('to')->toString() ?: null;
 
-        $logs = ActivityLog::query()
+        $query = ActivityLog::query();
+
+        // activity_logs has no branch column, and a row's `changes` JSON
+        // carries the document's own fields, so a branch-restricted user
+        // must not see rows about another branch's documents. A no-op for
+        // the owner and all-branch users (plan 12, section 5.7).
+        BranchMorphVisibility::apply($query, 'subject_type', 'subject_id');
+
+        $logs = $query
             ->with('user:id,name')
             ->when($subjectType, fn ($query) => $query->where('subject_type', $subjectType))
             ->when($from, fn ($query) => $query->whereDate('created_at', '>=', $from))

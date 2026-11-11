@@ -1,5 +1,5 @@
 <script setup>
-import { h, ref, watch } from 'vue';
+import { computed, h, ref, toRef, watch } from 'vue';
 import { router, useForm, usePage } from '@inertiajs/vue3';
 import AppLayout from '@/layouts/AppLayout.vue';
 import { useLayoutChrome } from '@/composables/useLayoutChrome';
@@ -13,14 +13,22 @@ import Modal from '@/components/ui/Modal.vue';
 import DataTable from '@/components/ui/DataTable.vue';
 import RowActions from '@/components/ui/RowActions.vue';
 import Label from '@/components/ui/Label.vue';
+import AreaFilterBar from '@/components/parties/AreaFilterBar.vue';
+import AreaSelect from '@/components/parties/AreaSelect.vue';
+import PartyAreaBulkBar from '@/components/parties/PartyAreaBulkBar.vue';
+import { usePartyAreaBulk } from '@/composables/usePartyAreaBulk';
 import { useToast } from '@/composables/useToast';
 import { useConfirm } from '@/composables/useConfirm';
 import { usePermissions } from '@/composables/usePermissions';
 
 defineOptions({ layout: AppLayout });
 
-defineProps({
+const props = defineProps({
     customers: {
+        type: Array,
+        default: () => [],
+    },
+    areas: {
         type: Array,
         default: () => [],
     },
@@ -31,6 +39,28 @@ const { toast } = useToast();
 const { confirm } = useConfirm();
 const { can } = usePermissions();
 useLayoutChrome('Customers');
+
+// Area filter: the list is fully loaded, so it narrows client-side.
+const areaFilter = ref('');
+
+const visibleCustomers = computed(() => {
+    if (areaFilter.value === '') return props.customers;
+    if (areaFilter.value === 'none') return props.customers.filter((row) => !row.area_id);
+
+    return props.customers.filter((row) => String(row.area_id) === areaFilter.value);
+});
+
+const bulk = usePartyAreaBulk({
+    url: '/customers/assign-area',
+    noun: 'customer',
+    rows: visibleCustomers,
+    areas: toRef(props, 'areas'),
+    // The walk-in customer is a system default; it never belongs to an area.
+    isSelectable: (row) => !row.is_walk_in,
+});
+
+// A selection made under one filter must not silently carry over to another.
+watch(areaFilter, () => bulk.clear());
 
 // Flash status is watched (not just read on mount) because create/edit/delete
 // all redirect back to this same route + component, which Inertia re-renders
@@ -96,6 +126,7 @@ const form = useForm({
     email: '',
     tpin: '',
     citizenship: '',
+    area_id: null,
 });
 
 function openCreate() {
@@ -114,6 +145,7 @@ function openEdit(customer) {
     form.email = customer.email ?? '';
     form.tpin = customer.tpin ?? '';
     form.citizenship = customer.citizenship ?? '';
+    form.area_id = customer.area_id ?? null;
     modalOpen.value = true;
 }
 
@@ -146,6 +178,7 @@ async function destroyCustomer(customer) {
 }
 
 const columns = [
+    ...(can('customers.edit') ? [bulk.selectionColumn()] : []),
     { accessorKey: 'name', header: 'Customer name' },
     {
         accessorKey: 'mobile_no',
@@ -164,6 +197,12 @@ const columns = [
         header: 'TPIN',
         numeric: false,
         cell: ({ row }) => row.original.tpin ?? '-',
+    },
+    {
+        id: 'area',
+        header: 'Area',
+        numeric: false,
+        cell: ({ row }) => row.original.area?.name ?? '-',
     },
     {
         id: 'ledger_code',
@@ -201,8 +240,9 @@ const columns = [
         </PageHeader>
 
         <Card variant="panel" class="bg-white">
-            <div v-if="can('customers.import')" class="mb-3 flex flex-wrap items-center justify-between gap-2">
-                <div class="ml-auto flex items-center gap-2">
+            <div v-if="customers.length > 0 || can('customers.import')" class="mb-3 flex flex-wrap items-end justify-between gap-2">
+                <AreaFilterBar v-if="customers.length > 0" v-model:area="areaFilter" :areas="areas" :show-group="false" id-prefix="customer-list" />
+                <div v-if="can('customers.import')" class="ml-auto flex items-center gap-2">
                     <Button variant="secondary" tone="neutral" type="button" @click="openImport">
                         <Upload class="size-4" />
                         Bulk import
@@ -218,7 +258,25 @@ const columns = [
                     New customer
                 </Button>
             </div>
-            <DataTable v-else :columns="columns" :data="customers" :page-size="10" empty-message="No customers" />
+            <template v-else>
+                <PartyAreaBulkBar
+                    v-if="can('customers.edit')"
+                    v-model:target-area-id="bulk.targetAreaId.value"
+                    :count="bulk.selectedIds.value.length"
+                    noun="customer"
+                    :areas="areas"
+                    :applying="bulk.applying.value"
+                    @apply="bulk.apply()"
+                    @clear-area="bulk.apply(null)"
+                    @clear="bulk.clear"
+                />
+                <DataTable
+                    :columns="columns"
+                    :data="visibleCustomers"
+                    :page-size="10"
+                    :empty-message="areaFilter ? 'No customers in this area' : 'No customers'"
+                />
+            </template>
         </Card>
 
         <Modal :open="modalOpen" :title="editing ? 'Edit customer' : 'New customer'" @update:open="onModalOpenChange">
@@ -234,6 +292,15 @@ const columns = [
                     <Input id="address" v-model="form.address" type="text" placeholder="e.g. Kathmandu-10" />
                     <p v-if="form.errors.address" class="mt-1 text-sm text-danger">{{ form.errors.address }}</p>
                 </div>
+
+                <AreaSelect
+                    v-if="!editing?.is_walk_in"
+                    id="customer-area"
+                    v-model="form.area_id"
+                    :areas="areas"
+                    :error="form.errors.area_id"
+                    help="Lets you filter and group the Debtors and ageing reports by area."
+                />
 
                 <div>
                     <Label for="mobile_no" class="mb-1">Mobile No</Label>
@@ -276,7 +343,8 @@ const columns = [
                 <p class="text-[13px] text-text-muted">
                     Download the template, fill in one customer per row, then upload the completed CSV file. Rows
                     with a missing name, an invalid email, or a mobile number already in use (or repeated in the
-                    file) are skipped and reported after import.
+                    file) are skipped and reported after import. The optional "area" column must name an area that
+                    already exists (see Areas); leave it blank for no area, and a row naming an unknown area is skipped.
                 </p>
                 <div class="flex flex-wrap items-center gap-3">
                     <a

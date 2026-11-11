@@ -24,11 +24,13 @@ class ManufacturingReportExport implements FromCollection, WithColumnFormatting,
      * @param  array<int, string>  $headings
      * @param  array<int, array{cells: array<int, mixed>, style: string}>  $rows
      * @param  array<int, int>  $numericColumns  zero-based column indexes
+     * @param  string|null  $branchLabel  BranchFilter::label() in a multi-branch tenant, else null (no extra heading row)
      */
     public function __construct(
         private readonly array $headings,
         private readonly array $rows,
         private readonly array $numericColumns,
+        private readonly ?string $branchLabel = null,
     ) {}
 
     public function collection(): Collection
@@ -37,11 +39,11 @@ class ManufacturingReportExport implements FromCollection, WithColumnFormatting,
     }
 
     /**
-     * @return array<int, string>
+     * @return array<int, string>|list<list<string>>
      */
     public function headings(): array
     {
-        return $this->headings;
+        return $this->branchLabel === null ? $this->headings : [[$this->branchLabel], $this->headings];
     }
 
     /**

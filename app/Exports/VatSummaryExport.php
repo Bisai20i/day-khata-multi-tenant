@@ -22,6 +22,10 @@ use PhpOffice\PhpSpreadsheet\Style\NumberFormat;
  * comma-grouped or "Rs."-prefixed string, which is exactly what made the
  * legacy predecessor's DOM-scraped VAT export unusable for Excel math.
  * `Money::toFloat()` appears only at that cell boundary (C1).
+ *
+ * In a multi-branch tenant the sheet opens with the branch filter's label
+ * (plan 12, BR14) above the headings; with no label the layout is exactly
+ * what it always was.
  */
 class VatSummaryExport implements FromCollection, WithColumnFormatting, WithHeadings, WithMapping
 {
@@ -29,12 +33,14 @@ class VatSummaryExport implements FromCollection, WithColumnFormatting, WithHead
      * @param  array{gross: string, capital: string, cancelled: string, returns: string, net: string}  $outputVat
      * @param  array{gross: string, capital: string, cancelled: string, returns: string, net: string}  $inputVat
      * @param  array<string, mixed>  $reconciliation
+     * @param  string|null  $branchLabel  BranchFilter::label() in a multi-branch tenant, else null
      */
     public function __construct(
         private readonly array $outputVat,
         private readonly array $inputVat,
         private readonly string $netVatPayable,
         private readonly array $reconciliation = ['applicable' => false],
+        private readonly ?string $branchLabel = null,
     ) {}
 
     /**
@@ -71,11 +77,13 @@ class VatSummaryExport implements FromCollection, WithColumnFormatting, WithHead
     }
 
     /**
-     * @return array<int, string>
+     * @return array<int, string>|list<list<string>>
      */
     public function headings(): array
     {
-        return ['Metric', 'Amount'];
+        $headings = ['Metric', 'Amount'];
+
+        return $this->branchLabel === null ? $headings : [[$this->branchLabel], $headings];
     }
 
     /**

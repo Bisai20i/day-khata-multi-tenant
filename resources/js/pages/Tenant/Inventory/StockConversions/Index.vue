@@ -18,6 +18,7 @@ import { formatMoney, formatQuantity } from '@/lib/money.js';
 import { formatBsDate } from '@/lib/format.js';
 import Create from './Create.vue';
 import { useOpenFiscalYear } from '@/composables/useOpenFiscalYear';
+import { useBranchListColumn } from '@/composables/useBranchListColumn';
 
 defineOptions({ layout: AppLayout });
 
@@ -28,7 +29,12 @@ const props = defineProps({
     stockConversions: { type: Array, default: () => [] },
     items: { type: Array, default: () => [] },
     stores: { type: Array, default: () => [] },
+    // Branch picker of the create form (BranchFormOptions::props()).
+    branchOptions: { type: Array, default: () => [] },
+    defaultBranchId: { type: Number, default: null },
 });
+
+const { branchColumns } = useBranchListColumn();
 
 const page = usePage();
 const { toast } = useToast();
@@ -95,6 +101,8 @@ const columns = [
                 h('span', { class: 'ml-1 text-text-faint' }, `(${String(row.original.date ?? '').slice(0, 10)})`),
             ]),
     },
+    // Only for a multi-branch company viewing all branches.
+    ...branchColumns(),
     {
         id: 'type',
         header: 'Type',
@@ -184,7 +192,14 @@ const columns = [
 <template>
     <div>
         <template v-if="showCreateForm">
-            <Create :items="items" :stores="stores" @cancel="showCreateForm = false" @posted="showCreateForm = false" />
+            <Create
+                :items="items"
+                :stores="stores"
+                :branch-options="branchOptions"
+                :default-branch-id="defaultBranchId"
+                @cancel="showCreateForm = false"
+                @posted="showCreateForm = false"
+            />
         </template>
 
         <template v-else>

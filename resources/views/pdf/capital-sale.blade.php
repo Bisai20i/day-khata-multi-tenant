@@ -3,6 +3,11 @@
 @section('title', 'Tax Invoice')
 
 @section('doc-meta-extra')
+    {{-- Multi-branch companies only (plan 12, BR12): the controller passes
+         a null branchName otherwise, so single-branch output is unchanged. --}}
+    @if(! empty($branchName))
+        <div><strong>{{ $branchLabel ?? 'Branch' }}:</strong> {{ $branchName }}</div>
+    @endif
     <div><strong>Payment:</strong> {{ ucfirst($capitalSale->payment_mode) }}</div>
     @if($capitalSale->status === 'cancelled')
         <div style="margin-top: 4px;"><span class="status-badge">Cancelled</span></div>

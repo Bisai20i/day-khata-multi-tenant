@@ -11,6 +11,9 @@ import Button from '@/components/ui/Button.vue';
 import Label from '@/components/ui/Label.vue';
 import { formatMoney, formatQuantity } from '@/lib/money';
 import { formatBsDate } from '@/lib/format';
+import { useBranchReportFilter } from '@/composables/useBranchReportFilter';
+import BranchReportFilter from '@/components/branch/BranchReportFilter.vue';
+import BranchReportNotes from '@/components/branch/BranchReportNotes.vue';
 
 defineOptions({ layout: AppLayout });
 
@@ -21,6 +24,8 @@ const props = defineProps({
     grandTotal: { type: Object, default: () => ({ value: '0.00', quantities: [] }) },
     stores: { type: Array, default: () => [] },
     storeId: { type: [Number, null], default: null },
+    // Branch filter; null when the company has no branches.
+    branchReport: { type: [Object, null], default: null },
 });
 
 useLayoutChrome('Purchase by Category');
@@ -28,6 +33,8 @@ useLayoutChrome('Purchase by Category');
 const from = ref(props.from);
 const to = ref(props.to);
 const storeId = ref(props.storeId);
+
+const branchFilter = useBranchReportFilter(() => props.branchReport);
 
 const storeOptions = computed(() => [
     { value: null, label: 'All stores' },
@@ -46,7 +53,7 @@ function resetFilters() {
 function applyFilter() {
     router.get(
         window.location.pathname,
-        { from: from.value, to: to.value, store_id: storeId.value ?? undefined },
+        { from: from.value, to: to.value, store_id: storeId.value ?? undefined, ...branchFilter.toQuery() },
         {
             preserveState: true,
             preserveScroll: true,
@@ -81,6 +88,7 @@ function lineDetailHref(categoryId, subcategoryId) {
         params.set('store_id', props.storeId);
     }
 
+    branchFilter.appendTo(params);
     params.set('category_id', categoryId);
 
     if (subcategoryId) {
@@ -115,9 +123,17 @@ function lineDetailHref(categoryId, subcategoryId) {
                     <Label class="mb-1">Store</Label>
                     <Select v-model="storeId" :options="storeOptions" />
                 </div>
+                <BranchReportFilter
+                    v-if="branchReport"
+                    v-model:choice="branchFilter.choice.value"
+                    :report="branchReport"
+                    id-prefix="purchase-by-category"
+                    @change="applyFilter"
+                />
                 <Button variant="primary" tone="purple" :loading="isLoading" @click="applyFilter">Generate report</Button>
                 <Button v-if="hasActiveFilter" variant="secondary" tone="purple" :disabled="isLoading" @click="resetFilters">Reset</Button>
             </div>
+            <BranchReportNotes v-if="branchReport" :report="branchReport" />
         </Card>
 
         <Card variant="panel">

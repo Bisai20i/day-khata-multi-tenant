@@ -6,6 +6,12 @@
 
 @section('title', 'Balance Sheet')
 
+@section('doc-meta-extra')
+    @if(!empty($branchFilterLabel))
+        <div>{{ $branchFilterLabel }}</div>
+    @endif
+@endsection
+
 @section('content')
     @if($balanceWarning ?? null)
         <div class="legal-note">{{ $balanceWarning }}</div>

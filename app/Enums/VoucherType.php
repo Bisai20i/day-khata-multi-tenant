@@ -43,6 +43,19 @@ namespace App\Enums;
  * cancelled from their owning records, never manually. ProductionEntry is a
  * header-only number series for production entries: no voucher ever
  * carries it.
+ *
+ * Payroll, SalaryPayment and StaffAdvance back the HR module: a posted
+ * payroll run (expense to Salary Payable), a salary payment (Salary Payable
+ * to cash/bank) and a staff advance (Staff Advances Receivable to cash/bank).
+ * Each is cancelled from its owning HR record, never manually.
+ *
+ * BranchStockTransfer (plan 12, BR17; posted from BR18) backs the vouchers a
+ * stock transfer between two branches posts: Stock Transferred to Branches
+ * in the sender, Stock Received from Branches in the receiver, and the
+ * Inter-Branch Clearing lines between them (App\Support\Branches\
+ * BranchAccounts). Its own gapless series, so a transfer never consumes a
+ * journal number. Posted and cancelled only from the owning stock transfer,
+ * never manually, and never offered as a type to create by hand.
  */
 enum VoucherType: string
 {
@@ -73,6 +86,10 @@ enum VoucherType: string
     case Production = 'production';
     case ProductionEntry = 'production_entry';
     case InventoryCost = 'inventory_cost';
+    case Payroll = 'payroll';
+    case SalaryPayment = 'salary_payment';
+    case StaffAdvance = 'staff_advance';
+    case BranchStockTransfer = 'branch_stock_transfer';
 
     /**
      * The five plain cash/bank voucher types (T14): each is a two-(or-more)

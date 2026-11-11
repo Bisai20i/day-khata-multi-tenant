@@ -6,8 +6,9 @@ use App\Models\Concerns\HasLedgerAccount;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
-#[Fillable(['account_id', 'name', 'address', 'mobile_no', 'email', 'tpin', 'is_vat_registered'])]
+#[Fillable(['account_id', 'area_id', 'name', 'address', 'mobile_no', 'email', 'tpin', 'is_vat_registered'])]
 class Supplier extends Model
 {
     use HasFactory, HasLedgerAccount;
@@ -29,5 +30,13 @@ class Supplier extends Model
     protected function ledgerAccountSubgroupName(): string
     {
         return 'Sundry Creditors';
+    }
+
+    /**
+     * @return BelongsTo<Area, $this>
+     */
+    public function area(): BelongsTo
+    {
+        return $this->belongsTo(Area::class);
     }
 }

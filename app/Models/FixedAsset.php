@@ -6,6 +6,8 @@ use App\Casts\Decimal;
 use App\Enums\DepreciationMethod;
 use App\Enums\DepreciationPool;
 use App\Enums\VoucherType;
+use App\Models\Concerns\BelongsToBranch;
+use App\Support\Branches\DocumentBranch;
 use App\Support\ClosedFiscalYearGuard;
 use App\Support\Money\Money;
 use Carbon\CarbonImmutable;
@@ -53,15 +55,31 @@ use InvalidArgumentException;
  * amount is exact Money: the old code multiplied floats and called round(),
  * which on PHP 8.4 charged a paisa too little on a 15% run against
  * 43,14,071.10 (audit P0-1).
+ *
+ * ## Branch
+ *
+ * Every asset belongs to one branch (`branch_id`, plan 12 section 5.4, BR09),
+ * chosen when it is bought or registered: the requested branch, else the
+ * actor's posting branch (Main for a single-branch company). Its purchase,
+ * depreciation and disposal vouchers all post in that branch, so a branch's
+ * P&L carries its own depreciation. The depreciation run passes the branch
+ * to JournalVoucher::write() explicitly because year-end close runs it with
+ * no meaningful actor branch. Moving an asset between branches is deferred
+ * (plan section 12). BelongsToBranch hides other branches' assets from a
+ * restricted user, which also limits a manual depreciation run to the
+ * branches that user may use; year-end close runs unrestricted and covers
+ * every asset.
  */
 #[Fillable([
     'asset_code', 'asset_name', 'account_id', 'category', 'purchase_date',
     'cost', 'vat_amount', 'salvage_value', 'depreciation_method', 'depreciation_rate',
     'accumulated_depreciation', 'status', 'disposal_date', 'disposal_amount',
-    'journal_voucher_id', 'disposal_journal_voucher_id', 'created_by',
+    'journal_voucher_id', 'disposal_journal_voucher_id', 'created_by', 'branch_id',
 ])]
 class FixedAsset extends Model
 {
+    use BelongsToBranch;
+
     /**
      * Written-down value, appended to every serialized asset as an exact
      * 2-decimal string so the Index page never has to subtract two numbers
@@ -85,6 +103,7 @@ class FixedAsset extends Model
             'accumulated_depreciation' => Decimal::class.':2',
             'disposal_date' => 'date:Y-m-d',
             'disposal_amount' => Decimal::class.':2',
+            'branch_id' => 'integer',
         ];
     }
 
@@ -153,11 +172,14 @@ class FixedAsset extends Model
      * uses. The asset's own cost line stays net of VAT - VAT is recoverable,
      * not part of what gets depreciated.
      *
-     * @param  array{asset_name: string, category: string, purchase_date: string, cost: string|float, vat_rate?: string|float|null, salvage_value?: string|float|null, depreciation_method: string, depreciation_rate: string|float, payment_mode: string, bank_account_id?: int|null, supplier_id?: int|null, narration?: string|null}  $data
+     * `branch_id` (optional) is the asset's branch; see the class docblock.
+     *
+     * @param  array{asset_name: string, category: string, purchase_date: string, cost: string|float, vat_rate?: string|float|null, salvage_value?: string|float|null, depreciation_method: string, depreciation_rate: string|float, payment_mode: string, bank_account_id?: int|null, supplier_id?: int|null, narration?: string|null, branch_id?: int|string|null}  $data
      */
     public static function post(array $data, User $actor): self
     {
         return DB::transaction(function () use ($data, $actor) {
+            $branchId = DocumentBranch::forDocument($actor, $data['branch_id'] ?? null)->branchId;
             $pool = DepreciationPool::from($data['category']);
             $method = DepreciationMethod::from($data['depreciation_method']);
             $cost = Money::of($data['cost']);
@@ -218,6 +240,7 @@ class FixedAsset extends Model
                     'fiscal_year_id' => $fiscalYear->id,
                     'date' => $data['purchase_date'],
                     'narration' => $data['narration'] ?? "Fixed asset purchase - {$data['asset_name']}",
+                    'branch_id' => $branchId,
                 ],
                 $voucherLines,
                 $actor,
@@ -238,6 +261,7 @@ class FixedAsset extends Model
                 'status' => 'active',
                 'journal_voucher_id' => $voucher->id,
                 'created_by' => $actor->id,
+                'branch_id' => $branchId,
             ]);
 
             $asset->update(['asset_code' => 'FA-'.str_pad((string) $asset->id, 5, '0', STR_PAD_LEFT)]);
@@ -265,11 +289,14 @@ class FixedAsset extends Model
      * being required positive guarantees at least one of the two remaining
      * lines is positive.
      *
-     * @param  array{asset_name: string, category: string, purchase_date: string, cost: string|float, accumulated_depreciation?: string|float|null, salvage_value?: string|float|null, depreciation_method: string, depreciation_rate: string|float, narration?: string|null}  $data
+     * `branch_id` (optional) is the asset's branch; see the class docblock.
+     *
+     * @param  array{asset_name: string, category: string, purchase_date: string, cost: string|float, accumulated_depreciation?: string|float|null, salvage_value?: string|float|null, depreciation_method: string, depreciation_rate: string|float, narration?: string|null, branch_id?: int|string|null}  $data
      */
     public static function registerExisting(array $data, User $actor): self
     {
         return DB::transaction(function () use ($data, $actor) {
+            $branchId = DocumentBranch::forDocument($actor, $data['branch_id'] ?? null)->branchId;
             $pool = DepreciationPool::from($data['category']);
             $method = DepreciationMethod::from($data['depreciation_method']);
             $cost = Money::of($data['cost']);
@@ -313,6 +340,7 @@ class FixedAsset extends Model
                     'fiscal_year_id' => $fiscalYear->id,
                     'date' => $data['purchase_date'],
                     'narration' => $data['narration'] ?? "Registered existing asset - {$data['asset_name']}",
+                    'branch_id' => $branchId,
                 ],
                 $voucherLines,
                 $actor,
@@ -333,6 +361,7 @@ class FixedAsset extends Model
                 'status' => 'active',
                 'journal_voucher_id' => $voucher->id,
                 'created_by' => $actor->id,
+                'branch_id' => $branchId,
             ]);
 
             $asset->update(['asset_code' => 'FA-'.str_pad((string) $asset->id, 5, '0', STR_PAD_LEFT)]);
@@ -360,6 +389,11 @@ class FixedAsset extends Model
     public static function postDepreciationForFiscalYear(FiscalYear $fiscalYear, User $actor): array
     {
         return DB::transaction(function () use ($fiscalYear, $actor) {
+            // Year lock first, then the asset rows: the order FiscalYear::close()
+            // uses, and the one JournalVoucher::write() would otherwise take
+            // in the opposite direction on its first voucher.
+            FiscalYear::query()->whereKey($fiscalYear->getKey())->lockForUpdate()->value('id');
+
             $assetIds = static::query()->where('status', 'active')->orderBy('id')->pluck('id');
 
             $postedCount = 0;
@@ -397,6 +431,10 @@ class FixedAsset extends Model
      *
      * The caller is responsible for holding the row lock and the
      * transaction.
+     *
+     * The voucher posts in the asset's branch (passed to write() as its
+     * origin branch), never in whoever happens to run the depreciation or
+     * close the year.
      */
     private static function postDepreciationForAsset(self $asset, FiscalYear $fiscalYear, User $actor, ?string $throughDate = null): ?Money
     {
@@ -473,6 +511,7 @@ class FixedAsset extends Model
                 ['account_id' => $depreciationExpense->id, 'debit' => $amount->toString(), 'credit' => '0.00'],
                 ['account_id' => $accumulatedDepreciationAccount->id, 'debit' => '0.00', 'credit' => $amount->toString()],
             ],
+            branchId: (int) $asset->branch_id,
         );
 
         FixedAssetDepreciation::create([
@@ -503,6 +542,15 @@ class FixedAsset extends Model
     public function dispose(User $actor, string $disposalDate, Money|string|int|null $proceeds, string $mode, ?int $bankAccountId = null): void
     {
         DB::transaction(function () use ($actor, $disposalDate, $proceeds, $mode, $bankAccountId) {
+            // Year lock first, then the asset row: the order FiscalYear::close()
+            // and postDepreciationForFiscalYear() take (the posting below
+            // needs the year row anyway, so the opposite order could deadlock).
+            FiscalYear::query()
+                ->whereDate('start_date', '<=', $disposalDate)
+                ->whereDate('end_date', '>=', $disposalDate)
+                ->lockForUpdate()
+                ->value('id');
+
             $locked = static::query()->whereKey($this->getKey())->lockForUpdate()->firstOrFail();
 
             if ($locked->status === 'disposed') {
@@ -571,6 +619,8 @@ class FixedAsset extends Model
                     'fiscal_year_id' => $fiscalYear->id,
                     'date' => $disposalDate,
                     'narration' => "Disposal - {$locked->asset_name} ({$locked->asset_code})",
+                    // The asset's branch, like its purchase and depreciation.
+                    'branch_id' => (int) $locked->branch_id,
                 ],
                 $lines,
                 $actor,

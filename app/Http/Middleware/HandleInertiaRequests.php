@@ -4,6 +4,7 @@ namespace App\Http\Middleware;
 
 use App\Models\FiscalYear;
 use App\Models\User;
+use App\Support\Branches\ActiveBranchSelection;
 use App\Support\ReversalNotice;
 use Illuminate\Http\Request;
 use Inertia\Middleware;
@@ -77,6 +78,15 @@ class HandleInertiaRequests extends Middleware
                     'has_open_fiscal_year' => FiscalYear::hasOpen(),
                 ]
                 : null,
+            // Top-bar branch switcher (plan 12, section 5.10). Lazy: nothing
+            // runs for guests or central pages, and a tenant without the
+            // branches module, or with only Main, gets the minimal shape
+            // (isMulti = false) for one cached branches read, so the UI
+            // renders nothing extra.
+            'branch' => fn (): ?array => ActiveBranchSelection::shared($request),
+            // What the company calls a branch: Branch, Site, Outlet or Project
+            // (the default, without a query, unless the tenant is multi-branch).
+            'branchLabel' => fn (): string => ActiveBranchSelection::sharedLabel($request),
             'flash' => [
                 // Plus the note JournalVoucher::reverse() leaves when it had to
                 // date a cancellation on the open year's last day (flags G-06).

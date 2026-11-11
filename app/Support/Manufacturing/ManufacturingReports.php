@@ -13,7 +13,12 @@ use App\Models\FiscalYearInventorySnapshot;
 use App\Models\ItemStockMovement;
 use App\Models\JournalVoucher;
 use App\Models\JournalVoucherLine;
+use App\Models\MaterialIssueNote;
+use App\Models\ProductionEntry;
 use App\Models\ProductionWipEntry;
+use App\Support\Branches\BranchContext;
+use App\Support\Branches\BranchFilter;
+use App\Support\Branches\BranchReportTotals;
 use App\Support\Inventory\PerpetualCosting;
 use App\Support\Inventory\StockCosting;
 use App\Support\Money\Money;
@@ -38,6 +43,15 @@ use Illuminate\Support\Facades\DB;
  * silent plug. The COGS schedule in particular computes COGS from the
  * subledgers and then compares it with the EXE10 balance; any difference is
  * returned as its own reconciling line.
+ *
+ * Branches (plan 12, BR15): every report takes an optional BranchFilter.
+ * Stock is narrowed to the covered branches' stores (a movement's store
+ * decides its branch, I5), WIP to the rows of their production entries and
+ * notes (InventoryReconciliation's I8 rule), GL figures by
+ * BranchFilter::lineBranchIds() straight on the lines. The prior year's
+ * snapshots carry no store, so a narrowed report opens from the day-before
+ * balance of its own stores and WIP instead. Null, or a filter that covers
+ * the whole company, runs exactly the queries it always ran.
  */
 class ManufacturingReports
 {
@@ -115,11 +129,11 @@ class ManufacturingReports
      *
      * @return array{class: string, label: string, from: string, to: string, openingFromSnapshot: bool, opening: array{quantity: ?string, value: string}, rows: array<int, array<string, mixed>>, closing: array{quantity: ?string, value: string}}
      */
-    public function stockLedger(string $class, string $from, string $to, ?int $itemId = null): array
+    public function stockLedger(string $class, string $from, string $to, ?int $itemId = null, ?BranchFilter $filter = null): array
     {
         return $class === self::CLASS_WIP
-            ? $this->wipLedger($from, $to)
-            : $this->movementLedger(InventoryClass::from($class), $from, $to, $itemId);
+            ? $this->wipLedger($from, $to, $filter?->effectiveIds())
+            : $this->movementLedger(InventoryClass::from($class), $from, $to, $itemId, $filter?->storeIds());
     }
 
     /**
@@ -131,18 +145,20 @@ class ManufacturingReports
      *
      * @return array{asOf: string, fiscalYear: ?string, rows: array<int, array{key: string, label: string, gl: string, subledger: ?string, difference: ?string}>, total: string}
      */
-    public function inventorySchedule(FiscalYear $fiscalYear, string $asOf): array
+    public function inventorySchedule(FiscalYear $fiscalYear, string $asOf, ?BranchFilter $filter = null): array
     {
+        $lineIds = $filter?->lineBranchIds();
+
         $gl = [
-            self::CLASS_RAW_MATERIAL => $this->glBalance($fiscalYear, ManufacturingAccounts::RAW_MATERIAL, null, $asOf, false),
-            self::CLASS_WIP => $this->glBalance($fiscalYear, ManufacturingAccounts::WIP, null, $asOf, false),
-            self::CLASS_FINISHED_GOOD => $this->glBalance($fiscalYear, ManufacturingAccounts::FINISHED_GOODS, null, $asOf, false),
+            self::CLASS_RAW_MATERIAL => $this->glBalance($fiscalYear, ManufacturingAccounts::RAW_MATERIAL, null, $asOf, false, $lineIds),
+            self::CLASS_WIP => $this->glBalance($fiscalYear, ManufacturingAccounts::WIP, null, $asOf, false, $lineIds),
+            self::CLASS_FINISHED_GOOD => $this->glBalance($fiscalYear, ManufacturingAccounts::FINISHED_GOODS, null, $asOf, false, $lineIds),
         ];
 
         $subledger = [
-            self::CLASS_RAW_MATERIAL => PerpetualCosting::classValue(InventoryClass::RawMaterial, $asOf),
-            self::CLASS_WIP => WipLedger::balance(null, $asOf),
-            self::CLASS_FINISHED_GOOD => PerpetualCosting::classValue(InventoryClass::FinishedGood, $asOf),
+            self::CLASS_RAW_MATERIAL => $this->classValue(InventoryClass::RawMaterial, $asOf, $filter?->storeIds()),
+            self::CLASS_WIP => $this->wipBalance($asOf, $filter?->effectiveIds()),
+            self::CLASS_FINISHED_GOOD => $this->classValue(InventoryClass::FinishedGood, $asOf, $filter?->storeIds()),
         ];
 
         $rows = [];
@@ -157,7 +173,7 @@ class ManufacturingReports
             ];
         }
 
-        $trading = $this->tradingStock($fiscalYear, $asOf);
+        $trading = $this->tradingStock($fiscalYear, $asOf, $filter?->effectiveIds(), $lineIds);
 
         $rows[] = [
             'key' => 'trading',
@@ -189,43 +205,63 @@ class ManufacturingReports
      * made) are added to the FG pool. Stock adjustments post to EXE23, not
      * EXE10, so their net loss is deducted from consumption / COGS.
      *
+     * Stock transfers (BR25): a transfer carries raw material and finished
+     * goods at cost (its TransferOut and TransferIn legs carry the same
+     * cost_value) and never touches EXE10, so its net, TransferIn less
+     * TransferOut in the window for the same stores, is added to the RM and
+     * the FG pool. Inside one branch both legs share a date and a branch, so
+     * they net to zero in every view. Between branches the out leg is dated
+     * at dispatch and the in leg at receipt: a branch view sees what it took
+     * in less what it sent, and the company view sees exactly the value in
+     * transit at the start of the window less that in transit at its end
+     * (goods in transit are in neither store's closing stock, so counting
+     * them as sent keeps the identity). A transfer cancelled in transit has
+     * its out leg flagged cancelled, so it drops out of the opening, the
+     * closing and the net alike. The two lines are only listed when non-zero,
+     * so a company with no such transfers sees the schedule it always saw.
+     *
      * @return array{from: string, to: string, fiscalYear: ?string, lines: array<int, array{key: string, label: string, amount: string, style: string}>, computedCogs: string, glCogs: string, difference: string, reconciled: bool}
      */
-    public function cogsSchedule(FiscalYear $fiscalYear, string $from, string $to): array
+    public function cogsSchedule(FiscalYear $fiscalYear, string $from, string $to, ?BranchFilter $filter = null): array
     {
         $glFrom = max($from, $fiscalYear->start_date->toDateString());
+        $storeIds = $filter?->storeIds();
+        $branchIds = $filter?->effectiveIds();
 
-        $openRm = $this->openingValue(self::CLASS_RAW_MATERIAL, $from);
-        $openWip = $this->openingValue(self::CLASS_WIP, $from);
-        $openFg = $this->openingValue(self::CLASS_FINISHED_GOOD, $from);
+        $openRm = $this->openingValue(self::CLASS_RAW_MATERIAL, $from, $storeIds, $branchIds);
+        $openWip = $this->openingValue(self::CLASS_WIP, $from, $storeIds, $branchIds);
+        $openFg = $this->openingValue(self::CLASS_FINISHED_GOOD, $from, $storeIds, $branchIds);
 
-        $closeRm = PerpetualCosting::classValue(InventoryClass::RawMaterial, $to);
-        $closeWip = WipLedger::balance(null, $to);
-        $closeFg = PerpetualCosting::classValue(InventoryClass::FinishedGood, $to);
+        $closeRm = $this->classValue(InventoryClass::RawMaterial, $to, $storeIds);
+        $closeWip = $this->wipBalance($to, $branchIds);
+        $closeFg = $this->classValue(InventoryClass::FinishedGood, $to, $storeIds);
 
-        $rm = $this->costByType(InventoryClass::RawMaterial, $from, $to);
-        $fg = $this->costByType(InventoryClass::FinishedGood, $from, $to);
+        $rm = $this->costByType(InventoryClass::RawMaterial, $from, $to, $storeIds);
+        $fg = $this->costByType(InventoryClass::FinishedGood, $from, $to, $storeIds);
 
         $rmPurchases = $this->purchasesNet($rm);
         $rmAdjustmentLoss = $this->adjustmentLoss($rm);
         $rmSoldDirectly = $this->soldNet($rm);
+        $rmTransferNet = $this->transferNet($rm);
         $fgPurchases = $this->purchasesNet($fg);
         $fgAdjustmentLoss = $this->adjustmentLoss($fg);
+        $fgTransferNet = $this->transferNet($fg);
 
-        $directCosts = $this->wipKindTotal(ProductionWipEntry::KIND_DIRECT_COST, $from, $to);
-        $productionLoss = $this->wipKindTotal(ProductionWipEntry::KIND_ABANDON, $from, $to);
+        $directCosts = $this->wipKindTotal(ProductionWipEntry::KIND_DIRECT_COST, $from, $to, $branchIds);
+        $productionLoss = $this->wipKindTotal(ProductionWipEntry::KIND_ABANDON, $from, $to, $branchIds);
 
-        $rmConsumed = $openRm->plus($rmPurchases)->minus($closeRm)->minus($rmAdjustmentLoss)->minus($rmSoldDirectly);
+        $rmConsumed = $openRm->plus($rmPurchases)->plus($rmTransferNet)->minus($closeRm)->minus($rmAdjustmentLoss)->minus($rmSoldDirectly);
         $totalManufacturing = $rmConsumed->plus($directCosts);
         $cogm = $totalManufacturing->plus($openWip)->minus($closeWip)->minus($productionLoss);
-        $cogs = $openFg->plus($fgPurchases)->plus($cogm)->minus($closeFg)->minus($fgAdjustmentLoss)->plus($rmSoldDirectly);
+        $cogs = $openFg->plus($fgPurchases)->plus($fgTransferNet)->plus($cogm)->minus($closeFg)->minus($fgAdjustmentLoss)->plus($rmSoldDirectly);
 
-        $glCogs = $this->glBalance($fiscalYear, ManufacturingAccounts::COGS, $glFrom, $to, true);
+        $glCogs = $this->glBalance($fiscalYear, ManufacturingAccounts::COGS, $glFrom, $to, true, $filter?->lineBranchIds());
         $difference = $glCogs->minus($cogs);
 
         $lines = [
             $this->line('opening_rm', 'Opening raw material', $openRm),
             $this->line('rm_purchases', 'Add: raw material purchases (net of returns)', $rmPurchases),
+            ...$this->lineUnlessZero('rm_transfers', 'Add: raw material received from other branches (net of sent; goods in transit count as sent)', $rmTransferNet),
             $this->line('closing_rm', 'Less: closing raw material', $closeRm),
             $this->line('rm_adjustments', 'Less: raw material adjustments (net loss)', $rmAdjustmentLoss),
             $this->line('rm_sold_directly', 'Less: raw material sold directly (charged to COGS at sale)', $rmSoldDirectly),
@@ -238,6 +274,7 @@ class ManufacturingReports
             $this->line('cogm', 'Cost of goods manufactured', $cogm, 'subtotal'),
             $this->line('opening_fg', 'Add: opening finished goods', $openFg),
             $this->line('fg_purchases', 'Add: finished goods purchased (net of returns)', $fgPurchases),
+            ...$this->lineUnlessZero('fg_transfers', 'Add: finished goods received from other branches (net of sent; goods in transit count as sent)', $fgTransferNet),
             $this->line('closing_fg', 'Less: closing finished goods', $closeFg),
             $this->line('fg_adjustments', 'Less: finished goods adjustments (net loss)', $fgAdjustmentLoss),
             $this->line('rm_sold_directly_cogs', 'Add: raw material sold directly', $rmSoldDirectly),
@@ -262,11 +299,23 @@ class ManufacturingReports
      * The MC9 reconciliation, reshaped to strings for the page: per class the
      * GL balance, the subledger total and the difference.
      *
+     * Branches (plan 12, BR15, carry-forward F1): when the report covers
+     * only some branches (a choice, or a restricted user, whose ledger lines
+     * the access scope already narrows while the stock side of check() is
+     * company-wide, which showed false differences) it is the sum of
+     * InventoryReconciliation::checkBranch() over exactly those branches,
+     * both sides per branch (I8). An unrestricted, un-narrowed view runs
+     * check() exactly as before; check() is never widened.
+     *
      * @return array{asOf: string, fiscalYear: ?string, rows: array<int, array{key: string, label: string, gl: string, subledger: string, difference: string}>, balanced: bool}
      */
-    public function reconciliation(FiscalYear $fiscalYear, string $asOf): array
+    public function reconciliation(FiscalYear $fiscalYear, string $asOf, ?BranchFilter $filter = null): array
     {
-        $check = InventoryReconciliation::check($fiscalYear, $asOf);
+        $branchIds = $filter?->effectiveIds();
+
+        $check = $branchIds === null
+            ? InventoryReconciliation::check($fiscalYear, $asOf)
+            : $this->branchesCheck($fiscalYear, $asOf, $branchIds);
 
         $rows = [];
         $balanced = true;
@@ -288,12 +337,49 @@ class ManufacturingReports
     }
 
     /**
+     * InventoryReconciliation::checkBranch() summed over $branchIds, side by
+     * side, in check()'s shape. $branchIds is BranchFilter::effectiveIds(),
+     * always inside the user's allowed set, so checkBranch()'s own
+     * unrestricted read never reaches a branch the user may not see. One
+     * checkBranch() per covered branch (a handful of grouped queries each).
+     *
+     * @param  list<int>  $branchIds
+     * @return array<string, array{gl: Money, subledger: Money, difference: Money}>
+     */
+    private function branchesCheck(FiscalYear $fiscalYear, string $asOf, array $branchIds): array
+    {
+        $sum = [];
+
+        foreach (self::classKeys() as $key) {
+            $sum[$key] = ['gl' => Money::zero(), 'subledger' => Money::zero(), 'difference' => Money::zero()];
+        }
+
+        foreach ($branchIds as $branchId) {
+            foreach (InventoryReconciliation::checkBranch($fiscalYear, $asOf, $branchId) as $key => $entry) {
+                $sum[$key] = [
+                    'gl' => $sum[$key]['gl']->plus($entry['gl']),
+                    'subledger' => $sum[$key]['subledger']->plus($entry['subledger']),
+                    'difference' => $sum[$key]['difference']->plus($entry['difference']),
+                ];
+            }
+        }
+
+        return $sum;
+    }
+
+    /**
      * Net GL balance (debit less credit) of one account inside one fiscal
      * year. `$excludeClosing` drops the year-end sweep vouchers, which is what
      * a period figure for a profit-and-loss account needs: after close() the
      * sweep would otherwise net EXE10 to zero.
+     *
+     * $lineBranchIds (BranchFilter::lineBranchIds(), BR15) narrows the lines
+     * straight on journal_voucher_lines.branch_id; null adds nothing (the
+     * access scope already narrows a restricted user's lines).
+     *
+     * @param  list<int>|null  $lineBranchIds
      */
-    public function glBalance(FiscalYear $fiscalYear, string $code, ?string $from, string $to, bool $excludeClosing): Money
+    public function glBalance(FiscalYear $fiscalYear, string $code, ?string $from, string $to, bool $excludeClosing, ?array $lineBranchIds = null): Money
     {
         $accountId = Account::where('code', $code)->value('id');
 
@@ -305,6 +391,7 @@ class ManufacturingReports
 
         $row = JournalVoucherLine::query()
             ->where('account_id', $accountId)
+            ->when($lineBranchIds !== null, fn (Builder $lines) => $lines->whereIn('journal_voucher_lines.branch_id', $lineBranchIds))
             ->whereHas('journalVoucher', function (Builder $voucher) use ($fiscalYear, $from, $to, $excludeClosing) {
                 $voucher->where('fiscal_year_id', $fiscalYear->id)
                     ->when($from !== null, fn (Builder $q) => $q->whereDate('date', '>=', $from))
@@ -322,18 +409,24 @@ class ManufacturingReports
     }
 
     /**
+     * $storeIds (BR15) narrows the opening and the rows to the same stores;
+     * the prior year's snapshot is company-wide (it has no store), so a
+     * narrowed ledger opens from its stores' balance as of the day before,
+     * the figure the snapshot was taken from.
+     *
+     * @param  list<int>|null  $storeIds
      * @return array{class: string, label: string, from: string, to: string, openingFromSnapshot: bool, opening: array{quantity: ?string, value: string}, rows: array<int, array<string, mixed>>, closing: array{quantity: ?string, value: string}}
      */
-    private function movementLedger(InventoryClass $class, string $from, string $to, ?int $itemId): array
+    private function movementLedger(InventoryClass $class, string $from, string $to, ?int $itemId, ?array $storeIds = null): array
     {
         $dayBefore = Carbon::parse($from)->subDay()->toDateString();
 
-        $snapshot = $this->snapshotOpening($class->value, $from, $itemId);
+        $snapshot = $storeIds === null ? $this->snapshotOpening($class->value, $from, $itemId) : null;
 
         if ($snapshot !== null) {
             [$openQuantity, $openValue] = $snapshot;
         } else {
-            [$openQuantity, $openValue] = $this->movementTotals($class, null, $dayBefore, $itemId);
+            [$openQuantity, $openValue] = $this->movementTotals($class, null, $dayBefore, $itemId, $storeIds);
         }
 
         $movements = ItemStockMovement::query()
@@ -343,6 +436,7 @@ class ManufacturingReports
             ->whereDate('item_stock_movements.date', '>=', $from)
             ->whereDate('item_stock_movements.date', '<=', $to)
             ->when($itemId !== null, fn (Builder $q) => $q->where('item_stock_movements.item_id', $itemId))
+            ->when($storeIds !== null, fn (Builder $q) => $q->whereIn('item_stock_movements.store_id', $storeIds))
             ->select('item_stock_movements.*')
             ->with(['item:id,name,unit', 'store:id,name'])
             ->with($this->stockMovementReferenceEagerLoad())
@@ -388,19 +482,24 @@ class ManufacturingReports
     }
 
     /**
+     * $branchIds (BR15) narrows the opening and the rows to the WIP of those
+     * branches (narrowWip()); the company-wide snapshot is then not used.
+     *
+     * @param  list<int>|null  $branchIds
      * @return array{class: string, label: string, from: string, to: string, openingFromSnapshot: bool, opening: array{quantity: ?string, value: string}, rows: array<int, array<string, mixed>>, closing: array{quantity: ?string, value: string}}
      */
-    private function wipLedger(string $from, string $to): array
+    private function wipLedger(string $from, string $to, ?array $branchIds = null): array
     {
         $dayBefore = Carbon::parse($from)->subDay()->toDateString();
 
-        $snapshot = $this->snapshotOpening(self::CLASS_WIP, $from, null);
-        $openValue = $snapshot !== null ? $snapshot[1] : WipLedger::balance(null, $dayBefore);
+        $snapshot = $branchIds === null ? $this->snapshotOpening(self::CLASS_WIP, $from, null) : null;
+        $openValue = $snapshot !== null ? $snapshot[1] : $this->wipBalance($dayBefore, $branchIds);
 
         $entries = ProductionWipEntry::query()
             ->where('cancelled', false)
             ->whereDate('date', '>=', $from)
             ->whereDate('date', '<=', $to)
+            ->tap(fn (Builder $query) => $this->narrowWip($query, $branchIds))
             ->with(['item:id,name', 'productionEntry:id,number', 'materialIssueNote:id,number'])
             ->orderBy('date')
             ->orderBy('id')
@@ -456,11 +555,17 @@ class ManufacturingReports
     /**
      * Opening figure for a class on `$from`: the prior year's verified
      * snapshot when the window starts the day after that year ended, else the
-     * balance as of the day before.
+     * balance as of the day before. Narrowed to branches (BR15, $branchIds
+     * not null) the snapshot, which is company-wide, is skipped: the stores'
+     * and branches' balance as of the day before is the same figure for
+     * their share.
+     *
+     * @param  list<int>|null  $storeIds
+     * @param  list<int>|null  $branchIds
      */
-    private function openingValue(string $class, string $from): Money
+    private function openingValue(string $class, string $from, ?array $storeIds = null, ?array $branchIds = null): Money
     {
-        $snapshot = $this->snapshotOpening($class, $from, null);
+        $snapshot = $branchIds === null ? $this->snapshotOpening($class, $from, null) : null;
 
         if ($snapshot !== null) {
             return $snapshot[1];
@@ -469,9 +574,79 @@ class ManufacturingReports
         $dayBefore = Carbon::parse($from)->subDay()->toDateString();
 
         return match ($class) {
-            self::CLASS_WIP => WipLedger::balance(null, $dayBefore),
-            default => PerpetualCosting::classValue(InventoryClass::from($class), $dayBefore),
+            self::CLASS_WIP => $this->wipBalance($dayBefore, $branchIds),
+            default => $this->classValue(InventoryClass::from($class), $dayBefore, $storeIds),
         };
+    }
+
+    /**
+     * Perpetual class value as of $asOf: PerpetualCosting::classValue() for
+     * the company (null, unchanged), else the net cost_value of the class's
+     * movements in $storeIds (the same signed sum movementTotals() takes).
+     *
+     * @param  list<int>|null  $storeIds
+     */
+    private function classValue(InventoryClass $class, string $asOf, ?array $storeIds): Money
+    {
+        return $storeIds === null
+            ? PerpetualCosting::classValue($class, $asOf)
+            : $this->movementTotals($class, null, $asOf, null, $storeIds)[1];
+    }
+
+    /**
+     * Net WIP value as of $asOf: WipLedger::balance() for the company (null,
+     * unchanged), else that of $branchIds (narrowWip()).
+     *
+     * @param  list<int>|null  $branchIds
+     */
+    private function wipBalance(string $asOf, ?array $branchIds): Money
+    {
+        if ($branchIds === null) {
+            return WipLedger::balance(null, $asOf);
+        }
+
+        $cast = $this->integerCast();
+
+        $scaled = ProductionWipEntry::query()
+            ->where('cancelled', false)
+            ->whereDate('date', '<=', $asOf)
+            ->tap(fn (Builder $query) => $this->narrowWip($query, $branchIds))
+            ->selectRaw("COALESCE(SUM(direction * CAST(ROUND(value * 100) AS {$cast})), 0) as net")
+            ->value('net');
+
+        return $this->fromScaled($scaled ?? 0, 100);
+    }
+
+    /**
+     * Narrows a production_wip_entries query to the WIP of $branchIds with
+     * InventoryReconciliation::checkBranch()'s rule (I8): a row belongs to
+     * its production entry's branch, else to its material issue note's,
+     * else (never written) to Main. Subqueries, so the outer query's columns
+     * stay unqualified. Null adds nothing.
+     *
+     * @param  Builder<ProductionWipEntry>  $query
+     * @param  list<int>|null  $branchIds
+     */
+    private function narrowWip(Builder $query, ?array $branchIds): void
+    {
+        if ($branchIds === null) {
+            return;
+        }
+
+        $mainBranchId = BranchContext::mainBranchIdOrNull();
+
+        $query->where(function (Builder $rows) use ($branchIds, $mainBranchId): void {
+            $rows->whereIn('production_wip_entries.production_entry_id', ProductionEntry::query()->select('id')->whereIn('branch_id', $branchIds))
+                ->orWhere(fn (Builder $orphan) => $orphan
+                    ->whereNull('production_wip_entries.production_entry_id')
+                    ->whereIn('production_wip_entries.material_issue_note_id', MaterialIssueNote::query()->select('id')->whereIn('branch_id', $branchIds)))
+                ->when(
+                    $mainBranchId !== null && in_array($mainBranchId, $branchIds, true),
+                    fn (Builder $withMain) => $withMain->orWhere(fn (Builder $neither) => $neither
+                        ->whereNull('production_wip_entries.production_entry_id')
+                        ->whereNull('production_wip_entries.material_issue_note_id')),
+                );
+        });
     }
 
     /**
@@ -507,11 +682,13 @@ class ManufacturingReports
     }
 
     /**
-     * Signed quantity and cost balance of one class's movements in a window.
+     * Signed quantity and cost balance of one class's movements in a window,
+     * optionally only in $storeIds (BR15).
      *
+     * @param  list<int>|null  $storeIds
      * @return array{0: Quantity, 1: Money}
      */
-    private function movementTotals(InventoryClass $class, ?string $from, string $to, ?int $itemId): array
+    private function movementTotals(InventoryClass $class, ?string $from, string $to, ?int $itemId, ?array $storeIds = null): array
     {
         $cast = $this->integerCast();
         $inTypes = $this->directionTypes(1);
@@ -526,6 +703,7 @@ class ManufacturingReports
             ->when($from !== null, fn (Builder $q) => $q->whereDate('item_stock_movements.date', '>=', $from))
             ->whereDate('item_stock_movements.date', '<=', $to)
             ->when($itemId !== null, fn (Builder $q) => $q->where('item_stock_movements.item_id', $itemId))
+            ->when($storeIds !== null, fn (Builder $q) => $q->whereIn('item_stock_movements.store_id', $storeIds))
             ->selectRaw(
                 "COALESCE(SUM(CASE WHEN item_stock_movements.movement_type IN ({$placeholders}) THEN {$quantity} ELSE -{$quantity} END), 0) as quantity_scaled,
                  COALESCE(SUM(CASE WHEN item_stock_movements.movement_type IN ({$placeholders}) THEN {$cost} ELSE -{$cost} END), 0) as cost_scaled",
@@ -540,11 +718,13 @@ class ManufacturingReports
     }
 
     /**
-     * Unsigned cost_value per movement type for one class in a window.
+     * Unsigned cost_value per movement type for one class in a window,
+     * optionally only in $storeIds (BR15).
      *
+     * @param  list<int>|null  $storeIds
      * @return array<string, Money>
      */
-    private function costByType(InventoryClass $class, string $from, string $to): array
+    private function costByType(InventoryClass $class, string $from, string $to, ?array $storeIds = null): array
     {
         $cast = $this->integerCast();
 
@@ -554,6 +734,7 @@ class ManufacturingReports
             ->where('item_stock_movements.cancelled', false)
             ->whereDate('item_stock_movements.date', '>=', $from)
             ->whereDate('item_stock_movements.date', '<=', $to)
+            ->when($storeIds !== null, fn (Builder $q) => $q->whereIn('item_stock_movements.store_id', $storeIds))
             ->selectRaw("item_stock_movements.movement_type as movement_type, COALESCE(SUM(CAST(ROUND(COALESCE(item_stock_movements.cost_value, 0) * 100) AS {$cast})), 0) as cost_scaled")
             ->groupBy('item_stock_movements.movement_type')
             ->get();
@@ -609,7 +790,23 @@ class ManufacturingReports
             ->minus($this->typeCost($byType, StockMovementType::SaleReturn));
     }
 
-    private function wipKindTotal(string $kind, string $from, string $to): Money
+    /**
+     * Stock transfers in less stock transfers out (BR25). Both legs of a
+     * perpetual line carry the same cost_value; cancelled legs are already
+     * left out by costByType().
+     *
+     * @param  array<string, Money>  $byType
+     */
+    private function transferNet(array $byType): Money
+    {
+        return $this->typeCost($byType, StockMovementType::TransferIn)
+            ->minus($this->typeCost($byType, StockMovementType::TransferOut));
+    }
+
+    /**
+     * @param  list<int>|null  $branchIds  BR15: only those branches' WIP (narrowWip())
+     */
+    private function wipKindTotal(string $kind, string $from, string $to, ?array $branchIds = null): Money
     {
         $cast = $this->integerCast();
 
@@ -618,6 +815,7 @@ class ManufacturingReports
             ->where('kind', $kind)
             ->whereDate('date', '>=', $from)
             ->whereDate('date', '<=', $to)
+            ->tap(fn (Builder $query) => $this->narrowWip($query, $branchIds))
             ->selectRaw("COALESCE(SUM(CAST(ROUND(value * 100) AS {$cast})), 0) as value_scaled")
             ->value('value_scaled');
 
@@ -629,8 +827,17 @@ class ManufacturingReports
      * pair (a ClosingEntry voucher touching AS11) the ledger holds the
      * closing value; before that the Balance Sheet shows the live periodic
      * closing value, so this does too.
+     *
+     * Branches (BR15), the same rule as AccountingReportController::
+     * stockPosition(), so the schedule's trading line equals the branch
+     * Balance Sheet's: posted, the Stock in Hand lines of $lineBranchIds
+     * (null: as the access scope leaves them); not posted, the covered
+     * branches' closing stock by the year-end convention (BranchReportTotals).
+     *
+     * @param  list<int>|null  $branchIds  BranchFilter::effectiveIds()
+     * @param  list<int>|null  $lineBranchIds  BranchFilter::lineBranchIds()
      */
-    private function tradingStock(FiscalYear $fiscalYear, string $asOf): Money
+    private function tradingStock(FiscalYear $fiscalYear, string $asOf, ?array $branchIds = null, ?array $lineBranchIds = null): Money
     {
         $stockInHand = Account::where('code', FiscalYear::STOCK_IN_HAND_CODE)->first();
 
@@ -638,15 +845,21 @@ class ManufacturingReports
             return Money::zero();
         }
 
-        $posted = JournalVoucher::query()
+        // Unrestricted: "has the year-end stock pair been posted" is a fact
+        // about the company, not about the branches the viewer may see.
+        $posted = BranchContext::unrestricted(fn (): bool => JournalVoucher::query()
             ->where('fiscal_year_id', $fiscalYear->id)
             ->where('voucher_type', VoucherType::ClosingEntry->value)
             ->whereHas('lines', fn (Builder $lines) => $lines->where('account_id', $stockInHand->id))
-            ->exists();
+            ->exists());
 
-        return $posted
-            ? $this->glBalance($fiscalYear, FiscalYear::STOCK_IN_HAND_CODE, null, $asOf, false)
-            : StockCosting::totalPeriodicClosingValue($asOf);
+        if ($posted) {
+            return $this->glBalance($fiscalYear, FiscalYear::STOCK_IN_HAND_CODE, null, $asOf, false, $lineBranchIds);
+        }
+
+        return $branchIds === null
+            ? StockCosting::totalPeriodicClosingValue($asOf)
+            : BranchReportTotals::periodicClosingValue($asOf, $branchIds);
     }
 
     /**
@@ -666,6 +879,18 @@ class ManufacturingReports
     private function line(string $key, string $label, Money $amount, string $style = 'line'): array
     {
         return ['key' => $key, 'label' => $label, 'amount' => $amount->toString(), 'style' => $style];
+    }
+
+    /**
+     * line() wrapped in a list, or an empty list for a zero amount: for a
+     * schedule line that only some companies ever have, spread into the
+     * lines so the others see their schedule unchanged.
+     *
+     * @return list<array{key: string, label: string, amount: string, style: string}>
+     */
+    private function lineUnlessZero(string $key, string $label, Money $amount): array
+    {
+        return $amount->isZero() ? [] : [$this->line($key, $label, $amount)];
     }
 
     private function integerCast(): string

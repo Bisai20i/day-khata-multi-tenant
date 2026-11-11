@@ -29,6 +29,7 @@ final readonly class DocumentTotals
         public Money $nontaxableAmount,
         public string $vatRate,
         public Money $vatAmount,
+        public Money $roundOff,
         public Money $total,
         public Money $tdsAmount,
         public Money $settlementDue,
@@ -45,7 +46,9 @@ final readonly class DocumentTotals
 
     /**
      * Snake_case keys, string values: the `expected` shape of the golden-vector
-     * fixture and of the frontend mirror's `totals`.
+     * fixture and of the frontend mirror's `totals`. `roundOff` is deliberately
+     * not a key: it is an input the caller already holds, and it is already
+     * folded into `total`, so the fixture shape stays what it always was.
      *
      * @return array<string, mixed>
      */

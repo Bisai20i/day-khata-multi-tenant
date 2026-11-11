@@ -3,11 +3,17 @@
 namespace App\Models;
 
 use App\Casts\Decimal;
+use App\Enums\InventoryClass;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
-#[Fillable(['stock_transfer_id', 'item_id', 'quantity', 'unit_cost_rate', 'line_value', 'remarks'])]
+/**
+ * `inventory_class` is the item's class when the line was written (BR25), so
+ * a transfer between branches splits its stored line values over INI23 /
+ * EXE11 (trading) and AS12 / AS14 (perpetual) without re-reading the item.
+ */
+#[Fillable(['stock_transfer_id', 'item_id', 'quantity', 'unit_cost_rate', 'line_value', 'inventory_class', 'remarks'])]
 class StockTransferLine extends Model
 {
     /**
@@ -19,6 +25,7 @@ class StockTransferLine extends Model
             'quantity' => Decimal::class.':4',
             'unit_cost_rate' => Decimal::class.':4',
             'line_value' => Decimal::class.':2',
+            'inventory_class' => InventoryClass::class,
         ];
     }
 

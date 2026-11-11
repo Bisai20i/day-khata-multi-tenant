@@ -22,6 +22,7 @@ import { formatBsDate } from '@/lib/format';
 import Create from './Create.vue';
 import { useOpenFiscalYear } from '@/composables/useOpenFiscalYear';
 import { usePermissions } from '@/composables/usePermissions';
+import { useBranchListColumn } from '@/composables/useBranchListColumn';
 
 defineOptions({ layout: AppLayout });
 
@@ -53,7 +54,12 @@ const props = defineProps({
     items: { type: Array, default: () => [] },
     walkInCustomerId: { type: Number, default: null },
     invoiceSettings: { type: Object, default: () => ({ default_vat_rate: '13.00' }) },
+    // Branch picker of the unlinked create form (BranchFormOptions::props()).
+    branchOptions: { type: Array, default: () => [] },
+    defaultBranchId: { type: Number, default: null },
 });
+
+const { branchColumns } = useBranchListColumn();
 
 const customerOptions = computed(() => props.customers.map((customer) => ({ value: customer.id, label: customer.name })));
 
@@ -199,6 +205,8 @@ const requestColumns = [
         numeric: false,
         cell: ({ row }) => formatBsDate(row.original.date),
     },
+    // Only for a multi-branch company viewing all branches.
+    ...branchColumns(),
     {
         id: 'request',
         header: 'Request',
@@ -297,6 +305,8 @@ const columns = [
         numeric: false,
         cell: ({ row }) => formatBsDate(row.original.date),
     },
+    // Only for a multi-branch company viewing all branches.
+    ...branchColumns(),
     {
         id: 'credit_note',
         header: 'Credit note #',
@@ -400,6 +410,9 @@ const columns = [
                 :walk-in-customer-id="walkInCustomerId"
                 :invoice-settings="invoiceSettings"
                 :mode="createMode"
+                :key="createMode"
+                :branch-options="branchOptions"
+                :default-branch-id="defaultBranchId"
                 @cancel="createMode = null"
                 @posted="createMode = null"
             />

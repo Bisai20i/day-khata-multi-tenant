@@ -11,6 +11,9 @@ import Label from '@/components/ui/Label.vue';
 import NepaliDateInput from '@/components/ui/NepaliDateInput.vue';
 import { formatMoney } from '@/lib/money';
 import { formatBsDate } from '@/lib/format';
+import { useBranchReportFilter } from '@/composables/useBranchReportFilter';
+import BranchReportFilter from '@/components/branch/BranchReportFilter.vue';
+import BranchReportNotes from '@/components/branch/BranchReportNotes.vue';
 
 defineOptions({ layout: AppLayout });
 
@@ -19,18 +22,24 @@ const { can } = usePermissions();
 const props = defineProps({
     schedule: { type: Object, required: true },
     asOf: { type: String, required: true },
+    // Branch filter; null when the company has no branches.
+    branchReport: { type: [Object, null], default: null },
 });
 
 useLayoutChrome('Inventory Schedule');
 
 const asOfInput = ref(props.asOf);
 
+const branchFilter = useBranchReportFilter(() => props.branchReport);
+
 function apply() {
-    router.get(window.location.pathname, { to: asOfInput.value }, { preserveState: true, preserveScroll: true });
+    router.get(window.location.pathname, { to: asOfInput.value, ...branchFilter.toQuery() }, { preserveState: true, preserveScroll: true });
 }
 
 function fileUrl(suffix) {
-    return `${window.location.pathname}/${suffix}?${new URLSearchParams({ to: asOfInput.value })}`;
+    const params = new URLSearchParams({ to: asOfInput.value });
+    branchFilter.appendTo(params);
+    return `${window.location.pathname}/${suffix}?${params}`;
 }
 </script>
 
@@ -49,8 +58,16 @@ function fileUrl(suffix) {
                     <Label class="mb-1">As of date (BS)</Label>
                     <NepaliDateInput v-model="asOfInput" />
                 </div>
+                <BranchReportFilter
+                    v-if="branchReport"
+                    v-model:choice="branchFilter.choice.value"
+                    :report="branchReport"
+                    id-prefix="mfg-inventory-schedule"
+                    @change="apply"
+                />
                 <Button variant="primary" tone="purple" @click="apply">Generate report</Button>
             </div>
+            <BranchReportNotes v-if="branchReport" :report="branchReport" />
         </Card>
 
         <Card variant="panel">

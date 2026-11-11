@@ -9,6 +9,9 @@ import Select from '@/components/ui/Select.vue';
 import Combobox from '@/components/ui/Combobox.vue';
 import NepaliDateInput from '@/components/ui/NepaliDateInput.vue';
 import Label from '@/components/ui/Label.vue';
+import BranchSelect from '@/components/branch/BranchSelect.vue';
+import BranchBadge from '@/components/branch/BranchBadge.vue';
+import { useBranchField } from '@/composables/useBranchField';
 import { addMoney, compareMoney, formatMoney, isZeroMoney, parseMoney } from '@/lib/money';
 import { todayInKathmandu, formatBsDate } from '@/lib/format';
 
@@ -16,6 +19,8 @@ const props = defineProps({
     customers: { type: Array, default: () => [] },
     accounts: { type: Array, default: () => [] },
     outstandingSales: { type: Array, default: () => [] },
+    branchOptions: { type: Array, default: () => [] },
+    defaultBranchId: { type: Number, default: null },
 });
 
 const emit = defineEmits(['cancel', 'posted']);
@@ -46,6 +51,13 @@ const form = useForm({
 });
 
 const showBankAccount = computed(() => form.payment_mode === 'bank');
+
+// Where the money came in (plan 12, BR12). Hidden, and left out of the
+// payload, unless the company runs several branches and the user may pick.
+const { branchId, showPicker, withBranch } = useBranchField(
+    () => props.branchOptions,
+    () => props.defaultBranchId,
+);
 
 // Keyed by sale id -> string allocation amount. A separate reactive map
 // (not part of `form`, which only holds scalar fields) so the checklist can
@@ -160,7 +172,7 @@ const canSubmit = computed(
 );
 
 function submit() {
-    form.transform((data) => ({
+    form.transform((data) => withBranch({
         ...data,
         amount: receiptAmount.value,
         allocations: allocations.value,
@@ -208,7 +220,9 @@ function submit() {
                         Enter an amount with at most 2 decimals.
                     </p>
                     <p v-if="form.errors.amount" class="mt-1 text-sm text-danger" role="alert">{{ form.errors.amount }}</p>
+                    <p v-if="!showPicker && form.errors.branch_id" class="mt-1 text-sm text-danger" role="alert">{{ form.errors.branch_id }}</p>
                 </div>
+                <BranchSelect v-model="branchId" :options="branchOptions" :error="form.errors.branch_id" />
                 <div>
                     <Label class="mb-1">Payment mode <span class="text-danger">*</span></Label>
                     <Select
@@ -259,7 +273,10 @@ function submit() {
                     </div>
                     <div v-for="sale in customerSales" :key="sale.id" class="grid grid-cols-[110px_1fr_110px_110px_130px] items-center gap-2">
                         <span class="text-sm text-text-base">{{ formatBsDate(sale.date) }}</span>
-                        <span class="text-sm text-text-base">{{ sale.invoice_number ?? `Sale #${sale.id}` }}</span>
+                        <span class="flex min-w-0 flex-wrap items-center gap-2 text-sm text-text-base">
+                            <span>{{ sale.invoice_number ?? `Sale #${sale.id}` }}</span>
+                            <BranchBadge :branch-id="sale.branch_id ?? null" />
+                        </span>
                         <span class="text-right text-sm text-text-base">{{ formatMoney(sale.total) }}</span>
                         <span class="text-right text-sm text-text-base">{{ formatMoney(sale.outstanding) }}</span>
                         <Input

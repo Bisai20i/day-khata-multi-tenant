@@ -11,6 +11,11 @@ use App\Models\Receipt;
 use App\Models\Sale;
 use App\Models\SalesReturn;
 use App\Support\AmountInWords;
+use App\Support\Branches\ActiveBranchSelection;
+use App\Support\Branches\BranchAccounts;
+use App\Support\Branches\BranchContext;
+use App\Support\Branches\BranchFormOptions;
+use App\Support\Branches\BranchListFilter;
 use App\Support\Money\Money;
 use App\Support\NepaliCalendar;
 use Barryvdh\DomPDF\Facade\Pdf;
@@ -35,17 +40,32 @@ class ReceiptController extends Controller
      * filter hid invoices that a one-paisa rounding error had left behind
      * and made them unsettleable (audit P0-3/P0-4).
      */
-    public function index(): Response
+    public function index(Request $request): Response
     {
+        // Branches (plan 12, BR12): the list follows the top-bar switcher,
+        // names each row's branch only when several branches can appear,
+        // and tags each open invoice with its branch so the form can show
+        // where an allocation lands. A tenant that is not multi-branch gets
+        // the same query and payload as before.
+        $isMultiBranch = ActiveBranchSelection::isMultiBranch($request);
+        $receipts = BranchListFilter::apply(Receipt::query(), $request)
+            ->with(['customer:id,name', 'allocations.sale:id,total,invoice_number'])
+            ->when(BranchListFilter::columnVisible($request), fn ($query) => $query->with('branch:id,name,code'))
+            ->orderByDesc('date')
+            ->orderByDesc('id')
+            ->paginate(25)
+            ->withQueryString();
+
+        if (BranchContext::allowedBranchIds() !== null) {
+            $receipts->through(fn (Receipt $receipt): Receipt => $this->hideOtherBranchInvoices($receipt));
+        }
+
         return Inertia::render('Tenant/Sales/Receipts/Index', [
-            'receipts' => Receipt::query()
-                ->with(['customer:id,name', 'allocations.sale:id,total,invoice_number'])
-                ->orderByDesc('date')
-                ->orderByDesc('id')
-                ->paginate(25)
-                ->withQueryString(),
+            'receipts' => $receipts,
             'customers' => Customer::query()->orderBy('name')->get(['id', 'name']),
-            'accounts' => Account::query()->orderBy('name')->get(['id', 'code', 'name']),
+            // Never the inter-branch control accounts, which only the system
+            // posts (BranchAccounts).
+            'accounts' => BranchAccounts::exclude(Account::query())->orderBy('name')->get(['id', 'code', 'name']),
             'outstandingSales' => Sale::query()
                 ->where('status', 'posted')
                 ->with('customer:id,name')
@@ -58,11 +78,32 @@ class ReceiptController extends Controller
                     'invoice_number' => $sale->invoice_number,
                     'total' => (string) $sale->total,
                     'outstanding' => Money::of($sale->outstandingAmount()),
+                    ...($isMultiBranch ? ['branch_id' => (int) $sale->branch_id] : []),
                 ])
                 ->filter(fn (array $sale) => $sale['outstanding']->isPositive())
                 ->map(fn (array $sale) => [...$sale, 'outstanding' => $sale['outstanding']->toString()])
                 ->values(),
+            ...BranchFormOptions::props($request),
         ]);
+    }
+
+    /**
+     * For a branch-restricted viewer (plan 12, I6): an allocation whose
+     * invoice sits in a branch they cannot see comes back with no sale
+     * (the Sale access scope hides it). Strip the invoice id as well and
+     * flag the row, so the page can say "Invoice in another branch" with
+     * only the applied amount, and learns nothing else about that invoice.
+     */
+    private function hideOtherBranchInvoices(Receipt $receipt): Receipt
+    {
+        foreach ($receipt->allocations as $allocation) {
+            if ($allocation->sale === null) {
+                $allocation->setAttribute('sale_id', null);
+                $allocation->setAttribute('in_other_branch', true);
+            }
+        }
+
+        return $receipt;
     }
 
     /**
@@ -87,6 +128,9 @@ class ReceiptController extends Controller
             'bank_account_id' => ['nullable', 'integer', Rule::in(SalesReturn::refundAccountQuery()->pluck('id')->all())],
             'reference_number' => ['nullable', 'string', 'max:255'],
             'narration' => ['nullable', 'string', 'max:255'],
+            // Where the money came in (plan 12, BR07); Receipt::post()
+            // checks it is active and accessible, default the posting branch.
+            'branch_id' => ['nullable', 'integer', 'exists:branches,id'],
             'allocations' => ['nullable', 'array'],
             'allocations.*.sale_id' => ['required_with:allocations', 'integer', 'distinct', 'exists:sales,id'],
             'allocations.*.amount' => ['required_with:allocations', 'numeric', 'decimal:0,2', 'min:0.01'],
@@ -97,7 +141,9 @@ class ReceiptController extends Controller
         try {
             Receipt::post($data, $request->user());
         } catch (InvalidArgumentException|AuthorizationException $e) {
-            return back()->withErrors(['amount' => $e->getMessage()])->withInput();
+            // A refused branch belongs on the branch picker; allocation,
+            // amount and clearing-account problems stay under `amount`.
+            return back()->withErrors([BranchFormOptions::errorField($e, 'amount') => $e->getMessage()])->withInput();
         }
 
         return redirect()->route('tenant.receipts.index')->with('status', 'Receipt recorded.');
@@ -119,7 +165,7 @@ class ReceiptController extends Controller
 
         $documentDate = $receipt->date->toDateString();
         $amount = Money::of($receipt->amount);
-        $voucherNumber = $receipt->journalVoucher?->voucher_number;
+        $voucherNumber = $receipt->journalVoucher?->seriesNumber();
 
         return Pdf::loadView('pdf.receipt', [
             'receipt' => $receipt,

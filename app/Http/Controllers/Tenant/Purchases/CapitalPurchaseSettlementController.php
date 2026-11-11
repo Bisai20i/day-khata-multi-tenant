@@ -7,6 +7,7 @@ use App\Http\Requests\Tenant\Purchases\CancelCapitalPurchaseSettlementRequest;
 use App\Http\Requests\Tenant\Purchases\SettleCapitalPurchaseRequest;
 use App\Models\CapitalPurchase;
 use App\Models\CapitalPurchaseSettlement;
+use App\Support\Branches\BranchFormOptions;
 use Illuminate\Auth\Access\AuthorizationException;
 use Illuminate\Http\RedirectResponse;
 use InvalidArgumentException;
@@ -18,7 +19,10 @@ class CapitalPurchaseSettlementController extends Controller
         try {
             CapitalPurchaseSettlement::settle($capitalPurchase, $request->validated(), $request->user());
         } catch (InvalidArgumentException|AuthorizationException $e) {
-            return back()->withErrors(['amount' => $e->getMessage()])->withInput();
+            // A refused paying branch belongs on the branch picker (plan 12,
+            // BR12); the bill's own branch, the amount and a missing clearing
+            // account stay under `amount`.
+            return back()->withErrors([BranchFormOptions::errorField($e, 'amount') => $e->getMessage()])->withInput();
         }
 
         return redirect()->route('tenant.capital-purchases.index')->with('status', 'Settlement posted.');

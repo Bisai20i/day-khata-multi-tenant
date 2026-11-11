@@ -59,6 +59,9 @@
                         <tr><td>Non Taxable Amount</td><td>{{ $nontaxable->format() }}</td></tr>
                     @endif
                     <tr><td>VAT ({{ Money::of($sale->vat_rate)->toString() }}%)</td><td>{{ $vat->format() }}</td></tr>
+                    @if(! $roundOff->isZero())
+                        <tr><td>Round Off</td><td>{{ $roundOffLabel }}</td></tr>
+                    @endif
                     <tr class="net"><td>Grand Total</td><td>{{ $total->format() }}</td></tr>
                     {{-- No digital payment rebate row: the stored sale and its
                          voucher carry no rebate, so the bill must not print one. --}}

@@ -7,6 +7,9 @@ use App\Enums\FiscalYearStatus;
 use App\Enums\StockAdjustmentReason;
 use App\Enums\StockMovementType;
 use App\Enums\VoucherType;
+use App\Models\Concerns\BelongsToBranch;
+use App\Models\Concerns\PlacesStockDocument;
+use App\Support\Branches\BranchContext;
 use App\Support\ClosedFiscalYearGuard;
 use App\Support\Inventory\PerpetualCosting;
 use App\Support\Inventory\PerpetualStockGuard;
@@ -53,10 +56,17 @@ use ValueError;
  * against EXE23 Inventory Adjustment, or against the "Profit & Loss" equity
  * account for an opening line, the same counter-account the opening-stock
  * import uses. Trading lines on the same document stay exactly as above.
+ *
+ * Branches (plan 12, BR08): the adjustment is filed in its store's branch
+ * (I5, PlacesStockDocument), and its InventoryCost or opening-stock voucher
+ * posts every line into that same branch, so each branch's AS12 / AS14
+ * balance keeps matching the value of its own stores (I8). Cancelling
+ * reverses the voucher line for line, branch for branch.
  */
 #[Fillable([
     'date',
     'store_id',
+    'branch_id',
     'note',
     'total_value',
     'status',
@@ -69,6 +79,9 @@ use ValueError;
 ])]
 class StockAdjustment extends Model
 {
+    use BelongsToBranch;
+    use PlacesStockDocument;
+
     /**
      * @return array<string, string>
      */
@@ -79,6 +92,7 @@ class StockAdjustment extends Model
             'total_value' => Decimal::class.':2',
             'is_opening_import' => 'boolean',
             'cancelled_at' => 'datetime',
+            'branch_id' => 'integer',
         ];
     }
 
@@ -144,7 +158,7 @@ class StockAdjustment extends Model
      * year the date actually falls in: the date decides the fiscal year, the
      * picker never overrides it.
      *
-     * @param  array{date: string, note?: string|null, store_id?: int|null, fiscal_year_id?: int, reason?: string|null, is_opening_import?: bool}  $data
+     * @param  array{date: string, note?: string|null, store_id?: int|null, branch_id?: int|null, fiscal_year_id?: int, reason?: string|null, is_opening_import?: bool}  $data
      * @param  array<int, array{item_id: int, item_unit_id?: int|null, direction: string, reason_type: string, quantity: mixed, unit_cost_rate?: mixed, remarks?: string|null}>  $lines
      */
     public static function post(array $data, array $lines, User $actor): self
@@ -174,11 +188,11 @@ class StockAdjustment extends Model
                 throw new AuthorizationException('You do not have permission to post into a reopened fiscal year.');
             }
 
-            $storeId = isset($data['store_id']) ? (int) $data['store_id'] : Store::where('is_active', true)->orderBy('id')->value('id');
-
-            if (! $storeId) {
-                throw new InvalidArgumentException('No active store is configured.');
-            }
+            // Branch and store together (plan 12, I5/I6): the store's
+            // branch, else the requested or posting branch with its default
+            // store. The perpetual voucher below posts into this same branch.
+            $placement = static::placeStockDocument($actor, $data['branch_id'] ?? null, $data['store_id'] ?? null);
+            $storeId = $placement->requireStoreId();
 
             $items = Item::with('units')->whereIn('id', collect($lines)->pluck('item_id'))->get()->keyBy('id');
 
@@ -273,6 +287,7 @@ class StockAdjustment extends Model
             $adjustment = static::create([
                 'date' => $data['date'],
                 'store_id' => $storeId,
+                'branch_id' => $placement->branchId,
                 'note' => $data['note'] ?? null,
                 'total_value' => $totalValue,
                 'status' => 'posted',
@@ -408,16 +423,26 @@ class StockAdjustment extends Model
      * FiscalYear::close()), and a second one would be read as a restatement
      * of every balance.
      *
-     * @param  array{date: string, note?: string|null, store_id?: int|null, fiscal_year_id?: int, reason?: string|null}  $data
+     * Branches (plan 12, BR08): a batch replaces only the previous batch of
+     * its own branch, so re-importing one branch's opening stock never
+     * cancels another branch's. The voucher posts into the batch's branch.
+     * With only Main this is the same single company-wide replacement as
+     * before.
+     *
+     * @param  array{date: string, note?: string|null, store_id?: int|null, branch_id?: int|null, fiscal_year_id?: int, reason?: string|null}  $data
      * @param  array<int, array{item_id: int, direction: string, reason_type: string, quantity: mixed, unit_cost_rate?: mixed, remarks?: string|null}>  $lines
      * @return array{adjustment: self, replaced: ?self}
      */
     public static function postOpeningImport(array $data, array $lines, User $actor): array
     {
         return DB::transaction(function () use ($data, $lines, $actor) {
+            $placement = static::placeStockDocument($actor, $data['branch_id'] ?? null, $data['store_id'] ?? null);
+            $data = ['branch_id' => $placement->branchId, 'store_id' => $placement->requireStoreId()] + $data;
+
             $previous = static::query()
                 ->where('is_opening_import', true)
                 ->where('status', 'posted')
+                ->where('branch_id', $placement->branchId)
                 ->orderBy('id')
                 ->lockForUpdate()
                 ->get();
@@ -468,6 +493,7 @@ class StockAdjustment extends Model
                         'date' => $data['date'],
                         'narration' => 'Opening stock',
                         'reason' => $data['reason'] ?? null,
+                        'branch_id' => $adjustment->branch_id,
                     ],
                     [
                         ...$debitLines,
@@ -526,7 +552,7 @@ class StockAdjustment extends Model
                 // the class accounts back in step with the movements just
                 // cancelled (P1).
                 JournalVoucher::reverse(
-                    $fresh->journalVoucher()->firstOrFail(),
+                    BranchContext::unrestricted(fn () => $fresh->journalVoucher()->firstOrFail()),
                     $actor,
                     $fresh->is_opening_import
                         ? "Reversal of opening stock entry for stock adjustment #{$fresh->id}"
@@ -688,6 +714,7 @@ class StockAdjustment extends Model
                 'date' => $adjustment->date->toDateString(),
                 'narration' => "Stock adjustment #{$adjustment->id}",
                 'reason' => $correctionReason,
+                'branch_id' => $adjustment->branch_id,
             ],
             $voucherLines,
             $actor,

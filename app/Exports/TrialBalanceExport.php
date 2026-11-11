@@ -24,8 +24,12 @@ class TrialBalanceExport implements FromCollection, WithColumnFormatting, WithHe
 {
     /**
      * @param  array<int, array{name: string, groups: array<int, array{name: string, accounts: array, subgroups: array}>}>  $heads
+     * @param  string|null  $branchLabel  BranchFilter::label() in a multi-branch tenant, else null (no extra heading row)
      */
-    public function __construct(private readonly array $heads) {}
+    public function __construct(
+        private readonly array $heads,
+        private readonly ?string $branchLabel = null,
+    ) {}
 
     public function collection(): Collection
     {
@@ -70,11 +74,13 @@ class TrialBalanceExport implements FromCollection, WithColumnFormatting, WithHe
     }
 
     /**
-     * @return array<int, string>
+     * @return array<int, string>|list<list<string>>
      */
     public function headings(): array
     {
-        return ['Head', 'Group', 'Subgroup', 'Code', 'Account', 'Opening Dr', 'Opening Cr', 'Period Dr', 'Period Cr', 'Closing Dr', 'Closing Cr'];
+        $headings = ['Head', 'Group', 'Subgroup', 'Code', 'Account', 'Opening Dr', 'Opening Cr', 'Period Dr', 'Period Cr', 'Closing Dr', 'Closing Cr'];
+
+        return $this->branchLabel === null ? $headings : [[$this->branchLabel], $headings];
     }
 
     /**

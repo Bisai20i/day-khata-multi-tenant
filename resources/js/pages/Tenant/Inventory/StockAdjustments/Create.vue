@@ -10,6 +10,8 @@ import InfoTip from '@/components/ui/InfoTip.vue';
 import Combobox from '@/components/ui/Combobox.vue';
 import NepaliDateInput from '@/components/ui/NepaliDateInput.vue';
 import Label from '@/components/ui/Label.vue';
+import BranchSelect from '@/components/branch/BranchSelect.vue';
+import { useBranchField } from '@/composables/useBranchField';
 import { usePermissions } from '@/composables/usePermissions';
 import { formatMoney, multiplyMoney, parseQuantity, sumMoney } from '@/lib/money.js';
 import { todayInKathmandu } from '@/lib/format.js';
@@ -23,6 +25,9 @@ const props = defineProps({
     // locked design decision in plans/invoicing-settings-sale-purchase-ux.
     // md ("Locked decisions" #3 / Phase D's recommended option (a)).
     correctionFiscalYear: { type: Object, default: null },
+    // Branch picker (BranchFormOptions::props()).
+    branchOptions: { type: Array, default: () => [] },
+    defaultBranchId: { type: Number, default: null },
 });
 
 const emit = defineEmits(['cancel', 'posted']);
@@ -34,7 +39,13 @@ const fiscalYearOptions = computed(() =>
 );
 
 const itemOptions = computed(() => props.items.map((i) => ({ value: i.id, label: `${i.name} (${i.unit})` })));
-const storeOptions = computed(() => props.stores.map((s) => ({ value: s.id, label: s.name })));
+// Branches (plan 12, BR12): the store list follows the chosen branch. With
+// the picker hidden (one branch) every store is listed, as before.
+const { branchId, showPicker, withBranch, storesForBranch, keepStoreInBranch } = useBranchField(
+    () => props.branchOptions,
+    () => props.defaultBranchId,
+);
+const storeOptions = computed(() => storesForBranch(props.stores).map((s) => ({ value: s.id, label: s.name })));
 const itemsById = computed(() => new Map(props.items.map((i) => [i.id, i])));
 
 // Alternate-unit entry (item 7): mirrors Purchases/Create.vue's
@@ -136,6 +147,10 @@ const form = useForm({
     lines: [emptyLine()],
 });
 
+// A store of another branch goes back to blank, which the server reads as
+// "the branch's default store".
+keepStoreInBranch(() => props.stores, () => form.store_id, (id) => (form.store_id = id), () => null);
+
 const isCorrectionSelected = computed(
     () => !!props.correctionFiscalYear && form.fiscal_year_id === props.correctionFiscalYear.id,
 );
@@ -221,7 +236,7 @@ const totalValue = computed(() => {
 });
 
 function submit() {
-    form.transform((data) => ({
+    form.transform((data) => withBranch({
         ...data,
         fiscal_year_id: data.fiscal_year_id || undefined,
         reason: isCorrectionSelected.value ? data.reason : undefined,
@@ -293,7 +308,8 @@ function submit() {
                     </div>
                 </div>
 
-                <div class="grid grid-cols-3 gap-4">
+                <div class="grid gap-4" :class="showPicker ? 'grid-cols-4' : 'grid-cols-3'">
+                    <BranchSelect v-model="branchId" :options="branchOptions" :error="form.errors.branch_id" />
                     <div>
                         <Label class="mb-1">Date <span class="text-danger">*</span></Label>
                         <NepaliDateInput v-model="form.date" required />
@@ -316,6 +332,7 @@ function submit() {
                             @update:model-value="(v) => (form.store_id = v)"
                         />
                         <p v-if="form.errors.store_id" class="mt-1 text-sm text-danger">{{ form.errors.store_id }}</p>
+                        <p v-if="!showPicker && form.errors.branch_id" class="mt-1 text-sm text-danger" role="alert">{{ form.errors.branch_id }}</p>
                     </div>
                 </div>
             </Card>

@@ -17,6 +17,8 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
  * that consumes a sale line's last remaining quantity credits "the component
  * minus everything already credited for that line" - which is only exact if
  * what earlier returns credited is a fact on the row, not a re-derivation.
+ * `round_off` is the line's signed slice of the original sale's Round Off (a
+ * fourth component, allocated by net like TDS and summed the same way).
  * `line_total` keeps its original meaning (what the customer is credited for
  * the goods themselves) and always equals `net_amount`.
  *
@@ -30,7 +32,7 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
  */
 #[Fillable([
     'sales_return_id', 'sale_line_id', 'item_id', 'item_unit_id', 'unit_conversion_factor', 'vatable',
-    'quantity', 'bonus_quantity', 'rate', 'line_total', 'net_amount', 'vat_amount', 'tds_amount',
+    'quantity', 'bonus_quantity', 'rate', 'line_total', 'net_amount', 'vat_amount', 'tds_amount', 'round_off',
 ])]
 class SaleReturnLine extends Model
 {
@@ -49,6 +51,7 @@ class SaleReturnLine extends Model
             'net_amount' => Decimal::class.':2',
             'vat_amount' => Decimal::class.':2',
             'tds_amount' => Decimal::class.':2',
+            'round_off' => Decimal::class.':2',
         ];
     }
 

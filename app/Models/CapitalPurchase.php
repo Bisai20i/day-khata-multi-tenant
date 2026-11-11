@@ -6,9 +6,12 @@ use App\Casts\Decimal;
 use App\Enums\DepreciationMethod;
 use App\Enums\DepreciationPool;
 use App\Enums\VoucherType;
+use App\Models\Concerns\BelongsToBranch;
 use App\Support\Billing\BillingException;
 use App\Support\Billing\DocumentCalculator;
 use App\Support\Billing\DocumentTotals;
+use App\Support\Branches\BranchContext;
+use App\Support\Branches\DocumentBranch;
 use App\Support\Money\InvalidAmount;
 use App\Support\Money\Money;
 use App\Support\SettlementNarration;
@@ -50,10 +53,12 @@ use InvalidArgumentException;
     'payment_mode', 'bank_account_id', 'cash_amount', 'bank_amount',
     'taxable_amount', 'nontaxable_amount', 'vat_rate', 'vat_amount',
     'total', 'status', 'created_by',
-    'cancelled_at', 'cancelled_by', 'cancel_reason', 'reversal_journal_voucher_id',
+    'cancelled_at', 'cancelled_by', 'cancel_reason', 'reversal_journal_voucher_id', 'branch_id',
 ])]
 class CapitalPurchase extends Model
 {
+    use BelongsToBranch;
+
     /**
      * @return array<string, string>
      */
@@ -69,6 +74,7 @@ class CapitalPurchase extends Model
             'vat_rate' => Decimal::class.':2',
             'vat_amount' => Decimal::class.':2',
             'total' => Decimal::class.':2',
+            'branch_id' => 'integer',
         ];
     }
 
@@ -162,12 +168,14 @@ class CapitalPurchase extends Model
     }
 
     /**
-     * Sum of live (not cancelled) later settlements.
+     * Sum of live (not cancelled) later settlements. Read outside the branch
+     * access scope (plan 12, section 5.7): a settlement paid from another
+     * branch still reduces what this bill owes, whoever is looking.
      */
     public function settledAmount(): Money
     {
         return Money::sum(
-            $this->settlements()->where('status', 'posted')->pluck('amount')
+            BranchContext::unrestricted(fn () => $this->settlements()->where('status', 'posted')->pluck('amount'))
                 ->map(static fn ($amount): Money => Money::of($amount))
         );
     }
@@ -269,7 +277,7 @@ class CapitalPurchase extends Model
      * purchase carries no items and no units, so quantity and conversion
      * factor are both fixed at 1 and the line's gross is the amount itself.
      *
-     * @param  array{supplier_id?: int|null, type: string, bill_number?: string|null, date: string, narration?: string|null, payment_mode: string, bank_account_id?: int|null, cash_amount?: mixed, bank_amount?: mixed, vat_rate?: mixed, expected_total?: mixed, store_id?: int}  $data
+     * @param  array{supplier_id?: int|null, type: string, bill_number?: string|null, date: string, narration?: string|null, payment_mode: string, bank_account_id?: int|null, cash_amount?: mixed, bank_amount?: mixed, vat_rate?: mixed, expected_total?: mixed, store_id?: int, branch_id?: int|null}  $data
      * @param  array<int, array{account_id: int, amount: mixed, narration?: string|null, vatable?: bool}>  $lines
      */
     public static function post(array $data, array $lines, User $actor): self
@@ -284,10 +292,13 @@ class CapitalPurchase extends Model
                 throw new InvalidArgumentException('Type must be either "capital" or "service".');
             }
 
-            $storeId = isset($data['store_id']) ? (int) $data['store_id'] : Store::where('is_active', true)->orderBy('id')->value('id');
-            if (! $storeId) {
-                throw new InvalidArgumentException('No active store is configured.');
-            }
+            // Branch and store together (plan 12, I5/I6): the requested
+            // branch, else the store's, else the actor's posting branch; the
+            // store defaults inside that branch (the company default store
+            // while it belongs there, like every other document). No stock
+            // moves, but the store still pins the bill to its branch.
+            $placement = DocumentBranch::forStoreDocument($actor, $data['branch_id'] ?? null, $data['store_id'] ?? null);
+            $storeId = $placement->requireStoreId();
 
             // Supplier before the bill-number guard and the fiscal year, the
             // posting lock order (Item::lockForStockOut()): the
@@ -313,8 +324,10 @@ class CapitalPurchase extends Model
             // race; this lookup exists to give the user a sentence instead of a
             // constraint violation. It is locked and read inside the same
             // transaction so it cannot be stale by the time the row is written.
+            // The index is company-wide, so the lookup ignores the branch
+            // access scope: a bill filed in another branch still counts.
             if ($guard !== null) {
-                $existing = static::query()->where('bill_number_guard', $guard)->lockForUpdate()->first();
+                $existing = BranchContext::unrestricted(fn () => static::query()->where('bill_number_guard', $guard)->lockForUpdate()->first());
 
                 if ($existing !== null) {
                     throw new InvalidArgumentException(
@@ -444,12 +457,13 @@ class CapitalPurchase extends Model
                     'voucher_type' => VoucherType::CapitalPurchase->value,
                     'date' => $data['date'],
                     'narration' => $data['narration'] ?? ($supplier ? "{$typeLabel} from {$supplier->name}" : $typeLabel),
+                    'branch_id' => $placement->branchId,
                 ],
                 $voucherLines,
                 $actor,
                 // Every line carries the same compact narration (item 10),
                 // so the supplier's ledger reads "CP-7 - Cash Settlement".
-                lineNarration: fn (JournalVoucher $voucher): string => SettlementNarration::line('CP-'.$voucher->voucher_number, $paymentMode),
+                lineNarration: fn (JournalVoucher $voucher): string => SettlementNarration::line($voucher->printedNumber('CP'), $paymentMode),
             );
 
             $capitalPurchase = static::create([
@@ -459,6 +473,7 @@ class CapitalPurchase extends Model
                 // supplier record is corrected later.
                 'supplier_pan' => $data['supplier_pan'] ?? $supplier?->tpin,
                 'store_id' => $storeId,
+                'branch_id' => $placement->branchId,
                 'journal_voucher_id' => $voucher->id,
                 'type' => $type,
                 'bill_number' => $billNumber,
@@ -548,6 +563,10 @@ class CapitalPurchase extends Model
             'status' => 'active',
             'journal_voucher_id' => $voucher->id,
             'created_by' => $actor->id,
+            // The asset belongs to the branch whose voucher booked its cost,
+            // so its depreciation follows it (plan 12, section 5.4). Explicit,
+            // so BelongsToBranch's creating hook leaves it alone.
+            'branch_id' => $voucher->branch_id,
         ]);
 
         $asset->update(['asset_code' => 'FA-'.str_pad((string) $asset->id, 5, '0', STR_PAD_LEFT)]);
@@ -654,25 +673,33 @@ class CapitalPurchase extends Model
                 throw new InvalidArgumentException('The cancellation reason cannot be longer than 500 characters.');
             }
 
-            if ($capitalPurchase->settlements()->where('status', 'posted')->exists()) {
+            // Read outside the branch access scope: a settlement paid from a
+            // branch the canceller cannot see must still block the cancel.
+            if (BranchContext::unrestricted(fn () => $capitalPurchase->settlements()->where('status', 'posted')->exists())) {
                 throw new InvalidArgumentException('This capital purchase has settlements against it. Cancel those settlements first.');
             }
 
-            $assets = FixedAsset::query()
+            // Read outside the branch access scope (FixedAsset uses
+            // BelongsToBranch): an asset hidden from a restricted canceller
+            // must never silently skip the depreciated-or-disposed guard.
+            $assets = BranchContext::unrestricted(fn () => FixedAsset::query()
                 ->whereIn('id', $capitalPurchase->lines()->whereNotNull('fixed_asset_id')->pluck('fixed_asset_id'))
                 ->lockForUpdate()
-                ->get();
+                ->get());
 
             foreach ($assets as $asset) {
-                if ($asset->status === 'disposed' || $asset->depreciations()->exists()) {
+                if ($asset->status === 'disposed' || BranchContext::unrestricted(fn () => $asset->depreciations()->exists())) {
                     throw new InvalidArgumentException(
                         "Fixed asset {$asset->asset_code} from this purchase has been depreciated or disposed. Reverse those entries first."
                     );
                 }
             }
 
+            // The reversal stays in the bill's branch: reverse() keeps the
+            // original's origin branch and every line's branch, and still
+            // checks that the actor may post there.
             $reversal = JournalVoucher::reverse(
-                $capitalPurchase->journalVoucher()->firstOrFail(),
+                BranchContext::unrestricted(fn () => $capitalPurchase->journalVoucher()->firstOrFail()),
                 $actor,
                 "Cancellation of capital purchase #{$capitalPurchase->id}: {$reason}",
             );

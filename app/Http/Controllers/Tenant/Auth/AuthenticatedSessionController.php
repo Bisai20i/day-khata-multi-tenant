@@ -3,6 +3,7 @@
 namespace App\Http\Controllers\Tenant\Auth;
 
 use App\Http\Controllers\Controller;
+use App\Support\Branches\ActiveBranchSelection;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
@@ -48,6 +49,7 @@ class AuthenticatedSessionController extends Controller
         }
 
         $request->session()->regenerate();
+        $request->session()->forget(ActiveBranchSelection::SESSION_KEY);
 
         return redirect()->intended(route('tenant.dashboard'));
     }

@@ -6,6 +6,12 @@
 
 @section('title', 'Income Statement')
 
+@section('doc-meta-extra')
+    @if(!empty($branchFilterLabel))
+        <div>{{ $branchFilterLabel }}</div>
+    @endif
+@endsection
+
 @section('content')
     <table class="items-table">
         <thead>

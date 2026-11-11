@@ -4,6 +4,10 @@ namespace App\Models;
 
 use App\Enums\FiscalYearStatus;
 use App\Enums\VoucherType;
+use App\Models\Concerns\BelongsToBranch;
+use App\Support\Branches\BranchBalancer;
+use App\Support\Branches\BranchContext;
+use App\Support\Branches\SeriesNumber;
 use App\Support\ClosedFiscalYearGuard;
 use App\Support\Money\Money;
 use App\Support\ReversalNotice;
@@ -11,17 +15,31 @@ use Carbon\CarbonImmutable;
 use Closure;
 use Illuminate\Auth\Access\AuthorizationException;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\Relations\HasOne;
+use Illuminate\Database\Query\Builder as QueryBuilder;
 use Illuminate\Support\Facades\DB;
 use InvalidArgumentException;
 use LogicException;
 
-#[Fillable(['fiscal_year_id', 'voucher_type', 'voucher_number', 'date', 'narration', 'reason', 'status', 'created_by', 'reversal_of_id'])]
+/**
+ * branch_id is the voucher's origin branch (plan 12, section 5.3): the hub
+ * its Inter-Branch Clearing lines meet at, and the branch lists, numbering
+ * and access read. It is fillable on purpose: mass assignment drops an
+ * unlisted column, and the column default (Main) would then hide the loss.
+ *
+ * series_branch_id (plan 12, BR20) is the series the number came from: 0 for
+ * the shared series, else the header branch in a per_branch year. Never
+ * print voucher_number on its own; use seriesNumber() / printedNumber().
+ */
+#[Fillable(['fiscal_year_id', 'voucher_type', 'voucher_number', 'series_branch_id', 'date', 'narration', 'reason', 'status', 'created_by', 'reversal_of_id', 'branch_id'])]
 class JournalVoucher extends Model
 {
+    use BelongsToBranch;
+
     /**
      * Posted vouchers are immutable ledger records (audit JE-01). The only
      * permitted update is the cancellation bookkeeping reverse() performs:
@@ -50,6 +68,8 @@ class JournalVoucher extends Model
         return [
             'voucher_type' => VoucherType::class,
             'date' => 'date:Y-m-d',
+            'branch_id' => 'integer',
+            'series_branch_id' => 'integer',
         ];
     }
 
@@ -101,6 +121,33 @@ class JournalVoucher extends Model
     }
 
     /**
+     * A restricted user sees a voucher whose origin branch is theirs, and
+     * also one that only has lines in their branches (branch A receiving
+     * cash for branch B's invoice puts B's receivable line on A's voucher;
+     * B's users must still find it). The lines themselves stay limited to
+     * their branches by JournalVoucherLine's own scope (plan 12, section 5.7).
+     * Overrides BelongsToBranch's plain branch_id predicate; only ever runs
+     * for restricted users.
+     *
+     * @param  Builder<static>  $query
+     * @param  list<int>  $branchIds
+     */
+    public function applyBranchAccessConstraint(Builder $query, array $branchIds): void
+    {
+        $voucherKey = $this->qualifyColumn($this->getKeyName());
+
+        $query->where(function (Builder $visible) use ($branchIds, $voucherKey): void {
+            $visible->whereIn($this->qualifyColumn('branch_id'), $branchIds)
+                ->orWhereExists(function (QueryBuilder $lines) use ($branchIds, $voucherKey): void {
+                    $lines->selectRaw('1')
+                        ->from('journal_voucher_lines')
+                        ->whereColumn('journal_voucher_lines.journal_voucher_id', $voucherKey)
+                        ->whereIn('journal_voucher_lines.branch_id', $branchIds);
+                });
+        });
+    }
+
+    /**
      * The one user-facing entry point for posting a journal voucher.
      * Resolves the target fiscal year (defaults to the currently open one),
      * gates posting into a closed year behind ClosedFiscalYearGuard (only
@@ -122,20 +169,34 @@ class JournalVoucher extends Model
      * right one back out by.
      *
      * $lineNarration, when given, is called with the new voucher (numbered,
-     * before any line exists) and its result becomes every line's narration.
-     * Documents whose ledger narration quotes their own number ("SL-12 -
+     * before any line exists) and its result becomes every line's narration,
+     * except Inter-Branch Clearing lines, which keep their own narration.
+     * Documents whose ledger narration quotes their own number ("S-12 -
      * Cash Settlement") need the voucher number first; they used to post
      * the lines and then rewrite them with a bulk query-builder update,
      * which only worked because a bulk update skips the model guard that
      * keeps posted lines immutable (flags G-22).
      *
-     * @param  array{voucher_type?: string, date: string, narration: string, reason?: string, fiscal_year_id?: int}  $header
-     * @param  array<int, array{account_id: int, debit?: float|string, credit?: float|string, narration?: string}>  $lines
+     * Branches (plan 12, section 5.3): $header['branch_id'] is the origin
+     * branch; when missing it is BranchContext::postingBranchId() for
+     * $actor (their selected or default branch, else Main), which is how
+     * every caller written before branches existed keeps posting into Main.
+     * Each line may carry its own branch_id (default: the origin) and
+     * counterparty_branch_id. Every branch's lines must balance on their own
+     * (invariant I1); a caller that legitimately spans branches (a receipt
+     * settling another branch's invoice, a cross-branch transfer) passes
+     * $autoBalance and BranchBalancer adds the Inter-Branch Clearing lines.
+     * A restricted actor may only post into branches they can access.
+     *
+     * @param  array{voucher_type?: string, date: string, narration: string, reason?: string, fiscal_year_id?: int, branch_id?: int|null}  $header
+     * @param  array<int, array{account_id: int, debit?: float|string, credit?: float|string, narration?: string, branch_id?: int|null, counterparty_branch_id?: int|null}>  $lines
      * @param  (Closure(self): string)|null  $lineNarration
+     *
+     * @throws AuthorizationException When $actor may not post into one of the branches.
      */
-    public static function post(array $header, array $lines, User $actor, bool $logCorrection = true, ?Closure $lineNarration = null): self
+    public static function post(array $header, array $lines, User $actor, bool $logCorrection = true, ?Closure $lineNarration = null, bool $autoBalance = false): self
     {
-        return DB::transaction(function () use ($header, $lines, $actor, $logCorrection, $lineNarration) {
+        return DB::transaction(function () use ($header, $lines, $actor, $logCorrection, $lineNarration, $autoBalance) {
             // Row-locked so a concurrent FiscalYear::close() (which takes the
             // same lock) either finishes first and this sees a Closed year, or
             // waits for this posting to commit (audit JE-04).
@@ -160,6 +221,15 @@ class JournalVoucher extends Model
                 throw new AuthorizationException('You do not have permission to post into a reopened fiscal year.');
             }
 
+            $branchId = static::branchIdOrNull($header['branch_id'] ?? null, 'The journal voucher names an invalid branch.')
+                ?? BranchContext::postingBranchId($actor);
+
+            // Clearing lines only ever join branches already on the voucher,
+            // so checking the origin and the caller's line branches covers
+            // the whole posting.
+            static::assertActorMayPostTo($actor, [$branchId, ...static::lineBranchIds($lines, $branchId)]);
+            static::assertBranchesUsable($branchId, $lines);
+
             $voucher = static::write(
                 $fiscalYear,
                 VoucherType::from($header['voucher_type'] ?? VoucherType::Journal->value),
@@ -169,13 +239,15 @@ class JournalVoucher extends Model
                 $actor,
                 $lines,
                 $lineNarration,
+                $branchId,
+                $autoBalance,
             );
 
             if ($isOverride) {
                 static::rollForward($voucher, $actor);
 
                 if ($logCorrection) {
-                    ClosedFiscalYearGuard::logCorrection($fiscalYear, $reason, "Journal voucher #{$voucher->voucher_number}: {$header['narration']}");
+                    ClosedFiscalYearGuard::logCorrection($fiscalYear, $reason, "Journal voucher #{$voucher->seriesNumber()}: {$header['narration']}");
                 }
             }
 
@@ -192,8 +264,15 @@ class JournalVoucher extends Model
      * specific fiscal year for system-generated bookkeeping rather than a
      * user-initiated posting.
      *
-     * @param  array<int, array{account_id: int, debit?: float|string, credit?: float|string, narration?: string}>  $lines
+     * $branchId is the origin branch; null means
+     * BranchContext::postingBranchId($actor), the same default post() uses.
+     * System callers that know the branch (reversal, roll-forward, year
+     * close) pass it. Branch access is not checked here: write() is the
+     * system path, and post() and reverse() check the actor themselves.
+     *
+     * @param  array<int, array{account_id: int, debit?: float|string, credit?: float|string, narration?: string, branch_id?: int|null, counterparty_branch_id?: int|null}>  $lines
      * @param  (Closure(self): string)|null  $lineNarration  See post().
+     * @param  bool  $autoBalance  See post().
      */
     public static function write(
         FiscalYear $fiscalYear,
@@ -204,20 +283,51 @@ class JournalVoucher extends Model
         User $actor,
         array $lines,
         ?Closure $lineNarration = null,
+        ?int $branchId = null,
+        bool $autoBalance = false,
     ): self {
         $date = static::assertDateInsideFiscalYear($fiscalYear, $date);
-        $lines = static::validateLines($lines);
+        $branchId ??= BranchContext::postingBranchId($actor);
+        $lines = static::validateLines($lines, $branchId, $autoBalance);
+
+        // Per-branch numbering (BR20): the header branch picks the series in
+        // a per_branch year; a shared year resolves to 0 with no query.
+        $seriesBranch = SeriesNumber::seriesBranchFor($fiscalYear, $branchId);
+        $seriesBranchId = SeriesNumber::seriesBranchId($seriesBranch);
+
+        // The year the caller holds may be an unlocked copy (depreciation,
+        // disposal). Locked exclusively (a no-op when the caller already holds
+        // it, as post() and reverse() do) so a concurrent scope change waits
+        // until this posting commits, and so a flow that later takes the
+        // exclusive lock itself (disposal) never upgrades from a share lock.
+        // The re-check refuses to number from the wrong series if the scope
+        // flipped between the caller's read and now.
+        $lockedScope = FiscalYear::query()->whereKey($fiscalYear->getKey())->lockForUpdate()->value('numbering_scope');
+
+        if (($lockedScope === FiscalYear::NUMBERING_PER_BRANCH) !== ($seriesBranch !== null)) {
+            throw new InvalidArgumentException(
+                "The numbering of \"{$fiscalYear->name}\" was changed while this was posting. Please try again."
+            );
+        }
 
         $voucher = static::create([
             'fiscal_year_id' => $fiscalYear->id,
             'voucher_type' => $type,
-            'voucher_number' => static::nextVoucherNumber($fiscalYear, $type),
+            'series_branch_id' => $seriesBranchId,
+            'voucher_number' => VoucherSequence::claimNext($fiscalYear, $type, $seriesBranchId),
             'date' => $date,
             'narration' => $narration,
             'reason' => $reason,
             'status' => 'posted',
             'created_by' => $actor->id,
+            'branch_id' => $branchId,
         ]);
+
+        // Only a branch series: a shared voucher must serialise exactly as
+        // before, without a series_branch key.
+        if ($seriesBranch !== null) {
+            $voucher->setRelation('seriesBranch', $seriesBranch);
+        }
 
         if ($lineNarration !== null) {
             $resolved = $lineNarration($voucher);
@@ -226,7 +336,15 @@ class JournalVoucher extends Model
                 throw new InvalidArgumentException('A line narration can be at most '.self::MAX_NARRATION_LENGTH.' characters.');
             }
 
-            $lines = array_map(fn (array $line): array => [...$line, 'narration' => $resolved], $lines);
+            // The system's Inter-Branch Clearing lines keep their own
+            // narration; the caller's narration is for the caller's lines.
+            $lines = array_map(
+                fn (array $line): array => ($line['narration'] ?? null) === BranchBalancer::CLEARING_NARRATION
+                    && ($line['counterparty_branch_id'] ?? null) !== null
+                    ? $line
+                    : [...$line, 'narration' => $resolved],
+                $lines,
+            );
         }
 
         $voucher->lines()->createMany($lines);
@@ -293,10 +411,19 @@ class JournalVoucher extends Model
      * rather than silently losing a paisa), the totals are compared exactly,
      * and the normalised strings are what gets stored.
      *
-     * @param  array<int, array{account_id: int, debit?: float|string, credit?: float|string, narration?: string}>  $lines
-     * @return list<array{account_id: int, debit: string, credit: string, narration: string|null}>
+     * Branches: every line comes back with a branch_id (its own, else
+     * $headerBranchId) and a counterparty_branch_id (its own, else null).
+     * After the company-wide total check, $autoBalance lets BranchBalancer
+     * append Inter-Branch Clearing lines, and then each branch must balance
+     * on its own (invariant I1). A voucher whose lines all sit in one branch
+     * passes the per-branch check exactly when it passes the total check, so
+     * it comes back with the same lines, amounts and order as before
+     * branches existed, and never reads the clearing account.
+     *
+     * @param  array<int, array{account_id: int, debit?: float|string, credit?: float|string, narration?: string, branch_id?: int|null, counterparty_branch_id?: int|null}>  $lines
+     * @return list<array{account_id: int, debit: string, credit: string, narration: string|null, branch_id: int, counterparty_branch_id: int|null}>
      */
-    private static function validateLines(array $lines): array
+    private static function validateLines(array $lines, int $headerBranchId, bool $autoBalance = false): array
     {
         if (count($lines) < 2) {
             throw new InvalidArgumentException('A journal voucher needs at least two lines.');
@@ -305,6 +432,7 @@ class JournalVoucher extends Model
         $normalised = [];
         $debits = [];
         $credits = [];
+        $branchesSeen = [];
 
         foreach ($lines as $line) {
             // ofNullable so a blank box ('' or null) reads as zero; anything
@@ -337,11 +465,25 @@ class JournalVoucher extends Model
             $debits[] = $debit;
             $credits[] = $credit;
 
+            $lineBranchId = static::branchIdOrNull($line['branch_id'] ?? null) ?? $headerBranchId;
+            $counterpartyBranchId = static::branchIdOrNull($line['counterparty_branch_id'] ?? null);
+
+            // A counterparty names the other end of a clearing pair, so it can
+            // never be the line's own branch. Callers set it only on clearing
+            // lines (BranchBalancer, or reverse()/rollForward() replaying them).
+            if ($counterpartyBranchId !== null && $counterpartyBranchId === $lineBranchId) {
+                throw new InvalidArgumentException('A journal voucher line cannot name its own branch as the counterparty branch.');
+            }
+
+            $branchesSeen[$lineBranchId] = true;
+
             $normalised[] = [
                 'account_id' => $line['account_id'],
                 'debit' => $debit->toString(),
                 'credit' => $credit->toString(),
                 'narration' => $line['narration'] ?? null,
+                'branch_id' => $lineBranchId,
+                'counterparty_branch_id' => $counterpartyBranchId,
             ];
         }
 
@@ -349,41 +491,262 @@ class JournalVoucher extends Model
             throw new InvalidArgumentException('Total debit must equal total credit.');
         }
 
+        // Parity fast path: with every line in one branch, that branch's
+        // balance is the total just checked, and the balancer would add
+        // nothing (one branch netting to zero is never a spoke to clear).
+        if (count($branchesSeen) === 1) {
+            return $normalised;
+        }
+
+        if ($autoBalance) {
+            $normalised = BranchBalancer::balance($normalised, $headerBranchId);
+        }
+
+        static::assertEachBranchBalances($normalised);
+
         return $normalised;
     }
 
     /**
-     * Claims the next number in this (fiscal year, voucher type) series.
+     * Invariant I1: within one voucher, each branch's debits equal its
+     * credits. Without this a branch's books (trial balance, balance sheet)
+     * would not balance even though the company's do.
      *
-     * firstOrCreate() used to race here: two simultaneous first postings of a
-     * type both saw no row, both inserted, and the loser hit the unique index
-     * with a 500 instead of getting a number. insertOrIgnore() makes the
-     * create side idempotent, and the row is then re-read under
-     * lockForUpdate() so the increment itself is serialised (a no-op on
-     * SQLite, which is why this is verified by review rather than by a test).
+     * @param  list<array{debit: string, credit: string, branch_id: int}>  $lines
      */
-    private static function nextVoucherNumber(FiscalYear $fiscalYear, VoucherType $type): int
+    private static function assertEachBranchBalances(array $lines): void
     {
-        // Through the model's own query builder, so it uses the tenant
-        // connection and table the rest of this class does. A raw insert
-        // bypasses Eloquent's timestamps, hence the explicit pair.
-        VoucherSequence::query()->insertOrIgnore([
-            'fiscal_year_id' => $fiscalYear->id,
-            'voucher_type' => $type->value,
-            'last_number' => 0,
-            'created_at' => now(),
-            'updated_at' => now(),
-        ]);
+        $imbalances = BranchBalancer::imbalances($lines);
 
-        $sequence = VoucherSequence::query()
-            ->where('fiscal_year_id', $fiscalYear->id)
-            ->where('voucher_type', $type)
-            ->lockForUpdate()
-            ->firstOrFail();
+        if ($imbalances === []) {
+            return;
+        }
 
-        $sequence->increment('last_number');
+        $branchId = array_key_first($imbalances);
+        $net = $imbalances[$branchId];
+        $branchName = Branch::query()->whereKey($branchId)->value('name') ?? "#{$branchId}";
 
-        return $sequence->last_number;
+        throw new InvalidArgumentException(sprintf(
+            'The lines for branch %s do not balance: %s exceeds %s by %s. Each branch in an entry must balance on its own; '
+            .'post it with inter-branch balancing to add the clearing lines.',
+            $branchName,
+            $net->isPositive() ? 'debit' : 'credit',
+            $net->isPositive() ? 'credit' : 'debit',
+            $net->abs()->toString(),
+        ));
+    }
+
+    /**
+     * A branch id from caller input: null or '' means "not given", anything
+     * else must be a positive whole number.
+     */
+    private static function branchIdOrNull(mixed $value, string $invalidMessage = 'A journal voucher line names an invalid branch.'): ?int
+    {
+        if ($value === null || $value === '') {
+            return null;
+        }
+
+        if (is_int($value) || (is_string($value) && ctype_digit($value))) {
+            $branchId = (int) $value;
+
+            if ($branchId > 0) {
+                return $branchId;
+            }
+        }
+
+        throw new InvalidArgumentException($invalidMessage);
+    }
+
+    /**
+     * Every branch post() is about to write into must exist and be active,
+     * and every counterparty branch must exist, for unrestricted actors too
+     * (the foreign key alone would only surface as a database error).
+     * reverse() and rollForward() do not call this: they replay history,
+     * which must stay reversible after a branch is deactivated.
+     *
+     * Main is skipped (it always exists and can never be deactivated), so a
+     * Main-only posting adds no query; anything else costs one.
+     *
+     * @param  array<int, array{branch_id?: int|string|null, counterparty_branch_id?: int|string|null}>  $lines
+     */
+    private static function assertBranchesUsable(int $headerBranchId, array $lines): void
+    {
+        $mainId = BranchContext::mainBranchIdOrNull();
+        $notMain = fn (int $branchId): bool => $branchId !== $mainId;
+
+        $postingIds = array_values(array_unique(array_filter([$headerBranchId, ...static::lineBranchIds($lines, $headerBranchId)], $notMain)));
+        $counterpartyIds = array_values(array_unique(array_filter(
+            array_map(fn (array $line): ?int => static::branchIdOrNull($line['counterparty_branch_id'] ?? null), $lines),
+            fn (?int $branchId): bool => $branchId !== null && $branchId !== $mainId,
+        )));
+
+        if ($postingIds === [] && $counterpartyIds === []) {
+            return;
+        }
+
+        $found = Branch::query()
+            ->whereIn('id', array_values(array_unique([...$postingIds, ...$counterpartyIds])))
+            ->get(['id', 'name', 'is_active'])
+            ->keyBy('id');
+
+        $problems = [];
+
+        foreach ($postingIds as $branchId) {
+            $branch = $found->get($branchId);
+
+            if ($branch === null) {
+                $problems[] = "branch #{$branchId} does not exist";
+            } elseif (! $branch->is_active) {
+                $problems[] = "branch {$branch->name} is inactive";
+            }
+        }
+
+        foreach ($counterpartyIds as $branchId) {
+            if (! $found->has($branchId)) {
+                $problems[] = "counterparty branch #{$branchId} does not exist";
+            }
+        }
+
+        if ($problems !== []) {
+            throw new InvalidArgumentException('This entry cannot be posted: '.implode('; ', array_unique($problems)).'.');
+        }
+    }
+
+    /**
+     * The branch each raw line will post into, the way validateLines()
+     * resolves it, for the access check in post().
+     *
+     * @param  array<int, array{branch_id?: int|string|null}>  $lines
+     * @return list<int>
+     */
+    private static function lineBranchIds(array $lines, int $headerBranchId): array
+    {
+        return array_map(fn (array $line): int => static::branchIdOrNull($line['branch_id'] ?? null) ?? $headerBranchId, $lines);
+    }
+
+    /**
+     * Invariant I6 on the write side: a restricted actor may only post into
+     * branches they can access. A no-op for unrestricted actors and inside
+     * BranchContext::unrestricted(), where system code posts on purpose.
+     *
+     * @param  array<int, int>  $branchIds
+     *
+     * @throws AuthorizationException
+     */
+    private static function assertActorMayPostTo(User $actor, array $branchIds): void
+    {
+        if (BranchContext::accessIsLifted()) {
+            return;
+        }
+
+        $allowed = BranchContext::allowedBranchIds($actor);
+
+        if ($allowed === null) {
+            return;
+        }
+
+        foreach (array_unique($branchIds) as $branchId) {
+            if (! in_array($branchId, $allowed, true)) {
+                throw new AuthorizationException('You do not have access to post into one of the branches on this entry.');
+            }
+        }
+    }
+
+    /**
+     * The branch whose series this voucher's number came from (plan 12,
+     * BR20). Only meaningful when series_branch_id is not 0; never eager
+     * load it blindly (0 matches no branch but still costs a query), use
+     * loadSeriesBranches().
+     *
+     * @return BelongsTo<Branch, $this>
+     */
+    public function seriesBranch(): BelongsTo
+    {
+        return $this->belongsTo(Branch::class, 'series_branch_id');
+    }
+
+    /**
+     * The number as people read it: `{n}` in the shared series (exactly the
+     * bare voucher_number every screen showed before BR20), `{series_code}-{n}`
+     * in a branch series, where the bare number repeats once per branch.
+     * See SeriesNumber::format().
+     */
+    public function seriesNumber(): string
+    {
+        return SeriesNumber::format($this->voucher_number, $this->seriesCode());
+    }
+
+    /**
+     * `{prefix}-{n}` in the shared series, `{prefix}-{series_code}-{n}` in a
+     * branch series. The one way a document builds its printed number from
+     * its voucher (sale invoices, credit and debit notes, purchase numbers,
+     * PMT-, SAL-, ADV-, capital invoices, ...).
+     */
+    public function printedNumber(string $prefix): string
+    {
+        return SeriesNumber::format($this->voucher_number, $this->seriesCode(), $prefix);
+    }
+
+    /**
+     * For JSON payloads that used to carry the bare voucher number: the same
+     * integer in the shared series (payloads stay byte-identical), the
+     * `{series_code}-{n}` string in a branch series.
+     */
+    public function displayNumber(): int|string
+    {
+        return (int) $this->series_branch_id === 0 ? (int) $this->voucher_number : $this->seriesNumber();
+    }
+
+    /**
+     * The series code printed with this voucher's number, or null for the
+     * shared series. The code is frozen once a branch series has numbered a
+     * voucher (Branch::booted()), so reading it at display time is stable.
+     * A branch that somehow lost its code falls back to its id rather than
+     * printing a bare, ambiguous number.
+     */
+    public function seriesCode(): ?string
+    {
+        $seriesBranchId = (int) $this->series_branch_id;
+
+        if ($seriesBranchId === 0) {
+            return null;
+        }
+
+        $code = trim((string) $this->seriesBranch?->series_code);
+
+        return $code !== '' ? $code : (string) $seriesBranchId;
+    }
+
+    /**
+     * Loads seriesBranch for the vouchers that are in a branch series, in one
+     * query, and none at all when every voucher is in the shared series (the
+     * only case a shared-scope company ever has), so lists can call
+     * seriesNumber() per row without N+1 queries.
+     *
+     * @param  iterable<self|null>  $vouchers
+     */
+    public static function loadSeriesBranches(iterable $vouchers): void
+    {
+        $pending = [];
+
+        foreach ($vouchers as $voucher) {
+            if ($voucher instanceof self && (int) $voucher->series_branch_id !== 0 && ! $voucher->relationLoaded('seriesBranch')) {
+                $pending[] = $voucher;
+            }
+        }
+
+        if ($pending === []) {
+            return;
+        }
+
+        $branches = Branch::query()
+            ->whereIn('id', array_values(array_unique(array_map(fn (self $voucher): int => (int) $voucher->series_branch_id, $pending))))
+            ->get(['id', 'name', 'series_code'])
+            ->keyBy('id');
+
+        foreach ($pending as $voucher) {
+            $voucher->setRelation('seriesBranch', $branches->get((int) $voucher->series_branch_id));
+        }
     }
 
     /**
@@ -395,20 +758,32 @@ class JournalVoucher extends Model
      * amounts, so the replayed line set stays balanced automatically.
      * Posted into every fiscal year after the corrected one, up to and
      * including the currently open one.
+     *
+     * Every replayed line keeps its branch and counterparty branch, and the
+     * adjustment keeps the corrected voucher's origin branch, so each branch
+     * stays balanced (retargeting never moves an amount between branches).
+     * The lines are read outside the branch access scope: a restricted
+     * actor's view could otherwise drop another branch's lines, and since
+     * every branch balances on its own the shortened replay would still pass
+     * validation, silently.
      */
     private static function rollForward(self $voucher, User $actor): void
     {
         $correctedYear = $voucher->fiscalYear;
         $plAccount = Account::where('name', 'Profit & Loss')->firstOrFail();
 
-        $retargetedLines = $voucher->lines()->get()->map(function (JournalVoucherLine $line) use ($plAccount, $voucher) {
+        $originalLines = BranchContext::unrestricted(fn () => $voucher->lines()->orderBy('id')->get());
+
+        $retargetedLines = $originalLines->map(function (JournalVoucherLine $line) use ($plAccount, $voucher) {
             $targetAccountId = $line->account->isProfitAndLoss() ? $plAccount->id : $line->account_id;
 
             return [
                 'account_id' => $targetAccountId,
                 'debit' => $line->debit,
                 'credit' => $line->credit,
-                'narration' => "Roll-forward of voucher #{$voucher->voucher_number}",
+                'narration' => "Roll-forward of voucher #{$voucher->seriesNumber()}",
+                'branch_id' => $line->branch_id,
+                'counterparty_branch_id' => $line->counterparty_branch_id,
             ];
         })->all();
 
@@ -428,10 +803,12 @@ class JournalVoucher extends Model
                 $year,
                 VoucherType::RollForwardAdjustment,
                 $year->start_date->toDateString(),
-                "Roll-forward adjustment for voucher #{$voucher->voucher_number} ({$correctedYear->name})",
+                "Roll-forward adjustment for voucher #{$voucher->seriesNumber()} ({$correctedYear->name})",
                 null,
                 $actor,
                 $retargetedLines,
+                null,
+                (int) $voucher->branch_id,
             );
 
             if ($year->status === FiscalYearStatus::Open) {
@@ -465,12 +842,22 @@ class JournalVoucher extends Model
      * - A document can only be reversed once, enforced by the row lock here
      *   and by the unique index on reversal_of_id underneath it.
      *
+     * Branches: the reversal keeps the original's origin branch, and every
+     * mirrored line keeps its branch and counterparty branch, so each branch
+     * (and every inter-branch clearing pair) nets to zero. The original and
+     * its lines are read outside the branch access scope: reading them
+     * through a restricted actor's view could drop another branch's lines,
+     * and because every branch balances on its own the partial reversal
+     * would still validate. The actor must still be allowed to post into
+     * every branch the reversal touches.
+     *
      * @throws InvalidArgumentException When $original is already reversed, its fiscal year is closed, or it is itself a reversal, closing entry or roll-forward adjustment (unless $allowSystemVoucher).
+     * @throws AuthorizationException When $actor may not post into one of the original's branches.
      */
     public static function reverse(self $original, User $actor, string $narration, bool $allowSystemVoucher = false): self
     {
         return DB::transaction(function () use ($original, $actor, $narration, $allowSystemVoucher) {
-            $locked = static::query()->whereKey($original->getKey())->lockForUpdate()->firstOrFail();
+            $locked = BranchContext::unrestricted(fn () => static::query()->whereKey($original->getKey())->lockForUpdate()->firstOrFail());
 
             // A reversal, a year-end closing entry and a roll-forward
             // adjustment are the books' own bookkeeping, never a document
@@ -480,7 +867,7 @@ class JournalVoucher extends Model
                 throw new InvalidArgumentException('A reversal, closing entry or roll-forward adjustment cannot be reversed.');
             }
 
-            if (static::query()->where('reversal_of_id', $locked->id)->exists()) {
+            if (BranchContext::unrestricted(fn () => static::query()->where('reversal_of_id', $locked->id)->exists())) {
                 throw new InvalidArgumentException('This document has already been reversed.');
             }
 
@@ -492,12 +879,20 @@ class JournalVoucher extends Model
                 );
             }
 
-            $mirroredLines = $locked->lines()->orderBy('id')->get()->map(fn (JournalVoucherLine $line) => [
+            $originalLines = BranchContext::unrestricted(fn () => $locked->lines()->orderBy('id')->get());
+
+            $mirroredLines = $originalLines->map(fn (JournalVoucherLine $line) => [
                 'account_id' => $line->account_id,
                 'debit' => $line->credit,
                 'credit' => $line->debit,
                 'narration' => $line->narration,
+                'branch_id' => $line->branch_id,
+                'counterparty_branch_id' => $line->counterparty_branch_id,
             ])->all();
+
+            $branchId = (int) $locked->branch_id;
+
+            static::assertActorMayPostTo($actor, [$branchId, ...static::lineBranchIds($mirroredLines, $branchId)]);
 
             // Dated today, but never after the open year's last day: between
             // that day and the year actually being closed, "today" belongs to
@@ -519,6 +914,8 @@ class JournalVoucher extends Model
                 null,
                 $actor,
                 $mirroredLines,
+                null,
+                $branchId,
             );
 
             $reversal->update(['reversal_of_id' => $locked->id]);
@@ -545,7 +942,7 @@ class JournalVoucher extends Model
      * it gets the same date-in-year guard, closed-year override and gapless
      * numbering as every other voucher.
      *
-     * @param  array{voucher_type: string, date: string, narration: string, fiscal_year_id?: int, reason?: string, bank_account_id?: int, from_account_id?: int, to_account_id?: int, amount?: string|float, lines?: array<int, array{account_id: int, amount: string|float, narration?: string|null}>}  $data
+     * @param  array{voucher_type: string, date: string, narration: string, fiscal_year_id?: int, reason?: string, branch_id?: int|null, bank_account_id?: int, from_account_id?: int, to_account_id?: int, amount?: string|float, lines?: array<int, array{account_id: int, amount: string|float, narration?: string|null}>}  $data
      */
     public static function postCashBank(array $data, User $actor): self
     {
@@ -566,6 +963,7 @@ class JournalVoucher extends Model
                 'reason' => $data['reason'] ?? null,
                 'date' => $data['date'],
                 'narration' => $data['narration'],
+                'branch_id' => $data['branch_id'] ?? null,
             ],
             $lines,
             $actor,
@@ -700,8 +1098,11 @@ class JournalVoucher extends Model
      *   Sale, Purchase, SalesReturn, PurchaseReturn, Payment, Receipt,
      *   CapitalSale, CapitalPurchase, FixedAsset and
      *   FixedAssetDepreciation can all own a JournalVoucher; StockAdjustment/
-     *   StockTransfer/StockConversion/Quotation never do (periodic, not
-     *   perpetual, inventory accounting - see Sale's class docblock).
+     *   StockConversion/Quotation never do (periodic, not perpetual,
+     *   inventory accounting - see Sale's class docblock). A StockTransfer
+     *   between branches (BR18) does: its dispatch, receipt and cancellation
+     *   vouchers (journal_voucher_id, receipt_journal_voucher_id,
+     *   reversal_journal_voucher_id), mapped below since BR19.
      */
     public function cancel(User $actor, string $reason): void
     {
@@ -720,7 +1121,7 @@ class JournalVoucher extends Model
                 throw new InvalidArgumentException("This journal voucher was generated by {$sourceLabel} and must be cancelled from that record instead.");
             }
 
-            static::reverse($locked, $actor, "Cancellation of journal voucher #{$locked->voucher_number}: {$reason}");
+            static::reverse($locked, $actor, "Cancellation of journal voucher #{$locked->seriesNumber()}: {$reason}");
         });
 
         $this->refresh();
@@ -756,14 +1157,25 @@ class JournalVoucher extends Model
             [FixedAsset::class, 'journal_voucher_id', 'a Fixed Asset purchase'],
             [FixedAsset::class, 'disposal_journal_voucher_id', 'a Fixed Asset disposal'],
             [FixedAssetDepreciation::class, 'journal_voucher_id', 'a Fixed Asset depreciation run'],
+            [PayrollRun::class, 'journal_voucher_id', 'a Payroll run'],
+            [PayrollPayment::class, 'journal_voucher_id', 'a Salary payment'],
+            [StaffAdvance::class, 'journal_voucher_id', 'a Staff advance'],
+            // A transfer between branches (BR18) owns up to three vouchers.
+            [StockTransfer::class, 'journal_voucher_id', 'a Stock transfer dispatch'],
+            [StockTransfer::class, 'receipt_journal_voucher_id', 'a Stock transfer receipt'],
+            [StockTransfer::class, 'reversal_journal_voucher_id', 'a Stock transfer cancellation'],
         ];
 
-        foreach ($sources as [$model, $column, $label]) {
-            if ($model::where($column, $this->id)->exists()) {
-                return $label;
+        // Read unscoped: the owning record may sit in a branch the viewer
+        // cannot see (a cross-branch receipt), and it must still count.
+        return BranchContext::unrestricted(function () use ($sources): ?string {
+            foreach ($sources as [$model, $column, $label]) {
+                if ($model::where($column, $this->id)->exists()) {
+                    return $label;
+                }
             }
-        }
 
-        return null;
+            return null;
+        });
     }
 }

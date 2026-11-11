@@ -3,9 +3,11 @@
 namespace App\Http\Controllers\Tenant\Parties;
 
 use App\Exports\Samples\SupplierSampleExport;
+use App\Http\Controllers\Concerns\HandlesPartyAreas;
 use App\Http\Controllers\Concerns\ImportsCsv;
 use Maatwebsite\Excel\Facades\Excel;
 use App\Http\Controllers\Controller;
+use App\Models\Area;
 use App\Models\Supplier;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
@@ -18,7 +20,7 @@ use Symfony\Component\HttpFoundation\StreamedResponse;
 
 class SupplierController extends Controller
 {
-    use ImportsCsv;
+    use HandlesPartyAreas, ImportsCsv;
 
     /**
      * Columns of the bulk-import template, in the order they're written to
@@ -27,12 +29,13 @@ class SupplierController extends Controller
      *
      * @var list<string>
      */
-    private const IMPORT_COLUMNS = ['name', 'address', 'mobile_no', 'email', 'tpin'];
+    private const IMPORT_COLUMNS = ['name', 'address', 'mobile_no', 'email', 'tpin', 'area'];
 
     public function index(): Response
     {
         return Inertia::render('Tenant/Parties/Suppliers/Index', [
-            'suppliers' => Supplier::query()->with('account:id,code')->latest()->get(),
+            'suppliers' => Supplier::query()->with(['account:id,code', 'area:id,name'])->latest()->get(),
+            'areas' => Area::options(),
         ]);
     }
 
@@ -70,7 +73,7 @@ class SupplierController extends Controller
         return response()->streamDownload(function (): void {
             $handle = fopen('php://output', 'w');
             fputcsv($handle, self::IMPORT_COLUMNS);
-            fputcsv($handle, ['ABC Traders', 'Kathmandu-10', '9800000001', 'contact@abctraders.com', '123456789']);
+            fputcsv($handle, ['ABC Traders', 'Kathmandu-10', '9800000001', 'contact@abctraders.com', '123456789', '']);
             fclose($handle);
         }, 'supplier-import-template.csv', ['Content-Type' => 'text/csv']);
     }
@@ -99,6 +102,7 @@ class SupplierController extends Controller
         $seenMobiles = [];
         $skipped = [];
         $validRows = [];
+        $areaIds = Area::idsByLowerName();
 
         foreach ($rows as $index => $row) {
             $data = [
@@ -108,6 +112,7 @@ class SupplierController extends Controller
                 'email' => $row['email'] ?? '',
                 'tpin' => $row['tpin'] ?? '',
             ];
+            $areaName = Area::normalizeName($row['area'] ?? '');
 
             $validator = Validator::make($data, [
                 'name' => ['required', 'string', 'max:255'],
@@ -125,6 +130,14 @@ class SupplierController extends Controller
                 continue;
             }
 
+            // Before the mobile is registered as seen: a row skipped for its area must not
+            // make a later, valid row with the same mobile look like a duplicate.
+            if ($areaName !== '' && ! isset($areaIds[mb_strtolower($areaName)])) {
+                $skipped[] = ['row' => $rowNumber, 'name' => $data['name'], 'reason' => "Unknown area \"{$areaName}\". Create it on the Areas page first."];
+
+                continue;
+            }
+
             $mobileKey = strtolower($data['mobile_no']);
 
             if ($mobileKey !== '' && isset($seenMobiles[$mobileKey])) {
@@ -137,7 +150,8 @@ class SupplierController extends Controller
                 $seenMobiles[$mobileKey] = true;
             }
 
-            $validRows[] = array_map(static fn (string $value): ?string => $value === '' ? null : $value, $data);
+            $validRows[] = array_map(static fn (string $value): ?string => $value === '' ? null : $value, $data)
+                + ['area_id' => $areaName === '' ? null : $areaIds[mb_strtolower($areaName)]];
         }
 
         $imported = 0;
@@ -159,6 +173,14 @@ class SupplierController extends Controller
     }
 
     /**
+     * Sets or clears the area of the selected suppliers.
+     */
+    public function assignArea(Request $request): RedirectResponse
+    {
+        return $this->bulkAssignArea($request, Supplier::class, 'tenant.suppliers.index', 'supplier');
+    }
+
+    /**
      * @return array<string, mixed>
      */
     private function validated(Request $request, ?Supplier $supplier = null): array
@@ -173,6 +195,7 @@ class SupplierController extends Controller
             // is not VAT registered can only issue a PAN bill, so a purchase
             // against them opens with the toggle already checked.
             'is_vat_registered' => ['boolean'],
+            'area_id' => ['nullable', 'integer', 'exists:areas,id'],
         ]);
     }
 }

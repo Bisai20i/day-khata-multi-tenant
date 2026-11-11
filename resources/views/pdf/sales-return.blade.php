@@ -6,6 +6,11 @@
 @section('title', $isCreditNote ? 'Credit Note' : 'Return Request')
 
 @section('doc-meta-extra')
+    {{-- Multi-branch companies only (plan 12, BR12): the controller passes
+         a null branchName otherwise, so single-branch output is unchanged. --}}
+    @if(! empty($branchName))
+        <div><strong>{{ $branchLabel ?? 'Branch' }}:</strong> {{ $branchName }}</div>
+    @endif
     {{-- An unlinked return (C7 "returns without a bill") has no parent sale
          at all: it names no invoice, and every party/item detail below comes
          off the return itself instead of off the sale. --}}
@@ -118,6 +123,15 @@
             <td>VAT</td>
             <td class="text-right">{{ \App\Support\Money\Money::of($salesReturn->vat_amount)->format() }}</td>
         </tr>
+        {{-- Signed share of the invoice's Round Off, already inside the stored
+             total below; shown on its own row and never added again. --}}
+        @php($returnRoundOff = \App\Support\Money\Money::of($salesReturn->round_off ?? '0'))
+        @unless($returnRoundOff->isZero())
+            <tr>
+                <td>Round Off</td>
+                <td class="text-right">{{ ($returnRoundOff->isPositive() ? '+' : '').$returnRoundOff->format() }}</td>
+            </tr>
+        @endunless
         <tr class="grand-total">
             <td>Grand Total</td>
             <td class="text-right">{{ \App\Support\Money\Money::of($salesReturn->total)->format() }}</td>

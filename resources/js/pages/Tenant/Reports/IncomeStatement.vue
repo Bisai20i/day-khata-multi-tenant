@@ -12,6 +12,12 @@ import Label from '@/components/ui/Label.vue';
 import { formatMoney, compareMoney } from '@/lib/money.js';
 import { formatBsDate } from '@/lib/format.js';
 import { usePermissions } from '@/composables/usePermissions';
+import { useBranchReportFilter } from '@/composables/useBranchReportFilter';
+import { useBranchReportColumns } from '@/composables/useBranchReportColumns';
+import BranchReportFilter from '@/components/branch/BranchReportFilter.vue';
+import BranchReportNotes from '@/components/branch/BranchReportNotes.vue';
+import BranchReportCells from '@/components/branch/BranchReportCells.vue';
+import BranchReportHeaderRow from '@/components/branch/BranchReportHeaderRow.vue';
 
 defineOptions({ layout: AppLayout });
 
@@ -29,6 +35,8 @@ const props = defineProps({
     totalExpenses: { type: String, default: '0.00' },
     grossProfit: { type: String, default: '0.00' },
     netProfit: { type: String, default: '0.00' },
+    // Branch filter and by-branch columns; null when the company has no branches.
+    branchReport: { type: [Object, null], default: null },
 });
 
 useLayoutChrome('Income Statement');
@@ -44,8 +52,14 @@ const fiscalYear = ref(props.fiscalYearId);
 const from = ref(props.from);
 const to = ref(props.to);
 
+const branchFilter = useBranchReportFilter(() => props.branchReport, { byBranch: true });
+const { byBranch: hasBranchColumns, columns: branchColumns, totalValues, minWidth } = useBranchReportColumns(
+    () => props.branchReport,
+);
+
 const cogsScheduleUrl = computed(() => {
     const params = new URLSearchParams({ from: props.from ?? '', to: props.to ?? '' });
+    branchFilter.appendTo(params);
     return `/reports/manufacturing/cogs-schedule?${params.toString()}`;
 });
 
@@ -59,7 +73,12 @@ watch(fiscalYear, (value) => {
 function apply() {
     router.get(
         window.location.pathname,
-        { fiscal_year_id: fiscalYear.value ?? undefined, from: from.value ?? undefined, to: to.value ?? undefined },
+        {
+            fiscal_year_id: fiscalYear.value ?? undefined,
+            from: from.value ?? undefined,
+            to: to.value ?? undefined,
+            ...branchFilter.toQuery(),
+        },
         { preserveState: true, preserveScroll: true },
     );
 }
@@ -72,11 +91,13 @@ const absGrossProfit = computed(() => (isGrossProfit.value ? props.grossProfit :
 
 function printUrl() {
     const params = new URLSearchParams({ fiscal_year_id: fiscalYear.value ?? '', from: from.value ?? '', to: to.value ?? '' });
+    branchFilter.appendTo(params);
     return `/reports/income-statement/print?${params.toString()}`;
 }
 
 function exportUrl() {
     const params = new URLSearchParams({ fiscal_year_id: fiscalYear.value ?? '', from: from.value ?? '', to: to.value ?? '' });
+    branchFilter.appendTo(params);
     return `/reports/income-statement/export?${params.toString()}`;
 }
 </script>
@@ -107,12 +128,22 @@ function exportUrl() {
                     <Label class="mb-1">To date (BS)</Label>
                     <NepaliDateInput v-model="to" />
                 </div>
+                <BranchReportFilter
+                    v-if="branchReport"
+                    v-model:choice="branchFilter.choice.value"
+                    v-model:by-branch="branchFilter.byBranch.value"
+                    :report="branchReport"
+                    allow-by-branch
+                    id-prefix="income-statement"
+                    @change="apply"
+                />
                 <Button variant="primary" tone="purple" @click="apply">Generate report</Button>
             </div>
             <p v-if="from && to" class="mt-2 text-[12px] text-text-muted">
                 Showing report for {{ formatBsDate(from) }} to {{ formatBsDate(to) }} BS
                 <span class="text-text-muted">({{ from }} to {{ to }})</span>
             </p>
+            <BranchReportNotes v-if="branchReport" :report="branchReport" />
         </Card>
 
         <p v-if="fiscalYearId === null" class="px-1 py-6 text-center text-[13px] text-text-muted">
@@ -120,11 +151,13 @@ function exportUrl() {
         </p>
 
         <template v-else>
-            <Card variant="panel" title="Trading Account" class="mb-4">
-                <div class="divide-y divide-border">
+            <Card variant="panel" title="Trading Account" class="mb-4" :class="{ 'overflow-x-auto': hasBranchColumns }">
+                <div class="divide-y divide-border" :style="minWidth(360, 128)">
+                    <BranchReportHeaderRow v-if="hasBranchColumns" :columns="branchColumns" />
                     <div class="flex items-center px-1 py-1.5 text-[13px] text-text-base">
                         <div class="flex-1">Opening Stock</div>
                         <div class="w-32 text-right">{{ formatMoney(stock.opening) }}</div>
+                        <BranchReportCells v-if="hasBranchColumns" :columns="branchColumns" :values="totalValues('openingStock')" cell-class="w-32" />
                     </div>
                     <div class="flex items-center px-1 py-1.5 text-[13px] text-text-base">
                         <div class="flex-1">
@@ -132,10 +165,12 @@ function exportUrl() {
                             <span v-if="!stock.posted" class="text-text-muted">· valued as at {{ stock.asOf }}</span>
                         </div>
                         <div class="w-32 text-right">{{ formatMoney(stock.closing) }}</div>
+                        <BranchReportCells v-if="hasBranchColumns" :columns="branchColumns" :values="totalValues('closingStock')" cell-class="w-32" />
                     </div>
-                    <div class="flex items-center px-1 pt-2 text-[13px] font-bold" :class="isGrossProfit ? 'text-success' : 'text-danger'">
-                        <div class="flex-1">{{ isGrossProfit ? 'Gross Profit' : 'Gross Loss' }}</div>
-                        <div class="w-32 text-right">{{ formatMoney(absGrossProfit) }}</div>
+                    <div class="flex items-center px-1 pt-2 text-[13px] font-bold" :class="hasBranchColumns ? 'text-text-strong' : isGrossProfit ? 'text-success' : 'text-danger'">
+                        <div class="flex-1">{{ hasBranchColumns ? 'Gross Profit / (Loss)' : isGrossProfit ? 'Gross Profit' : 'Gross Loss' }}</div>
+                        <div class="w-32 text-right">{{ formatMoney(hasBranchColumns ? grossProfit : absGrossProfit) }}</div>
+                        <BranchReportCells v-if="hasBranchColumns" :columns="branchColumns" :values="totalValues('grossProfit')" cell-class="w-32" />
                     </div>
                 </div>
                 <p v-if="!stock.posted" class="mt-2 text-[12px] text-text-muted">
@@ -149,9 +184,10 @@ function exportUrl() {
                 </p>
             </Card>
 
-            <Card variant="panel" title="Income" class="mb-4">
+            <Card variant="panel" title="Income" class="mb-4" :class="{ 'overflow-x-auto': hasBranchColumns }">
                 <div v-if="income.length === 0" class="px-1 py-6 text-center text-[13px] text-text-muted">No transactions in this period. Try widening the date range.</div>
-                <div v-else class="divide-y divide-border">
+                <div v-else class="divide-y divide-border" :style="minWidth(360, 128)">
+                    <BranchReportHeaderRow v-if="hasBranchColumns" :columns="branchColumns" />
                     <div
                         v-for="account in income"
                         :key="`income-${account.id ?? account.code}`"
@@ -162,17 +198,20 @@ function exportUrl() {
                             <span v-if="account.computed" class="text-text-muted">· computed</span>
                         </div>
                         <div class="w-32 text-right">{{ formatMoney(account.amount) }}</div>
+                        <BranchReportCells v-if="hasBranchColumns" :columns="branchColumns" :values="account.by_branch" cell-class="w-32" />
                     </div>
                     <div class="flex items-center px-1 pt-2 text-[13px] font-bold text-text-strong">
                         <div class="flex-1">Total Income</div>
                         <div class="w-32 text-right">{{ formatMoney(totalIncome) }}</div>
+                        <BranchReportCells v-if="hasBranchColumns" :columns="branchColumns" :values="totalValues('totalIncome')" cell-class="w-32" />
                     </div>
                 </div>
             </Card>
 
-            <Card variant="panel" title="Expenses" class="mb-4">
+            <Card variant="panel" title="Expenses" class="mb-4" :class="{ 'overflow-x-auto': hasBranchColumns }">
                 <div v-if="expenses.length === 0" class="px-1 py-6 text-center text-[13px] text-text-muted">No transactions in this period. Try widening the date range.</div>
-                <div v-else class="divide-y divide-border">
+                <div v-else class="divide-y divide-border" :style="minWidth(360, 128)">
+                    <BranchReportHeaderRow v-if="hasBranchColumns" :columns="branchColumns" />
                     <div
                         v-for="account in expenses"
                         :key="`expense-${account.id ?? account.code}`"
@@ -183,18 +222,26 @@ function exportUrl() {
                             <span v-if="account.computed" class="text-text-muted">· computed</span>
                         </div>
                         <div class="w-32 text-right">{{ formatMoney(account.amount) }}</div>
+                        <BranchReportCells v-if="hasBranchColumns" :columns="branchColumns" :values="account.by_branch" cell-class="w-32" />
                     </div>
                     <div class="flex items-center px-1 pt-2 text-[13px] font-bold text-text-strong">
                         <div class="flex-1">Total Expenses</div>
                         <div class="w-32 text-right">{{ formatMoney(totalExpenses) }}</div>
+                        <BranchReportCells v-if="hasBranchColumns" :columns="branchColumns" :values="totalValues('totalExpenses')" cell-class="w-32" />
                     </div>
                 </div>
             </Card>
 
-            <Card variant="panel">
-                <div class="flex items-center px-1 py-1 text-[14px] font-bold" :class="isProfit ? 'text-success' : 'text-danger'">
-                    <div class="flex-1">{{ isProfit ? 'Net Profit' : 'Net Loss' }}</div>
-                    <div class="w-32 text-right">{{ formatMoney(absNetProfit) }}</div>
+            <Card variant="panel" :class="{ 'overflow-x-auto': hasBranchColumns }">
+                <BranchReportHeaderRow v-if="hasBranchColumns" :columns="branchColumns" :style="minWidth(360, 128)" />
+                <div
+                    class="flex items-center px-1 py-1 text-[14px] font-bold"
+                    :class="hasBranchColumns ? 'text-text-strong' : isProfit ? 'text-success' : 'text-danger'"
+                    :style="minWidth(360, 128)"
+                >
+                    <div class="flex-1">{{ hasBranchColumns ? 'Net Profit / (Loss)' : isProfit ? 'Net Profit' : 'Net Loss' }}</div>
+                    <div class="w-32 text-right">{{ formatMoney(hasBranchColumns ? netProfit : absNetProfit) }}</div>
+                    <BranchReportCells v-if="hasBranchColumns" :columns="branchColumns" :values="totalValues('netProfit')" cell-class="w-32" />
                 </div>
             </Card>
         </template>

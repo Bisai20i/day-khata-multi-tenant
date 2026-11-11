@@ -24,6 +24,7 @@ import Create from './Create.vue';
 import CashBankCreate from './CashBankCreate.vue';
 import { useOpenFiscalYear } from '@/composables/useOpenFiscalYear';
 import { usePermissions } from '@/composables/usePermissions';
+import { useBranchListColumn } from '@/composables/useBranchListColumn';
 
 // A manually posted Journal voucher and the five plain cash/bank vouchers
 // (Cash Receipt, Cash Payment, Bank Receipt, Bank Payment, Contra - T14)
@@ -55,9 +56,13 @@ const props = defineProps({
         type: Object,
         default: null,
     },
+    // Branch pickers of the manual journal (BranchFormOptions::props()).
+    branchOptions: { type: Array, default: () => [] },
+    defaultBranchId: { type: Number, default: null },
 });
 
 const page = usePage();
+const { branchColumns } = useBranchListColumn();
 const { toast } = useToast();
 useLayoutChrome('Journal Vouchers');
 
@@ -117,9 +122,22 @@ const voucherTypeLabels = {
     bank_receipt: 'Bank Receipt',
     bank_payment: 'Bank Payment',
     contra: 'Contra',
+    material_issue: 'Material Issue',
+    production: 'Production',
+    production_entry: 'Production Entry',
+    inventory_cost: 'Inventory Cost',
+    payroll: 'Payroll',
+    salary_payment: 'Salary Payment',
+    staff_advance: 'Staff Advance',
+    branch_stock_transfer: 'Branch Stock Transfer',
 };
 
-const voucherTypeOptions = Object.entries(voucherTypeLabels).map(([value, label]) => ({ value, label }));
+// A branch stock transfer only exists between two active branches, so a
+// company that is not multi-branch is not offered it as a filter (plan 12,
+// BR22 parity); its label above still names any such voucher in the list.
+const voucherTypeOptions = computed(() => Object.entries(voucherTypeLabels)
+    .filter(([value]) => value !== 'branch_stock_transfer' || page.props.branch?.isMulti === true)
+    .map(([value, label]) => ({ value, label })));
 
 // --- Filters, search and sort ---------------------------------------------
 // Server-side over the whole ledger, same as Sales/Index.vue - the old
@@ -276,9 +294,19 @@ function voucherTypeLabel(type) {
     return voucherTypeLabels[type] ?? type;
 }
 
+// A voucher numbered in a branch series (per-branch numbering year) prints
+// its series code too, e.g. "JV-KTM-12"; shared-series vouchers carry no
+// series_branch and print exactly as before. Mirrors JournalVoucher::printedNumber().
 function voucherLabel(voucher) {
     const prefix = voucherTypePrefixes[voucher.voucher_type] ?? 'JV';
-    return `${prefix}-${voucher.voucher_number}`;
+    const seriesBranchId = Number.parseInt(String(voucher.series_branch_id ?? 0), 10) || 0;
+
+    if (seriesBranchId === 0) {
+        return `${prefix}-${voucher.voucher_number}`;
+    }
+
+    const code = String(voucher.series_branch?.series_code ?? '').trim() || String(seriesBranchId);
+    return `${prefix}-${code}-${voucher.voucher_number}`;
 }
 
 // Exact string arithmetic, never Number(): the lines arrive as 2dp decimal
@@ -355,6 +383,9 @@ const columns = [
         numeric: false,
         cell: ({ row }) => voucherTypeLabel(row.original.voucher_type),
     },
+    // The voucher's origin branch, only for a multi-branch company viewing
+    // all branches.
+    ...branchColumns(),
     {
         id: 'narration',
         header: 'Narration',
@@ -442,6 +473,8 @@ function iconAction(action) {
             <Create
                 :accounts="accounts"
                 :correction-fiscal-year="correctionFiscalYear"
+                :branch-options="branchOptions"
+                :default-branch-id="defaultBranchId"
                 @cancel="showCreateForm = false"
                 @posted="showCreateForm = false"
             />
@@ -450,6 +483,8 @@ function iconAction(action) {
         <template v-else-if="showCashBankForm">
             <CashBankCreate
                 :accounts="accounts"
+                :branch-options="branchOptions"
+                :default-branch-id="defaultBranchId"
                 @cancel="showCashBankForm = false"
                 @posted="showCashBankForm = false"
             />

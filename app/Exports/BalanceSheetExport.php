@@ -19,11 +19,13 @@ class BalanceSheetExport implements FromCollection, WithColumnFormatting, WithHe
 {
     /**
      * @param  array<int, array{name: string, groups: array<int, array{name: string, accounts: array, subgroups: array}>}>  $heads
+     * @param  string|null  $branchLabel  BranchFilter::label() in a multi-branch tenant, else null (no extra heading row)
      */
     public function __construct(
         private readonly array $heads,
         private readonly string $totalAssets,
         private readonly string $totalLiabilitiesAndCapital,
+        private readonly ?string $branchLabel = null,
     ) {}
 
     public function collection(): Collection
@@ -68,11 +70,13 @@ class BalanceSheetExport implements FromCollection, WithColumnFormatting, WithHe
     }
 
     /**
-     * @return array<int, string>
+     * @return array<int, string>|list<list<string>>
      */
     public function headings(): array
     {
-        return ['Head', 'Group', 'Subgroup', 'Code', 'Account', 'Debit', 'Credit'];
+        $headings = ['Head', 'Group', 'Subgroup', 'Code', 'Account', 'Debit', 'Credit'];
+
+        return $this->branchLabel === null ? $headings : [[$this->branchLabel], $headings];
     }
 
     /**

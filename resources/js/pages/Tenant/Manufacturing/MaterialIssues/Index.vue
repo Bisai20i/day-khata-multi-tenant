@@ -17,6 +17,7 @@ import Label from '@/components/ui/Label.vue';
 import { useToast } from '@/composables/useToast';
 import { usePermissions } from '@/composables/usePermissions';
 import { useOpenFiscalYear } from '@/composables/useOpenFiscalYear';
+import { useBranchListColumn } from '@/composables/useBranchListColumn';
 import { formatMoney } from '@/lib/money.js';
 import { formatBsDate } from '@/lib/format.js';
 
@@ -32,6 +33,7 @@ const props = defineProps({
 });
 
 const page = usePage();
+const { branchColumns } = useBranchListColumn();
 const { toast } = useToast();
 const { can } = usePermissions();
 const { hasOpenFiscalYear } = useOpenFiscalYear();
@@ -101,7 +103,7 @@ const columns = [
         header: 'No.',
         numeric: false,
         cell: ({ row }) =>
-            h(Link, { href: `/material-issues/${row.original.id}`, class: 'font-semibold text-primary hover:underline' }, () => `MI-${row.original.number}`),
+            h(Link, { href: `/material-issues/${row.original.id}`, class: 'font-semibold text-primary hover:underline' }, () => row.original.document_number ?? `MI-${row.original.number}`),
     },
     {
         id: 'date',
@@ -114,6 +116,8 @@ const columns = [
                 h('span', { class: 'ml-1 text-text-faint' }, `(${String(row.original.date ?? '').slice(0, 10)})`),
             ]),
     },
+    // Only for a multi-branch company viewing all branches.
+    ...branchColumns(),
     { id: 'store', header: 'Store', numeric: false, cell: ({ row }) => row.original.store?.name ?? '-' },
     {
         id: 'production_entry',
@@ -147,7 +151,7 @@ const columns = [
                               target: '_blank',
                               rel: 'noopener',
                               class: 'flex h-[26px] w-[26px] items-center justify-center bg-bg-subtle text-text-faint transition-colors duration-150 hover:bg-primary-tint hover:text-primary',
-                              'aria-label': `Print material issue MI-${row.original.number}`,
+                              'aria-label': `Print material issue ${row.original.document_number ?? `MI-${row.original.number}`}`,
                           },
                           [h(Printer, { class: 'h-[13px] w-[13px]' })],
                       ),

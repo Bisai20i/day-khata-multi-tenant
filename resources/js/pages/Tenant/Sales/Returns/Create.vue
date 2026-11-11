@@ -1,5 +1,5 @@
 <script setup>
-import { computed } from 'vue';
+import { computed, ref } from 'vue';
 import { useForm } from '@inertiajs/vue3';
 import Card from '@/components/ui/Card.vue';
 import Button from '@/components/ui/Button.vue';
@@ -17,6 +17,9 @@ import { useSaleReturnCreateSalePicker } from '@/composables/useSaleReturnCreate
 import { useSaleReturnCreateUnlinked } from '@/composables/useSaleReturnCreateUnlinked';
 import { addMoney, formatMoney, moneyEquals, parseMoney } from '@/lib/money';
 import { todayInKathmandu } from '@/lib/format';
+import BranchSelect from '@/components/branch/BranchSelect.vue';
+import BranchBadge from '@/components/branch/BranchBadge.vue';
+import { useDocumentBranchStore } from '@/composables/useDocumentBranchStore';
 
 const props = defineProps({
     // A length-aware paginator of sale summaries, searched server-side: the
@@ -46,6 +49,10 @@ const props = defineProps({
     // see SalesReturn::postUnlinked(): the lines name an item and a rate
     // directly, VAT is the company rate, and it always posts straight away.
     mode: { type: String, default: 'post' },
+    // Unlinked mode's branch picker (BranchFormOptions::props()); empty
+    // unless the company runs several branches.
+    branchOptions: { type: Array, default: () => [] },
+    defaultBranchId: { type: Number, default: null },
 });
 
 const emit = defineEmits(['cancel', 'posted']);
@@ -86,7 +93,38 @@ const refundAccountOptions = computed(() =>
         label: account.code ? `${account.code} - ${account.name}` : account.name,
     })),
 );
-const storeOptions = computed(() => props.stores.map((store) => ({ value: store.id, label: store.name })));
+
+// Branches (plan 12, BR12). An unlinked return picks its branch and the
+// store follows it. A linked return has no picker: it always lands in its
+// sale's branch (shown read-only), so its store dropdown offers only that
+// branch's stores. The mode is fixed for the life of this form.
+const unlinkedBranch = props.mode === 'unlinked'
+    ? useDocumentBranchStore({
+          branchOptions: () => props.branchOptions,
+          defaultBranchId: () => props.defaultBranchId,
+          stores: () => props.stores,
+          getStoreId: () => form.store_id,
+          setStoreId: (id) => {
+              form.store_id = id;
+          },
+      })
+    : null;
+const branchId = unlinkedBranch?.branchId ?? ref(null);
+const showBranchPicker = computed(() => unlinkedBranch?.showPicker.value === true);
+const withBranch = (data) => (unlinkedBranch ? unlinkedBranch.withBranch(data) : data);
+
+const storeOptions = computed(() => {
+    const saleBranchId = props.selectedSale?.branch_id ?? null;
+    let stores = props.stores;
+
+    if (unlinkedBranch) {
+        stores = unlinkedBranch.storeChoices.value;
+    } else if (saleBranchId !== null) {
+        stores = props.stores.filter((store) => store.branch_id === saleBranchId);
+    }
+
+    return stores.map((store) => ({ value: store.id, label: store.name }));
+});
 
 /**
  * What a refund would have to pay out: the credit note total less any TDS
@@ -101,6 +139,14 @@ const refundDue = computed(() => {
     }
 
     return totals.value.credited;
+});
+
+// The sale's signed Round Off share this return gives back: a separate cell
+// before the total only when it is not zero. It is already inside the total.
+const signedRoundOff = computed(() => {
+    const amount = totals.value.roundOff;
+
+    return moneyEquals(amount, '0.00') ? null : (amount[0] === '-' ? '' : '+') + formatMoney(amount);
 });
 
 const hasRefundSplit = computed(
@@ -188,7 +234,7 @@ function refundPayload(data) {
 function submit() {
     if (isUnlinked.value) {
         form
-            .transform((data) => ({
+            .transform((data) => withBranch({
                 customer_id: data.customer_id,
                 date: data.date,
                 reason: data.reason || null,
@@ -250,6 +296,9 @@ function submit() {
         <p v-if="form.errors.expected_total" class="mb-4 border-[1.5px] border-danger bg-danger-bg px-3 py-2 text-sm text-danger">
             {{ form.errors.expected_total }}
         </p>
+        <p v-if="!showBranchPicker && form.errors.branch_id" class="mb-4 border-[1.5px] border-danger bg-danger-bg px-3 py-2 text-sm text-danger" role="alert">
+            {{ form.errors.branch_id }}
+        </p>
 
         <form class="flex flex-col gap-4" @submit.prevent="submit">
             <SaleReturnCreateSalePicker
@@ -269,6 +318,7 @@ function submit() {
                     <div class="text-sm">
                         <span class="font-bold text-text-strong">{{ selectedSale.invoice_number ?? `#${selectedSale.id}` }}</span>
                         <span class="text-text-muted"> - {{ selectedSale.customer ?? '-' }} - {{ selectedSale.date }} - {{ formatMoney(selectedSale.total) }}</span>
+                        <BranchBadge :branch-id="selectedSale.branch_id ?? null" class="ml-2" />
                     </div>
                     <Button variant="secondary" tone="purple" type="button" @click="clearSale">Change invoice</Button>
                 </div>
@@ -315,7 +365,7 @@ function submit() {
                 </div>
                 </Card>
 
-                <Card variant="panel" class="grid grid-cols-5 gap-3 !p-4 text-sm">
+                <Card variant="panel" :class="signedRoundOff === null ? 'grid-cols-5' : 'grid-cols-6'" class="grid gap-3 !p-4 text-sm">
                     <div>
                         <p class="text-[10px] font-bold tracking-[.8px] text-text-muted uppercase">Taxable</p>
                         <p class="font-bold text-text-strong">{{ formatMoney(totals.taxable) }}</p>
@@ -332,12 +382,20 @@ function submit() {
                         <p class="text-[10px] font-bold tracking-[.8px] text-text-muted uppercase">TDS reversed</p>
                         <p class="font-bold text-text-strong">{{ formatMoney(totals.tds) }}</p>
                     </div>
+                    <div v-if="signedRoundOff !== null">
+                        <p class="text-[10px] font-bold tracking-[.8px] text-text-muted uppercase" title="Share of the invoice's signed rounding adjustment">Round off</p>
+                        <p class="font-bold text-text-strong">{{ signedRoundOff }}</p>
+                    </div>
                     <div>
                         <p class="text-[10px] font-bold tracking-[.8px] text-text-muted uppercase">Credit note total</p>
                         <p class="font-bold text-text-strong">{{ formatMoney(totals.total) }}</p>
                     </div>
                 </Card>
             </template>
+
+            <div v-if="showBranchPicker" class="sm:max-w-sm">
+                <BranchSelect v-model="branchId" :options="branchOptions" :error="form.errors.branch_id" />
+            </div>
 
             <SaleReturnCreateUnlinkedFields
                 v-if="isUnlinked"

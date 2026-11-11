@@ -1,5 +1,5 @@
 <script setup>
-import { h, watch } from 'vue';
+import { computed, h, watch } from 'vue';
 import { router, useForm, usePage } from '@inertiajs/vue3';
 import { Plus } from '@lucide/vue';
 import AppLayout from '@/layouts/AppLayout.vue';
@@ -13,6 +13,7 @@ import Modal from '@/components/ui/Modal.vue';
 import Input from '@/components/ui/Input.vue';
 import FormField from '@/components/ui/FormField.vue';
 import CheckboxField from '@/components/ui/CheckboxField.vue';
+import Select from '@/components/ui/Select.vue';
 import RowActions from '@/components/ui/RowActions.vue';
 import { useToast } from '@/composables/useToast';
 import { useConfirm } from '@/composables/useConfirm';
@@ -21,14 +22,38 @@ import { usePermissions } from '@/composables/usePermissions';
 
 defineOptions({ layout: AppLayout });
 
-defineProps({
+const props = defineProps({
     stores: {
+        type: Array,
+        default: () => [],
+    },
+    // Every branch (plan 12, BR10). A store belongs to exactly one branch;
+    // the field shows only in a multi-branch company.
+    branches: {
         type: Array,
         default: () => [],
     },
 });
 
 const page = usePage();
+
+// The shared multi-branch gate (module on and more than one ACTIVE branch),
+// not the length of `branches`: that list also holds inactive branches, so
+// Main plus a deactivated branch must still look like a one-branch company
+// (BR22 parity). Hidden, the form still sends Main's id for a new store
+// (createDefaults below) and the store's own branch on edit, as before.
+const showBranch = computed(() => page.props.branch?.isMulti === true);
+
+// Active branches only, plus the store's current branch so an edit still
+// shows where it is.
+const branchOptions = computed(() =>
+    props.branches
+        .filter((branch) => branch.is_active || branch.id === form.branch_id)
+        .map((branch) => ({ value: branch.id, label: branch.is_active ? branch.name : `${branch.name} (inactive)` })),
+);
+
+const mainBranchId = computed(() => props.branches[0]?.id ?? null);
+
 const { toast } = useToast();
 const { confirm } = useConfirm();
 const { can } = usePermissions();
@@ -52,6 +77,15 @@ const form = useForm({
     address: '',
     phone: '',
     is_active: true,
+    branch_id: null,
+});
+
+// No branch chosen means "leave it to the server" (Main for a new store, the
+// current branch on edit), never an explicit null.
+form.transform((data) => {
+    if (data.branch_id !== null) return data;
+    const { branch_id: _omitted, ...rest } = data;
+    return rest;
 });
 
 const { showModal, editing, addAnother, savedNotice, isDirty, openCreate, openEdit, closeModal, onModalOpenChange, submit } = useCrudModal({
@@ -63,16 +97,24 @@ const { showModal, editing, addAnother, savedNotice, isDirty, openCreate, openEd
         form.address = store.address ?? '';
         form.phone = store.phone ?? '';
         form.is_active = !!store.is_active;
+        form.branch_id = store.branch_id ?? null;
     },
+    // The server lists Main first, so a new store defaults to Main, or to the
+    // branch of the store just added when adding several in a row.
+    createDefaults: (lastCreated) => ({ branch_id: lastCreated?.branch_id ?? mainBranchId.value }),
 });
+
+// A used store keeps its branch (invariant I5): move a business by transfer.
+const branchLocked = computed(() => Boolean(editing.value?.branch_locked));
 
 async function destroy(store) {
     if (!(await confirm({ message: `Delete store "${store.name}"? Stock recorded in it will no longer be available to select. This cannot be undone.`, tone: 'danger', confirmLabel: 'Delete store' }))) return;
     router.delete(`/stores/${store.id}`);
 }
 
-const columns = [
+const columns = computed(() => [
     { accessorKey: 'name', header: 'Name' },
+    ...(showBranch.value ? [{ accessorKey: 'branch_name', header: 'Branch' }] : []),
     { accessorKey: 'address', header: 'Address' },
     { accessorKey: 'phone', header: 'Phone' },
     {
@@ -96,7 +138,7 @@ const columns = [
                   })
                 : null,
     },
-];
+]);
 </script>
 
 <template>
@@ -168,6 +210,21 @@ const columns = [
                         />
                     </FormField>
                 </div>
+
+                <FormField
+                    v-if="showBranch"
+                    label="Branch"
+                    for="store-branch"
+                    required
+                    :help="branchLocked ? '' : 'The branch whose documents use this store.'"
+                    :error="form.errors.branch_id"
+                >
+                    <Select id="store-branch" v-model="form.branch_id" :options="branchOptions" :disabled="branchLocked" />
+                    <p v-if="branchLocked" class="mt-1 text-xs text-text-faint">
+                        This store has stock movements or documents, so its branch can no longer change. To move stock to another branch,
+                        create a store there and transfer the stock.
+                    </p>
+                </FormField>
 
                 <CheckboxField
                     v-if="editing"
