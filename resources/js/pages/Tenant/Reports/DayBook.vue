@@ -144,6 +144,14 @@ function voucherLabel(voucher) {
 <template>
     <div>
         <PageHeader title="Day Book" description="Every voucher posted in the period, listed by date with its debit and credit lines.">
+            <BranchReportFilter
+                v-if="branchReport"
+                v-model:choice="branchFilter.choice.value"
+                :report="branchReport"
+                id-prefix="day-book"
+                hide-label
+                @change="applyFilter"
+            />
             <template v-if="fiscalYearId !== null">
                 <a v-if="can('day_book.print')" :href="printUrl()" target="_blank" rel="noopener"><Button variant="secondary" tone="purple">Print</Button></a>
                 <a v-if="can('day_book.export')" :href="exportUrl()"><Button variant="secondary" tone="purple">Export</Button></a>
@@ -168,19 +176,12 @@ function voucherLabel(voucher) {
                     <Label class="mb-1">Voucher type</Label>
                     <Select v-model="voucherType" :options="voucherTypeFilterOptions" />
                 </div>
-                <BranchReportFilter
-                    v-if="branchReport"
-                    v-model:choice="branchFilter.choice.value"
-                    :report="branchReport"
-                    id-prefix="day-book"
-                    @change="applyFilter"
-                />
                 <Button variant="primary" tone="purple" @click="applyFilter">Generate report</Button>
             </div>
             <p v-if="from && to" class="mt-2 text-[12px] text-text-muted">
                 Showing report for {{ formatBsDate(from) }} to {{ formatBsDate(to) }} BS
             </p>
-            <BranchReportNotes v-if="branchReport" :report="branchReport" show-narrowed-note />
+            <BranchReportNotes v-if="branchReport" :report="branchReport" hide-label show-narrowed-note />
         </Card>
 
         <Card variant="panel">

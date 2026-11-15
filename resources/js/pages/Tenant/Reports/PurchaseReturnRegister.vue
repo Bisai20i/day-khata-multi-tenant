@@ -137,6 +137,14 @@ const columns = computed(() => {
                 <FileSpreadsheet class="h-[14px] w-[14px]" aria-hidden="true" />
                 Export to Excel
             </Button>
+            <BranchReportFilter
+                v-if="branchReport"
+                v-model:choice="branchFilter.choice.value"
+                :report="branchReport"
+                id-prefix="purchase-return-register"
+                hide-label
+                @change="applyFilter"
+            />
         </PageHeader>
 
         <p class="mb-1 text-[12.5px] text-text-muted">Showing report for {{ rangeLabel }}</p>
@@ -160,17 +168,10 @@ const columns = computed(() => {
                     <Label class="mb-1">Store</Label>
                     <Select v-model="storeId" :options="storeOptions" />
                 </div>
-                <BranchReportFilter
-                    v-if="branchReport"
-                    v-model:choice="branchFilter.choice.value"
-                    :report="branchReport"
-                    id-prefix="purchase-return-register"
-                    @change="applyFilter"
-                />
                 <Button variant="primary" tone="purple" :loading="isLoading" @click="applyFilter">Generate report</Button>
                 <Button v-if="hasActiveFilter" variant="secondary" tone="purple" :disabled="isLoading" @click="resetFilters">Reset</Button>
             </div>
-            <BranchReportNotes v-if="branchReport" :report="branchReport" />
+            <BranchReportNotes v-if="branchReport" :report="branchReport" hide-label />
         </Card>
 
         <Card variant="panel">

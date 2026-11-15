@@ -1,100 +1,54 @@
-# Portable Agentic Development Workflow (Laravel + Vue Edition)
+# Multi-Agent Development Workflow (Day Khata Edition)
 
-A token-optimized, multi-agent development architecture designed to prevent session limit exhaustion, eliminate context pollution, and enable seamless, non-colliding parallel execution across **Claude Code**, **Antigravity CLI (AGY)**, **Cursor**, and other AI coding assistants.
-
----
-
-## ⚠️ Status in this repo
-
-This directory was dropped in as a generic starting template but never bootstrapped - this project
-already had a more mature, project-specific version of the same idea before `init.ps1` was ever run.
-**Do not run `init.ps1` here**: it would overwrite the Laravel-Boost-managed root `CLAUDE.md` and
-replace working infrastructure with generic placeholders. As of 2026-09-16, the real system is:
-
-| Generic template concept | Actual location in this repo |
-| --- | --- |
-| `workflow/todo.md` (task queue) | `todo/START.md`, `todo/CONTRACTS.md`, `todo/T##-*.md` - a real, project-tuned coordinator/parallel-subagent protocol with file ownership, forbidden commands, and a live status board |
-| `workflow/memory.md` (stack + invariants) | `mem.md` (living state) and `goal.md` (direction/roadmap) |
-| `workflow/plans/*.md` | `plans/*.md` |
-| Root `CLAUDE.md` pointer | `CLAUDE.md` is auto-managed by Laravel Boost - don't overwrite it |
-| Cross-cutting durable rules (golden rules, protected files, etc.) | `.ai/rules/` (via Boost's `record-rule`) |
-| `templates/claude-agents/*` personas | `.claude/agents/builder.md`, `builder-high.md`, `scaffolder.md` - adapted to this project's actual conventions (money/decimal rules, migration rules, no-test-execution policy) |
-
-`todo.md`, `memory.md`, `progress.md`, `PROMPTS.md`, `plans/template.md`, and `templates/` were removed
-from this directory for that reason (still recoverable from git history if ever needed). `AGENTS.md`,
-`ROLES.md`, `bin/safe-run.*`, and `init.ps1` are left as-is as a portable reference for bootstrapping
-a *different*, greenfield repo - they don't apply here.
+A token-optimized, multi-agent development architecture designed to prevent session limit exhaustion, eliminate context pollution, and enable seamless, non-colliding parallel execution across **Antigravity CLI (AGY)**, **Claude Code**, and **Cursor**.
 
 ---
 
-## 📁 Directory Structure
+## 🏛️ Architecture Overview
+
+The system is organized into three clean layers:
 
 ```text
-.workflow/
-├── AGENTS.md                  # Master AI operating contract and token preservation rules
-├── ROLES.md                   # Persona definitions (@orchestrator, @scaffolder, @builder, @builder-high, @reviewer)
-├── PROMPTS.md                 # Copy-paste prompts for every phase of development
-├── memory.md                  # Project stack, architectural invariants, and protected shared files
-├── todo.md                    # Active task queue (lean, tagged with execution tier)
-├── progress.md                # Ephemeral live execution breadcrumbs
-├── plans/                     # Feature specifications & technical plans
-│   └── template.md            # Plan template for new features
-├── bin/
-│   ├── safe-run.ps1           # Windows PowerShell output-truncating wrapper
-│   └── safe-run.sh            # Linux / macOS / WSL command wrapper
-├── templates/
-│   └── claude-agents/         # Ready-to-use subagents for Claude Code (.claude/agents/)
-└── init.ps1                   # 1-click bootstrap script for any repository
+├── AGENTS.md                  # Universal root contract: rules, forbidden commands, money invariants, DoD
+├── CLAUDE.md                  # Laravel Boost guidelines + root pointer to AGENTS.md
+├── mem.md & goal.md           # Living state, completed features, and architectural roadmap
+├── plans/                     # Architectural specifications and feature plans
+├── todo/                      # Modular task queues (todo/CONTRACTS.md, task files)
+├── .agents/                   # Native Antigravity (AGY) customizations
+│   ├── skills/
+│   │   ├── daykhata-workflow/ # Multi-agent coordination skill, roles, and DoD
+│   │   └── safe-runner/       # Output-truncating command runner skill
+│   ├── bin/
+│   │   ├── safe-run.ps1       # Windows PowerShell safe runner (logs to .workflow_cmd.log)
+│   │   └── safe-run.sh        # Bash safe runner (Linux / macOS / WSL)
+│   └── rules/                 # Workspace rules discovered by Antigravity
+├── .claude/                   # Claude Code subagents (.claude/agents/) and skills
+└── .workflow/                 # Backward-compatible reference and runner aliases
 ```
 
 ---
 
-## 🚀 How to Use in a New Project
+## 🚀 Key Commands
 
-1. **Copy the directory:**
-   Copy `.workflow` (or `workflow`) into the root of your new project.
+### Safe Command Execution
+Never run raw test suites or unbounded build commands. Use `safe-run` to log output to `.workflow_cmd.log` and display only the tail on failure:
 
-2. **Run the bootstrap script:**
-   Open PowerShell in your project and run:
-   ```powershell
-   powershell -File .workflow/init.ps1
-   ```
-   This automatically:
-   - Creates root entry points (`AGENTS.md`, `CLAUDE.md`, `.cursorrules`)
-   - Auto-detects your Laravel & Vue versions from `composer.json` & `package.json`
-   - Adds temporary log artifacts to `.gitignore`
-   - Installs pre-configured subagents into `.claude/agents/`
-
-3. **Verify `memory.md`:**
-   Inspect `memory.md` to ensure any special project rules are documented.
-
----
-
-## 🔄 The Operating Cycle
-
-### 1. Plan (The Architect)
-* Use **Claude Code** (or AGY) with the planning prompt from `PROMPTS.md`.
-* Produces `plans/[feature].md` and populates `todo.md`.
-* **Action:** Run `/clear` immediately after planning to reset context.
-
-### 2. Build (The Workers)
-* **Backend:** Use **AGY** with CodeGraph for fast PHP/Laravel symbol exploration.
-* **Frontend:** Use **Claude Code** for Vue 3 UI/TypeScript components.
-* Tasks are strictly file-partitioned: **no two workers ever touch the same file**.
-
-### 3. Wire (The Orchestrator)
-* The lead agent registers routes in `routes/web.php` or `routes/api.php` and connects components.
-
-### 4. Review & Verify (The Reviewer)
-* Runs the 5-point **Definition of Done** via `safe-run`.
-* Inspects `git diff` and commits.
+- **Windows PowerShell:**
+  ```powershell
+  powershell -File .agents/bin/safe-run.ps1 -Command "php -l <file.php>"
+  powershell -File .agents/bin/safe-run.ps1 -Command "vendor/bin/pint <files>"
+  ```
+- **Bash / Linux / WSL:**
+  ```bash
+  bash .agents/bin/safe-run.sh "<command>"
+  ```
 
 ---
 
 ## 🛡️ The 5 Golden Rules of Token Conservation
 
-1. **Safe-Run Only:** Never execute raw `npm run build` or full `php artisan test`. Always use `safe-run.ps1` to prevent 400-line error dumps.
-2. **The 3-File Rule:** A single task should touch at most 3 files. Break larger tasks into smaller steps.
-3. **The 8-Turn Limit:** If a builder doesn't finish within 8 turns, log status to `progress.md` and yield. Never loop.
-4. **Targeted Inspection:** Never dump files > 150 lines. Use line ranges or CodeGraph.
-5. **Fresh Starts:** Always `/clear` after a task or planning phase is committed.
+1. **Safe-Run Only:** Risky or verbose commands run through `safe-run`.
+2. **Disjoint File Boundaries:** Parallel workers edit only assigned files (≤ 3 files).
+3. **The ~150k Token Transcript Cap:** Tasks split into small slices (≤ 3 checkboxes) to prevent context blowout.
+4. **Targeted Inspection:** No raw dumps of files > 150 lines; use CodeGraph or line ranges.
+5. **No Destructive Resets:** Workers may never run global git resets (`git restore .`, `git reset`).

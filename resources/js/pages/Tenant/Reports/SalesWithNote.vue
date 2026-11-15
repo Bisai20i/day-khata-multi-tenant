@@ -112,7 +112,16 @@ const columns = computed(() => {
 
 <template>
     <div>
-        <PageHeader title="Sales With Note" description="Sales in the selected dates that have a note written on them." />
+        <PageHeader title="Sales With Note" description="Sales in the selected dates that have a note written on them.">
+            <BranchReportFilter
+                v-if="branchReport"
+                v-model:choice="branchFilter.choice.value"
+                :report="branchReport"
+                id-prefix="sales-with-note"
+                hide-label
+                @change="applyFilter"
+            />
+        </PageHeader>
 
         <p class="mb-4 text-[12.5px] text-text-muted">
             Posted sales in this range that have a note recorded against them. Cancelled sales and sales with no note are excluded.
@@ -134,17 +143,10 @@ const columns = computed(() => {
                     <Label class="mb-1">Store</Label>
                     <Select v-model="storeId" :options="storeOptions" />
                 </div>
-                <BranchReportFilter
-                    v-if="branchReport"
-                    v-model:choice="branchFilter.choice.value"
-                    :report="branchReport"
-                    id-prefix="sales-with-note"
-                    @change="applyFilter"
-                />
                 <Button variant="primary" tone="purple" :loading="isLoading" @click="applyFilter">Generate report</Button>
                 <Button v-if="hasActiveFilter" variant="secondary" tone="purple" :disabled="isLoading" @click="resetFilters">Reset</Button>
             </div>
-            <BranchReportNotes v-if="branchReport" :report="branchReport" />
+            <BranchReportNotes v-if="branchReport" :report="branchReport" hide-label />
         </Card>
 
         <Card variant="panel">

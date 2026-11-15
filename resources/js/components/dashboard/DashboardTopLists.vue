@@ -12,6 +12,7 @@ import { usePermissions } from '@/composables/usePermissions';
 defineProps({
     topItemsThisMonth: { type: [Array, null], default: null },
     topCustomersThisMonth: { type: [Array, null], default: null },
+    periodLabel: { type: String, default: '' },
 });
 
 const { can } = usePermissions();
@@ -22,10 +23,10 @@ function formatAmount(amount) {
 </script>
 
 <template>
-    <div class="grid grid-cols-1 gap-5" :class="{ 'md:grid-cols-2': topItemsThisMonth && topCustomersThisMonth }">
-        <Card v-if="topItemsThisMonth" variant="panel" title="Top 5 Items This Month">
+    <div class="flex flex-col gap-5">
+        <Card v-if="topItemsThisMonth" variant="panel" :title="periodLabel ? `Top 5 Items (${periodLabel})` : 'Top 5 Items'">
             <div v-if="topItemsThisMonth.length === 0" class="py-6 text-center text-sm text-text-muted">
-                No sales this month yet.
+                No items sold in this period.
                 <Link v-if="can('sales.view')" href="/sales" class="font-semibold text-primary hover:underline">Record a sale</Link>
             </div>
             <ol v-else class="flex flex-col gap-3">
@@ -41,9 +42,9 @@ function formatAmount(amount) {
             </ol>
         </Card>
 
-        <Card v-if="topCustomersThisMonth" variant="panel" title="Top 5 Customers This Month">
+        <Card v-if="topCustomersThisMonth" variant="panel" :title="periodLabel ? `Top 5 Customers (${periodLabel})` : 'Top 5 Customers'">
             <div v-if="topCustomersThisMonth.length === 0" class="py-6 text-center text-sm text-text-muted">
-                No sales this month yet.
+                No customer sales in this period.
                 <Link v-if="can('sales.view')" href="/sales" class="font-semibold text-primary hover:underline">Record a sale</Link>
             </div>
             <ol v-else class="flex flex-col gap-3">

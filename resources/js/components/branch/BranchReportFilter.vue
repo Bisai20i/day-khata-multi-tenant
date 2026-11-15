@@ -27,6 +27,7 @@ const props = defineProps({
     report: { type: Object, required: true },
     allowByBranch: { type: Boolean, default: false },
     idPrefix: { type: String, default: 'branch-report' },
+    hideLabel: { type: Boolean, default: false },
 });
 
 const emit = defineEmits(['change']);
@@ -87,13 +88,27 @@ function onByBranch(value) {
 </script>
 
 <template>
-    <div class="flex flex-wrap items-end gap-3">
-        <div class="w-56">
-            <Label class="mb-1">{{ label() }}</Label>
-            <p v-if="isFixedScope" class="flex h-9 items-center truncate text-[13px] font-semibold text-text-strong">
+    <div :class="['flex flex-wrap gap-3', hideLabel ? 'items-center' : 'items-end']">
+        <div :class="hideLabel ? 'w-48 sm:w-56' : 'w-56'">
+            <Label v-if="!hideLabel" class="mb-1">{{ label() }}</Label>
+            <span
+                v-if="isFixedScope"
+                :class="[
+                    'truncate text-[13px] font-semibold text-text-strong',
+                    hideLabel
+                        ? 'inline-flex h-9 items-center rounded border border-border bg-bg-subtle px-2.5 text-xs font-medium text-text-muted'
+                        : 'flex h-9 items-center',
+                ]"
+            >
                 {{ fixedScopeText }}
-            </p>
-            <Select v-else v-model="selectedValue" :options="options" :placeholder="report.label" />
+            </span>
+            <Select
+                v-else
+                v-model="selectedValue"
+                :options="options"
+                :placeholder="report.label"
+                :aria-label="label()"
+            />
         </div>
         <CheckboxField
             v-if="showByBranch"
@@ -101,7 +116,7 @@ function onByBranch(value) {
             :model-value="byBranch"
             :label="`Show by ${label('lower')}`"
             :hint="`Adds a column for each ${label('lower')} on screen.`"
-            class="pb-2"
+            :class="hideLabel ? '' : 'pb-2'"
             @update:model-value="onByBranch"
         />
     </div>

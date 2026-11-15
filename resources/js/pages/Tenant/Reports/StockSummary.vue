@@ -146,7 +146,19 @@ const columnsKey = computed(() => transitBuckets.value.join('|') || 'plain');
 
 <template>
     <div>
-        <PageHeader title="Stock Summary" description="Opening stock, stock in, stock out and closing stock for each item in the selected dates." />
+        <PageHeader
+            title="Stock Summary"
+            description="Opening stock, stock in, stock out and closing stock for each item in the selected dates."
+        >
+            <BranchReportFilter
+                v-if="branchReport"
+                v-model:choice="branchFilter.choice.value"
+                :report="branchReport"
+                id-prefix="stock-summary-branch"
+                hide-label
+                @change="applyFilter"
+            />
+        </PageHeader>
 
         <p class="mb-1 text-[12.5px] text-text-muted">Showing report for {{ rangeLabel }}</p>
 
@@ -167,19 +179,12 @@ const columnsKey = computed(() => transitBuckets.value.join('|') || 'plain');
                 <Label class="mb-1 text-[11px]">Store</Label>
                 <Select v-model="storeId" :options="storeOptions" />
             </div>
-            <BranchReportFilter
-                v-if="branchReport"
-                v-model:choice="branchFilter.choice.value"
-                :report="branchReport"
-                id-prefix="stock-summary-branch"
-                @change="applyFilter"
-            />
             <Button variant="primary" tone="purple" :loading="isLoading" @click="applyFilter">Generate report</Button>
             <Button v-if="hasActiveFilter" variant="secondary" tone="purple" :disabled="isLoading" @click="resetFilters">Reset</Button>
         </div>
 
         <div v-if="branchReport" class="-mt-2 mb-4">
-            <BranchReportNotes :report="branchReport" />
+            <BranchReportNotes :report="branchReport" hide-label />
         </div>
 
         <div v-if="inTransit" class="mb-4 space-y-1 text-[12.5px] text-text-muted">

@@ -23,6 +23,7 @@ use App\Support\Money\Money;
 use App\Support\Money\Quantity;
 use Brick\Math\BigDecimal;
 use Brick\Math\RoundingMode;
+use Carbon\Carbon;
 use Illuminate\Contracts\Database\Query\Builder as BuilderContract;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Http\Request;
@@ -105,6 +106,7 @@ class DashboardController extends Controller
 
         $filter = BranchFilter::fromRequest($request);
         $fiscalYear = FiscalYear::query()->where('status', FiscalYearStatus::Open)->first();
+        [$from, $to, $preset] = $this->resolveDateRange($request, $fiscalYear);
         $today = now()->toDateString();
         $weekAgo = now()->subWeek()->toDateString();
 
@@ -115,6 +117,11 @@ class DashboardController extends Controller
                 'name' => $fiscalYear->name,
                 'startDate' => $fiscalYear->start_date->toDateString(),
                 'endDate' => $fiscalYear->end_date->toDateString(),
+            ],
+            'dateRange' => [
+                'from' => $from,
+                'to' => $to,
+                'preset' => $preset,
             ],
         ];
         $kpis = [];
@@ -153,8 +160,9 @@ class DashboardController extends Controller
             $kpis['sales'] = [
                 'today' => $this->documentTotals($filter, Sale::class, whereDate: $today),
                 'thisWeek' => $this->documentTotals($filter, Sale::class, since: $weekAgo),
+                'period' => $this->documentTotals($filter, Sale::class, from: $from, to: $to),
             ];
-            $props['salesTrend'] = $this->dailyTotals($filter, Sale::class, 7);
+            $props['salesTrend'] = $this->dailyTotals($filter, Sale::class, 7, asOf: $to);
             $props['recentSales'] = $this->recentSales($filter);
         }
 
@@ -162,8 +170,9 @@ class DashboardController extends Controller
             $kpis['purchases'] = [
                 'today' => $this->documentTotals($filter, Purchase::class, whereDate: $today),
                 'thisWeek' => $this->documentTotals($filter, Purchase::class, since: $weekAgo),
+                'period' => $this->documentTotals($filter, Purchase::class, from: $from, to: $to),
             ];
-            $props['purchaseTrend'] = $this->dailyTotals($filter, Purchase::class, 7);
+            $props['purchaseTrend'] = $this->dailyTotals($filter, Purchase::class, 7, asOf: $to);
         }
 
         if ($can('cash_bank_book.view')) {
@@ -184,19 +193,36 @@ class DashboardController extends Controller
 
         if ($can('tax_reports.view')) {
             $weekSales = $this->activeDocuments($filter, Sale::class, since: $weekAgo);
+            $weekTaxRow = $weekSales->selectRaw(
+                'COALESCE(SUM('.$this->scaledMoney('taxable_amount').'), 0) as taxable_scaled, '
+                .'COALESCE(SUM('.$this->scaledMoney('nontaxable_amount').'), 0) as nontaxable_scaled, '
+                .'COALESCE(SUM('.$this->scaledMoney('vat_amount').'), 0) as vat_scaled'
+            )->first();
+
+            $periodSales = $this->activeDocuments($filter, Sale::class, from: $from, to: $to);
+            $periodTaxRow = $periodSales->selectRaw(
+                'COALESCE(SUM('.$this->scaledMoney('taxable_amount').'), 0) as taxable_scaled, '
+                .'COALESCE(SUM('.$this->scaledMoney('nontaxable_amount').'), 0) as nontaxable_scaled, '
+                .'COALESCE(SUM('.$this->scaledMoney('vat_amount').'), 0) as vat_scaled'
+            )->first();
 
             $kpis['tax'] = [
                 'thisWeek' => [
-                    'taxable' => $this->sumColumn($weekSales, 'taxable_amount')->toString(),
-                    'nontaxable' => $this->sumColumn($weekSales, 'nontaxable_amount')->toString(),
-                    'vat' => $this->sumColumn($weekSales, 'vat_amount')->toString(),
+                    'taxable' => $this->fromScaled($weekTaxRow?->taxable_scaled)->toString(),
+                    'nontaxable' => $this->fromScaled($weekTaxRow?->nontaxable_scaled)->toString(),
+                    'vat' => $this->fromScaled($weekTaxRow?->vat_scaled)->toString(),
+                ],
+                'period' => [
+                    'taxable' => $this->fromScaled($periodTaxRow?->taxable_scaled)->toString(),
+                    'nontaxable' => $this->fromScaled($periodTaxRow?->nontaxable_scaled)->toString(),
+                    'vat' => $this->fromScaled($periodTaxRow?->vat_scaled)->toString(),
                 ],
             ];
         }
 
         if ($can('sales_reports.view')) {
-            $props['topItemsThisMonth'] = $this->topItemsThisMonth($filter);
-            $props['topCustomersThisMonth'] = $this->topCustomersThisMonth($filter);
+            $props['topItemsThisMonth'] = $this->topItems($filter, $from, $to);
+            $props['topCustomersThisMonth'] = $this->topCustomers($filter, $from, $to);
         }
 
         if ($can('stock_reports.view')) {
@@ -211,7 +237,7 @@ class DashboardController extends Controller
         $props['branchReport'] = $filter->payload();
         $props['branchComparison'] = BranchDashboardComparison::build(
             $filter,
-            now()->startOfMonth()->toDateString(),
+            $from,
             withSales: $can('sales.view'),
             withPurchases: $can('purchases.view'),
             canOpenReport: $filter->isActive() && $can('branches.report'),
@@ -237,9 +263,42 @@ class DashboardController extends Controller
     }
 
     /**
+     * @return array{0: string, 1: string, 2: string}
+     */
+    private function resolveDateRange(Request $request, ?FiscalYear $fiscalYear): array
+    {
+        $preset = $request->string('preset')->trim()->toString();
+        $from = $request->string('from')->trim()->toString();
+        $to = $request->string('to')->trim()->toString();
+
+        $today = now()->toDateString();
+
+        if ($from !== '' && $to !== '') {
+            return [$from, $to, 'custom'];
+        }
+
+        return match ($preset) {
+            'today' => [$today, $today, 'today'],
+            'this_week' => [now()->subDays(6)->toDateString(), $today, 'this_week'],
+            'this_fiscal_year' => $fiscalYear !== null
+                ? [$fiscalYear->start_date->toDateString(), $fiscalYear->end_date->toDateString(), 'this_fiscal_year']
+                : [now()->startOfMonth()->toDateString(), $today, 'this_month'],
+            default => [now()->startOfMonth()->toDateString(), $today, 'this_month'],
+        };
+    }
+
+    /**
      * @return Collection<int, array{name: string, total: string}>
      */
     private function topItemsThisMonth(BranchFilter $filter): Collection
+    {
+        return $this->topItems($filter, now()->startOfMonth()->toDateString(), now()->toDateString());
+    }
+
+    /**
+     * @return Collection<int, array{name: string, total: string}>
+     */
+    private function topItems(BranchFilter $filter, string $from, string $to): Collection
     {
         // sale_lines carries no access scope, so the sale's branch is applied
         // explicitly (BranchFilter::applyToDocuments covers a restricted user).
@@ -247,7 +306,8 @@ class DashboardController extends Controller
             ->join('sales', 'sales.id', '=', 'sale_lines.sale_id')
             ->join('items', 'items.id', '=', 'sale_lines.item_id')
             ->where('sales.status', '!=', 'cancelled')
-            ->where('sales.date', '>=', now()->startOfMonth()->toDateString())
+            ->whereDate('sales.date', '>=', $from)
+            ->whereDate('sales.date', '<=', $to)
             ->groupBy('sale_lines.item_id', 'items.name')
             ->orderByDesc('total_scaled')
             ->selectRaw('items.name as name')
@@ -262,10 +322,19 @@ class DashboardController extends Controller
      */
     private function topCustomersThisMonth(BranchFilter $filter): Collection
     {
+        return $this->topCustomers($filter, now()->startOfMonth()->toDateString(), now()->toDateString());
+    }
+
+    /**
+     * @return Collection<int, array{name: string, total: string}>
+     */
+    private function topCustomers(BranchFilter $filter, string $from, string $to): Collection
+    {
         return $filter->applyToDocuments(Sale::query(), 'sales.branch_id')
             ->join('customers', 'customers.id', '=', 'sales.customer_id')
             ->where('sales.status', '!=', 'cancelled')
-            ->where('sales.date', '>=', now()->startOfMonth()->toDateString())
+            ->whereDate('sales.date', '>=', $from)
+            ->whereDate('sales.date', '<=', $to)
             ->groupBy('sales.customer_id', 'customers.name')
             ->orderByDesc('total_scaled')
             ->selectRaw('customers.name as name')
@@ -377,13 +446,23 @@ class DashboardController extends Controller
      * @param  class-string<Sale>|class-string<Purchase>  $modelClass
      * @return array{count: int, total: string}
      */
-    private function documentTotals(BranchFilter $filter, string $modelClass, ?string $whereDate = null, ?string $since = null): array
-    {
-        $query = $this->activeDocuments($filter, $modelClass, $whereDate, $since);
+    private function documentTotals(
+        BranchFilter $filter,
+        string $modelClass,
+        ?string $whereDate = null,
+        ?string $since = null,
+        ?string $from = null,
+        ?string $to = null,
+    ): array {
+        $query = $this->activeDocuments($filter, $modelClass, $whereDate, $since, $from, $to);
+
+        $row = (clone $query)->selectRaw(
+            'COUNT(*) as count_val, COALESCE(SUM('.$this->scaledMoney('total').'), 0) as total_scaled'
+        )->first();
 
         return [
-            'count' => (clone $query)->count(),
-            'total' => $this->sumColumn($query, 'total')->toString(),
+            'count' => (int) ($row?->count_val ?? 0),
+            'total' => $this->fromScaled($row?->total_scaled ?? 0)->toString(),
         ];
     }
 
@@ -395,12 +474,20 @@ class DashboardController extends Controller
      * @param  class-string<Sale>|class-string<Purchase>  $modelClass
      * @return Builder<Sale|Purchase>
      */
-    private function activeDocuments(BranchFilter $filter, string $modelClass, ?string $whereDate = null, ?string $since = null)
-    {
+    private function activeDocuments(
+        BranchFilter $filter,
+        string $modelClass,
+        ?string $whereDate = null,
+        ?string $since = null,
+        ?string $from = null,
+        ?string $to = null,
+    ) {
         return $filter->applyToDocuments($modelClass::query())
             ->where('status', '!=', 'cancelled')
             ->when($whereDate !== null, fn ($query) => $query->whereDate('date', $whereDate))
-            ->when($since !== null, fn ($query) => $query->whereDate('date', '>=', $since));
+            ->when($since !== null, fn ($query) => $query->whereDate('date', '>=', $since))
+            ->when($from !== null, fn ($query) => $query->whereDate('date', '>=', $from))
+            ->when($to !== null, fn ($query) => $query->whereDate('date', '<=', $to));
     }
 
     /**
@@ -462,25 +549,36 @@ class DashboardController extends Controller
     }
 
     /**
-     * One row per day for the last $days days (oldest first), summing
-     * `total` for non-cancelled records dated that day.
+     * One row per day for the last $days days ending at $asOf (oldest first), summing
+     * `total` for non-cancelled records dated that day in a single grouped query.
      *
      * @param  class-string<Sale>|class-string<Purchase>  $modelClass
      * @return array<int, array{date: string, total: string}>
      */
-    private function dailyTotals(BranchFilter $filter, string $modelClass, int $days): array
+    private function dailyTotals(BranchFilter $filter, string $modelClass, int $days = 7, ?string $asOf = null): array
     {
-        return collect(range($days - 1, 0))
-            ->map(function (int $offset) use ($filter, $modelClass) {
-                $date = now()->subDays($offset)->toDateString();
+        $baseDate = $asOf !== null ? Carbon::parse($asOf) : now();
 
-                return [
-                    'date' => $date,
-                    'total' => $this->sumColumn($this->activeDocuments($filter, $modelClass, whereDate: $date), 'total')->toString(),
-                ];
-            })
-            ->values()
-            ->all();
+        $dates = collect(range($days - 1, 0))
+            ->map(fn (int $offset) => (clone $baseDate)->subDays($offset)->toDateString())
+            ->values();
+
+        $startDate = $dates->first();
+        $endDate = $dates->last();
+
+        $totalsByDate = $this->activeDocuments($filter, $modelClass, from: $startDate, to: $endDate)
+            ->groupBy('date')
+            ->selectRaw('date, COALESCE(SUM('.$this->scaledMoney('total').'), 0) as total_scaled')
+            ->pluck('total_scaled', 'date');
+
+        return $dates->map(function (string $date) use ($totalsByDate) {
+            $scaled = $totalsByDate->get($date);
+
+            return [
+                'date' => $date,
+                'total' => $this->fromScaled($scaled)->toString(),
+            ];
+        })->all();
     }
 
     /**

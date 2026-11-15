@@ -1,3 +1,6 @@
+<!-- Universal Agent Contract Pointer -->
+> **CRITICAL:** Before taking action, read and strictly adhere to [AGENTS.md](AGENTS.md) for this project's universal operating contract, token preservation guardrails, exact-decimal money rules (C1-C3), and subagent boundaries.
+
 <laravel-boost-guidelines>
 === foundation rules ===
 

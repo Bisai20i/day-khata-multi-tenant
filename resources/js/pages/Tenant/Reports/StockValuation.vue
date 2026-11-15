@@ -113,7 +113,21 @@ const columns = computed(() => [...baseColumns, ...branchColumns.value, itemLedg
 
 <template>
     <div>
-        <PageHeader title="Stock Valuation" description="What your stock on hand is worth on a chosen date, item by item." />
+        <PageHeader
+            title="Stock Valuation"
+            description="What your stock on hand is worth on a chosen date, item by item."
+        >
+            <BranchReportFilter
+                v-if="branchReport"
+                v-model:choice="branchFilter.choice.value"
+                v-model:by-branch="branchFilter.byBranch.value"
+                :report="branchReport"
+                :allow-by-branch="storeId === null"
+                id-prefix="stock-valuation-branch"
+                hide-label
+                @change="applyFilter"
+            />
+        </PageHeader>
 
         <p class="mb-1 text-[12.5px] text-text-muted">Showing report: {{ asOfLabel }}</p>
 
@@ -134,21 +148,12 @@ const columns = computed(() => [...baseColumns, ...branchColumns.value, itemLedg
                 <Label class="mb-1 text-[11px]">Stock status</Label>
                 <Select v-model="stockStatus" :options="stockStatusOptions" />
             </div>
-            <BranchReportFilter
-                v-if="branchReport"
-                v-model:choice="branchFilter.choice.value"
-                v-model:by-branch="branchFilter.byBranch.value"
-                :report="branchReport"
-                :allow-by-branch="storeId === null"
-                id-prefix="stock-valuation-branch"
-                @change="applyFilter"
-            />
             <Button variant="primary" tone="purple" :loading="isLoading" @click="applyFilter">Generate report</Button>
             <Button v-if="hasActiveFilter" variant="secondary" tone="purple" :disabled="isLoading" @click="resetFilters">Reset</Button>
         </div>
 
         <div v-if="branchReport" class="-mt-2 mb-4">
-            <BranchReportNotes :report="branchReport" />
+            <BranchReportNotes :report="branchReport" hide-label />
             <p v-if="hasBranchColumns" class="mt-1 text-[12px] text-text-muted">
                 Each {{ label('lower') }} column shows the quantity above and the value below.
             </p>

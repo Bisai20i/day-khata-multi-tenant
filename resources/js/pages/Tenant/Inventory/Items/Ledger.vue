@@ -165,6 +165,14 @@ const columns = [
             back-href="/items"
             back-label="Back to items"
         >
+            <BranchReportFilter
+                v-if="branchReport"
+                v-model:choice="branchFilter.choice.value"
+                :report="branchReport"
+                id-prefix="item-ledger-branch"
+                hide-label
+                @change="applyFilters"
+            />
             <a v-if="can('stock_reports.print')" :href="fileUrl('print')" target="_blank" rel="noopener"><Button variant="secondary" tone="purple">Print ledger</Button></a>
             <a v-if="can('stock_reports.export')" :href="fileUrl('export')"><Button variant="secondary" tone="purple">Export ledger</Button></a>
         </PageHeader>
@@ -186,17 +194,10 @@ const columns = [
                     <Label class="mb-1">Store</Label>
                     <Select v-model="storeId" :options="storeOptions" />
                 </div>
-                <BranchReportFilter
-                    v-if="branchReport"
-                    v-model:choice="branchFilter.choice.value"
-                    :report="branchReport"
-                    id-prefix="item-ledger-branch"
-                    @change="applyFilters"
-                />
                 <Button variant="primary" tone="purple" @click="applyFilters">Apply filters</Button>
                 <Button v-if="hasExplicitFilters" variant="secondary" tone="purple" @click="clearFilters">Clear filters</Button>
             </div>
-            <BranchReportNotes v-if="branchReport" :report="branchReport" />
+            <BranchReportNotes v-if="branchReport" :report="branchReport" hide-label />
         </Card>
 
         <Card variant="panel" class="mb-4">

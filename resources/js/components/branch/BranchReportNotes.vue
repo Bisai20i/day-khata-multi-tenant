@@ -14,14 +14,15 @@ import { useBranchLabel } from '@/composables/useBranchLabel';
 defineProps({
     report: { type: Object, required: true },
     showNarrowedNote: { type: Boolean, default: false },
+    hideLabel: { type: Boolean, default: false },
 });
 
 const { label, plural } = useBranchLabel();
 </script>
 
 <template>
-    <div class="mt-2 space-y-1">
-        <p class="text-xs font-semibold text-text-strong">{{ report.label }}</p>
+    <div v-if="!hideLabel || report.restricted || report.management || (showNarrowedNote && report.narrowed)" class="mt-2 space-y-1">
+        <p v-if="!hideLabel" class="text-xs font-semibold text-text-strong">{{ report.label }}</p>
         <p v-if="report.restricted" class="text-[12px] text-text-muted">
             Company-wide totals are not available to your account.
         </p>

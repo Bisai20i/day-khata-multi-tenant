@@ -96,7 +96,16 @@ const emptyMessage = computed(() =>
         <PageHeader
             title="Aged Payables"
             description="How much you owe each supplier, grouped by how long the bills have been outstanding."
-        />
+        >
+            <BranchReportFilter
+                v-if="branchReport"
+                v-model:choice="branchFilter.choice.value"
+                :report="branchReport"
+                id-prefix="aged-payables-branch"
+                hide-label
+                @change="applyFilter"
+            />
+        </PageHeader>
 
         <Card variant="panel" class="mb-4">
             <div class="flex flex-wrap items-end gap-3">
@@ -114,18 +123,11 @@ const emptyMessage = computed(() =>
                     :areas="areas"
                     id-prefix="aged-payables"
                 />
-                <BranchReportFilter
-                    v-if="branchReport"
-                    v-model:choice="branchFilter.choice.value"
-                    :report="branchReport"
-                    id-prefix="aged-payables-branch"
-                    @change="applyFilter"
-                />
                 <Button variant="primary" tone="purple" @click="applyFilter">Generate report</Button>
             </div>
             <p class="mt-2 text-[12px] text-text-muted">Showing report {{ asOfLabel.charAt(0).toLowerCase() + asOfLabel.slice(1) }}</p>
             <p v-if="areaLabel" class="mt-1 text-xs font-semibold text-text-strong">Area: {{ areaLabel }}</p>
-            <BranchReportNotes v-if="branchReport" :report="branchReport" />
+            <BranchReportNotes v-if="branchReport" :report="branchReport" hide-label />
         </Card>
 
         <Card variant="panel">

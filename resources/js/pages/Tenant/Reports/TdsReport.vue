@@ -114,7 +114,16 @@ const purchaseColumns = computed(() => columnsFor('Supplier', 'Bill #'));
         <PageHeader
             title="TDS Report"
             description="Tax deducted at source on sales (credit you can claim) and purchases (amount you must pay to the tax office)."
-        />
+        >
+            <BranchReportFilter
+                v-if="branchReport"
+                v-model:choice="branchFilter.choice.value"
+                :report="branchReport"
+                id-prefix="tds-report"
+                hide-label
+                @change="applyFilter"
+            />
+        </PageHeader>
 
         <p class="mb-4 text-[12.5px] text-text-muted">
             One row per event, in the period the event happened. A credit or debit note reverses TDS in its
@@ -136,17 +145,10 @@ const purchaseColumns = computed(() => columnsFor('Supplier', 'Bill #'));
                     <Label class="mb-1">Store</Label>
                     <Select v-model="storeId" :options="storeOptions" />
                 </div>
-                <BranchReportFilter
-                    v-if="branchReport"
-                    v-model:choice="branchFilter.choice.value"
-                    :report="branchReport"
-                    id-prefix="tds-report"
-                    @change="applyFilter"
-                />
                 <Button variant="primary" tone="purple" @click="applyFilter">Generate report</Button>
             </div>
             <p class="mt-2 text-[12px] text-text-muted">Showing report for {{ rangeLabel }}</p>
-            <BranchReportNotes v-if="branchReport" :report="branchReport" />
+            <BranchReportNotes v-if="branchReport" :report="branchReport" hide-label />
         </Card>
 
         <Card variant="panel" title="TDS on Sales (claimable credit)" class="mb-4">

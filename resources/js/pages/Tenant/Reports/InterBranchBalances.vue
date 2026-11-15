@@ -150,7 +150,16 @@ const thClass = 'border-b-[1.5px] border-border px-2 py-2 text-[10px] font-bold 
         <PageHeader
             :title="`Inter-${label('lower')} Balances`"
             :description="`What each ${label('lower')} owes the others through Inter-Branch Clearing, and the stock moving between them.`"
-        />
+        >
+            <BranchReportFilter
+                v-if="branchReport"
+                v-model:choice="branchFilter.choice.value"
+                :report="branchReport"
+                id-prefix="inter-branch"
+                hide-label
+                @change="apply()"
+            />
+        </PageHeader>
 
         <p v-if="!branchReport" class="px-1 py-6 text-center text-[13px] text-text-muted">
             This report is available once the company has more than one active {{ label('lower') }}.
@@ -175,14 +184,13 @@ const thClass = 'border-b-[1.5px] border-border px-2 py-2 text-[10px] font-bold 
                         <Label class="mb-1">As at (BS)</Label>
                         <NepaliDateInput v-model="to" />
                     </div>
-                    <BranchReportFilter v-model:choice="branchFilter.choice.value" :report="branchReport" id-prefix="inter-branch" @change="apply()" />
                     <Button variant="primary" tone="purple" @click="apply()">Generate report</Button>
                 </div>
                 <p v-if="from && to" class="mt-2 text-[12px] text-text-muted">
                     Balances as at {{ formatBsDate(to) }} BS ({{ to }}); transfers received and stock accounts for
                     {{ formatBsDate(from) }} to {{ formatBsDate(to) }} BS.
                 </p>
-                <BranchReportNotes :report="branchReport" />
+                <BranchReportNotes v-if="branchReport" :report="branchReport" hide-label />
             </Card>
 
             <p v-if="missingAccounts" class="mb-4 border-[1.5px] border-danger bg-danger-bg px-3 py-2 text-[13px] text-danger">

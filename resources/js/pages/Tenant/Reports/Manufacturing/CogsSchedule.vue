@@ -54,6 +54,14 @@ const rowClass = (style) => ({
 <template>
     <div>
         <PageHeader title="COGM and COGS Schedule" description="Note to the Income Statement: raw material consumed, cost of goods manufactured and cost of goods sold.">
+            <BranchReportFilter
+                v-if="branchReport"
+                v-model:choice="branchFilter.choice.value"
+                :report="branchReport"
+                id-prefix="mfg-cogs-schedule"
+                hide-label
+                @change="apply"
+            />
             <a v-if="can('manufacturing_reports.export')" :href="fileUrl('print')" target="_blank" rel="noopener"><Button variant="secondary" tone="purple">Print</Button></a>
             <a v-if="can('manufacturing_reports.export')" :href="fileUrl('export')"><Button variant="secondary" tone="purple">Export</Button></a>
         </PageHeader>
@@ -72,16 +80,9 @@ const rowClass = (style) => ({
                     <Label class="mb-1">To (BS)</Label>
                     <NepaliDateInput v-model="to" />
                 </div>
-                <BranchReportFilter
-                    v-if="branchReport"
-                    v-model:choice="branchFilter.choice.value"
-                    :report="branchReport"
-                    id-prefix="mfg-cogs-schedule"
-                    @change="apply"
-                />
                 <Button variant="primary" tone="purple" @click="apply">Generate report</Button>
             </div>
-            <BranchReportNotes v-if="branchReport" :report="branchReport" />
+            <BranchReportNotes v-if="branchReport" :report="branchReport" hide-label />
         </Card>
 
         <div

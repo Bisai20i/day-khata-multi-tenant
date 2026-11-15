@@ -239,6 +239,14 @@ const columns = [
             back-href="/accounts"
             back-label="Back to accounts"
         >
+            <BranchReportFilter
+                v-if="branchReport"
+                v-model:choice="branchFilter.choice.value"
+                :report="branchReport"
+                id-prefix="account-ledger"
+                hide-label
+                @change="applyWindow"
+            />
             <template v-if="fiscalYearId !== null">
                 <a v-if="canPrint" :href="printUrl()" target="_blank" rel="noopener"><Button variant="secondary" tone="purple">Print ledger</Button></a>
                 <a v-if="canExport" :href="exportUrl()"><Button variant="secondary" tone="purple">Export ledger</Button></a>
@@ -263,18 +271,11 @@ const columns = [
                     <Label class="mb-1">To date</Label>
                     <NepaliDateInput v-model="to" />
                 </div>
-                <BranchReportFilter
-                    v-if="branchReport"
-                    v-model:choice="branchFilter.choice.value"
-                    :report="branchReport"
-                    id-prefix="account-ledger"
-                    @change="applyWindow"
-                />
                 <Button variant="primary" tone="purple" @click="applyWindow">Apply filters</Button>
                 <Button v-if="from || to" variant="secondary" tone="purple" @click="clearWindow">Clear filters</Button>
             </div>
             <p class="mt-2 text-xs text-text-muted">Dates outside the chosen fiscal year are trimmed to its start and end. The opening balance adjusts to your From date.</p>
-            <BranchReportNotes v-if="branchReport" :report="branchReport" />
+            <BranchReportNotes v-if="branchReport" :report="branchReport" hide-label />
         </Card>
 
         <Card v-if="fiscalYearId !== null" variant="panel" class="mb-4">

@@ -178,7 +178,21 @@ const columns = [
 
 <template>
     <div>
-        <PageHeader title="Stock Movement Register" description="Every stock in and out movement in the selected dates, line by line." />
+        <PageHeader
+            title="Stock Movement Register"
+            description="Every stock in and out movement in the selected dates, line by line."
+        >
+            <BranchReportFilter
+                v-if="branchReport"
+                v-model:choice="branchFilter.choice.value"
+                v-model:by-branch="branchFilter.byBranch.value"
+                :report="branchReport"
+                :allow-by-branch="storeId === null"
+                id-prefix="stock-movement-branch"
+                hide-label
+                @change="applyFilter"
+            />
+        </PageHeader>
 
         <p class="mb-4 text-[12.5px] text-text-muted">Showing report for {{ rangeLabel }}</p>
 
@@ -212,19 +226,10 @@ const columns = [
                     <Label class="mb-1">Brand</Label>
                     <Select v-model="brandId" :options="brandOptions" />
                 </div>
-                <BranchReportFilter
-                    v-if="branchReport"
-                    v-model:choice="branchFilter.choice.value"
-                    v-model:by-branch="branchFilter.byBranch.value"
-                    :report="branchReport"
-                    :allow-by-branch="storeId === null"
-                    id-prefix="stock-movement-branch"
-                    @change="applyFilter"
-                />
                 <Button variant="primary" tone="purple" :loading="isLoading" @click="applyFilter">Generate report</Button>
                 <Button v-if="hasActiveFilter" variant="secondary" tone="purple" :disabled="isLoading" @click="resetFilters">Reset</Button>
             </div>
-            <BranchReportNotes v-if="branchReport" :report="branchReport" />
+            <BranchReportNotes v-if="branchReport" :report="branchReport" hide-label />
         </Card>
 
         <StockMovementBranchSummary v-if="hasBranchSummary" :report="branchReport" />

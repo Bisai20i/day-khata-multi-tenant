@@ -143,6 +143,12 @@ const {
 // One branch per terminal; held carts' stores are re-checked against it.
 const { branchId, withBranch, storeOptions, revalidateAndTell, stockBlocksSale } = usePosBranch({ props, form, carts, activeCartIndex, toast });
 
+const activeBranch = computed(() => {
+    if (!props.branchOptions || props.branchOptions.length === 0) return null;
+    return props.branchOptions.find((b) => b.id === branchId.value) ?? props.branchOptions[0] ?? null;
+});
+const branchName = computed(() => activeBranch.value?.name ?? '');
+
 /** Clears every line from the active cart after confirming. */
 async function clearCart() {
     if (form.lines.length === 0) return;
@@ -555,6 +561,7 @@ onUnmounted(() => {
         <PosTopBar
             v-model:date="form.date"
             :company-name="companyName"
+            :branch-name="branchName"
             :current-fiscal-year="currentFiscalYear"
             :is-pan-invoice="isPanInvoice"
             :active-invoice-type="activeInvoiceType"

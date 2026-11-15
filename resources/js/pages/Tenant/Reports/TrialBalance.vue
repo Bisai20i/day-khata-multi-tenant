@@ -124,6 +124,16 @@ function exportUrl() {
             title="Trial Balance"
             description="Total debits and credits of every account. The two totals must match."
         >
+            <BranchReportFilter
+                v-if="branchReport"
+                v-model:choice="branchFilter.choice.value"
+                v-model:by-branch="branchFilter.byBranch.value"
+                :report="branchReport"
+                allow-by-branch
+                id-prefix="trial-balance"
+                hide-label
+                @change="apply"
+            />
             <template v-if="fiscalYearId !== null">
                 <a v-if="can('financial_statements.print')" :href="printUrl()" target="_blank" rel="noopener"><Button variant="secondary" tone="purple">Print</Button></a>
                 <a v-if="can('financial_statements.export')" :href="exportUrl()"><Button variant="secondary" tone="purple">Export</Button></a>
@@ -148,15 +158,6 @@ function exportUrl() {
                     <Label class="mb-1">Account</Label>
                     <Select v-model="accountId" :options="accountOptions" />
                 </div>
-                <BranchReportFilter
-                    v-if="branchReport"
-                    v-model:choice="branchFilter.choice.value"
-                    v-model:by-branch="branchFilter.byBranch.value"
-                    :report="branchReport"
-                    allow-by-branch
-                    id-prefix="trial-balance"
-                    @change="apply"
-                />
                 <Button variant="primary" tone="purple" @click="apply">Generate report</Button>
                 <Button v-if="accountId !== null" variant="secondary" tone="purple" @click="accountId = null; apply()">Reset</Button>
             </div>
@@ -164,7 +165,7 @@ function exportUrl() {
                 Showing report for {{ formatBsDate(from) }} to {{ formatBsDate(to) }} BS
                 <span class="text-text-muted">({{ from }} to {{ to }})</span>
             </p>
-            <BranchReportNotes v-if="branchReport" :report="branchReport" />
+            <BranchReportNotes v-if="branchReport" :report="branchReport" hide-label />
         </Card>
 
         <Card variant="panel">

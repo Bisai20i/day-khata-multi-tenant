@@ -12,6 +12,7 @@ import { formatMoney, compareMoney, parseMoney } from '@/lib/money.js';
 const props = defineProps({
     salesTrend: { type: [Array, null], default: null },
     purchaseTrend: { type: [Array, null], default: null },
+    periodLabel: { type: String, default: 'Last 7 Days' },
 });
 
 /**
@@ -56,10 +57,10 @@ function formatAmount(amount) {
 </script>
 
 <template>
-    <div class="mb-5 grid grid-cols-1 gap-5" :class="{ 'md:grid-cols-2': salesTrend && purchaseTrend }">
-        <Card v-if="salesTrend" variant="panel" title="Sales Trend (Last 7 Days)">
+    <div class="grid grid-cols-1 gap-5" :class="{ 'md:grid-cols-2': salesTrend && purchaseTrend }">
+        <Card v-if="salesTrend" variant="panel" :title="periodLabel ? `Sales Trend (${periodLabel})` : 'Sales Trend'">
             <div v-if="salesTrend.length === 0" class="py-6 text-center text-sm text-text-muted">
-                No sales in the last 7 days.
+                No sales recorded in this period.
                 <Link href="/sales" class="font-semibold text-primary hover:underline">Record a sale</Link>
             </div>
             <ul v-else class="flex flex-col gap-2">
@@ -73,9 +74,9 @@ function formatAmount(amount) {
             </ul>
         </Card>
 
-        <Card v-if="purchaseTrend" variant="panel" title="Purchase Trend (Last 7 Days)">
+        <Card v-if="purchaseTrend" variant="panel" :title="periodLabel ? `Purchase Trend (${periodLabel})` : 'Purchase Trend'">
             <div v-if="purchaseTrend.length === 0" class="py-6 text-center text-sm text-text-muted">
-                No purchases in the last 7 days.
+                No purchases recorded in this period.
                 <Link href="/purchases" class="font-semibold text-primary hover:underline">Record a purchase</Link>
             </div>
             <ul v-else class="flex flex-col gap-2">

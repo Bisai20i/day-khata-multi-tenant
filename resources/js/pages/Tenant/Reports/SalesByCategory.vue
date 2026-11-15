@@ -101,7 +101,16 @@ function lineDetailHref(categoryId, subcategoryId) {
 
 <template>
     <div>
-        <PageHeader title="Sales by Category" description="What you sold in each item category in the selected dates, by quantity and amount." />
+        <PageHeader title="Sales by Category" description="What you sold in each item category in the selected dates, by quantity and amount.">
+            <BranchReportFilter
+                v-if="branchReport"
+                v-model:choice="branchFilter.choice.value"
+                :report="branchReport"
+                id-prefix="sales-by-category"
+                hide-label
+                @change="applyFilter"
+            />
+        </PageHeader>
 
         <p class="mb-1 text-[12.5px] text-text-muted">Showing report for {{ rangeLabel }}</p>
 
@@ -123,17 +132,10 @@ function lineDetailHref(categoryId, subcategoryId) {
                     <Label class="mb-1">Store</Label>
                     <Select v-model="storeId" :options="storeOptions" />
                 </div>
-                <BranchReportFilter
-                    v-if="branchReport"
-                    v-model:choice="branchFilter.choice.value"
-                    :report="branchReport"
-                    id-prefix="sales-by-category"
-                    @change="applyFilter"
-                />
                 <Button variant="primary" tone="purple" :loading="isLoading" @click="applyFilter">Generate report</Button>
                 <Button v-if="hasActiveFilter" variant="secondary" tone="purple" :disabled="isLoading" @click="resetFilters">Reset</Button>
             </div>
-            <BranchReportNotes v-if="branchReport" :report="branchReport" />
+            <BranchReportNotes v-if="branchReport" :report="branchReport" hide-label />
         </Card>
 
         <Card variant="panel">

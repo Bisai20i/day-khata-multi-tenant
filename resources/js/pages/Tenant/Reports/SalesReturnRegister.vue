@@ -133,6 +133,14 @@ const columns = computed(() => {
 <template>
     <div>
         <PageHeader title="Sales Return Register" description="Sales Return Register: the credit note book, listing every posted sales return with its VAT effect.">
+            <BranchReportFilter
+                v-if="branchReport"
+                v-model:choice="branchFilter.choice.value"
+                :report="branchReport"
+                id-prefix="sales-return-register"
+                hide-label
+                @change="applyFilter"
+            />
             <Button v-if="can('sales_reports.export')" as="a" :href="exportUrl" variant="secondary" tone="purple">
                 <FileSpreadsheet class="h-[14px] w-[14px]" aria-hidden="true" />
                 Export to Excel
@@ -160,17 +168,10 @@ const columns = computed(() => {
                     <Label class="mb-1">Store</Label>
                     <Select v-model="storeId" :options="storeOptions" />
                 </div>
-                <BranchReportFilter
-                    v-if="branchReport"
-                    v-model:choice="branchFilter.choice.value"
-                    :report="branchReport"
-                    id-prefix="sales-return-register"
-                    @change="applyFilter"
-                />
                 <Button variant="primary" tone="purple" :loading="isLoading" @click="applyFilter">Generate report</Button>
                 <Button v-if="hasActiveFilter" variant="secondary" tone="purple" :disabled="isLoading" @click="resetFilters">Reset</Button>
             </div>
-            <BranchReportNotes v-if="branchReport" :report="branchReport" />
+            <BranchReportNotes v-if="branchReport" :report="branchReport" hide-label />
         </Card>
 
         <Card variant="panel">

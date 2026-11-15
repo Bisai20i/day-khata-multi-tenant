@@ -98,6 +98,14 @@ const reconciles = computed(
 <template>
     <div>
         <PageHeader title="VAT Summary" description="VAT Summary: output VAT on sales less input VAT on purchases, showing what you owe or can claim back for the period.">
+            <BranchReportFilter
+                v-if="branchReport"
+                v-model:choice="branchFilter.choice.value"
+                :report="branchReport"
+                id-prefix="vat-summary"
+                hide-label
+                @change="applyFilter"
+            />
             <Button v-if="can('tax_reports.export')" as="a" :href="exportUrl" variant="secondary" tone="purple">
                 <FileSpreadsheet class="h-[14px] w-[14px]" aria-hidden="true" />
                 Export to Excel
@@ -126,17 +134,10 @@ const reconciles = computed(
                     <Label class="mb-1">Store</Label>
                     <Select v-model="storeId" :options="storeOptions" />
                 </div>
-                <BranchReportFilter
-                    v-if="branchReport"
-                    v-model:choice="branchFilter.choice.value"
-                    :report="branchReport"
-                    id-prefix="vat-summary"
-                    @change="applyFilter"
-                />
                 <Button variant="primary" tone="purple" :loading="isLoading" @click="applyFilter">Generate report</Button>
                 <Button v-if="hasActiveFilter" variant="secondary" tone="purple" :disabled="isLoading" @click="resetFilters">Reset</Button>
             </div>
-            <BranchReportNotes v-if="branchReport" :report="branchReport" />
+            <BranchReportNotes v-if="branchReport" :report="branchReport" hide-label />
         </Card>
 
         <div class="mb-4 grid gap-4 md:grid-cols-2">

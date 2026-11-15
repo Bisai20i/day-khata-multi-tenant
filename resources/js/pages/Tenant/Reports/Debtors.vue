@@ -110,6 +110,16 @@ const emptyMessage = computed(() =>
             title="Debtors"
             description="Customers who owe you money, with the balance each one owes. Includes migrated opening dues no invoice explains."
         >
+            <BranchReportFilter
+                v-if="branchReport"
+                v-model:choice="branchFilter.choice.value"
+                v-model:by-branch="branchFilter.byBranch.value"
+                :report="branchReport"
+                allow-by-branch
+                id-prefix="debtors-branch"
+                hide-label
+                @change="applyFilter"
+            />
             <Button v-if="can('receivables_reports.export')" as="a" :href="exportUrl" variant="secondary" tone="purple">
                 <FileSpreadsheet class="h-[14px] w-[14px]" aria-hidden="true" />
                 Export to Excel
@@ -128,18 +138,9 @@ const emptyMessage = computed(() =>
                     :areas="areas"
                     id-prefix="debtors"
                 />
-                <BranchReportFilter
-                    v-if="branchReport"
-                    v-model:choice="branchFilter.choice.value"
-                    v-model:by-branch="branchFilter.byBranch.value"
-                    :report="branchReport"
-                    allow-by-branch
-                    id-prefix="debtors-branch"
-                    @change="applyFilter"
-                />
                 <Button variant="primary" tone="purple" @click="applyFilter">Generate report</Button>
             </div>
-            <BranchReportNotes v-if="branchReport" :report="branchReport" />
+            <BranchReportNotes v-if="branchReport" :report="branchReport" hide-label />
             <p v-if="areaLabel" class="mt-3 text-xs font-semibold text-text-strong">Area: {{ areaLabel }}</p>
             <p v-if="creditBalanceNote" class="mt-3 text-xs text-text-muted">{{ creditBalanceNote }}</p>
         </Card>

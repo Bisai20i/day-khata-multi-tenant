@@ -45,28 +45,28 @@ const categories = computed(() => {
 
 <template>
     <div class="flex min-h-full flex-col">
-        <PageHeader title="Reports" description="Every report in one place. Pick one to set its period and filters, then print or export it." />
-
-        <div class="relative mb-4 max-w-md">
-            <Search class="pointer-events-none absolute top-1/2 left-2.5 size-4 -translate-y-1/2 text-text-faint" />
-            <input
-                v-model="query"
-                type="text"
-                aria-label="Search reports"
-                placeholder="Search reports..."
-                class="w-full border-[1.5px] border-border bg-white py-2 pr-8 pl-8 text-sm text-text-base placeholder:text-text-faint focus:border-primary focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
-                @keydown.esc="query = ''"
-            />
-            <button
-                v-if="query"
-                type="button"
-                class="absolute top-1/2 right-1.5 flex size-6 -translate-y-1/2 cursor-pointer items-center justify-center text-text-faint hover:text-text-strong"
-                aria-label="Clear search"
-                @click="query = ''"
-            >
-                <X class="size-4" />
-            </button>
-        </div>
+        <PageHeader title="Reports" description="Every report in one place. Pick one to set its period and filters, then print or export it.">
+            <div class="relative w-full shrink-0 sm:w-72 md:w-80">
+                <Search class="pointer-events-none absolute top-1/2 left-2.5 size-4 -translate-y-1/2 text-text-faint" />
+                <input
+                    v-model="query"
+                    type="text"
+                    aria-label="Search reports"
+                    placeholder="Search reports..."
+                    class="w-full border-[1.5px] border-border bg-white py-2 pr-8 pl-8 text-sm text-text-base placeholder:text-text-faint focus:border-primary focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
+                    @keydown.esc="query = ''"
+                />
+                <button
+                    v-if="query"
+                    type="button"
+                    class="absolute top-1/2 right-1.5 flex size-6 -translate-y-1/2 cursor-pointer items-center justify-center text-text-faint hover:text-text-strong"
+                    aria-label="Clear search"
+                    @click="query = ''"
+                >
+                    <X class="size-4" />
+                </button>
+            </div>
+        </PageHeader>
 
         <p v-if="allowedCategories.length === 0" class="border-[1.5px] border-border bg-white px-4 py-6 text-center text-sm text-text-muted">
             You do not have access to any reports. Ask an administrator to grant a reports permission to your role.
@@ -75,31 +75,37 @@ const categories = computed(() => {
             No reports match "{{ query.trim() }}".
         </p>
 
-        <div v-else class="grid grid-cols-1 items-start gap-4 lg:grid-cols-2 2xl:grid-cols-3">
-            <Card v-for="category in categories" :key="category.label" variant="panel" class="!bg-white !p-0">
-                <template #title>
-                    <span class="flex items-center gap-1.5">
-                        <component :is="category.icon" class="size-3.5" />
-                        {{ category.label }}
-                    </span>
-                </template>
+        <div v-else class="columns-1 gap-4 md:columns-2 xl:columns-3">
+            <div
+                v-for="category in categories"
+                :key="category.label"
+                class="mb-4 inline-block w-full break-inside-avoid"
+            >
+                <Card variant="panel" class="!bg-white !p-0">
+                    <template #title>
+                        <span class="flex items-center gap-1.5">
+                            <component :is="category.icon" class="size-3.5" />
+                            {{ category.label }}
+                        </span>
+                    </template>
 
-                <p class="border-b border-border px-3 py-2 text-xs text-text-muted">{{ category.description }}</p>
-                <ul class="divide-y divide-border">
-                    <li v-for="item in category.items" :key="item.href">
-                        <Link
-                            :href="item.href"
-                            class="group flex items-center justify-between gap-3 px-3 py-2.5 hover:bg-bg-subtle focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-primary"
-                        >
-                            <span class="min-w-0">
-                                <span class="block text-sm font-semibold text-text-strong group-hover:text-primary">{{ item.label }}</span>
-                                <span class="block text-xs text-text-muted">{{ item.description }}</span>
-                            </span>
-                            <ChevronRight class="size-4 shrink-0 text-text-faint group-hover:text-primary" aria-hidden="true" />
-                        </Link>
-                    </li>
-                </ul>
-            </Card>
+                    <p class="border-b border-border px-3 py-2 text-xs text-text-muted">{{ category.description }}</p>
+                    <ul class="divide-y divide-border">
+                        <li v-for="item in category.items" :key="item.href">
+                            <Link
+                                :href="item.href"
+                                class="group flex items-center justify-between gap-3 px-3 py-2.5 hover:bg-bg-subtle focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-primary"
+                            >
+                                <span class="min-w-0">
+                                    <span class="block text-sm font-semibold text-text-strong group-hover:text-primary">{{ item.label }}</span>
+                                    <span class="block text-xs text-text-muted">{{ item.description }}</span>
+                                </span>
+                                <ChevronRight class="size-4 shrink-0 text-text-faint group-hover:text-primary" aria-hidden="true" />
+                            </Link>
+                        </li>
+                    </ul>
+                </Card>
+            </div>
         </div>
     </div>
 </template>

@@ -98,6 +98,14 @@ const columns = [
 <template>
     <div>
         <PageHeader title="Manufacturing Stock Ledger" description="Quantity and cost movement of raw materials, work in process or finished goods, with a running balance.">
+            <BranchReportFilter
+                v-if="branchReport"
+                v-model:choice="branchFilter.choice.value"
+                :report="branchReport"
+                id-prefix="mfg-stock-ledger"
+                hide-label
+                @change="apply"
+            />
             <a v-if="can('manufacturing_reports.export')" :href="fileUrl('print')" target="_blank" rel="noopener"><Button variant="secondary" tone="purple">Print</Button></a>
             <a v-if="can('manufacturing_reports.export')" :href="fileUrl('export')"><Button variant="secondary" tone="purple">Export</Button></a>
         </PageHeader>
@@ -123,16 +131,9 @@ const columns = [
                     <Label class="mb-1">To date</Label>
                     <NepaliDateInput v-model="to" />
                 </div>
-                <BranchReportFilter
-                    v-if="branchReport"
-                    v-model:choice="branchFilter.choice.value"
-                    :report="branchReport"
-                    id-prefix="mfg-stock-ledger"
-                    @change="apply"
-                />
                 <Button variant="primary" tone="purple" @click="apply">Apply filters</Button>
             </div>
-            <BranchReportNotes v-if="branchReport" :report="branchReport" />
+            <BranchReportNotes v-if="branchReport" :report="branchReport" hide-label />
         </Card>
 
         <Card variant="panel" class="mb-4">

@@ -1,4 +1,5 @@
 <script setup>
+import { computed } from 'vue';
 import { Link } from '@inertiajs/vue3';
 import { ChevronLeft, CircleHelp, Maximize2, Merge, Minimize2, Plus, X } from '@lucide/vue';
 import Button from '@/components/ui/Button.vue';
@@ -14,8 +15,9 @@ import NepaliDateInput from '@/components/ui/NepaliDateInput.vue';
  * (function ref) so usePosCarts' `cartTabsScroller` ref and its scroll-into-view
  * watcher keep working unchanged.
  */
-defineProps({
+const props = defineProps({
     companyName: { type: String, default: '' },
+    branchName: { type: String, default: '' },
     currentFiscalYear: { type: String, default: '' },
     isPanInvoice: { type: Boolean, default: false },
     activeInvoiceType: { type: String, default: 'full' },
@@ -40,12 +42,20 @@ const emit = defineEmits([
 ]);
 
 const bindScroller = (element) => emit('scroller', element);
+
+const headerTitle = computed(() => [props.companyName, props.branchName].filter(Boolean).join(' • '));
 </script>
 
 <template>
-    <!-- Company name (Company Information), centred in its own row so the bar's layout is untouched -->
-    <div v-if="companyName" class="pos-company shrink-0 truncate px-3.5 py-1 text-center text-sm font-bold" :title="companyName">
-        {{ companyName }}
+    <!-- Company name and branch info, centred with minimal height so vertical space is preserved -->
+    <div
+        v-if="companyName || branchName"
+        class="pos-company shrink-0 truncate px-3.5 py-0.5 text-center text-xs font-semibold leading-tight"
+        :title="headerTitle"
+    >
+        <span v-if="companyName">{{ companyName }}</span>
+        <span v-if="companyName && branchName" class="mx-1.5 select-none opacity-40 font-normal">•</span>
+        <span v-if="branchName" class="font-normal opacity-90">{{ branchName }}</span>
     </div>
     <!-- Top bar: always-visible dashboard exit, FY, help, date, invoice type, hints -->
     <div class="pos-bar flex shrink-0 flex-col lg:flex-row">

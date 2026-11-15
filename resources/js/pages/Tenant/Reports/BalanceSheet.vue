@@ -104,6 +104,16 @@ function exportUrl() {
             title="Balance Sheet"
             description="What the business owns (assets) against what it owes and the owners' capital, on one date."
         >
+            <BranchReportFilter
+                v-if="branchReport"
+                v-model:choice="branchFilter.choice.value"
+                v-model:by-branch="branchFilter.byBranch.value"
+                :report="branchReport"
+                allow-by-branch
+                id-prefix="balance-sheet"
+                hide-label
+                @change="apply"
+            />
             <template v-if="fiscalYearId !== null">
                 <a v-if="can('financial_statements.print')" :href="printUrl()" target="_blank" rel="noopener"><Button variant="secondary" tone="purple">Print</Button></a>
                 <a v-if="can('financial_statements.export')" :href="exportUrl()"><Button variant="secondary" tone="purple">Export</Button></a>
@@ -120,21 +130,12 @@ function exportUrl() {
                     <Label class="mb-1">As at date (BS)</Label>
                     <NepaliDateInput v-model="to" />
                 </div>
-                <BranchReportFilter
-                    v-if="branchReport"
-                    v-model:choice="branchFilter.choice.value"
-                    v-model:by-branch="branchFilter.byBranch.value"
-                    :report="branchReport"
-                    allow-by-branch
-                    id-prefix="balance-sheet"
-                    @change="apply"
-                />
                 <Button variant="primary" tone="purple" @click="apply">Generate report</Button>
             </div>
             <p v-if="to" class="mt-2 text-[12px] text-text-muted">
                 Showing report as at {{ formatBsDate(to) }} BS <span class="text-text-muted">({{ to }})</span>
             </p>
-            <BranchReportNotes v-if="branchReport" :report="branchReport" />
+            <BranchReportNotes v-if="branchReport" :report="branchReport" hide-label />
         </Card>
 
         <p v-if="fiscalYearId === null" class="px-1 py-6 text-center text-[13px] text-text-muted">

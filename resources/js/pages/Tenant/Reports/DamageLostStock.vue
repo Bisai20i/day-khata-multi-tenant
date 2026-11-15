@@ -146,7 +146,16 @@ const totalQuantityLabel = computed(() => {
 
 <template>
     <div>
-        <PageHeader title="Damage & Lost Stock" description="Stock written off as damaged or lost, with quantity and value for the selected dates." />
+        <PageHeader title="Damage & Lost Stock" description="Stock written off as damaged or lost, with quantity and value for the selected dates.">
+            <BranchReportFilter
+                v-if="branchReport"
+                v-model:choice="branchFilter.choice.value"
+                :report="branchReport"
+                id-prefix="damage-lost-branch"
+                hide-label
+                @change="applyFilter"
+            />
+        </PageHeader>
 
         <p class="mb-4 text-[12.5px] text-text-muted">Showing report for {{ rangeLabel }}</p>
 
@@ -172,17 +181,10 @@ const totalQuantityLabel = computed(() => {
                     <Label class="mb-1">Reason</Label>
                     <Select v-model="reason" :options="reasonOptions" />
                 </div>
-                <BranchReportFilter
-                    v-if="branchReport"
-                    v-model:choice="branchFilter.choice.value"
-                    :report="branchReport"
-                    id-prefix="damage-lost-branch"
-                    @change="applyFilter"
-                />
                 <Button variant="primary" tone="purple" :loading="isLoading" @click="applyFilter">Generate report</Button>
                 <Button v-if="hasActiveFilter" variant="secondary" tone="purple" :disabled="isLoading" @click="resetFilters">Reset</Button>
             </div>
-            <BranchReportNotes v-if="branchReport" :report="branchReport" />
+            <BranchReportNotes v-if="branchReport" :report="branchReport" hide-label />
         </Card>
 
         <div class="mb-3 flex items-center gap-2">

@@ -85,7 +85,19 @@ function quantityLabel(quantities) {
 
 <template>
     <div>
-        <PageHeader title="Stock by Category" description="How much stock you hold in each item category, and what it is worth." />
+        <PageHeader
+            title="Stock by Category"
+            description="How much stock you hold in each item category, and what it is worth."
+        >
+            <BranchReportFilter
+                v-if="branchReport"
+                v-model:choice="branchFilter.choice.value"
+                :report="branchReport"
+                id-prefix="stock-category-branch"
+                hide-label
+                @change="applyFilter"
+            />
+        </PageHeader>
 
         <p class="mb-1 text-[12.5px] text-text-muted">Showing report: {{ asOfLabel }}</p>
 
@@ -103,17 +115,10 @@ function quantityLabel(quantities) {
                     <Label class="mb-1">Store</Label>
                     <Select v-model="storeId" :options="storeOptions" />
                 </div>
-                <BranchReportFilter
-                    v-if="branchReport"
-                    v-model:choice="branchFilter.choice.value"
-                    :report="branchReport"
-                    id-prefix="stock-category-branch"
-                    @change="applyFilter"
-                />
                 <Button variant="primary" tone="purple" :loading="isLoading" @click="applyFilter">Generate report</Button>
                 <Button v-if="hasActiveFilter" variant="secondary" tone="purple" :disabled="isLoading" @click="resetFilters">Reset</Button>
             </div>
-            <BranchReportNotes v-if="branchReport" :report="branchReport" />
+            <BranchReportNotes v-if="branchReport" :report="branchReport" hide-label />
         </Card>
 
         <Card variant="panel">

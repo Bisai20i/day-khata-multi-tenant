@@ -108,6 +108,16 @@ function exportUrl() {
             title="Income Statement"
             description="Profit and loss: income earned minus expenses incurred in the period. Also called Profit &amp; Loss."
         >
+            <BranchReportFilter
+                v-if="branchReport"
+                v-model:choice="branchFilter.choice.value"
+                v-model:by-branch="branchFilter.byBranch.value"
+                :report="branchReport"
+                allow-by-branch
+                id-prefix="income-statement"
+                hide-label
+                @change="apply"
+            />
             <template v-if="fiscalYearId !== null">
                 <a v-if="can('financial_statements.print')" :href="printUrl()" target="_blank" rel="noopener"><Button variant="secondary" tone="purple">Print</Button></a>
                 <a v-if="can('financial_statements.export')" :href="exportUrl()"><Button variant="secondary" tone="purple">Export</Button></a>
@@ -128,22 +138,13 @@ function exportUrl() {
                     <Label class="mb-1">To date (BS)</Label>
                     <NepaliDateInput v-model="to" />
                 </div>
-                <BranchReportFilter
-                    v-if="branchReport"
-                    v-model:choice="branchFilter.choice.value"
-                    v-model:by-branch="branchFilter.byBranch.value"
-                    :report="branchReport"
-                    allow-by-branch
-                    id-prefix="income-statement"
-                    @change="apply"
-                />
                 <Button variant="primary" tone="purple" @click="apply">Generate report</Button>
             </div>
             <p v-if="from && to" class="mt-2 text-[12px] text-text-muted">
                 Showing report for {{ formatBsDate(from) }} to {{ formatBsDate(to) }} BS
                 <span class="text-text-muted">({{ from }} to {{ to }})</span>
             </p>
-            <BranchReportNotes v-if="branchReport" :report="branchReport" />
+            <BranchReportNotes v-if="branchReport" :report="branchReport" hide-label />
         </Card>
 
         <p v-if="fiscalYearId === null" class="px-1 py-6 text-center text-[13px] text-text-muted">

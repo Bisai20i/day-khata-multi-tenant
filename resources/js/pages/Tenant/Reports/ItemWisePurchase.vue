@@ -180,7 +180,16 @@ const columns = [
 
 <template>
     <div>
-        <PageHeader title="Item-wise Purchase" description="How much of each item you bought in the selected dates, with the amount spent." />
+        <PageHeader title="Item-wise Purchase" description="How much of each item you bought in the selected dates, with the amount spent.">
+            <BranchReportFilter
+                v-if="branchReport"
+                v-model:choice="branchFilter.choice.value"
+                :report="branchReport"
+                id-prefix="item-wise-purchase"
+                hide-label
+                @change="applyFilter"
+            />
+        </PageHeader>
 
         <p class="mb-1 text-[12.5px] text-text-muted">Showing report for {{ rangeLabel }}</p>
 
@@ -218,17 +227,10 @@ const columns = [
                     <Label class="mb-1">Item (drill-down)</Label>
                     <Select v-model="itemId" :options="itemOptions" />
                 </div>
-                <BranchReportFilter
-                    v-if="branchReport"
-                    v-model:choice="branchFilter.choice.value"
-                    :report="branchReport"
-                    id-prefix="item-wise-purchase"
-                    @change="applyFilter"
-                />
                 <Button variant="primary" tone="purple" :loading="isLoading" @click="applyFilter">Generate report</Button>
                 <Button v-if="hasActiveFilter" variant="secondary" tone="purple" :disabled="isLoading" @click="resetFilters">Reset</Button>
             </div>
-            <BranchReportNotes v-if="branchReport" :report="branchReport" />
+            <BranchReportNotes v-if="branchReport" :report="branchReport" hide-label />
         </Card>
 
         <Card variant="panel">

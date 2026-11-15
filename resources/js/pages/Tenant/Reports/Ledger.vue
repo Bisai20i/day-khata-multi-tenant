@@ -16,7 +16,6 @@ import { formatBsDate } from '@/lib/format.js';
 import { usePermissions } from '@/composables/usePermissions';
 import { useBranchReportFilter } from '@/composables/useBranchReportFilter';
 import BranchReportFilter from '@/components/branch/BranchReportFilter.vue';
-import BranchReportNotes from '@/components/branch/BranchReportNotes.vue';
 
 defineOptions({ layout: AppLayout });
 
@@ -189,6 +188,14 @@ const columns = [
             title="General Ledger"
             description="View sequential transaction history, debits, credits, and running balance for any General Ledger account."
         >
+            <BranchReportFilter
+                v-if="branchReport"
+                v-model:choice="branchFilter.choice.value"
+                :report="branchReport"
+                id-prefix="ledger"
+                hide-label
+                @change="apply"
+            />
             <template v-if="account && fiscalYearId !== null">
                 <a v-if="can('account_ledger.print')" :href="printUrl()" target="_blank" rel="noopener">
                     <Button variant="secondary" tone="purple">Print ledger</Button>
@@ -223,15 +230,6 @@ const columns = [
                     <Label class="mb-1">To Date (BS)</Label>
                     <NepaliDateInput v-model="to" />
                 </div>
-            </div>
-            <div v-if="branchReport" class="mt-3">
-                <BranchReportFilter
-                    v-model:choice="branchFilter.choice.value"
-                    :report="branchReport"
-                    id-prefix="ledger"
-                    @change="apply"
-                />
-                <BranchReportNotes :report="branchReport" />
             </div>
             <div class="mt-3 flex items-center justify-end gap-2 border-t border-border pt-3">
                 <Button v-if="from || to" variant="secondary" tone="purple" type="button" @click="clearWindow">Clear dates</Button>

@@ -46,6 +46,14 @@ function fileUrl(suffix) {
 <template>
     <div>
         <PageHeader title="Inventory Schedule" description="Note to the Balance Sheet: stock by class, with the total of the Balance Sheet's stock lines.">
+            <BranchReportFilter
+                v-if="branchReport"
+                v-model:choice="branchFilter.choice.value"
+                :report="branchReport"
+                id-prefix="mfg-inventory-schedule"
+                hide-label
+                @change="apply"
+            />
             <a v-if="can('manufacturing_reports.export')" :href="fileUrl('print')" target="_blank" rel="noopener"><Button variant="secondary" tone="purple">Print</Button></a>
             <a v-if="can('manufacturing_reports.export')" :href="fileUrl('export')"><Button variant="secondary" tone="purple">Export</Button></a>
         </PageHeader>
@@ -58,16 +66,9 @@ function fileUrl(suffix) {
                     <Label class="mb-1">As of date (BS)</Label>
                     <NepaliDateInput v-model="asOfInput" />
                 </div>
-                <BranchReportFilter
-                    v-if="branchReport"
-                    v-model:choice="branchFilter.choice.value"
-                    :report="branchReport"
-                    id-prefix="mfg-inventory-schedule"
-                    @change="apply"
-                />
                 <Button variant="primary" tone="purple" @click="apply">Generate report</Button>
             </div>
-            <BranchReportNotes v-if="branchReport" :report="branchReport" />
+            <BranchReportNotes v-if="branchReport" :report="branchReport" hide-label />
         </Card>
 
         <Card variant="panel">

@@ -132,6 +132,14 @@ const columns = [
             :title="`Cash Book - ${account.name} (${account.code ?? '-'})`"
             description="Every cash receipt and payment in the period, with the running cash balance."
         >
+            <BranchReportFilter
+                v-if="branchReport"
+                v-model:choice="branchFilter.choice.value"
+                :report="branchReport"
+                id-prefix="cash-book"
+                hide-label
+                @change="applyFilter"
+            />
             <a v-if="can('cash_bank_book.print')" :href="printUrl()" target="_blank" rel="noopener"><Button variant="secondary" tone="purple">Print</Button></a>
             <a v-if="can('cash_bank_book.export')" :href="exportUrl()"><Button variant="secondary" tone="purple">Export</Button></a>
         </PageHeader>
@@ -150,19 +158,12 @@ const columns = [
                     <Label class="mb-1">To date (BS)</Label>
                     <NepaliDateInput v-model="to" />
                 </div>
-                <BranchReportFilter
-                    v-if="branchReport"
-                    v-model:choice="branchFilter.choice.value"
-                    :report="branchReport"
-                    id-prefix="cash-book"
-                    @change="applyFilter"
-                />
                 <Button variant="primary" tone="purple" @click="applyFilter">Generate report</Button>
             </div>
             <p v-if="from && to" class="mt-2 text-[12px] text-text-muted">
                 Showing report for {{ formatBsDate(from) }} to {{ formatBsDate(to) }} BS
             </p>
-            <BranchReportNotes v-if="branchReport" :report="branchReport" />
+            <BranchReportNotes v-if="branchReport" :report="branchReport" hide-label />
         </Card>
 
         <Card variant="panel">

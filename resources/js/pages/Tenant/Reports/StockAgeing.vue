@@ -95,7 +95,19 @@ const reconciles = computed(() => props.totals.value === props.valuationTotal);
 
 <template>
     <div>
-        <PageHeader title="Stock Ageing" description="How long the stock on hand has been sitting, item by item, grouped by age of the receipt." />
+        <PageHeader
+            title="Stock Ageing"
+            description="How long the stock on hand has been sitting, item by item, grouped by age of the receipt."
+        >
+            <BranchReportFilter
+                v-if="branchReport"
+                v-model:choice="branchFilter.choice.value"
+                :report="branchReport"
+                id-prefix="stock-ageing-branch"
+                hide-label
+                @change="applyFilter"
+            />
+        </PageHeader>
 
         <p class="mb-1 text-[12.5px] text-text-muted">Showing report: {{ asOfLabel }}</p>
 
@@ -113,18 +125,11 @@ const reconciles = computed(() => props.totals.value === props.valuationTotal);
                 <Label class="mb-1 text-[11px]">Store</Label>
                 <Select v-model="storeId" :options="storeOptions" />
             </div>
-            <BranchReportFilter
-                v-if="branchReport"
-                v-model:choice="branchFilter.choice.value"
-                :report="branchReport"
-                id-prefix="stock-ageing-branch"
-                @change="applyFilter"
-            />
             <Button variant="primary" tone="purple" :loading="isLoading" @click="applyFilter">Generate report</Button>
         </div>
 
         <div v-if="branchReport" class="-mt-2 mb-4">
-            <BranchReportNotes :report="branchReport" />
+            <BranchReportNotes :report="branchReport" hide-label />
         </div>
 
         <Card variant="panel">
