@@ -3,13 +3,14 @@
 namespace App\Models\Concerns;
 
 use App\Models\Account;
+use App\Models\AccountGroup;
 use App\Models\AccountSubgroup;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
 /**
- * Gives a master-data model (Customer, Supplier) its own ledger Account,
- * auto-created on first save and kept in sync on update. Mirrors the
+ * Gives a master-data model (Customer, Supplier, Agent, StaffMember) its own ledger
+ * Account, auto-created on first save and kept in sync on update. Mirrors the
  * legacy app's "creating a customer/supplier also writes a mainaccount
  * row" behavior (see CustomerController::store/update), normalized onto
  * a real foreign key instead of a matched-by-string denormalized copy.
@@ -43,6 +44,14 @@ trait HasLedgerAccount
     abstract protected function ledgerAccountSubgroupName(): string;
 
     /**
+     * Optional parent account code to attach the generated account to.
+     */
+    protected function ledgerAccountParentCode(): ?string
+    {
+        return null;
+    }
+
+    /**
      * @return BelongsTo<Account, $this>
      */
     public function account(): BelongsTo
@@ -52,12 +61,38 @@ trait HasLedgerAccount
 
     protected function makeLedgerAccount(): Account
     {
-        $subgroup = AccountSubgroup::where('name', $this->ledgerAccountSubgroupName())->firstOrFail();
+        $subgroupName = $this->ledgerAccountSubgroupName();
+        $subgroup = AccountSubgroup::where('name', $subgroupName)->first();
 
-        return $subgroup->accounts()->create([
+        if (! $subgroup) {
+            $groupName = method_exists($this, 'ledgerAccountGroupName')
+                ? $this->ledgerAccountGroupName()
+                : 'Current Liabilities';
+
+            $group = AccountGroup::where('name', $groupName)->first() ?? AccountGroup::first();
+
+            $subgroup = AccountSubgroup::create([
+                'account_group_id' => $group?->id,
+                'name' => $subgroupName,
+            ]);
+        }
+
+        $attributes = [
             'name' => $this->name,
             'phone' => $this->mobile_no,
             'address' => $this->address,
-        ]);
+        ];
+
+        if (method_exists($this, 'ledgerAccountParentCode') && ($code = $this->ledgerAccountParentCode())) {
+            $parent = Account::where('code', $code)
+                ->orWhere('name', 'Salary Payable')
+                ->first();
+
+            if ($parent) {
+                $attributes['parent_account_id'] = $parent->id;
+            }
+        }
+
+        return $subgroup->accounts()->create($attributes);
     }
 }

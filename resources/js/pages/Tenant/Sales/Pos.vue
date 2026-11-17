@@ -69,6 +69,7 @@ const { can } = usePermissions();
 
 const props = defineProps({
     customers: { type: Array, default: () => [] },
+    areas: { type: Array, default: () => [] },
     items: { type: Array, default: () => [] },
     categories: { type: Array, default: () => [] },
     bankAccounts: { type: Array, default: () => [] },
@@ -648,7 +649,7 @@ onUnmounted(() => {
             </div>
         </div>
 
-        <PosCustomerModal v-model:open="customerModalOpen" @created="onCustomerCreated" />
+        <PosCustomerModal v-model:open="customerModalOpen" :areas="areas" @created="onCustomerCreated" />
 
         <PosSplitModal
             v-model:quantity="splitQuantity"

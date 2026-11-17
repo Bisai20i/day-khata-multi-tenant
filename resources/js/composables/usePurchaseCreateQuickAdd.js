@@ -51,7 +51,7 @@ export function usePurchaseCreateQuickAdd(form, props, { selectSupplier, stageIt
     }
 
     const supplierModalOpen = ref(false);
-    const supplierForm = useForm({ name: '', mobile_no: '' });
+    const supplierForm = useForm({ name: '', mobile_no: '', area_id: null });
 
     function openSupplierModal() {
         supplierForm.reset();
@@ -66,7 +66,7 @@ export function usePurchaseCreateQuickAdd(form, props, { selectSupplier, stageIt
     }
 
     function submitSupplier() {
-        const pendingSupplier = { name: supplierForm.name, mobile_no: supplierForm.mobile_no };
+        const pendingSupplier = { name: supplierForm.name, mobile_no: supplierForm.mobile_no, area_id: supplierForm.area_id };
 
         supplierForm.post('/suppliers', {
             onSuccess: () => {

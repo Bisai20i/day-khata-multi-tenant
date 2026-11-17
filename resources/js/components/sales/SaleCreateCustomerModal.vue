@@ -3,10 +3,12 @@ import Button from '@/components/ui/Button.vue';
 import Input from '@/components/ui/Input.vue';
 import Modal from '@/components/ui/Modal.vue';
 import Label from '@/components/ui/Label.vue';
+import AreaSelect from '@/components/parties/AreaSelect.vue';
 
 defineProps({
     open: { type: Boolean, default: false },
     customerForm: { type: Object, required: true },
+    areas: { type: Array, default: () => [] },
 });
 
 defineEmits(['close', 'submit']);
@@ -26,6 +28,12 @@ defineEmits(['close', 'submit']);
                 <Input v-model="customerForm.mobile_no" type="text" placeholder="98XXXXXXXX" />
                 <p v-if="customerForm.errors.mobile_no" class="mt-1 text-sm text-danger">{{ customerForm.errors.mobile_no }}</p>
             </div>
+            <AreaSelect
+                id="quick-customer-area"
+                v-model="customerForm.area_id"
+                :areas="areas"
+                :error="customerForm.errors.area_id"
+            />
         </form>
         <template #footer>
             <Button variant="secondary" tone="purple" type="button" @click="$emit('close')">Cancel</Button>

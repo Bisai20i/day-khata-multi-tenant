@@ -8,18 +8,13 @@ use App\Http\Controllers\Controller;
 use App\Models\FiscalYear;
 use App\Models\PayComponent;
 use App\Models\PayrollLine;
-use App\Models\PayrollPaymentLine;
-use App\Models\StaffAdvance;
 use App\Models\StaffMember;
 use App\Support\AsOfDate;
-use App\Support\Branches\BranchContext;
 use App\Support\Hr\StaffBalances;
+use App\Support\Hr\StaffStatementData;
 use App\Support\Money\Money;
 use Carbon\Carbon;
-use Illuminate\Database\Eloquent\Model;
 use Illuminate\Http\Request;
-use Illuminate\Support\Arr;
-use Illuminate\Support\Collection;
 use Inertia\Inertia;
 use Inertia\Response;
 use Maatwebsite\Excel\Facades\Excel;
@@ -103,130 +98,30 @@ class HrReportController extends Controller
             'to' => ['nullable', 'date', 'after_or_equal:from'],
         ]);
 
-        // The `date` rule accepts anything strtotime() does ("2026-7-1", a
-        // time suffix); normalise so the string comparisons below hold.
         $from = ($rawFrom = $request->string('from')->toString()) !== '' ? Carbon::parse($rawFrom)->toDateString() : null;
         $to = ($rawTo = $request->string('to')->toString()) !== '' ? Carbon::parse($rawTo)->toDateString() : null;
-        $statuses = ($from !== null || $to !== null) ? ['posted', 'cancelled'] : ['posted'];
 
-        $salary = collect();
-        $advance = collect();
-
-        // HR rows are company-wide; the reversal vouchers they eager-load are
-        // read outside the branch access scope too (plan 12, BR09 carry-
-        // forward c), so a cancelled document always gets its offset line.
-        BranchContext::unrestricted(fn () => PayrollLine::query()
-            ->where('staff_id', $staff->id)
-            ->whereHas('run', fn ($run) => $run->whereIn('status', $statuses))
-            ->with(['run:id,period_label,date,run_number,series_branch_id,status,reversal_journal_voucher_id', 'run.reversalJournalVoucher:id,date'])
-            ->get())
-            ->each(function (PayrollLine $line) use ($salary, $advance): void {
-                $this->pushWithReversal($salary, $line->run, [
-                    'date' => $line->run->date->toDateString(), 'order' => 1, 'reference' => $line->run->displayNumber(),
-                    'description' => 'Payroll '.$line->run->period_label, 'debit' => '0.00', 'credit' => $line->net,
-                ]);
-
-                if (Money::of($line->advance_recovery)->isPositive()) {
-                    $this->pushWithReversal($advance, $line->run, [
-                        'date' => $line->run->date->toDateString(), 'order' => 2, 'reference' => $line->run->displayNumber(),
-                        'description' => 'Recovered in payroll '.$line->run->period_label, 'debit' => '0.00', 'credit' => $line->advance_recovery,
-                    ]);
-                }
-            });
-
-        BranchContext::unrestricted(fn () => PayrollPaymentLine::query()
-            ->whereHas('payrollLine', fn ($line) => $line->where('staff_id', $staff->id))
-            ->whereHas('payment', fn ($payment) => $payment->whereIn('status', $statuses))
-            ->with(['payment:id,date,payment_number,payment_mode,status,reversal_journal_voucher_id', 'payment.reversalJournalVoucher:id,date'])
-            ->get())
-            ->each(function (PayrollPaymentLine $row) use ($salary): void {
-                $this->pushWithReversal($salary, $row->payment, [
-                    'date' => $row->payment->date->toDateString(), 'order' => 2, 'reference' => $row->payment->payment_number,
-                    'description' => 'Salary payment ('.$row->payment->payment_mode.')', 'debit' => $row->amount, 'credit' => '0.00',
-                ]);
-            });
-
-        BranchContext::unrestricted(fn () => StaffAdvance::query()
-            ->where('staff_id', $staff->id)
-            ->whereIn('status', $statuses)
-            ->with('reversalJournalVoucher:id,date')
-            ->get())
-            ->each(function (StaffAdvance $row) use ($advance): void {
-                $this->pushWithReversal($advance, $row, [
-                    'date' => $row->date->toDateString(), 'order' => 1, 'reference' => $row->advance_number,
-                    'description' => 'Advance given ('.$row->payment_mode.')', 'debit' => $row->amount, 'credit' => '0.00',
-                ]);
-            });
-
-        // Balances carried in from before `from`: the same as-at figures the
-        // Staff Balances report shows for the day before.
-        $dayBefore = $from !== null ? Carbon::parse($from)->subDay()->toDateString() : null;
-        $openingSalary = $dayBefore !== null ? StaffBalances::payable($staff->id, $dayBefore) : Money::zero();
-        $openingAdvance = $dayBefore !== null ? StaffBalances::advance($staff->id, $dayBefore) : Money::zero();
-
-        $inRange = fn (Collection $entries): Collection => $entries->filter(
-            fn (array $entry): bool => ($from === null || $entry['date'] >= $from) && ($to === null || $entry['date'] <= $to),
-        );
+        $data = StaffStatementData::build($staff, $from, $to);
 
         return Inertia::render('Tenant/Hr/Reports/StaffStatement', [
-            'staff' => $staff->only(['id', 'staff_code', 'name', 'designation', 'department']),
+            'staff' => $data['staff'],
             'filters' => ['from' => $from, 'to' => $to],
-            'openingSalary' => $openingSalary->toString(),
-            'openingAdvance' => $openingAdvance->toString(),
-            // Salary: credit = owed to the staff member, so balance = credit - debit.
-            'salaryEntries' => $this->withRunningBalance($inRange($salary), creditNormal: true, opening: $openingSalary),
-            // Advance: debit = given, so balance = debit - credit.
-            'advanceEntries' => $this->withRunningBalance($inRange($advance), creditNormal: false, opening: $openingAdvance),
+            'openingSalary' => $data['openingSalary'],
+            'openingAdvance' => $data['openingAdvance'],
+            'closingSalary' => $data['closingSalary'],
+            'closingAdvance' => $data['closingAdvance'],
+            'salaryEntries' => $data['salaryEntries'],
+            'advanceEntries' => $data['advanceEntries'],
+            'staffOptions' => StaffMember::query()
+                ->orderBy('name')
+                ->get(['id', 'staff_code', 'name'])
+                ->map(fn (StaffMember $s) => [
+                    'value' => $s->id,
+                    'label' => $s->staff_code ? "{$s->name} ({$s->staff_code})" : $s->name,
+                    'searchValue' => "{$s->name} {$s->staff_code}",
+                ])
+                ->values(),
         ]);
-    }
-
-    /**
-     * Adds a document's line and, when it has been cancelled and its reversal
-     * voucher exists, the offsetting line on the reversal's date (debit and
-     * credit swapped). Only the date-filtered statement loads cancelled
-     * documents, so the unfiltered one never gets a reversal line.
-     *
-     * @param  Collection<int, array<string, mixed>>  $entries
-     * @param  array<string, mixed>  $entry
-     */
-    private function pushWithReversal(Collection $entries, Model $document, array $entry): void
-    {
-        $entries->push($entry);
-
-        if ($document->status !== 'cancelled' || $document->reversalJournalVoucher === null) {
-            return;
-        }
-
-        $entries->push([
-            'date' => $document->reversalJournalVoucher->date->toDateString(),
-            'order' => 3,
-            'reference' => $entry['reference'],
-            'description' => 'Cancelled: '.$entry['description'],
-            'debit' => $entry['credit'],
-            'credit' => $entry['debit'],
-        ]);
-    }
-
-    /**
-     * @param  Collection<int, array<string, mixed>>  $entries
-     * @return list<array<string, mixed>>
-     */
-    private function withRunningBalance(Collection $entries, bool $creditNormal, Money $opening): array
-    {
-        $balance = $opening;
-
-        return $entries
-            ->sortBy([['date', 'asc'], ['order', 'asc']])
-            ->values()
-            ->map(function (array $entry) use (&$balance, $creditNormal): array {
-                $movement = $creditNormal
-                    ? Money::of($entry['credit'])->minus($entry['debit'])
-                    : Money::of($entry['debit'])->minus($entry['credit']);
-                $balance = $balance->plus($movement);
-
-                return Arr::except($entry, 'order') + ['balance' => $balance->toString()];
-            })
-            ->all();
     }
 
     /**

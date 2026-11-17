@@ -38,6 +38,7 @@ import { useDocumentBranchStore } from '@/composables/useDocumentBranchStore';
  */
 const props = defineProps({
     customers: { type: Array, default: () => [] },
+    areas: { type: Array, default: () => [] },
     items: { type: Array, default: () => [] },
     itemCategories: { type: Array, default: () => [] },
     bankAccounts: { type: Array, default: () => [] },
@@ -394,6 +395,7 @@ function submit(print = false, copies = 1) {
     <SaleCreateCustomerModal
         :open="customerModalOpen"
         :customer-form="customerForm"
+        :areas="areas"
         @close="closeCustomerModal"
         @submit="submitCustomer"
     />

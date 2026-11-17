@@ -8,6 +8,7 @@ use App\Exports\AccountBookExport;
 use App\Exports\BalanceSheetExport;
 use App\Exports\CancelledDocumentsExport;
 use App\Exports\DayBookExport;
+use App\Exports\HrTableExport;
 use App\Exports\IncomeStatementExport;
 use App\Exports\TrialBalanceExport;
 use App\Http\Controllers\Controller;
@@ -26,12 +27,14 @@ use App\Models\PurchaseReturn;
 use App\Models\Receipt;
 use App\Models\Sale;
 use App\Models\SalesReturn;
+use App\Models\StaffMember;
 use App\Models\Supplier;
 use App\Support\Branches\ActiveBranchSelection;
 use App\Support\Branches\BranchContext;
 use App\Support\Branches\BranchFilter;
 use App\Support\Branches\BranchListFilter;
 use App\Support\Branches\BranchReportTotals;
+use App\Support\Hr\StaffStatementData;
 use App\Support\Inventory\StockCosting;
 use App\Support\Money\Money;
 use App\Support\NepaliCalendar;
@@ -48,6 +51,7 @@ use Inertia\Inertia;
 use Inertia\Response;
 use Maatwebsite\Excel\Facades\Excel;
 use RuntimeException;
+use Symfony\Component\HttpFoundation\BinaryFileResponse;
 
 /**
  * Trial Balance / Income Statement / Balance Sheet / Day Book / Cash Book /
@@ -104,6 +108,7 @@ class AccountingReportController extends Controller
         $fiscalYear = $this->resolveFiscalYear($request);
         $filter = BranchFilter::fromRequest($request);
         $accountId = $request->integer('account_id') ?: null;
+        $staffId = $request->integer('staff_id') ?: null;
         $includeSubAccounts = $request->boolean('include_sub_accounts', true);
         $accounts = Account::with(['parent:id,name', 'group.accountHead', 'subgroup.accountGroup.accountHead'])
             ->orderBy('name')
@@ -118,8 +123,14 @@ class AccountingReportController extends Controller
                 'type' => $acc->group?->accountHead?->name ?? $acc->subgroup?->accountGroup?->accountHead?->name,
             ]);
 
+        $staffList = StaffMember::query()
+            ->orderBy('name')
+            ->get(['id', 'staff_code', 'name', 'designation', 'department']);
+
         $data = $this->emptyAccountBook();
         $account = null;
+        $staff = null;
+        $staffStatement = null;
         [$from, $to] = [null, null];
 
         if ($fiscalYear !== null) {
@@ -130,6 +141,11 @@ class AccountingReportController extends Controller
                 if ($account) {
                     $data = $this->accountBook($account, $fiscalYear, $from, $to, $filter->lineBranchIds(), $includeSubAccounts);
                 }
+            } elseif ($staffId) {
+                $staff = StaffMember::find($staffId);
+                if ($staff) {
+                    $staffStatement = StaffStatementData::build($staff, $from, $to);
+                }
             }
         }
 
@@ -138,6 +154,15 @@ class AccountingReportController extends Controller
             'fiscalYearId' => $fiscalYear?->id,
             'accounts' => $accounts,
             'accountId' => $accountId,
+            'staffList' => $staffList,
+            'staffId' => $staffId,
+            'staff' => $staffStatement['staff'] ?? ($staff ? $staff->only(['id', 'staff_code', 'name', 'designation', 'department']) : null),
+            'staffSalaryEntries' => $staffStatement['salaryEntries'] ?? [],
+            'staffAdvanceEntries' => $staffStatement['advanceEntries'] ?? [],
+            'staffOpeningSalary' => $staffStatement['openingSalary'] ?? '0.00',
+            'staffOpeningAdvance' => $staffStatement['openingAdvance'] ?? '0.00',
+            'staffClosingSalary' => $staffStatement['closingSalary'] ?? '0.00',
+            'staffClosingAdvance' => $staffStatement['closingAdvance'] ?? '0.00',
             'account' => $account ? [
                 'id' => $account->id,
                 'name' => $account->name,
@@ -163,16 +188,163 @@ class AccountingReportController extends Controller
 
     public function ledgerPdf(Request $request)
     {
-        $account = Account::findOrFail($request->integer('account_id'));
+        if ($accountId = $request->integer('account_id')) {
+            $account = Account::findOrFail($accountId);
 
-        return $this->accountBookPdf($request, $account, 'Ledger');
+            return $this->accountBookPdf($request, $account, 'Ledger');
+        }
+
+        if ($staffId = $request->integer('staff_id')) {
+            $staff = StaffMember::findOrFail($staffId);
+            $fiscalYear = $this->resolveFiscalYear($request);
+            abort_if($fiscalYear === null, 404, 'No fiscal year to report on.');
+
+            [$from, $to] = $this->resolveWindow($request, $fiscalYear);
+            $data = StaffStatementData::build($staff, $from, $to);
+
+            return $this->staffLedgerPdf($staff, $fiscalYear, $from, $to, $data);
+        }
+
+        abort(404, 'No account or staff specified.');
     }
 
     public function ledgerExport(Request $request)
     {
-        $account = Account::findOrFail($request->integer('account_id'));
+        if ($accountId = $request->integer('account_id')) {
+            $account = Account::findOrFail($accountId);
 
-        return $this->accountBookExport($request, $account, 'ledger');
+            return $this->accountBookExport($request, $account, 'ledger');
+        }
+
+        if ($staffId = $request->integer('staff_id')) {
+            $staff = StaffMember::findOrFail($staffId);
+            $fiscalYear = $this->resolveFiscalYear($request);
+            abort_if($fiscalYear === null, 404, 'No fiscal year to report on.');
+
+            [$from, $to] = $this->resolveWindow($request, $fiscalYear);
+            $data = StaffStatementData::build($staff, $from, $to);
+
+            return $this->staffLedgerExport($staff, $data);
+        }
+
+        abort(404, 'No account or staff specified.');
+    }
+
+    private function staffLedgerPdf(StaffMember $staff, FiscalYear $fiscalYear, ?string $from, ?string $to, array $data)
+    {
+        $entries = [];
+
+        if (! empty($data['salaryEntries']) || $data['openingSalary'] !== '0.00' || empty($data['advanceEntries'])) {
+            $entries[] = [
+                'date' => $from ?? '',
+                'date_bs' => $from ? NepaliCalendar::formatBs($from) : null,
+                'voucherType' => 'SECTION',
+                'voucherNumber' => '---',
+                'narration' => '=== SALARY PAYABLE LEDGER (Opening: Rs. '.$data['openingSalary'].' | Closing: Rs. '.$data['closingSalary'].') ===',
+                'debit' => '',
+                'credit' => '',
+                'balance' => $data['closingSalary'],
+            ];
+            foreach ($data['salaryEntries'] as $entry) {
+                $entries[] = [
+                    'date' => $entry['date'],
+                    'date_bs' => $entry['date_bs'] ?? null,
+                    'voucherType' => 'Salary',
+                    'voucherNumber' => $entry['reference'] ?? '-',
+                    'narration' => $entry['description'] ?? '',
+                    'debit' => $entry['debit'],
+                    'credit' => $entry['credit'],
+                    'balance' => $entry['balance'],
+                ];
+            }
+        }
+
+        if (! empty($data['advanceEntries']) || $data['openingAdvance'] !== '0.00') {
+            $entries[] = [
+                'date' => $from ?? '',
+                'date_bs' => $from ? NepaliCalendar::formatBs($from) : null,
+                'voucherType' => 'SECTION',
+                'voucherNumber' => '---',
+                'narration' => '=== STAFF ADVANCE LEDGER (Opening: Rs. '.$data['openingAdvance'].' | Closing: Rs. '.$data['closingAdvance'].') ===',
+                'debit' => '',
+                'credit' => '',
+                'balance' => $data['closingAdvance'],
+            ];
+            foreach ($data['advanceEntries'] as $entry) {
+                $entries[] = [
+                    'date' => $entry['date'],
+                    'date_bs' => $entry['date_bs'] ?? null,
+                    'voucherType' => 'Advance',
+                    'voucherNumber' => $entry['reference'] ?? '-',
+                    'narration' => $entry['description'] ?? '',
+                    'debit' => $entry['debit'],
+                    'credit' => $entry['credit'],
+                    'balance' => $entry['balance'],
+                ];
+            }
+        }
+
+        $pdf = Pdf::loadView('pdf.account-book', [
+            'title' => "Staff Ledger - {$staff->name}",
+            'company' => CompanySetting::current(),
+            'documentNumber' => "{$staff->staff_code} - {$staff->name}",
+            'documentDate' => $to,
+            'dateAd' => $to,
+            'dateBs' => NepaliCalendar::formatBs($to),
+            'fiscalYearName' => $fiscalYear->name,
+            'from' => $from,
+            'to' => $to,
+            'openingBalance' => 'Salary: '.$data['openingSalary'].' | Advance: '.$data['openingAdvance'],
+            'closingBalance' => 'Salary: '.$data['closingSalary'].' | Advance: '.$data['closingAdvance'],
+            'entries' => $entries,
+            'branchFilterLabel' => null,
+            'partyArea' => null,
+        ]);
+
+        return $pdf->stream('staff-ledger-'.$staff->staff_code.'.pdf');
+    }
+
+    private function staffLedgerExport(StaffMember $staff, array $data): BinaryFileResponse
+    {
+        $rows = [];
+
+        $rows[] = ['Salary Payable', '', '', '', 'Opening Balance', '', '', $data['openingSalary']];
+        foreach ($data['salaryEntries'] as $entry) {
+            $rows[] = [
+                'Salary Payable',
+                $entry['date'],
+                $entry['date_bs'] ?? '',
+                $entry['reference'] ?? '',
+                $entry['description'] ?? '',
+                $entry['debit'],
+                $entry['credit'],
+                $entry['balance'],
+            ];
+        }
+        $rows[] = ['Salary Payable', '', '', '', 'Closing Balance', '', '', $data['closingSalary']];
+        $rows[] = ['', '', '', '', '', '', '', ''];
+
+        $rows[] = ['Staff Advance', '', '', '', 'Opening Balance', '', '', $data['openingAdvance']];
+        foreach ($data['advanceEntries'] as $entry) {
+            $rows[] = [
+                'Staff Advance',
+                $entry['date'],
+                $entry['date_bs'] ?? '',
+                $entry['reference'] ?? '',
+                $entry['description'] ?? '',
+                $entry['debit'],
+                $entry['credit'],
+                $entry['balance'],
+            ];
+        }
+        $rows[] = ['Staff Advance', '', '', '', 'Closing Balance', '', '', $data['closingAdvance']];
+
+        $headings = ['Section', 'Date (AD)', 'Date (BS)', 'Reference', 'Description', 'Debit', 'Credit', 'Balance'];
+
+        return Excel::download(
+            new HrTableExport($headings, $rows, [5, 6, 7]),
+            "staff-ledger-{$staff->staff_code}.xlsx"
+        );
     }
 
     public function trialBalance(Request $request): Response

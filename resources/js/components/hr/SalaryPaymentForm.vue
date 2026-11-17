@@ -86,7 +86,7 @@ const visibleLines = computed(() => {
 });
 
 function isSelected(line) {
-    return Object.prototype.hasOwnProperty.call(allocationAmounts, line.id);
+    return allocationAmounts[line.id] !== undefined;
 }
 
 /** Ticking fills the full outstanding (still editable); unticking drops the row. */

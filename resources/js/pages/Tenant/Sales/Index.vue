@@ -44,6 +44,7 @@ const props = defineProps({
         default: () => ({ taxable_amount: '0.00', nontaxable_amount: '0.00', vat_amount: '0.00', total: '0.00' }),
     },
     customers: { type: Array, default: () => [] },
+    areas: { type: Array, default: () => [] },
     items: { type: Array, default: () => [] },
     itemCategories: { type: Array, default: () => [] },
     bankAccounts: { type: Array, default: () => [] },
@@ -430,6 +431,7 @@ const columns = [
         <template v-if="showCreateForm">
             <Create
                 :customers="customers"
+                :areas="areas"
                 :items="items"
                 :item-categories="itemCategories"
                 :bank-accounts="bankAccounts"

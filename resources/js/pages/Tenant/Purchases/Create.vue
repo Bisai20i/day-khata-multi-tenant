@@ -61,6 +61,7 @@ const props = defineProps({
     // Branch picker (BranchFormOptions::props() on the server, plan 12).
     branchOptions: { type: Array, default: () => [] },
     defaultBranchId: { type: Number, default: null },
+    areas: { type: Array, default: () => [] },
 });
 
 const emit = defineEmits(['cancel', 'posted']);
@@ -545,6 +546,7 @@ function submit(print = false) {
         :item-open="itemModalOpen"
         :item-form="itemForm"
         :item-category-options="itemCategoryOptions"
+        :areas="areas"
         @close-supplier="closeSupplierModal"
         @submit-supplier="submitSupplier"
         @close-item="closeItemModal"

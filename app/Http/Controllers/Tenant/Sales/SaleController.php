@@ -8,6 +8,7 @@ use App\Http\Controllers\Concerns\OffersDocumentBranch;
 use App\Http\Controllers\Controller;
 use App\Models\Account;
 use App\Models\Agent;
+use App\Models\Area;
 use App\Models\CompanySetting;
 use App\Models\Customer;
 use App\Models\FiscalYear;
@@ -108,7 +109,8 @@ class SaleController extends Controller
             // totals row always ties to what is actually on screen (audit
             // section 4 polish, "list ... totals row").
             'totals' => $this->filteredTotals($filters, $request),
-            'customers' => Customer::query()->orderBy('name')->get(['id', 'name', 'mobile_no']),
+            'customers' => Customer::query()->orderBy('name')->get(['id', 'name', 'mobile_no', 'area_id']),
+            'areas' => Area::options(),
             'items' => $this->itemsForPicker($stockDisplay),
             'itemCategories' => ItemCategory::query()->orderBy('name')->get(['id', 'name']),
             // What the picker's stock figures cover; null when not

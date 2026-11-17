@@ -4,6 +4,7 @@ import Input from '@/components/ui/Input.vue';
 import Combobox from '@/components/ui/Combobox.vue';
 import Modal from '@/components/ui/Modal.vue';
 import Label from '@/components/ui/Label.vue';
+import AreaSelect from '@/components/parties/AreaSelect.vue';
 
 defineProps({
     supplierOpen: { type: Boolean, default: false },
@@ -11,6 +12,7 @@ defineProps({
     itemOpen: { type: Boolean, default: false },
     itemForm: { type: Object, required: true },
     itemCategoryOptions: { type: Array, default: () => [] },
+    areas: { type: Array, default: () => [] },
 });
 
 defineEmits(['close-supplier', 'submit-supplier', 'close-item', 'submit-item']);
@@ -31,6 +33,12 @@ defineEmits(['close-supplier', 'submit-supplier', 'close-item', 'submit-item']);
                     <Input v-model="supplierForm.mobile_no" type="text" placeholder="98XXXXXXXX" />
                     <p v-if="supplierForm.errors.mobile_no" class="mt-1 text-sm text-danger">{{ supplierForm.errors.mobile_no }}</p>
                 </div>
+                <AreaSelect
+                    id="quick-supplier-area"
+                    v-model="supplierForm.area_id"
+                    :areas="areas"
+                    :error="supplierForm.errors.area_id"
+                />
             </form>
             <template #footer>
                 <Button variant="secondary" tone="purple" type="button" @click="$emit('close-supplier')">Cancel</Button>

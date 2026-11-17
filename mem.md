@@ -3,7 +3,35 @@
 Living state doc. Read this before starting work, update it before stopping. See `goal.md` for
 direction/roadmap - this file is "what exists and why," not "what's next."
 
-**2026-09-16 entry (newest - gap-audit-2026-09-11 CLOSED, all 4 phases committed).** This file had
+**2026-11-17 entry (Staff Ledger Integration, Quick-Add Customer/Supplier Area, Nav Labels, Staff Ledger Account under Salary Payable, Salary Payment Form Fix).**
+- **Staff Ledger Account under Salary Payable (`LIA22`):**
+  - Mirrored the Customer and Supplier pattern (`HasLedgerAccount`) on `StaffMember` (`hr_staff`).
+  - Added additive migration `database/migrations/tenant/2026_11_17_210000_add_account_id_to_hr_staff_table.php` adding `account_id` foreign key on `hr_staff` with `nullOnDelete()`, ensuring the `"Salary Payable"` subgroup exists under `"Current Liabilities"`, and backfilling existing staff records.
+  - Updated `App\Models\Concerns\HasLedgerAccount` to support `ledgerAccountParentCode(): ?string` (returning `HrAccounts::SALARY_PAYABLE`), creating accounts under the `"Salary Payable"` subgroup parented to `LIA22` (`Salary Payable`), while maintaining two-way sync on name/mobile_no/address and backward compatibility for `Customer`, `Supplier`, and `Agent`.
+  - Updated `App\Models\Account`'s `REFERENCES` array to include `'hr_staff' => 'account_id'`, preventing accidental deletion of accounts linked to active staff via `deletionBlocker()`.
+  - Updated `ChartOfAccountsSeeder` to include `['group' => 'Current Liabilities', 'name' => 'Salary Payable']` in starter subgroups.
+  - Feature test: `tests/Feature/Tenant/Hr/StaffLedgerAccountTest.php`.
+- **Payroll Salary Payment Fix:**
+  - Fixed Vue 3 Proxy reactivity issue in `resources/js/components/hr/SalaryPaymentForm.vue` where `Object.prototype.hasOwnProperty.call(allocationAmounts, line.id)` prevented tracking line selection. Replaced with `allocationAmounts[line.id] !== undefined` so checking/unchecking payslips reactively enables the "Record payment" button and recalculates totals.
+- **Staff Ledger Search & Unified Statement:**
+  - Staff members (`hr_staff`) do not possess individual rows in `accounts`, as payroll and advances post through control accounts `Salary Payable` (`LIA22`) and `Staff Advances Receivable` (`ASA24`).
+  - Added `App\Support\Hr\StaffStatementData` service to extract and unify per-staff ledger calculation (salary payable running balance, advance receivable running balance, and period opening/closing balances).
+  - Updated `AccountingReportController::ledger` to query `hr_staff`, return `staffList` to the frontend, and when `staff_id` is passed, calculate and provide staff salary and advance ledgers.
+  - Updated `AccountingReportController::ledgerPdf` and `ledgerExport` to support staff ledgers with dedicated PDF and Excel generation.
+  - Updated `Ledger.vue` (`resources/js/pages/Tenant/Reports/Ledger.vue`) to merge staff options into `targetOptions` (`acc-{id}` and `staff-{id}`), render a staff details banner with opening/closing balances, and show both Salary Payable and Staff Advance statement tables with BS dates.
+  - Updated `StaffStatement.vue` (`resources/js/pages/Tenant/Hr/Reports/StaffStatement.vue`) to include a staff switcher Combobox and a cross-navigation button to open the staff member directly in the General Ledger.
+  - Feature test: `tests/Feature/Tenant/Reports/StaffLedgerSearchTest.php`.
+- **Area Selection on Quick-Add Modals:**
+  - Added area dropdown (`AreaSelect`) to customer and supplier quick-add modal components: `SaleCreateCustomerModal.vue`, `PurchaseCreateModals.vue`, and `PosCustomerModal.vue`.
+  - Passed `areas` and accepted `area_id` across `SaleController`, `PurchaseController`, and `PosController`.
+  - Feature tests: `PurchaseQuickSupplierAreaTest.php`, `SaleQuickCustomerAreaTest.php`.
+- **Navigation Renaming:**
+  - Renamed primary sidebar navigation headers in `resources/js/lib/nav-items.js`:
+    - `SELL` -> `SALES`
+    - `BUY` -> `PURCHASE`
+    - `MONEY` -> `RECEIPTS & PAYMENTS`
+
+**2026-09-16 entry (gap-audit-2026-09-11 CLOSED, all 4 phases committed).** This file had
 gone stale relative to `todo/START.md`: the last several entries below never mention the gap/correctness
 audit that was, in fact, the dominant effort across this project's last several sessions. That audit is
 now fully done and committed. Treat everything below this entry as background/narrative history that may

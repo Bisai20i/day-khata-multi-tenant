@@ -18,7 +18,7 @@ const PENDING_ITEM_KEY = 'sales-create-pending-item';
 export function useSaleCreateCustomer(form, props, { stageItem } = {}) {
     const { toast } = useToast();
     const customerModalOpen = ref(false);
-    const customerForm = useForm({ name: '', mobile_no: '' });
+    const customerForm = useForm({ name: '', mobile_no: '', area_id: null });
 
     function openCustomerModal() {
         customerForm.reset();
@@ -33,7 +33,7 @@ export function useSaleCreateCustomer(form, props, { stageItem } = {}) {
     }
 
     function submitCustomer() {
-        const pendingCustomer = { name: customerForm.name, mobile_no: customerForm.mobile_no };
+        const pendingCustomer = { name: customerForm.name, mobile_no: customerForm.mobile_no, area_id: customerForm.area_id };
 
         customerForm.post('/customers', {
             onSuccess: () => {

@@ -2,6 +2,8 @@
 
 namespace App\Models;
 
+use App\Models\Concerns\HasLedgerAccount;
+use App\Support\Hr\HrAccounts;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
@@ -15,10 +17,9 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
  * the ones who do. Named StaffMember rather than Employee because "employees"
  * already means login users in routes/tenant-employees.php.
  *
- * The staff member has no ledger account of their own. What they are owed or
- * owe lives in the HR tables (payroll lines, payments, advances) against the
- * Salary Payable / Staff Advances Receivable control accounts - see
- * App\Support\Hr\StaffBalances and HrAccounts for why.
+ * Each staff member has their own ledger account under the "Salary Payable"
+ * subgroup, parented to the Salary Payable control account (LIA22). Created
+ * automatically on staff creation and kept in sync on update via HasLedgerAccount.
  *
  * `branch_id` is the staff member's home branch (NOT NULL, foreign key to
  * branches; plan 12, section 5.4): their payslip's expense, Salary Payable
@@ -32,12 +33,12 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
  * (balances, payroll locks) that must see every branch.
  */
 #[Fillable([
-    'staff_code', 'name', 'mobile_no', 'address', 'designation', 'department', 'join_date', 'end_date',
+    'staff_code', 'name', 'account_id', 'mobile_no', 'address', 'designation', 'department', 'join_date', 'end_date',
     'pan_no', 'bank_name', 'bank_account_no', 'user_id', 'is_active', 'branch_id',
 ])]
 class StaffMember extends Model
 {
-    use HasFactory;
+    use HasFactory, HasLedgerAccount;
 
     protected $table = 'hr_staff';
 
@@ -78,7 +79,18 @@ class StaffMember extends Model
             'end_date' => 'date:Y-m-d',
             'is_active' => 'boolean',
             'branch_id' => 'integer',
+            'account_id' => 'integer',
         ];
+    }
+
+    protected function ledgerAccountSubgroupName(): string
+    {
+        return 'Salary Payable';
+    }
+
+    protected function ledgerAccountParentCode(): ?string
+    {
+        return HrAccounts::SALARY_PAYABLE;
     }
 
     /**

@@ -6,6 +6,7 @@ use App\Enums\FiscalYearStatus;
 use App\Exports\PurchaseListExport;
 use App\Http\Controllers\Controller;
 use App\Models\Account;
+use App\Models\Area;
 use App\Models\Branch;
 use App\Models\CompanySetting;
 use App\Models\FiscalYear;
@@ -93,7 +94,8 @@ class PurchaseController extends Controller
             // (CONTRACTS C5); the page hides it for everyone else rather
             // than offering a 403.
             'canCancel' => (bool) $request->user()?->can('purchases.cancel'),
-            'suppliers' => Supplier::query()->orderBy('name')->get(['id', 'name', 'mobile_no', 'is_vat_registered']),
+            'suppliers' => Supplier::query()->orderBy('name')->get(['id', 'name', 'mobile_no', 'is_vat_registered', 'area_id']),
+            'areas' => Area::options(),
             // Inactive items are deliberately withheld: an item that has been
             // retired must not be purchasable again from the form, and showing
             // it only to have the post rejected is worse than not offering it.

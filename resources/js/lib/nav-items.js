@@ -96,7 +96,7 @@ export function navGroups() {
             items: [{ label: 'Dashboard', href: '/dashboard', icon: LayoutDashboard }],
         },
         {
-            label: 'SELL',
+            label: 'SALES',
             items: [
                 { label: 'POS', href: '/pos', icon: ScanBarcode, permission: 'pos.view' },
                 { label: 'Quotations', href: '/quotations', icon: FileSignature, permission: 'quotations.view' },
@@ -106,7 +106,7 @@ export function navGroups() {
             ],
         },
         {
-            label: 'BUY',
+            label: 'PURCHASE',
             items: [
                 { label: 'Purchases', href: '/purchases', icon: PackageSearch, permission: 'purchases.view' },
                 { label: 'Capital & Service', href: '/capital-purchases', icon: Wrench, permission: 'capital_purchases.view' },
@@ -114,7 +114,7 @@ export function navGroups() {
             ],
         },
         {
-            label: 'MONEY',
+            label: 'RECEIPTS & PAYMENTS',
             items: [
                 { label: 'Receipts', href: '/receipts', icon: Banknote, permission: 'receipts.view' },
                 { label: 'Payments', href: '/payments', icon: Wallet, permission: 'payments.view' },

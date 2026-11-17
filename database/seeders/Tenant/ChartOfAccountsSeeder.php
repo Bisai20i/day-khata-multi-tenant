@@ -95,6 +95,7 @@ class ChartOfAccountsSeeder extends Seeder
             ['group' => 'Current Assets', 'name' => 'Stock'],
             ['group' => 'Current Liabilities', 'name' => 'Sundry Creditors'],
             ['group' => 'Current Liabilities', 'name' => 'Sales Agents'],
+            ['group' => 'Current Liabilities', 'name' => 'Salary Payable'],
             ['group' => 'Capital Account', 'name' => 'Reserve Surplus'],
         ])->mapWithKeys(fn (array $subgroup) => [$subgroup['name'] => AccountSubgroup::create([
             'account_group_id' => $groups[$subgroup['group']]->id,

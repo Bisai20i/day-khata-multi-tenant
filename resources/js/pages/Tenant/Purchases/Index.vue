@@ -59,6 +59,7 @@ const props = defineProps({
     // Branch picker of the create form (BranchFormOptions::props()).
     branchOptions: { type: Array, default: () => [] },
     defaultBranchId: { type: Number, default: null },
+    areas: { type: Array, default: () => [] },
 });
 
 // Plan 12, BR12: a branch column only for a multi-branch company viewing all
@@ -421,6 +422,7 @@ const columns = [
                 :initial-draft="initialDraft"
                 :branch-options="branchOptions"
                 :default-branch-id="defaultBranchId"
+                :areas="areas"
                 @cancel="closeCreateForm"
                 @posted="closeCreateForm"
             />

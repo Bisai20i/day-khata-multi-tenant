@@ -6,6 +6,7 @@ use App\Enums\FiscalYearStatus;
 use App\Http\Controllers\Concerns\OffersDocumentBranch;
 use App\Http\Controllers\Controller;
 use App\Models\Account;
+use App\Models\Area;
 use App\Models\CompanySetting;
 use App\Models\Customer;
 use App\Models\FiscalYear;
@@ -75,7 +76,8 @@ class PosController extends Controller
         });
 
         return Inertia::render('Tenant/Sales/Pos', [
-            'customers' => Customer::query()->orderBy('name')->get(['id', 'name', 'mobile_no']),
+            'customers' => Customer::query()->orderBy('name')->get(['id', 'name', 'mobile_no', 'area_id']),
+            'areas' => Area::options(),
             'items' => $items,
             // What the tile badges cover; null when not multi-branch.
             'stockScope' => $stockDisplay->scope(),

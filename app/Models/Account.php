@@ -57,6 +57,7 @@ class Account extends Model
         'customers' => 'account_id',
         'suppliers' => 'account_id',
         'agents' => 'account_id',
+        'hr_staff' => 'account_id',
         'fixed_assets' => 'account_id',
         'items' => 'account_id',
         'purchase_lines' => 'account_id',

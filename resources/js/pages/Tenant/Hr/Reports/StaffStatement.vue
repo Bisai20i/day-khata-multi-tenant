@@ -4,18 +4,23 @@ import { Link, router, usePage } from '@inertiajs/vue3';
 import { ArrowLeft } from '@lucide/vue';
 import AppLayout from '@/layouts/AppLayout.vue';
 import { useLayoutChrome } from '@/composables/useLayoutChrome';
+import { usePermissions } from '@/composables/usePermissions';
 import Card from '@/components/ui/Card.vue';
 import PageHeader from '@/components/ui/PageHeader.vue';
 import NepaliDateInput from '@/components/ui/NepaliDateInput.vue';
 import Button from '@/components/ui/Button.vue';
 import Label from '@/components/ui/Label.vue';
+import Combobox from '@/components/ui/Combobox.vue';
 import { formatMoney } from '@/lib/money';
 import { formatBsDate } from '@/lib/format';
 
 defineOptions({ layout: AppLayout });
 
+const { can } = usePermissions();
+
 const props = defineProps({
     staff: { type: Object, required: true },
+    staffOptions: { type: Array, default: () => [] },
     filters: { type: Object, default: () => ({ from: null, to: null }) },
     openingSalary: { type: String, default: '0.00' },
     openingAdvance: { type: String, default: '0.00' },
@@ -84,6 +89,30 @@ function resetFilters() {
     applyFilter();
 }
 
+function onStaffChange(newStaffId) {
+    if (!newStaffId || Number(newStaffId) === Number(props.staff.id)) {
+        return;
+    }
+
+    const params = {};
+    if (from.value) {
+        params.from = from.value;
+    }
+    if (to.value) {
+        params.to = to.value;
+    }
+
+    router.get(`/hr/staff/${newStaffId}/statement`, params);
+}
+
+const formattedStaffOptions = computed(() =>
+    props.staffOptions.map((s) => ({
+        value: s.value ?? s.id,
+        label: s.label ?? (s.staff_code ? `${s.name} (${s.staff_code})` : s.name),
+        searchValue: s.searchValue ?? `${s.name ?? ''} ${s.staff_code ?? ''}`,
+    })),
+);
+
 const staffLine = computed(() =>
     [props.staff.staff_code, props.staff.designation, props.staff.department].filter(Boolean).join(' - '),
 );
@@ -122,6 +151,15 @@ const totalCellClass = 'border-y-[1.5px] border-border bg-primary-tint/40 px-[9p
 <template>
     <div>
         <PageHeader :title="`Staff Statement - ${staff.name}`" :description="staffLine">
+            <Button
+                v-if="can('account_ledger.view')"
+                :as="Link"
+                :href="`/reports/ledger?staff_id=${staff.id}`"
+                variant="secondary"
+                tone="purple"
+            >
+                View in General Ledger
+            </Button>
             <Button :as="Link" href="/hr/staff" variant="secondary" tone="purple">
                 <ArrowLeft class="h-[14px] w-[14px]" aria-hidden="true" />
                 Back to staff
@@ -130,6 +168,16 @@ const totalCellClass = 'border-y-[1.5px] border-border bg-primary-tint/40 px-[9p
 
         <Card variant="panel" class="mb-4">
             <div class="flex flex-wrap items-end gap-3">
+                <div v-if="formattedStaffOptions.length > 0" class="min-w-[220px] flex-1 sm:max-w-xs">
+                    <Label for="statement-staff" class="mb-1">Switch staff</Label>
+                    <Combobox
+                        id="statement-staff"
+                        :model-value="staff.id"
+                        :options="formattedStaffOptions"
+                        placeholder="Search staff..."
+                        @update:model-value="onStaffChange"
+                    />
+                </div>
                 <div>
                     <Label for="statement-from" class="mb-1">From date (BS)</Label>
                     <NepaliDateInput id="statement-from" v-model="from" />

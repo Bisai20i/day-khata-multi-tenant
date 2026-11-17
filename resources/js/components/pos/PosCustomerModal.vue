@@ -5,6 +5,7 @@ import Button from '@/components/ui/Button.vue';
 import Input from '@/components/ui/Input.vue';
 import Modal from '@/components/ui/Modal.vue';
 import Label from '@/components/ui/Label.vue';
+import AreaSelect from '@/components/parties/AreaSelect.vue';
 
 /**
  * Quick "+ New customer" modal. Reuses the existing POST /customers endpoint
@@ -12,10 +13,13 @@ import Label from '@/components/ui/Label.vue';
  * route); on success it emits `created` with the submitted name/mobile so the
  * page can bounce back to /pos and auto-select the new customer.
  */
+const props = defineProps({
+    areas: { type: Array, default: () => [] },
+});
 const open = defineModel('open', { type: Boolean, default: false });
 const emit = defineEmits(['created']);
 
-const customerForm = useForm({ name: '', mobile_no: '' });
+const customerForm = useForm({ name: '', mobile_no: '', area_id: null });
 
 watch(open, () => {
     customerForm.reset();
@@ -27,7 +31,7 @@ function closeModal() {
 }
 
 function submitCustomer() {
-    const pending = { name: customerForm.name, mobile_no: customerForm.mobile_no };
+    const pending = { name: customerForm.name, mobile_no: customerForm.mobile_no, area_id: customerForm.area_id };
 
     customerForm.post('/customers', {
         onSuccess: () => emit('created', pending),
@@ -48,6 +52,12 @@ function submitCustomer() {
                 <Input v-model="customerForm.mobile_no" type="text" placeholder="98XXXXXXXX" />
                 <p v-if="customerForm.errors.mobile_no" class="mt-1 text-sm text-danger">{{ customerForm.errors.mobile_no }}</p>
             </div>
+            <AreaSelect
+                id="pos-customer-area"
+                v-model="customerForm.area_id"
+                :areas="areas"
+                :error="customerForm.errors.area_id"
+            />
         </form>
         <template #footer>
             <Button variant="secondary" tone="purple" type="button" @click="closeModal">Cancel</Button>
