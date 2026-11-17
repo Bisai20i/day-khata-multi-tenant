@@ -16,9 +16,7 @@ import {
     History,
     LayoutDashboard,
     Landmark,
-    Layers,
     Library,
-    ListTree,
     MapPin,
     Megaphone,
     NotebookPen,
@@ -44,6 +42,7 @@ import {
     Undo2,
     UserCog,
     Users,
+    Upload,
     Wallet,
     Wrench,
     ArrowLeftRight,
@@ -126,6 +125,7 @@ export function navGroups() {
             label: 'INVENTORY',
             items: [
                 { label: 'Items', href: '/items', icon: Package, permission: 'items.view' },
+                { label: 'Import Opening Stock', href: '/stock-adjustments?import=true', icon: Upload, permission: 'opening_stock.import' },
                 { label: 'Stock Adjustments', href: '/stock-adjustments', icon: ClipboardPen, permission: 'stock_adjustments.view' },
                 { label: 'Stock Transfers', href: '/stock-transfers', icon: ArrowLeftRight, permission: 'stock_transfers.view' },
                 { label: 'Refining & Repackaging', href: '/stock-conversions', icon: Replace, permission: 'stock_conversions.view' },
@@ -160,7 +160,7 @@ export function navGroups() {
         {
             label: 'ACCOUNTING',
             items: [
-                { label: 'Accounts', href: '/accounts', icon: BookOpen, permission: 'accounts.view' },
+                { label: 'Chart of Accounts', href: '/accounts', aliases: ['/account-groups', '/account-subgroups'], icon: BookOpen, permission: 'accounts.view' },
                 { label: 'Fiscal Years', href: '/fiscal-years', icon: CalendarRange, permission: 'fiscal_year.view' },
                 { label: 'Fixed Assets', href: '/fixed-assets', icon: HandCoins, permission: 'fixed_assets.view' },
             ],
@@ -174,6 +174,7 @@ export function navGroups() {
                 // Any-of: the hub is useful to anyone who can open at least one report.
                 { label: 'All reports', href: '/reports', icon: FileText, permissions: reportPermissions(), exact: true },
                 { label: 'Ledger', href: '/reports/ledger', icon: Library, permission: 'account_ledger.view' },
+                { label: 'Item Ledger', href: '/reports/item-ledger', icon: Package, permission: 'stock_reports.view' },
                 { label: 'Sales Register', href: '/reports/sales-register', icon: TrendingUp, permission: 'sales_reports.view' },
                 { label: 'Stock Summary', href: '/reports/stock-summary', icon: Boxes, permission: 'stock_reports.view' },
                 { label: 'VAT Summary', href: '/reports/vat-summary', icon: Receipt, permission: 'tax_reports.view' },
@@ -190,8 +191,6 @@ export function navGroups() {
                         { label: 'Item Subcategories', href: '/item-subcategories', icon: Tag, permission: 'item_categories.view' },
                         { label: 'Item Varieties', href: '/item-varieties', icon: Shapes, permission: 'item_varieties.view' },
                         { label: 'Brands', href: '/brands', icon: Award, permission: 'brands.view' },
-                        { label: 'Account Groups', href: '/account-groups', icon: Layers, permission: 'accounts.view' },
-                        { label: 'Account Subgroups', href: '/account-subgroups', icon: ListTree, permission: 'accounts.view' },
                     ],
                 },
                 {

@@ -17,6 +17,7 @@ import Label from '@/components/ui/Label.vue';
 import { useToast } from '@/composables/useToast';
 import { useConfirm } from '@/composables/useConfirm';
 import { usePermissions } from '@/composables/usePermissions';
+import ChartOfAccountsTabs from '@/components/accounting/ChartOfAccountsTabs.vue';
 
 defineOptions({ layout: AppLayout });
 
@@ -33,7 +34,7 @@ const props = defineProps({
 
 const page = usePage();
 const { can } = usePermissions();
-useLayoutChrome('Account Subgroups');
+useLayoutChrome('Chart of Accounts');
 
 const { toast } = useToast();
 const { confirm } = useConfirm();
@@ -44,7 +45,14 @@ onMounted(() => {
     }
 });
 
-const groupOptions = computed(() => props.groups.map((group) => ({ value: group.id, label: group.name })));
+const groupOptions = computed(() =>
+    props.groups.map((group) => ({
+        value: group.id,
+        label: group.account_head?.name ? `${group.account_head.name} › ${group.name}` : group.name,
+    })),
+);
+
+const selectedGroupHead = computed(() => props.groups.find((g) => g.id === form.account_group_id)?.account_head?.name);
 
 const showModal = ref(false);
 const editing = ref(null);
@@ -112,13 +120,25 @@ async function destroy(subgroup) {
 }
 
 const columns = [
-    { accessorKey: 'name', header: 'Subgroup Name' },
+    {
+        id: 'sn',
+        header: 'SN',
+        numeric: false,
+        cell: ({ row }) => h('span', { class: 'text-xs text-text-muted font-medium' }, String(row.index + 1)),
+    },
+    {
+        id: 'head',
+        header: 'Account Head',
+        numeric: false,
+        cell: ({ row }) => row.original.account_group?.account_head?.name ?? '-',
+    },
     {
         id: 'group',
-        header: 'Account Group',
+        header: 'Group',
         numeric: false,
         cell: ({ row }) => row.original.account_group?.name ?? '-',
     },
+    { accessorKey: 'name', header: 'Subgroup' },
     {
         id: 'actions',
         header: '',
@@ -140,12 +160,14 @@ const columns = [
 
 <template>
     <div>
-        <PageHeader title="Account Subgroups" description="Finer divisions inside an account group (for example Bank Accounts under Current Assets). Individual accounts are placed in a subgroup.">
+        <PageHeader title="Chart of Accounts" description="Finer divisions inside an account group (for example Bank Accounts under Current Assets). Individual accounts are placed in a subgroup.">
             <Button v-if="can('accounts.create')" variant="primary" tone="purple" @click="openCreate">
                 <Plus class="size-4" />
                 New subgroup
             </Button>
         </PageHeader>
+
+        <ChartOfAccountsTabs current="subgroups" />
 
         <Card variant="panel" class="bg-white">
             <div v-if="subgroups.length === 0" class="flex flex-col items-center gap-3 py-10 text-center">
@@ -173,6 +195,10 @@ const columns = [
                         placeholder="Select account group"
                     />
                     <p v-if="form.errors.account_group_id" class="mt-1 text-sm text-danger">{{ form.errors.account_group_id }}</p>
+                </div>
+
+                <div v-if="selectedGroupHead" class="border border-border bg-bg-subtle px-3 py-2 text-xs text-text-muted">
+                    Account Head: <strong class="font-semibold text-text-strong">{{ selectedGroupHead }}</strong>
                 </div>
 
                 <div>

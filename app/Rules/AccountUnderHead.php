@@ -19,7 +19,8 @@ use Illuminate\Contracts\Validation\ValidationRule;
  */
 class AccountUnderHead implements ValidationRule
 {
-    public function __construct(private readonly string $head) {}
+    /** @param string|list<string> $head */
+    public function __construct(private readonly string|array $head) {}
 
     public function validate(string $attribute, mixed $value, Closure $fail): void
     {
@@ -27,15 +28,18 @@ class AccountUnderHead implements ValidationRule
             return;
         }
 
+        $heads = (array) $this->head;
+
         $underHead = Account::query()
             ->whereKey($value)
             ->where(fn ($query) => $query
-                ->whereHas('group.accountHead', fn ($q) => $q->where('name', $this->head))
-                ->orWhereHas('subgroup.accountGroup.accountHead', fn ($q) => $q->where('name', $this->head)))
+                ->whereHas('group.accountHead', fn ($q) => $q->whereIn('name', $heads))
+                ->orWhereHas('subgroup.accountGroup.accountHead', fn ($q) => $q->whereIn('name', $heads)))
             ->exists();
 
         if (! $underHead) {
-            $fail("The selected :attribute must be an account under {$this->head}.");
+            $headNames = implode(' or ', $heads);
+            $fail("The selected :attribute must be an account under {$headNames}.");
 
             return;
         }

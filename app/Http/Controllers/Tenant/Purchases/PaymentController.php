@@ -14,6 +14,7 @@ use App\Support\Branches\BranchFormOptions;
 use App\Support\Branches\BranchListFilter;
 use App\Support\Money\Money;
 use Illuminate\Auth\Access\AuthorizationException;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Carbon;
@@ -41,14 +42,14 @@ class PaymentController extends Controller
                 ->paginate(25)
                 ->withQueryString(),
             'suppliers' => Supplier::query()->orderBy('name')->get(['id', 'name']),
-            // Money leaves through an asset account, so the bank picker only
-            // offers accounts filed under Assets rather than the whole chart,
-            // less the inter-branch control accounts AccountUnderHead refuses
-            // (BranchAccounts).
+            // Balance sheet accounts money can leave through (Assets, Liabilities, Capital),
+            // excluding party ledgers and inter-branch control accounts.
             'bankAccounts' => BranchAccounts::exclude(Account::query())
-                ->where(fn ($query) => $query
-                    ->whereHas('group.accountHead', fn ($q) => $q->where('name', 'Assets'))
-                    ->orWhereHas('subgroup.accountGroup.accountHead', fn ($q) => $q->where('name', 'Assets')))
+                ->where(function (Builder $query) {
+                    $query->whereHas('group.accountHead', fn (Builder $head) => $head->where('is_profit_and_loss', false))
+                        ->orWhereHas('subgroup.accountGroup.accountHead', fn (Builder $head) => $head->where('is_profit_and_loss', false));
+                })
+                ->whereDoesntHave('subgroup', fn (Builder $subgroup) => $subgroup->whereIn('name', ['Sundry Debtors', 'Sundry Creditors', 'Sales Agents']))
                 ->orderBy('name')
                 ->get(['id', 'code', 'name']),
             // Only for the supplier being paid, and only when the form asks
@@ -69,7 +70,7 @@ class PaymentController extends Controller
             'date' => ['required', 'date'],
             'amount' => ['required', 'numeric', 'min:0.01', 'decimal:0,2'],
             'payment_mode' => ['required', 'in:cash,bank'],
-            'bank_account_id' => ['nullable', 'exists:accounts,id', new AccountUnderHead('Assets')],
+            'bank_account_id' => ['nullable', 'exists:accounts,id', new AccountUnderHead(['Assets', 'Liabilities', 'Capital'])],
             'reference_number' => ['nullable', 'string', 'max:255'],
             'narration' => ['nullable', 'string', 'max:255'],
             // Where the money went out (plan 12, BR07); Payment::post()

@@ -17,6 +17,7 @@ import Label from '@/components/ui/Label.vue';
 import { useToast } from '@/composables/useToast';
 import { useConfirm } from '@/composables/useConfirm';
 import { usePermissions } from '@/composables/usePermissions';
+import ChartOfAccountsTabs from '@/components/accounting/ChartOfAccountsTabs.vue';
 
 defineOptions({ layout: AppLayout });
 
@@ -33,7 +34,7 @@ const props = defineProps({
 
 const page = usePage();
 const { can } = usePermissions();
-useLayoutChrome('Account Groups');
+useLayoutChrome('Chart of Accounts');
 
 const { toast } = useToast();
 const { confirm } = useConfirm();
@@ -112,13 +113,19 @@ async function destroy(group) {
 }
 
 const columns = [
-    { accessorKey: 'name', header: 'Group Name' },
+    {
+        id: 'sn',
+        header: 'SN',
+        numeric: false,
+        cell: ({ row }) => h('span', { class: 'text-xs text-text-muted font-medium' }, String(row.index + 1)),
+    },
     {
         id: 'head',
         header: 'Account Head',
         numeric: false,
         cell: ({ row }) => row.original.account_head?.name ?? '-',
     },
+    { accessorKey: 'name', header: 'Group Name' },
     {
         id: 'actions',
         header: '',
@@ -140,12 +147,14 @@ const columns = [
 
 <template>
     <div>
-        <PageHeader title="Account Groups" description="Top-level categories that organise your chart of accounts. Each group sits under an account head and can be split into subgroups.">
+        <PageHeader title="Chart of Accounts" description="Top-level categories that organise your chart of accounts. Each group sits under an account head and can be split into subgroups.">
             <Button v-if="can('accounts.create')" variant="primary" tone="purple" @click="openCreate">
                 <Plus class="size-4" />
                 New group
             </Button>
         </PageHeader>
+
+        <ChartOfAccountsTabs current="groups" />
 
         <Card variant="panel" class="bg-white">
             <div v-if="groups.length === 0" class="flex flex-col items-center gap-3 py-10 text-center">

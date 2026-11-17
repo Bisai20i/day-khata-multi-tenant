@@ -10,7 +10,6 @@ import Combobox from '@/components/ui/Combobox.vue';
 import InfoTip from '@/components/ui/InfoTip.vue';
 import NepaliDateInput from '@/components/ui/NepaliDateInput.vue';
 import Label from '@/components/ui/Label.vue';
-import BranchSelect from '@/components/branch/BranchSelect.vue';
 import BranchBadge from '@/components/branch/BranchBadge.vue';
 import { useBranchField } from '@/composables/useBranchField';
 import { compareMoney, formatMoney, parseMoney, sumMoney } from '@/lib/money';
@@ -180,9 +179,8 @@ function submit() {
                     <Label class="mb-1">Amount paid (Rs.) <span class="text-danger">*</span></Label>
                     <Input v-model="form.amount" type="number" min="0.01" step="0.01" placeholder="0.00" required />
                     <p v-if="form.errors.amount" class="mt-1 text-sm text-danger">{{ form.errors.amount }}</p>
-                    <p v-if="!showPicker && form.errors.branch_id" class="mt-1 text-sm text-danger" role="alert">{{ form.errors.branch_id }}</p>
+                    <p v-if="form.errors.branch_id" class="mt-1 text-sm text-danger" role="alert">{{ form.errors.branch_id }}</p>
                 </div>
-                <BranchSelect v-model="branchId" :options="branchOptions" :error="form.errors.branch_id" />
                 <div>
                     <Label class="mb-1">Paid by <span class="text-danger">*</span></Label>
                     <Select

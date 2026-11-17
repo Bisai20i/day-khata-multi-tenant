@@ -2,6 +2,7 @@
 
 declare(strict_types=1);
 
+use App\Http\Controllers\Tenant\Inventory\ItemLedgerController;
 use App\Http\Controllers\Tenant\Reports\InventoryReportController;
 use Illuminate\Support\Facades\Route;
 
@@ -19,4 +20,5 @@ use Illuminate\Support\Facades\Route;
 
 Route::name('tenant.reports.')->prefix('reports')->group(function () {
     Route::get('/stock-summary', [InventoryReportController::class, 'stockSummary'])->middleware('can:stock_reports.view')->name('stock-summary');
+    Route::get('/item-ledger', [ItemLedgerController::class, 'index'])->middleware('can:stock_reports.view')->name('item-ledger');
 });

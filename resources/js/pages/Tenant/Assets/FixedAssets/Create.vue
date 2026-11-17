@@ -9,7 +9,6 @@ import Combobox from '@/components/ui/Combobox.vue';
 import InfoTip from '@/components/ui/InfoTip.vue';
 import NepaliDateInput from '@/components/ui/NepaliDateInput.vue';
 import Label from '@/components/ui/Label.vue';
-import BranchSelect from '@/components/branch/BranchSelect.vue';
 import { useBranchField } from '@/composables/useBranchField';
 
 const props = defineProps({
@@ -150,10 +149,13 @@ function submit() {
             This asset was already owned before this system went live (no payment, register its opening cost)
         </label>
 
+        <p v-if="form.errors.branch_id" class="mb-4 border-[1.5px] border-danger bg-danger-bg px-3 py-2 text-sm text-danger" role="alert">
+            {{ form.errors.branch_id }}
+        </p>
+
         <form class="flex flex-col gap-4" @submit.prevent="submit">
             <Card variant="panel" class="!p-4">
                 <div class="grid grid-cols-1 gap-4 md:grid-cols-3">
-                    <BranchSelect v-model="branchId" :options="branchOptions" :error="form.errors.branch_id" />
                     <div>
                         <Label class="mb-1">Asset Name <span class="text-danger">*</span></Label>
                         <Input v-model="form.asset_name" type="text" placeholder="e.g. Office Laptop" required />

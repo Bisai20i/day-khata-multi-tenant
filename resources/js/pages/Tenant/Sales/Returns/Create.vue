@@ -17,7 +17,6 @@ import { useSaleReturnCreateSalePicker } from '@/composables/useSaleReturnCreate
 import { useSaleReturnCreateUnlinked } from '@/composables/useSaleReturnCreateUnlinked';
 import { addMoney, formatMoney, moneyEquals, parseMoney } from '@/lib/money';
 import { todayInKathmandu } from '@/lib/format';
-import BranchSelect from '@/components/branch/BranchSelect.vue';
 import BranchBadge from '@/components/branch/BranchBadge.vue';
 import { useDocumentBranchStore } from '@/composables/useDocumentBranchStore';
 
@@ -296,7 +295,7 @@ function submit() {
         <p v-if="form.errors.expected_total" class="mb-4 border-[1.5px] border-danger bg-danger-bg px-3 py-2 text-sm text-danger">
             {{ form.errors.expected_total }}
         </p>
-        <p v-if="!showBranchPicker && form.errors.branch_id" class="mb-4 border-[1.5px] border-danger bg-danger-bg px-3 py-2 text-sm text-danger" role="alert">
+        <p v-if="form.errors.branch_id" class="mb-4 border-[1.5px] border-danger bg-danger-bg px-3 py-2 text-sm text-danger" role="alert">
             {{ form.errors.branch_id }}
         </p>
 
@@ -392,10 +391,6 @@ function submit() {
                     </div>
                 </Card>
             </template>
-
-            <div v-if="showBranchPicker" class="sm:max-w-sm">
-                <BranchSelect v-model="branchId" :options="branchOptions" :error="form.errors.branch_id" />
-            </div>
 
             <SaleReturnCreateUnlinkedFields
                 v-if="isUnlinked"

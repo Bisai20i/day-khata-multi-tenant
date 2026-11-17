@@ -46,6 +46,15 @@ Development in this repo follows a strict two-tier hierarchy:
   - `mem.md`, `goal.md`, and master status tracking.
 - **Rules:** The coordinator never writes heavy feature logic directly; it reviews combined diffs and makes logical, per-task git commits with explicit file lists (never `git add -A`).
 
+### Dual-Speed Execution Model
+To ensure maximum speed without sacrificing safety or architectural integrity:
+- **Fast-Path (Direct Surgical Fixes):**
+  - **Triggers:** Isolated UI tweaks, text/copy changes, styling/CSS, single-component fixes, or minor bug corrections (≤ 2 files).
+  - **Execution:** The Coordinator executes the fix directly in 1 turn using targeted file tools (`read_file`, `edit_file`) followed by syntax verification (`php -l` or pint if applicable). Zero subagent overhead.
+- **Deep-Path (Worker Dispatch):**
+  - **Triggers:** Financial/ledger math, database migrations, state machines, concurrency, or multi-file features (3+ files).
+  - **Execution:** The Coordinator plans, decomposes into disjoint file ownership, and dispatches Tier 2 subagents (`@SCAFFOLDER`, `@BUILDER`, `@BUILDER-HIGH`, `@REVIEWER`).
+
 ### Tier 2: Subagents (@SCAFFOLDER, @BUILDER, @BUILDER-HIGH, @REVIEWER)
 Workers never touch shared junction files. If a worker needs a route registered, a nav item added, or a config changed, it specifies the exact change as a **Cross-File Request** in its final report.
 

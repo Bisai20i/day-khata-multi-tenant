@@ -123,6 +123,8 @@ Route::name('tenant.')->group(function () {
         // Bulk "mark vatable" (item 6 of T13) - not nested under {item} for
         // the same reason as barcode-labels.print above.
         Route::post('/mark-vatable', [ItemController::class, 'markVatable'])->middleware('can:items.edit')->name('mark-vatable');
+        Route::post('/mark-non-vatable', [ItemController::class, 'markNonVatable'])->middleware('can:items.edit')->name('mark-non-vatable');
+        Route::post('/mark-inactive', [ItemController::class, 'markInactive'])->middleware('can:items.edit')->name('mark-inactive');
         // Per-unit barcode scan (item 6 of T13): Sales/Create, Pos.vue and
         // Purchases/Create call this to resolve a scanned code to an item +
         // (optionally) a specific alternate unit. Gated items.view, not

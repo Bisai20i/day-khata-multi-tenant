@@ -10,7 +10,6 @@ import NepaliDateInput from '@/components/ui/NepaliDateInput.vue';
 import Label from '@/components/ui/Label.vue';
 import { calculateDocument, formatMoney } from '@/lib/money';
 import { todayInKathmandu } from '@/lib/format';
-import BranchSelect from '@/components/branch/BranchSelect.vue';
 import BranchBadge from '@/components/branch/BranchBadge.vue';
 import { useBranchField } from '@/composables/useBranchField';
 
@@ -165,7 +164,7 @@ function submit() {
         <p v-if="form.errors.expected_total" class="mb-4 border-[1.5px] border-danger bg-danger-bg px-3 py-2 text-sm text-danger">
             {{ form.errors.expected_total }}
         </p>
-        <p v-if="(quotation || !showPicker) && form.errors.branch_id" class="mb-4 border-[1.5px] border-danger bg-danger-bg px-3 py-2 text-sm text-danger" role="alert">
+        <p v-if="form.errors.branch_id" class="mb-4 border-[1.5px] border-danger bg-danger-bg px-3 py-2 text-sm text-danger" role="alert">
             {{ form.errors.branch_id }}
         </p>
 
@@ -189,9 +188,6 @@ function submit() {
                 <div>
                     <Label class="mb-1">Reference #</Label>
                     <Input v-model="form.reference_number" type="text" placeholder="Optional" />
-                </div>
-                <div v-if="!quotation && showPicker">
-                    <BranchSelect v-model="branchId" :options="branchOptions" :error="form.errors.branch_id" />
                 </div>
             </Card>
 

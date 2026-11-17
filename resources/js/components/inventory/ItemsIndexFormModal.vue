@@ -16,7 +16,7 @@ import { usePermissions } from '@/composables/usePermissions';
 import { useStockScopeLabel } from '@/composables/useStockScopeLabel';
 import { generateItemBarcode } from '@/lib/barcode.js';
 import { findCreatedByName, hasAnyError, hasAnyValue } from '@/lib/formModal.js';
-import { formatQuantity } from '@/lib/money.js';
+import { formatQuantity, rateExcludingVat, rateIncludingVat } from '@/lib/money.js';
 
 const props = defineProps({
     categories: {
@@ -273,6 +273,48 @@ function invalid(field) {
     return form.errors[field] ? 'true' : undefined;
 }
 
+function onSaleRateInput(value) {
+    form.sale_rate = value;
+    if (value === '' || value === null || value === undefined) {
+        return;
+    }
+    const vatRate = form.is_vatable ? '13' : '0';
+    const result = rateIncludingVat(value, vatRate, 2);
+    if (result.ok) {
+        form.mrp = result.value;
+    }
+}
+
+function onMrpInput(value) {
+    form.mrp = value;
+    if (value === '' || value === null || value === undefined) {
+        return;
+    }
+    const vatRate = form.is_vatable ? '13' : '0';
+    const result = rateExcludingVat(value, vatRate, 2);
+    if (result.ok) {
+        form.sale_rate = result.value;
+    }
+}
+
+watch(
+    () => form.is_vatable,
+    (isVatable) => {
+        const vatRate = isVatable ? '13' : '0';
+        if (form.sale_rate !== '' && form.sale_rate !== null && form.sale_rate !== undefined) {
+            const result = rateIncludingVat(form.sale_rate, vatRate, 2);
+            if (result.ok) {
+                form.mrp = result.value;
+            }
+        } else if (form.mrp !== '' && form.mrp !== null && form.mrp !== undefined) {
+            const result = rateExcludingVat(form.mrp, vatRate, 2);
+            if (result.ok) {
+                form.sale_rate = result.value;
+            }
+        }
+    },
+);
+
 defineExpose({ openCreate, openEdit });
 </script>
 
@@ -404,26 +446,28 @@ defineExpose({ openCreate, openEdit });
                     <FormField v-slot="{ describedBy }" label="Sale rate" for="item-sale-rate" :error="form.errors.sale_rate">
                         <Input
                             id="item-sale-rate"
-                            v-model="form.sale_rate"
+                            :model-value="form.sale_rate"
                             type="number"
                             step="0.01"
                             min="0"
                             placeholder="0.00"
                             :aria-describedby="describedBy"
                             :aria-invalid="invalid('sale_rate')"
+                            @update:model-value="onSaleRateInput"
                         />
                     </FormField>
 
                     <FormField v-slot="{ describedBy }" label="MRP" for="item-mrp" :error="form.errors.mrp">
                         <Input
                             id="item-mrp"
-                            v-model="form.mrp"
+                            :model-value="form.mrp"
                             type="number"
                             step="0.01"
                             min="0"
                             placeholder="Optional"
                             :aria-describedby="describedBy"
                             :aria-invalid="invalid('mrp')"
+                            @update:model-value="onMrpInput"
                         />
                     </FormField>
                 </div>

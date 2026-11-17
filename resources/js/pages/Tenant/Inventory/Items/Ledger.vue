@@ -6,6 +6,7 @@ import { useLayoutChrome } from '@/composables/useLayoutChrome';
 import PageHeader from '@/components/ui/PageHeader.vue';
 import Card from '@/components/ui/Card.vue';
 import Select from '@/components/ui/Select.vue';
+import Combobox from '@/components/ui/Combobox.vue';
 import Button from '@/components/ui/Button.vue';
 import InfoTip from '@/components/ui/InfoTip.vue';
 import NepaliDateInput from '@/components/ui/NepaliDateInput.vue';
@@ -24,9 +25,13 @@ defineOptions({ layout: AppLayout });
 const { can } = usePermissions();
 
 const props = defineProps({
+    items: {
+        type: Array,
+        default: () => [],
+    },
     item: {
-        type: Object,
-        required: true,
+        type: [Object, null],
+        default: null,
     },
     stores: {
         type: Array,
@@ -63,7 +68,7 @@ const props = defineProps({
     },
 });
 
-useLayoutChrome(() => `Item Ledger - ${props.item.name}`);
+useLayoutChrome(() => (props.item ? `Item Ledger - ${props.item.name}` : 'Item Ledger'));
 
 // Stock is not reset at year end, so unlike the account ledger there is no
 // fiscal year picker: the window is any date range, and the backend works
@@ -71,6 +76,14 @@ useLayoutChrome(() => `Item Ledger - ${props.item.name}`);
 const from = ref(props.from);
 const to = ref(props.to);
 const storeId = ref(props.storeId);
+const selectedItemId = ref(props.item?.id ?? null);
+
+const itemOptions = computed(() =>
+    props.items.map((i) => ({
+        value: i.id,
+        label: i.barcode ? `${i.name} (${i.barcode})` : i.name,
+    })),
+);
 
 // The server drops a store outside the chosen branches; follow what it applied.
 watch(
@@ -79,6 +92,12 @@ watch(
         storeId.value = props.storeId;
     },
 );
+
+watch(selectedItemId, (newItemId) => {
+    if (newItemId && newItemId !== props.item?.id) {
+        applyFilters();
+    }
+});
 
 const branchFilter = useBranchReportFilter(() => props.branchReport);
 
@@ -93,6 +112,7 @@ const storeOptions = computed(() => [
 
 function filterParams() {
     return {
+        item_id: selectedItemId.value ?? undefined,
         from: from.value ?? undefined,
         to: to.value ?? undefined,
         store_id: storeId.value ?? undefined,
@@ -100,7 +120,7 @@ function filterParams() {
 }
 
 function applyFilters() {
-    router.get(window.location.pathname, { ...filterParams(), ...branchFilter.toQuery() }, { preserveState: true, preserveScroll: true });
+    router.get('/reports/item-ledger', { ...filterParams(), ...branchFilter.toQuery() }, { preserveState: true, preserveScroll: true });
 }
 
 function clearFilters() {
@@ -111,14 +131,15 @@ function clearFilters() {
 }
 
 function fileUrl(suffix) {
+    if (!props.item?.id) return '#';
     const params = new URLSearchParams(
-        Object.entries(filterParams()).filter(([, value]) => value !== undefined),
+        Object.entries(filterParams()).filter(([key, value]) => value !== undefined && key !== 'item_id'),
     );
     branchFilter.appendTo(params);
-    return `${window.location.pathname}/${suffix}?${params.toString()}`;
+    return `/items/${props.item.id}/ledger/${suffix}?${params.toString()}`;
 }
 
-const unitSuffix = computed(() => (props.item.unit ? ` ${props.item.unit}` : ''));
+const unitSuffix = computed(() => (props.item?.unit ? ` ${props.item.unit}` : ''));
 
 // Quantities arrive as exact 4-decimal strings (the running balance is
 // accumulated with App\Support\Money\Quantity on the server); the page only
@@ -160,10 +181,10 @@ const columns = [
 <template>
     <div>
         <PageHeader
-            :title="`Item Ledger: ${item.name}`"
+            :title="item ? `Item Ledger: ${item.name}` : 'Item Ledger'"
             description="Every stock movement for this item, with a running balance. Narrow to a date range or a single store."
-            back-href="/items"
-            back-label="Back to items"
+            back-href="/reports"
+            back-label="Back to reports"
         >
             <BranchReportFilter
                 v-if="branchReport"
@@ -173,12 +194,16 @@ const columns = [
                 hide-label
                 @change="applyFilters"
             />
-            <a v-if="can('stock_reports.print')" :href="fileUrl('print')" target="_blank" rel="noopener"><Button variant="secondary" tone="purple">Print ledger</Button></a>
-            <a v-if="can('stock_reports.export')" :href="fileUrl('export')"><Button variant="secondary" tone="purple">Export ledger</Button></a>
+            <a v-if="item && can('stock_reports.print')" :href="fileUrl('print')" target="_blank" rel="noopener"><Button variant="secondary" tone="purple">Print ledger</Button></a>
+            <a v-if="item && can('stock_reports.export')" :href="fileUrl('export')"><Button variant="secondary" tone="purple">Export ledger</Button></a>
         </PageHeader>
 
         <Card variant="panel" class="mb-4">
             <div class="flex flex-wrap items-end gap-3">
+                <div v-if="items.length > 0" class="w-64">
+                    <Label class="mb-1">Item</Label>
+                    <Combobox v-model="selectedItemId" :options="itemOptions" placeholder="Select item" />
+                </div>
                 <div>
                     <div class="mb-1 flex items-center gap-1">
                         <Label>From date</Label>
@@ -200,15 +225,21 @@ const columns = [
             <BranchReportNotes v-if="branchReport" :report="branchReport" hide-label />
         </Card>
 
-        <Card variant="panel" class="mb-4">
-            <div class="flex flex-wrap justify-end gap-6 text-[13px]">
-                <div><span class="text-text-muted">Opening balance:</span> <span class="font-semibold tabular-nums">{{ formatQuantity(openingBalance) }}{{ unitSuffix }}</span></div>
-                <div><span class="text-text-muted">Closing balance:</span> <span class="font-semibold tabular-nums">{{ formatQuantity(closingBalance) }}{{ unitSuffix }}</span></div>
-            </div>
+        <Card v-if="!item" variant="panel" class="py-12 text-center text-text-muted">
+            <p class="text-sm">No item selected. Please select an item above to view its stock ledger.</p>
         </Card>
 
-        <Card variant="panel">
-            <DataTable :columns="columns" :data="entries" :page-size="25" empty-message="No stock movements in this period. Try a wider date range or another store." />
-        </Card>
+        <template v-else>
+            <Card variant="panel" class="mb-4">
+                <div class="flex flex-wrap justify-end gap-6 text-[13px]">
+                    <div><span class="text-text-muted">Opening balance:</span> <span class="font-semibold tabular-nums">{{ formatQuantity(openingBalance) }}{{ unitSuffix }}</span></div>
+                    <div><span class="text-text-muted">Closing balance:</span> <span class="font-semibold tabular-nums">{{ formatQuantity(closingBalance) }}{{ unitSuffix }}</span></div>
+                </div>
+            </Card>
+
+            <Card variant="panel">
+                <DataTable :columns="columns" :data="entries" :page-size="25" empty-message="No stock movements in this period. Try a wider date range or another store." />
+            </Card>
+        </template>
     </div>
 </template>

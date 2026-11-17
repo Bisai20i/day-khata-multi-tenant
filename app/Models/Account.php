@@ -11,7 +11,7 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Support\Facades\DB;
 use InvalidArgumentException;
 
-#[Fillable(['account_group_id', 'account_subgroup_id', 'code', 'name', 'phone', 'address'])]
+#[Fillable(['account_group_id', 'account_subgroup_id', 'code', 'name', 'phone', 'address', 'parent_account_id'])]
 class Account extends Model
 {
     use HasFactory;
@@ -90,6 +90,10 @@ class Account extends Model
     {
         if ($this->isSystemAccount() || in_array($this->getOriginal('code'), self::SEEDED_CODES, true)) {
             return 'This is a default system account the ledger depends on and cannot be deleted.';
+        }
+
+        if ($this->exists && $this->subAccounts()->exists()) {
+            return 'This account has sub-accounts and cannot be deleted.';
         }
 
         // ANY line counts - posted, cancelled or reversed, any fiscal year,
@@ -171,12 +175,73 @@ class Account extends Model
         });
 
         static::saving(function (self $account): void {
+            if ($account->parent_account_id !== null) {
+                if ((int) $account->parent_account_id === (int) $account->id || in_array((int) $account->parent_account_id, $account->allSubAccountIds(), true)) {
+                    throw new InvalidArgumentException('An account cannot have itself or one of its sub-accounts as parent.');
+                }
+            }
+
             if (($account->account_group_id === null) === ($account->account_subgroup_id === null)) {
                 throw new InvalidArgumentException(
                     'An account must belong to exactly one of account_group_id or account_subgroup_id.'
                 );
             }
         });
+    }
+
+    /**
+     * The parent account this sub-account belongs to, if any.
+     *
+     * @return BelongsTo<Account, $this>
+     */
+    public function parent(): BelongsTo
+    {
+        return $this->belongsTo(Account::class, 'parent_account_id');
+    }
+
+    /**
+     * Direct sub-accounts belonging to this account.
+     *
+     * @return HasMany<Account, $this>
+     */
+    public function subAccounts(): HasMany
+    {
+        return $this->hasMany(Account::class, 'parent_account_id');
+    }
+
+    /**
+     * IDs of all direct and nested sub-accounts.
+     *
+     * @return list<int>
+     */
+    public function allSubAccountIds(): array
+    {
+        if (! $this->exists) {
+            return [];
+        }
+
+        $ids = [];
+        $queue = $this->subAccounts()->pluck('id')->map(fn ($id): int => (int) $id)->all();
+
+        while (! empty($queue)) {
+            $currentId = array_shift($queue);
+            if (! in_array($currentId, $ids, true)) {
+                $ids[] = $currentId;
+                $children = static::query()
+                    ->where('parent_account_id', $currentId)
+                    ->pluck('id')
+                    ->map(fn ($id): int => (int) $id)
+                    ->all();
+
+                foreach ($children as $childId) {
+                    if (! in_array($childId, $ids, true) && ! in_array($childId, $queue, true)) {
+                        $queue[] = $childId;
+                    }
+                }
+            }
+        }
+
+        return $ids;
     }
 
     /**

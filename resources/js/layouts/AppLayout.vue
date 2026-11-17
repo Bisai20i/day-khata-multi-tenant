@@ -86,29 +86,9 @@ const canManageSettings = computed(() => {
     return Boolean(page.props.auth?.can?.['settings.manage']);
 });
 
-function isActive(href, exact = false) {
-    const path = page.url.split('?')[0];
-    return path === href || (!exact && href !== '/' && path.startsWith(`${href}/`));
-}
-
 function toTitleCase(text) {
     return text.toLowerCase().replace(/\b\w/g, (character) => character.toUpperCase());
 }
-
-/**
- * Tenant-only breadcrumb prefix: the label of the nav section containing the
- * active page (e.g. "Transactions"), or null when nothing matches.
- */
-const sectionPrefix = computed(() => {
-    if (isPlatformAdmin.value || !page.props.auth?.user) return null;
-    for (const section of sections.value) {
-        const items = section.categories ? section.categories.flatMap((category) => category.items) : section.items;
-        if (section.label && items.some((item) => isActive(item.href, item.exact))) return toTitleCase(section.label);
-    }
-    // Reports without a sidebar link of their own still belong under Reports.
-    if (page.url.split('?')[0].startsWith('/reports')) return 'Reports';
-    return null;
-});
 
 const searchInput = ref(null);
 
@@ -298,7 +278,7 @@ function selectActiveCommand() {
 
             <SidebarNav :sections="sections" :accordion="!isPlatformAdmin" />
 
-            <div class="flex shrink-0 items-center gap-2.5 border-t border-border px-4 py-4">
+            <div class="flex shrink-0 items-center gap-2.5 border-t border-border px-3.5 py-3">
                 <div class="flex size-8 shrink-0 items-center justify-center rounded-full bg-primary-tint text-sm font-bold text-primary">
                     {{ currentPrincipal?.name?.charAt(0)?.toUpperCase() }}
                 </div>
@@ -328,14 +308,6 @@ function selectActiveCommand() {
                         <Menu class="size-5" />
                     </button>
                     <h1 class="min-w-0 truncate text-sm font-bold text-text-strong">
-                        <template v-if="isPlatformAdmin">
-                            <span class="hidden font-semibold text-text-muted sm:inline">Platform Admin</span>
-                            <span class="hidden px-1.5 text-text-faint sm:inline" aria-hidden="true">/</span>
-                        </template>
-                        <template v-if="sectionPrefix && sectionPrefix !== chrome.title">
-                            <span class="hidden font-semibold text-text-muted sm:inline">{{ sectionPrefix }}</span>
-                            <span class="hidden px-1.5 text-text-faint sm:inline" aria-hidden="true">/</span>
-                        </template>
                         {{ chrome.title }}
                     </h1>
                 </div>

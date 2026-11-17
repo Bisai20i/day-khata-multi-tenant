@@ -27,7 +27,7 @@ const props = defineProps({
     holdScans: { type: Boolean, default: false },
 });
 
-const emit = defineEmits(['add']);
+const emit = defineEmits(['add', 'add-item']);
 
 const stagingLine = ref(emptyPurchaseLine());
 const stagingLineEl = ref(null);
@@ -238,7 +238,19 @@ defineExpose({ stage, focusItem });
                     :options="itemOptions"
                     placeholder="Search item"
                     @update:model-value="selectStagingItem"
-                />
+                >
+                    <template v-if="can('items.create')" #addon>
+                        <button
+                            type="button"
+                            class="flex items-center justify-center text-text-muted hover:text-primary"
+                            aria-label="Add new item"
+                            title="Add new item"
+                            @click="emit('add-item')"
+                        >
+                            <Plus class="h-3.5 w-3.5" />
+                        </button>
+                    </template>
+                </Combobox>
             </div>
             <div>
                 <Label class="mb-1">Unit</Label>

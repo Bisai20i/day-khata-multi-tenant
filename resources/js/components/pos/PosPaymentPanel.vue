@@ -8,7 +8,6 @@ import Combobox from '@/components/ui/Combobox.vue';
 import Label from '@/components/ui/Label.vue';
 import { addMoney, formatMoney } from '@/lib/money';
 import { usePermissions } from '@/composables/usePermissions';
-import BranchSelect from '@/components/branch/BranchSelect.vue';
 
 /**
  * Payment area, bottom half of the POS right-hand side: payment grid with
@@ -88,9 +87,7 @@ const { can } = usePermissions();
                 </div>
             </div>
 
-            <div v-if="branchOptions.length > 1" class="mb-2.5">
-                <BranchSelect v-model="branchId" :options="branchOptions" :error="form.errors.branch_id" />
-            </div>
+            <p v-if="form.errors.branch_id" class="mb-2 text-sm text-danger" role="alert">{{ form.errors.branch_id }}</p>
 
             <!-- Legacy's fixed 2x2 layout: Cash | Bank / Note | Bank account -->
             <div class="pos-pay-fields grid gap-2.5">

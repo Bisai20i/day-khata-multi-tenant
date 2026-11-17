@@ -126,6 +126,16 @@ watch(
     },
 );
 
+watch(
+    () => page.url,
+    (url) => {
+        if (url.includes('import=true') && can('opening_stock.import')) {
+            openImport();
+        }
+    },
+    { immediate: true },
+);
+
 function openImport() {
     importForm.reset();
     importForm.date = todayInKathmandu();
@@ -140,6 +150,9 @@ function closeImportModal() {
     importForm.date = todayInKathmandu();
     importForm.clearErrors();
     importResult.value = null;
+    if (page.url.includes('import=true')) {
+        router.replace('/stock-adjustments');
+    }
 }
 
 function onImportModalOpenChange(value) {

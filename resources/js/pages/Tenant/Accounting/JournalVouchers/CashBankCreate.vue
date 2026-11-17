@@ -10,7 +10,6 @@ import Select from '@/components/ui/Select.vue';
 import NepaliDateInput from '@/components/ui/NepaliDateInput.vue';
 import InfoTip from '@/components/ui/InfoTip.vue';
 import Label from '@/components/ui/Label.vue';
-import BranchSelect from '@/components/branch/BranchSelect.vue';
 import { useBranchField } from '@/composables/useBranchField';
 import JournalVoucherTotalsBar from '@/components/accounting/JournalVoucherTotalsBar.vue';
 import { useConfirm } from '@/composables/useConfirm';
@@ -198,11 +197,13 @@ function submit(print = false) {
     <p v-if="form.errors.lines" class="mb-4 border-[1.5px] border-danger bg-danger-bg px-3 py-2 text-sm text-danger">
         {{ form.errors.lines }}
     </p>
+    <p v-if="form.errors.branch_id" class="mb-4 border-[1.5px] border-danger bg-danger-bg px-3 py-2 text-sm text-danger" role="alert">
+        {{ form.errors.branch_id }}
+    </p>
 
     <form class="flex flex-1 flex-col gap-4" @submit.prevent="submit(false)">
         <Card variant="panel" class="!p-4">
-            <div class="grid grid-cols-1 gap-4" :class="showPicker ? 'sm:grid-cols-4' : 'sm:grid-cols-3'">
-                <BranchSelect v-model="branchId" :options="branchOptions" :error="form.errors.branch_id" />
+            <div class="grid grid-cols-1 gap-4 sm:grid-cols-3">
                 <div>
                     <div class="mb-1 flex items-center gap-1">
                         <Label>Voucher type <span class="text-danger" aria-hidden="true">*</span></Label>

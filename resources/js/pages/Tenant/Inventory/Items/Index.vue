@@ -1,6 +1,6 @@
 <script setup>
 import { computed, h, ref, watch } from 'vue';
-import { router, useForm, usePage } from '@inertiajs/vue3';
+import { Link, router, useForm, usePage } from '@inertiajs/vue3';
 import AppLayout from '@/layouts/AppLayout.vue';
 import { useLayoutChrome } from '@/composables/useLayoutChrome';
 import PageHeader from '@/components/ui/PageHeader.vue';
@@ -235,18 +235,30 @@ function toggleSelectAll() {
     }
 }
 
-const markVatableForm = useForm({ item_ids: [] });
+const bulkActionForm = useForm({ item_ids: [] });
 
-function markSelectedVatable() {
+function runBulkAction(url) {
     if (selectedItemIds.value.length === 0) return;
 
-    markVatableForm.item_ids = [...selectedItemIds.value];
-    markVatableForm.post('/items/mark-vatable', {
+    bulkActionForm.item_ids = [...selectedItemIds.value];
+    bulkActionForm.post(url, {
         preserveScroll: true,
         onSuccess: () => {
             selectedItemIds.value = [];
         },
     });
+}
+
+function markSelectedVatable() {
+    runBulkAction('/items/mark-vatable');
+}
+
+function markSelectedNonVatable() {
+    runBulkAction('/items/mark-non-vatable');
+}
+
+function markSelectedInactive() {
+    runBulkAction('/items/mark-inactive');
 }
 
 const { can } = usePermissions();
@@ -535,16 +547,48 @@ function moreActionsFor(item) {
                     </button>
                 </div>
 
-                <div v-if="can('items.import') || selectedItemIds.length > 0" class="ml-auto flex items-center gap-2">
+                <div v-if="can('items.import') || can('opening_stock.import') || selectedItemIds.length > 0" class="ml-auto flex flex-wrap items-center gap-2">
+                    <div v-if="selectedItemIds.length > 0" class="flex flex-wrap items-center gap-1.5">
+                        <span class="text-xs font-semibold text-text-muted">{{ selectedItemIds.length }} selected:</span>
+                        <Button
+                            variant="secondary"
+                            tone="neutral"
+                            type="button"
+                            :disabled="bulkActionForm.processing"
+                            @click="markSelectedVatable"
+                        >
+                            Mark vatable
+                        </Button>
+                        <Button
+                            variant="secondary"
+                            tone="neutral"
+                            type="button"
+                            :disabled="bulkActionForm.processing"
+                            @click="markSelectedNonVatable"
+                        >
+                            Mark non-vatable
+                        </Button>
+                        <Button
+                            v-if="activeTab !== 'inactive'"
+                            variant="secondary"
+                            tone="danger"
+                            type="button"
+                            :disabled="bulkActionForm.processing"
+                            @click="markSelectedInactive"
+                        >
+                            Mark inactive
+                        </Button>
+                    </div>
                     <Button
-                        v-if="selectedItemIds.length > 0"
+                        v-if="can('opening_stock.import')"
                         variant="secondary"
                         tone="neutral"
                         type="button"
-                        :disabled="markVatableForm.processing"
-                        @click="markSelectedVatable"
+                        :as="Link"
+                        href="/stock-adjustments?import=true"
                     >
-                        Mark {{ selectedItemIds.length }} vatable
+                        <Upload class="size-4" />
+                        Import opening stock
                     </Button>
                     <Button v-if="can('items.import')" variant="secondary" tone="neutral" type="button" @click="openImport">
                         <Upload class="size-4" />

@@ -47,10 +47,33 @@ const props = defineProps({
     class: { type: [String, Array, Object], default: '' },
 });
 
-const pageSizeOptions = computed(() => {
+const ALL_SIZE = 9999999;
+
+const numericSizes = computed(() => {
     const base = [10, 25, 50, 100];
-    return base.includes(props.pageSize) ? base : [props.pageSize, ...base].sort((a, b) => a - b);
+    if (props.pageSize && props.pageSize < ALL_SIZE && !base.includes(props.pageSize)) {
+        return [props.pageSize, ...base].sort((a, b) => a - b);
+    }
+    return base;
 });
+
+const isAllSelected = computed(() => {
+    const current = table.atoms.pagination.get().pageSize;
+    return current >= ALL_SIZE;
+});
+
+const pageSizeDisplay = computed(() => {
+    return isAllSelected.value ? 'All' : `${table.atoms.pagination.get().pageSize} / page`;
+});
+
+function changePageSize(size) {
+    if (size === 'all') {
+        table.setPageSize(ALL_SIZE);
+        table.setPageIndex(0);
+    } else {
+        table.setPageSize(size);
+    }
+}
 
 const hasRows = computed(() => props.data.length > 0);
 
@@ -192,7 +215,7 @@ function onHeaderKeydown(event, column) {
                         <DropdownMenuTrigger
                             class="inline-flex items-center gap-1 border-[1.5px] border-border bg-white px-2 py-1 text-xs font-semibold text-text-muted outline-none transition-colors duration-150 ease-out hover:border-primary hover:text-primary"
                         >
-                            {{ table.atoms.pagination.get().pageSize }} / page
+                            {{ pageSizeDisplay }}
                             <ChevronDown class="h-3 w-3" />
                         </DropdownMenuTrigger>
                         <DropdownMenuPortal>
@@ -202,12 +225,18 @@ function onHeaderKeydown(event, column) {
                                 class="z-50 min-w-[7rem] border-[1.5px] border-border bg-white p-1 shadow-[0_8px_24px_rgba(0,0,0,.12)]"
                             >
                                 <DropdownMenuItem
-                                    v-for="size in pageSizeOptions"
+                                    v-for="size in numericSizes"
                                     :key="size"
                                     class="cursor-pointer px-2 py-1.5 text-xs font-medium text-text-base outline-none select-none data-[highlighted]:bg-primary-tint data-[highlighted]:text-primary"
-                                    @select="table.setPageSize(size)"
+                                    @select="changePageSize(size)"
                                 >
                                     {{ size }} / page
+                                </DropdownMenuItem>
+                                <DropdownMenuItem
+                                    class="cursor-pointer px-2 py-1.5 text-xs font-medium text-text-base outline-none select-none data-[highlighted]:bg-primary-tint data-[highlighted]:text-primary"
+                                    @select="changePageSize('all')"
+                                >
+                                    All
                                 </DropdownMenuItem>
                             </DropdownMenuContent>
                         </DropdownMenuPortal>

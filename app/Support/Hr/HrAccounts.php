@@ -112,8 +112,16 @@ class HrAccounts
             ->where(fn (Builder $query) => $query
                 ->whereHas('group.accountHead', fn (Builder $head) => $head->where('name', 'Assets'))
                 ->orWhereHas('subgroup.accountGroup.accountHead', fn (Builder $head) => $head->where('name', 'Assets')))
-            ->where(fn (Builder $query) => $query->whereNull('code')->orWhereNotIn('code', [...self::CONTROL_CODES, ...BranchAccounts::CONTROL_CODES]))
-            ->whereDoesntHave('subgroup', fn (Builder $subgroup) => $subgroup->whereIn('name', SaleController::PARTY_SUBGROUPS))
+            ->where(fn (Builder $query) => $query->whereNull('code')->orWhereNotIn('code', [
+                ...self::CONTROL_CODES,
+                ...BranchAccounts::CONTROL_CODES,
+                'AS11', 'AS12', 'AS13', 'AS14', 'ASA23', 'AS31',
+            ]))
+            ->whereDoesntHave('group', fn (Builder $group) => $group->where('name', 'Fixed Assets'))
+            ->whereDoesntHave('subgroup', fn (Builder $subgroup) => $subgroup->whereIn('name', [
+                ...SaleController::PARTY_SUBGROUPS,
+                'Stock',
+            ]))
             ->orderBy('name')
             ->get(['id', 'code', 'name']);
     }

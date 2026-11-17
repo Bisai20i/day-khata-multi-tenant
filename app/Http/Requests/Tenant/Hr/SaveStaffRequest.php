@@ -49,6 +49,7 @@ class SaveStaffRequest extends FormRequest
             'bank_account_no' => ['nullable', 'string', 'max:100'],
             'user_id' => ['nullable', 'integer', 'exists:users,id', Rule::unique('hr_staff', 'user_id')->ignore($staff?->id)],
             'is_active' => ['sometimes', 'boolean'],
+            'add_another' => ['sometimes', 'boolean'],
             // Home branch (plan 12, BR09). Existence, active and access are
             // checked by StaffController through DocumentBranch, which knows
             // the actor; missing means the actor's posting branch on create

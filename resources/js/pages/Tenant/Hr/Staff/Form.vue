@@ -1,5 +1,5 @@
 <script setup>
-import { computed, watch } from 'vue';
+import { computed, ref, watch } from 'vue';
 import { Link, useForm, usePage } from '@inertiajs/vue3';
 import { Check, Plus, Trash2 } from '@lucide/vue';
 import AppLayout from '@/layouts/AppLayout.vue';
@@ -81,6 +81,7 @@ function initialData() {
 }
 
 const form = useForm(initialData());
+const addAnother = ref(false);
 
 // Create redirects to the edit page of the same component; if Inertia keeps the
 // component instance, re-seed the form from the fresh props.
@@ -151,12 +152,22 @@ function submit() {
 
                 return { pay_component_id: row.pay_component_id, amount: parsed.ok ? parsed.value : row.amount };
             }),
+            ...(!isEdit.value ? { add_another: addAnother.value } : {}),
         };
 
         return isEdit.value ? { ...payload, is_active: isActive } : payload;
     });
 
-    form[method](url, { preserveScroll: true });
+    form[method](url, {
+        preserveScroll: true,
+        onSuccess: () => {
+            if (!isEdit.value && addAnother.value) {
+                form.defaults(initialData());
+                form.reset();
+                form.clearErrors();
+            }
+        },
+    });
 }
 
 function discard() {
@@ -329,6 +340,10 @@ function discard() {
             </fieldset>
 
             <FormActions class="mt-auto" :status="form.isDirty ? 'Unsaved changes' : ''" :emphasize="form.isDirty">
+                <label v-if="!isEdit" class="mr-auto inline-flex items-center gap-2 text-xs text-text-muted cursor-pointer">
+                    <input v-model="addAnother" type="checkbox" class="size-4 border-[1.5px] border-border" />
+                    Add another
+                </label>
                 <Button v-if="canSave" variant="secondary" tone="neutral" type="button" :disabled="!form.isDirty || form.processing" @click="discard">Discard</Button>
                 <Button :as="Link" href="/hr/staff" variant="secondary" tone="neutral">Back to list</Button>
                 <Button v-if="canSave" variant="primary" tone="purple" type="submit" :loading="form.processing" :disabled="form.processing">

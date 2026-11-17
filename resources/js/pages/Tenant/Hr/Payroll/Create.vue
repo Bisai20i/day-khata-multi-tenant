@@ -9,7 +9,6 @@ import Button from '@/components/ui/Button.vue';
 import Input from '@/components/ui/Input.vue';
 import NepaliDateInput from '@/components/ui/NepaliDateInput.vue';
 import Label from '@/components/ui/Label.vue';
-import BranchSelect from '@/components/branch/BranchSelect.vue';
 import { useBranchField } from '@/composables/useBranchField';
 
 defineOptions({ layout: AppLayout });
@@ -77,18 +76,15 @@ function submit() {
         <form class="flex flex-1 flex-col gap-4" @submit.prevent="submit">
             <Card variant="panel" class="!p-4">
                 <div class="grid grid-cols-1 gap-4 sm:grid-cols-2">
-                    <template v-if="showPicker">
-                        <BranchSelect v-model="branchId" :options="branchOptions" :error="form.errors.branch_id" />
-                        <label class="flex items-center gap-2 self-end pb-2 text-sm text-text-base">
-                            <input v-model="form.all_branches" type="checkbox" class="size-4" />
-                            Include staff of every branch (each payslip stays in its staff member's branch)
-                        </label>
-                    </template>
+                    <label v-if="showPicker" class="flex items-center gap-2 self-end pb-2 text-sm text-text-base sm:col-span-2">
+                        <input v-model="form.all_branches" type="checkbox" class="size-4" />
+                        Include staff of every branch (each payslip stays in its staff member's branch)
+                    </label>
                     <div>
                         <Label class="mb-1">Period label <span class="text-danger" aria-hidden="true">*</span></Label>
                         <Input v-model="form.period_label" type="text" maxlength="100" placeholder="e.g. Kartik 2083" required />
                         <p v-if="form.errors.period_label" class="mt-1 text-sm text-danger" role="alert">{{ form.errors.period_label }}</p>
-                        <p v-if="!showPicker && form.errors.branch_id" class="mt-1 text-sm text-danger" role="alert">{{ form.errors.branch_id }}</p>
+                        <p v-if="form.errors.branch_id" class="mt-1 text-sm text-danger" role="alert">{{ form.errors.branch_id }}</p>
                     </div>
                     <div>
                         <Label class="mb-1">Voucher date (BS) <span class="text-danger" aria-hidden="true">*</span></Label>

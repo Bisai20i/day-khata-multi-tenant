@@ -5,6 +5,7 @@ namespace App\Models;
 use App\Casts\Decimal;
 use App\Enums\VoucherType;
 use App\Models\Concerns\BelongsToBranch;
+use App\Support\Branches\BranchAccounts;
 use App\Support\Branches\BranchContext;
 use App\Support\Branches\BranchRuleViolation;
 use App\Support\Branches\DocumentBranch;
@@ -14,6 +15,7 @@ use App\Support\SettlementNarration;
 use Carbon\CarbonImmutable;
 use Illuminate\Auth\Access\AuthorizationException;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
@@ -197,7 +199,7 @@ class Receipt extends Model
                 // Only a cash/bank account may be debited as the "bank", and
                 // never the customer's own ledger account (SAL-02).
                 if ($settlementAccountId === (int) $customer->account_id
-                    || ! SalesReturn::refundAccountQuery()->whereKey($settlementAccountId)->exists()) {
+                    || ! static::settlementAccountQuery()->whereKey($settlementAccountId)->exists()) {
                     throw new InvalidArgumentException('A receipt can only be banked into a cash or bank account.');
                 }
             } else {
@@ -460,5 +462,22 @@ class Receipt extends Model
 
             $this->setRawAttributes($receipt->getAttributes(), true);
         });
+    }
+
+    /**
+     * Eligible accounts that money can be banked into (balance sheet accounts,
+     * excluding party ledgers and inter-branch control codes).
+     *
+     * @return Builder<Account>
+     */
+    public static function settlementAccountQuery(): Builder
+    {
+        return Account::query()
+            ->where(function (Builder $query) {
+                $query->whereHas('group.accountHead', fn (Builder $head) => $head->where('is_profit_and_loss', false))
+                    ->orWhereHas('subgroup.accountGroup.accountHead', fn (Builder $head) => $head->where('is_profit_and_loss', false));
+            })
+            ->whereDoesntHave('subgroup', fn (Builder $subgroup) => $subgroup->whereIn('name', ['Sundry Debtors', 'Sundry Creditors', 'Sales Agents']))
+            ->where(fn (Builder $query) => $query->whereNull('code')->orWhereNotIn('code', BranchAccounts::CONTROL_CODES));
     }
 }

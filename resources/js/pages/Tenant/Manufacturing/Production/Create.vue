@@ -10,7 +10,6 @@ import Input from '@/components/ui/Input.vue';
 import Combobox from '@/components/ui/Combobox.vue';
 import Select from '@/components/ui/Select.vue';
 import Label from '@/components/ui/Label.vue';
-import BranchSelect from '@/components/branch/BranchSelect.vue';
 import { useBranchField } from '@/composables/useBranchField';
 import NepaliDateInput from '@/components/ui/NepaliDateInput.vue';
 import IssueNoteLines from '@/components/manufacturing/IssueNoteLines.vue';
@@ -145,8 +144,7 @@ function submit() {
 
         <form class="flex flex-1 flex-col gap-4" @submit.prevent="submit">
             <Card variant="panel" class="!p-4">
-                <div class="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
-                    <BranchSelect v-model="branchId" :options="branchOptions" :error="form.errors.branch_id" />
+                <div class="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
                     <div>
                         <Label class="mb-1">Date (BS) <span class="text-danger" aria-hidden="true">*</span></Label>
                         <NepaliDateInput v-model="form.date" required />
@@ -156,7 +154,7 @@ function submit() {
                         <Label class="mb-1">Store <span class="text-danger" aria-hidden="true">*</span></Label>
                         <Combobox :model-value="form.store_id" :options="storeOptions" placeholder="Select store" @update:model-value="(v) => (form.store_id = v)" />
                         <p v-if="form.errors.store_id" class="mt-1 text-sm text-danger" role="alert">{{ form.errors.store_id }}</p>
-                        <p v-if="!showPicker && form.errors.branch_id" class="mt-1 text-sm text-danger" role="alert">{{ form.errors.branch_id }}</p>
+                        <p v-if="form.errors.branch_id" class="mt-1 text-sm text-danger" role="alert">{{ form.errors.branch_id }}</p>
                     </div>
                     <div>
                         <Label class="mb-1">Finished good <span class="text-danger" aria-hidden="true">*</span></Label>

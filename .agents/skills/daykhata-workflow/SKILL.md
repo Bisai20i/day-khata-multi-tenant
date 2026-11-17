@@ -14,19 +14,29 @@ This skill guides the AI assistant in operating as a disciplined **Coordinator**
 
 ## 1. Operating Protocol Overview
 
-Development is split into 4 iterative stages:
+Development follows a **Dual-Speed Triage Model**:
 
 ```mermaid
-flowchart LR
-    A["1. Plan & Scope<br/>(Coordinator)"] --> B["2. Scaffold Boilerplate<br/>(@scaffolder)"]
-    B --> C["3. Surgical Build<br/>(@builder / @builder-high)"]
-    C --> D["4. Wire & Gate Review<br/>(Coordinator / @reviewer)"]
-    D --> E["5. Developer Verification<br/>(User Action)"]
+flowchart TD
+    Issue["Incoming Issue / Task"] --> Triage{"Scope & Risk Assessment"}
+    
+    Triage -- "Surgical Fix (≤ 2 files)<br/>UI tweaks, copy, CSS, simple bug" --> Fast["⚡ Fast-Path (Direct Fix)<br/>1. Targeted read_file<br/>2. Direct edit_file<br/>3. Syntax check & immediate report<br/>⏱ Turnaround: ~30s"]
+    
+    Triage -- "Architectural / Multi-file<br/>Ledger math, DB migrations, 3+ files" --> Deep["🏗️ Deep-Path (Worker Dispatch)<br/>1. Plan & Scope (@orchestrator)<br/>2. Scaffold (@scaffolder)<br/>3. Surgical Build (@builder / @builder-high)<br/>4. Review & Gate (@reviewer)"]
 ```
 
 ---
 
 ## 2. Step-by-Step Execution Guide
+
+### Fast-Path: Direct Surgical Fixes
+For small bugs, label updates, styling adjustments, or single-file changes:
+1. Coordinator locates target file using targeted search or direct path.
+2. Applies edits directly with `edit_file`.
+3. Verifies PHP syntax (`php -l`) or formatting if applicable.
+4. Reports diff and verification instructions immediately (turnaround < 1 minute).
+
+### Deep-Path: Multi-Agent Feature Development
 
 ### Stage 1: Plan & Scope (Coordinator)
 1. **Context Ingestion:** Skim `mem.md` for living architecture and `plans/` for the relevant specification.

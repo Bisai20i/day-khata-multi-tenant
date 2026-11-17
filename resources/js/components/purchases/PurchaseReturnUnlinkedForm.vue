@@ -12,7 +12,6 @@ import NepaliDateInput from '@/components/ui/NepaliDateInput.vue';
 import Label from '@/components/ui/Label.vue';
 import { addMoney, formatMoney, formatQuantity, moneyEquals, parseMoney } from '@/lib/money';
 import { todayInKathmandu } from '@/lib/format';
-import BranchSelect from '@/components/branch/BranchSelect.vue';
 import { useBranchField } from '@/composables/useBranchField';
 import {
     blankUnlinkedLine,
@@ -292,12 +291,12 @@ function submit() {
             {{ form.errors.lines ?? form.errors.expected_total }}
         </p>
         <!-- A branch refusal when there is no picker to show it on (plan 12). -->
-        <p v-if="!showPicker && form.errors.branch_id" class="border-[1.5px] border-danger bg-danger-bg px-3 py-2 text-sm text-danger" role="alert">
+        <p v-if="form.errors.branch_id" class="border-[1.5px] border-danger bg-danger-bg px-3 py-2 text-sm text-danger" role="alert">
             {{ form.errors.branch_id }}
         </p>
 
         <Card variant="panel" class="!p-4">
-        <div class="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-5">
+        <div class="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
             <div>
                 <Label class="mb-1">Return date (BS) <span class="text-danger">*</span></Label>
                 <NepaliDateInput v-model="form.date" required />
@@ -308,7 +307,6 @@ function submit() {
                 <Combobox :model-value="form.supplier_id" :options="supplierOptions" placeholder="Optional" @update:model-value="(v) => (form.supplier_id = v)" />
                 <p v-if="form.errors.supplier_id" class="mt-1 text-sm text-danger">{{ form.errors.supplier_id }}</p>
             </div>
-            <BranchSelect v-model="branchId" :options="branchOptions" :error="form.errors.branch_id" />
             <div>
                 <Label class="mb-1">Store</Label>
                 <Combobox :model-value="form.store_id" :options="storeOptions" placeholder="Default store" @update:model-value="(v) => (form.store_id = v)" />

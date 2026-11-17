@@ -9,8 +9,8 @@ use App\Models\ActivityLog;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
-use Illuminate\Validation\ValidationException;
 use Illuminate\Validation\Rule;
+use Illuminate\Validation\ValidationException;
 use Inertia\Inertia;
 use Inertia\Response;
 
@@ -19,8 +19,8 @@ class AccountSubgroupController extends Controller
     public function index(): Response
     {
         return Inertia::render('Tenant/Accounting/AccountSubgroups/Index', [
-            'groups' => AccountGroup::query()->orderBy('name')->get(['id', 'name']),
-            'subgroups' => AccountSubgroup::query()->with('accountGroup:id,name')->orderBy('name')->get(),
+            'groups' => AccountGroup::query()->with('accountHead:id,name')->orderBy('name')->get(['id', 'account_head_id', 'name']),
+            'subgroups' => AccountSubgroup::query()->with(['accountGroup.accountHead:id,name', 'accountGroup:id,account_head_id,name'])->orderBy('name')->get(),
         ]);
     }
 

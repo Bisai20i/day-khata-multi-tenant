@@ -9,7 +9,6 @@ import Select from '@/components/ui/Select.vue';
 import Combobox from '@/components/ui/Combobox.vue';
 import NepaliDateInput from '@/components/ui/NepaliDateInput.vue';
 import Label from '@/components/ui/Label.vue';
-import BranchSelect from '@/components/branch/BranchSelect.vue';
 import BranchBadge from '@/components/branch/BranchBadge.vue';
 import { useBranchField } from '@/composables/useBranchField';
 import { addMoney, compareMoney, formatMoney, isZeroMoney, parseMoney } from '@/lib/money';
@@ -220,9 +219,8 @@ function submit() {
                         Enter an amount with at most 2 decimals.
                     </p>
                     <p v-if="form.errors.amount" class="mt-1 text-sm text-danger" role="alert">{{ form.errors.amount }}</p>
-                    <p v-if="!showPicker && form.errors.branch_id" class="mt-1 text-sm text-danger" role="alert">{{ form.errors.branch_id }}</p>
+                    <p v-if="form.errors.branch_id" class="mt-1 text-sm text-danger" role="alert">{{ form.errors.branch_id }}</p>
                 </div>
-                <BranchSelect v-model="branchId" :options="branchOptions" :error="form.errors.branch_id" />
                 <div>
                     <Label class="mb-1">Payment mode <span class="text-danger">*</span></Label>
                     <Select

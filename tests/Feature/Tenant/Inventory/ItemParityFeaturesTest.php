@@ -1,8 +1,10 @@
 <?php
 
+use App\Enums\StockMovementType;
 use App\Models\Item;
 use App\Models\ItemCategory;
 use App\Models\ItemUnit;
+use App\Models\Store;
 use App\Models\Tenant;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -171,6 +173,72 @@ test('bulk mark vatable requires at least one item id', function () {
     $this->post("http://{$domain}/items/mark-vatable", [
         'item_ids' => [],
     ])->assertSessionHasErrors('item_ids');
+
+    $tenant->delete();
+});
+
+test('bulk mark non-vatable updates exactly the selected items', function () {
+    $domain = 'item-bulk-mark-non-vatable.tenant-test';
+    $tenant = provisionItemParityTestTenant($domain);
+
+    $itemAId = null;
+    $itemBId = null;
+    $itemCId = null;
+    $tenant->run(function () use (&$itemAId, &$itemBId, &$itemCId) {
+        User::factory()->create(['email' => 'owner@example.com']);
+        $categoryId = ItemCategory::factory()->create(['name' => 'Groceries'])->id;
+
+        $itemAId = Item::factory()->create(['item_category_id' => $categoryId, 'name' => 'Item A', 'is_vatable' => true])->id;
+        $itemBId = Item::factory()->create(['item_category_id' => $categoryId, 'name' => 'Item B', 'is_vatable' => true])->id;
+        $itemCId = Item::factory()->create(['item_category_id' => $categoryId, 'name' => 'Item C', 'is_vatable' => true])->id;
+    });
+
+    loginItemParityTestUser($domain);
+
+    $this->post("http://{$domain}/items/mark-non-vatable", [
+        'item_ids' => [$itemAId, $itemBId],
+    ])->assertRedirect("http://{$domain}/items");
+
+    $tenant->run(function () use ($itemAId, $itemBId, $itemCId) {
+        expect(Item::findOrFail($itemAId)->is_vatable)->toBeFalse()
+            ->and(Item::findOrFail($itemBId)->is_vatable)->toBeFalse()
+            ->and(Item::findOrFail($itemCId)->is_vatable)->toBeTrue();
+    });
+
+    $tenant->delete();
+});
+
+test('bulk mark inactive deactivates zero-stock items and skips items with stock on hand', function () {
+    $domain = 'item-bulk-mark-inactive.tenant-test';
+    $tenant = provisionItemParityTestTenant($domain);
+
+    $itemAId = null;
+    $itemBId = null;
+    $itemCId = null;
+    $tenant->run(function () use (&$itemAId, &$itemBId, &$itemCId) {
+        User::factory()->create(['email' => 'owner@example.com']);
+        $categoryId = ItemCategory::factory()->create(['name' => 'Groceries'])->id;
+        $store = Store::factory()->create();
+
+        $itemAId = Item::factory()->create(['item_category_id' => $categoryId, 'name' => 'Item A', 'is_active' => true])->id;
+        $itemBId = Item::factory()->create(['item_category_id' => $categoryId, 'name' => 'Item B', 'is_active' => true])->id;
+        $itemC = Item::factory()->create(['item_category_id' => $categoryId, 'name' => 'Item C', 'is_active' => true]);
+        $itemC->recordStockMovement(StockMovementType::Purchase, '10', '2026-06-01', $store->id, null, '10.0000', '100.00');
+        $itemCId = $itemC->id;
+    });
+
+    loginItemParityTestUser($domain);
+
+    $this->post("http://{$domain}/items/mark-inactive", [
+        'item_ids' => [$itemAId, $itemCId],
+    ])->assertRedirect("http://{$domain}/items")
+        ->assertSessionHas('status', 'Marked 1 item(s) inactive. 1 item(s) skipped because they still have stock on hand.');
+
+    $tenant->run(function () use ($itemAId, $itemBId, $itemCId) {
+        expect(Item::findOrFail($itemAId)->is_active)->toBeFalse()
+            ->and(Item::findOrFail($itemBId)->is_active)->toBeTrue()
+            ->and(Item::findOrFail($itemCId)->is_active)->toBeTrue();
+    });
 
     $tenant->delete();
 });

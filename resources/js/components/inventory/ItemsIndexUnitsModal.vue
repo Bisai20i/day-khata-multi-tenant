@@ -8,7 +8,7 @@ import Input from '@/components/ui/Input.vue';
 import RowActions from '@/components/ui/RowActions.vue';
 import Label from '@/components/ui/Label.vue';
 import { useConfirm } from '@/composables/useConfirm';
-import { formatQuantity, formatRate } from '@/lib/money.js';
+import { formatQuantity, formatRate, rateExcludingVat, rateIncludingVat } from '@/lib/money.js';
 
 const props = defineProps({
     items: {
@@ -102,6 +102,30 @@ async function destroyUnit(unit) {
     });
 }
 
+function onUnitSaleRateInput(value) {
+    unitForm.sale_rate = value;
+    if (value === '' || value === null || value === undefined) {
+        return;
+    }
+    const vatRate = unitsItem.value?.is_vatable ? '13' : '0';
+    const result = rateIncludingVat(value, vatRate, 2);
+    if (result.ok) {
+        unitForm.mrp = result.value;
+    }
+}
+
+function onUnitMrpInput(value) {
+    unitForm.mrp = value;
+    if (value === '' || value === null || value === undefined) {
+        return;
+    }
+    const vatRate = unitsItem.value?.is_vatable ? '13' : '0';
+    const result = rateExcludingVat(value, vatRate, 2);
+    if (result.ok) {
+        unitForm.sale_rate = result.value;
+    }
+}
+
 defineExpose({ openUnits });
 </script>
 
@@ -176,12 +200,28 @@ defineExpose({ openUnits });
                     </div>
                     <div>
                         <Label for="unit_sale_rate" class="mb-1">Sale rate</Label>
-                        <Input id="unit_sale_rate" v-model="unitForm.sale_rate" type="number" step="0.01" min="0" placeholder="Defaults to item's rate" />
+                        <Input
+                            id="unit_sale_rate"
+                            :model-value="unitForm.sale_rate"
+                            type="number"
+                            step="0.01"
+                            min="0"
+                            placeholder="Defaults to item's rate"
+                            @update:model-value="onUnitSaleRateInput"
+                        />
                         <p v-if="unitForm.errors.sale_rate" class="mt-1 text-sm text-danger">{{ unitForm.errors.sale_rate }}</p>
                     </div>
                     <div>
                         <Label for="unit_mrp" class="mb-1">MRP</Label>
-                        <Input id="unit_mrp" v-model="unitForm.mrp" type="number" step="0.01" min="0" placeholder="Optional" />
+                        <Input
+                            id="unit_mrp"
+                            :model-value="unitForm.mrp"
+                            type="number"
+                            step="0.01"
+                            min="0"
+                            placeholder="Optional"
+                            @update:model-value="onUnitMrpInput"
+                        />
                         <p v-if="unitForm.errors.mrp" class="mt-1 text-sm text-danger">{{ unitForm.errors.mrp }}</p>
                     </div>
                     <div>

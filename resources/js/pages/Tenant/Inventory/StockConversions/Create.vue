@@ -10,7 +10,6 @@ import InfoTip from '@/components/ui/InfoTip.vue';
 import Combobox from '@/components/ui/Combobox.vue';
 import NepaliDateInput from '@/components/ui/NepaliDateInput.vue';
 import Label from '@/components/ui/Label.vue';
-import BranchSelect from '@/components/branch/BranchSelect.vue';
 import { useBranchField } from '@/composables/useBranchField';
 import { formatMoney, multiplyMoney, sumMoney } from '@/lib/money.js';
 import { todayInKathmandu } from '@/lib/format.js';
@@ -148,8 +147,7 @@ function submit() {
         </p>
 
         <form class="flex flex-col gap-4" @submit.prevent="submit">
-            <Card variant="panel" class="grid grid-cols-4 gap-4 !p-4">
-                <BranchSelect v-model="branchId" :options="branchOptions" :error="form.errors.branch_id" />
+            <Card variant="panel" class="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4 !p-4">
                 <div>
                     <Label class="mb-1">Type <span class="text-danger">*</span></Label>
                     <Select :model-value="form.type" :options="typeOptions" @update:model-value="(v) => (form.type = v)" />
@@ -171,7 +169,7 @@ function submit() {
                         @update:model-value="(v) => (form.store_id = v)"
                     />
                     <p v-if="form.errors.store_id" class="mt-1 text-sm text-danger">{{ form.errors.store_id }}</p>
-                    <p v-if="!showPicker && form.errors.branch_id" class="mt-1 text-sm text-danger" role="alert">{{ form.errors.branch_id }}</p>
+                    <p v-if="form.errors.branch_id" class="mt-1 text-sm text-danger" role="alert">{{ form.errors.branch_id }}</p>
                 </div>
                 <div>
                     <Label class="mb-1">Note</Label>

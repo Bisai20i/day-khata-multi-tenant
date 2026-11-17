@@ -97,6 +97,7 @@ export function reportCategories({ branchLabel = 'Branch', isMultiBranch = true 
             icon: Boxes,
             items: [
                 { label: 'Stock Summary', description: 'Quantity on hand per item and store.', href: '/reports/stock-summary', permission: 'stock_reports.view' },
+                { label: 'Item-wise Ledger', description: 'Stock movement history and running balance for a single item.', href: '/reports/item-ledger', permission: 'stock_reports.view' },
                 { label: 'Stock Valuation', description: 'Closing stock value at cost.', href: '/reports/stock-valuation', permission: 'stock_valuation.view' },
                 { label: 'Stock Ageing', description: 'How long stock has been sitting.', href: '/reports/stock-ageing', permission: 'stock_ageing.view' },
                 { label: 'Stock Movement Register', description: 'Every stock in and out, with the document behind it.', href: '/reports/stock-movement-register', permission: 'stock_reports.view' },

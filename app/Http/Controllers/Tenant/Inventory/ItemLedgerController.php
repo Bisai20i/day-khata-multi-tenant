@@ -41,23 +41,47 @@ class ItemLedgerController extends Controller
 {
     use DescribesStockMovements;
 
-    public function show(Request $request, Item $item): Response
+    public function index(Request $request): Response
     {
+        $items = Item::where('is_active', true)->where('is_stockable', true)->orderBy('name')->get(['id', 'name', 'unit', 'barcode']);
+        $itemId = $request->integer('item_id') ?: ($items->first()?->id ?? null);
+        $item = $itemId ? Item::find($itemId) : null;
+
+        if (! $item) {
+            return Inertia::render('Tenant/Inventory/Items/Ledger', [
+                'items' => $items,
+                'item' => null,
+                'stores' => [],
+                'storeId' => null,
+                'from' => null,
+                'to' => null,
+                'openingBalance' => '0.0000',
+                'closingBalance' => '0.0000',
+                'entries' => [],
+                'branchReport' => null,
+            ]);
+        }
+
         $filter = BranchFilter::fromRequest($request);
         $data = $this->ledgerData($request, $item, $filter);
 
         return Inertia::render('Tenant/Inventory/Items/Ledger', array_merge([
+            'items' => $items,
             'item' => $item->only(['id', 'name', 'unit', 'barcode']),
-            // Branches (plan 12, BR12): a multi-branch company is offered only
-            // the stores of the branches the user may use, each named
-            // "Store (Branch)"; BR15 narrows that further to the stores of
-            // the branches the ledger covers. Not multi-branch: the same list
-            // as before.
             'stores' => BranchStock::storeOptions($filter, BranchStoreOptions::apply(Store::where('is_active', true), $request, withBranch: true))
                 ->orderBy('name')
                 ->get(BranchStoreOptions::columns($request, ['id', 'name'])),
             'branchReport' => $filter->payload(),
         ], $data));
+    }
+
+    public function show(Request $request, Item $item): Response
+    {
+        if (! $request->has('item_id')) {
+            $request->merge(['item_id' => $item->id]);
+        }
+
+        return $this->index($request);
     }
 
     public function print(Request $request, Item $item): HttpResponse

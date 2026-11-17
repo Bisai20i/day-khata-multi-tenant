@@ -5,6 +5,7 @@ import Card from '@/components/ui/Card.vue';
 import Button from '@/components/ui/Button.vue';
 import SaleCreateCustomerCard from '@/components/sales/SaleCreateCustomerCard.vue';
 import SaleCreateCustomerModal from '@/components/sales/SaleCreateCustomerModal.vue';
+import SaleCreateItemModal from '@/components/sales/SaleCreateItemModal.vue';
 import SaleCreateStagingRow from '@/components/sales/SaleCreateStagingRow.vue';
 import SaleCreateLinesTable from '@/components/sales/SaleCreateLinesTable.vue';
 import SaleCreatePaymentNotes from '@/components/sales/SaleCreatePaymentNotes.vue';
@@ -21,7 +22,7 @@ import { usePermissions } from '@/composables/usePermissions';
 import PosEstimateModal from '@/components/pos/PosEstimateModal.vue';
 import { useSaleEstimate } from '@/composables/useSaleEstimate';
 import { useToast } from '@/composables/useToast';
-import BranchSelect from '@/components/branch/BranchSelect.vue';
+import Badge from '@/components/ui/Badge.vue';
 import { useDocumentBranchStore } from '@/composables/useDocumentBranchStore';
 
 /**
@@ -38,6 +39,7 @@ import { useDocumentBranchStore } from '@/composables/useDocumentBranchStore';
 const props = defineProps({
     customers: { type: Array, default: () => [] },
     items: { type: Array, default: () => [] },
+    itemCategories: { type: Array, default: () => [] },
     bankAccounts: { type: Array, default: () => [] },
     tdsAccounts: { type: Array, default: () => [] },
     stores: { type: Array, default: () => [] },
@@ -98,6 +100,7 @@ function defaultFormData() {
         // freely changeable, this just saves the cashier a click on the
         // common case of a counter sale nobody bothers to name.
         customer_id: props.walkInCustomerId ?? null,
+        invoice_type: props.invoiceSettings?.active_invoice_type ?? 'full',
         store_id: props.invoiceSettings.default_store_id ?? null,
         chalani_number: '',
         // Asia/Kathmandu, not UTC: between midnight and 05:45 local time a
@@ -121,8 +124,42 @@ function defaultFormData() {
     };
 }
 
-// A restored draft may predate the Round Off field.
-const form = useForm(props.initialDraft ? { round_off: '', ...props.initialDraft } : defaultFormData());
+// A restored draft may predate the Round Off field or invoice_type.
+const form = useForm(
+    props.initialDraft
+        ? {
+              round_off: '',
+              invoice_type: props.invoiceSettings?.active_invoice_type ?? 'full',
+              ...props.initialDraft,
+          }
+        : defaultFormData(),
+);
+
+const invoiceType = computed(() => form.invoice_type || props.invoiceSettings?.active_invoice_type || 'full');
+
+const invoiceTypeDetails = computed(() => {
+    switch (invoiceType.value) {
+        case 'pan':
+            return {
+                label: 'PAN Invoice',
+                badgeVariant: 'neutral',
+                description: 'Non-VAT PAN invoice (0.00% Tax)',
+            };
+        case 'abbreviated':
+            return {
+                label: 'ABIT Bill',
+                badgeVariant: 'warning',
+                description: 'IRD Abbreviated Bill (Max NPR 10,000.00 ceiling)',
+            };
+        case 'full':
+        default:
+            return {
+                label: `VAT Invoice (${props.invoiceSettings?.default_vat_rate ?? '13'}%)`,
+                badgeVariant: 'info',
+                description: `Standard VAT invoice (${props.invoiceSettings?.default_vat_rate ?? '13'}% Tax)`,
+            };
+    }
+});
 
 const roundOffEnabled = computed(() => !!props.invoiceSettings.round_off_enabled);
 
@@ -161,7 +198,22 @@ const isAbitOverCeiling = computed(() => {
 
 const { totals, totalBeforeRoundOff, previewError, toggleHeaderDiscountType, showBankField, showPartialFields, partialBalanced, canSubmit } =
     useSaleCreatePreview(form, { itemsById, isPanInvoice, effectiveVatRate, roundOffEnabled });
-const { customerModalOpen, customerForm, openCustomerModal, closeCustomerModal, submitCustomer } = useSaleCreateCustomer(form, props);
+const stagingRow = ref(null);
+const {
+    customerModalOpen,
+    customerForm,
+    openCustomerModal,
+    closeCustomerModal,
+    submitCustomer,
+    itemModalOpen,
+    itemForm,
+    itemCategoryOptions,
+    openItemModal,
+    closeItemModal,
+    submitItem,
+} = useSaleCreateCustomer(form, props, {
+    stageItem: (itemId) => stagingRow.value?.stage(itemId),
+});
 
 // Estimate: the bill this form would post, previewed without saving. Sent
 // to the sales-gated twin of the POS route, since this page needs no pos.view.
@@ -222,7 +274,12 @@ function submit(print = false, copies = 1) {
             <h3 class="text-base font-bold text-text-strong">New sale</h3>
             <p class="text-xs text-text-muted">Fields marked * are required. Totals update as you add items.</p>
         </div>
-        <Button variant="secondary" tone="purple" type="button" @click="requestCancel">Cancel</Button>
+        <div class="flex items-center gap-3">
+            <Badge pill :variant="invoiceTypeDetails.badgeVariant" :title="invoiceTypeDetails.description">
+                {{ invoiceTypeDetails.label }}
+            </Badge>
+            <Button variant="secondary" tone="purple" type="button" @click="requestCancel">Cancel</Button>
+        </div>
     </div>
 
     <p v-if="form.errors.lines" class="mb-4 border-[1.5px] border-danger bg-danger-bg px-3 py-2 text-sm text-danger">
@@ -233,7 +290,7 @@ function submit(print = false, copies = 1) {
     </p>
     <!-- Branch and store refusals: shown here whenever their own field is
          not on screen (picker hidden, More options closed). -->
-    <p v-if="!showPicker && form.errors.branch_id" class="mb-4 border-[1.5px] border-danger bg-danger-bg px-3 py-2 text-sm text-danger" role="alert">
+    <p v-if="form.errors.branch_id" class="mb-4 border-[1.5px] border-danger bg-danger-bg px-3 py-2 text-sm text-danger" role="alert">
         {{ form.errors.branch_id }}
     </p>
     <p v-if="!showMoreOptions && form.errors.store_id" class="mb-4 border-[1.5px] border-danger bg-danger-bg px-3 py-2 text-sm text-danger" role="alert">
@@ -241,142 +298,112 @@ function submit(print = false, copies = 1) {
     </p>
 
     <form class="flex flex-1 flex-col gap-4" @submit.prevent="submit(false)">
-        <!-- Invoice Type Selector (Tasks 02, 03, 04) -->
-        <div class="flex flex-wrap items-center justify-between gap-3 border-[1.5px] border-border bg-white px-4 py-2.5">
-            <div class="flex items-center gap-2">
-                <span class="text-xs font-bold uppercase tracking-wider text-text-muted">Invoice Type:</span>
-                <div class="inline-flex rounded-md border border-neutral-300 bg-neutral-100 p-0.5 text-xs font-semibold">
-                    <button
-                        type="button"
-                        class="rounded px-3 py-1 transition-colors"
-                        :class="form.invoice_type === 'full' ? 'bg-primary text-white shadow-sm' : 'text-text-muted hover:text-text-strong'"
-                        @click="form.invoice_type = 'full'"
-                    >
-                        VAT Invoice (Full Tax)
-                    </button>
-                    <button
-                        type="button"
-                        class="rounded px-3 py-1 transition-colors"
-                        :class="form.invoice_type === 'abbreviated' ? 'bg-primary text-white shadow-sm' : 'text-text-muted hover:text-text-strong'"
-                        @click="form.invoice_type = 'abbreviated'"
-                    >
-                        ABIT Bill (Abbreviated)
-                    </button>
-                    <button
-                        type="button"
-                        class="rounded px-3 py-1 transition-colors"
-                        :class="form.invoice_type === 'pan' ? 'bg-primary text-white shadow-sm' : 'text-text-muted hover:text-text-strong'"
-                        @click="form.invoice_type = 'pan'"
-                    >
-                        PAN Invoice
+        <div v-if="isAbitOverCeiling" class="border-[1.5px] border-danger bg-danger-bg px-4 py-3 text-sm text-danger">
+            <strong>ABIT Bill Exceeds Statutory Limit:</strong> Abbreviated tax invoices cannot exceed NPR 10,000.00 under IRD Rule 18. Current total is NPR {{ totals?.total }}. Please reduce quantities before posting.
+        </div>
+
+        <SaleCreateCustomerCard :form="form" :customers="customers" @add-customer="openCustomerModal" />
+
+        <!-- Items: staging row + the bill's committed lines, merged into
+             one section instead of two separate cards. -->
+        <Card variant="panel" class="!p-4">
+            <template #title>
+                <div class="flex items-center justify-between">
+                    <span>Items</span>
+                    <button type="button" class="text-xs font-semibold tracking-normal text-primary normal-case" @click="showLineExtras = !showLineExtras">
+                        {{ showLineExtras ? 'Hide' : 'Show' }} bonus &amp; MRP columns
                     </button>
                 </div>
-            </div>
-            <div class="text-xs">
-                <span v-if="form.invoice_type === 'full'" class="font-medium text-primary">Standard VAT invoice ({{ props.invoiceSettings.default_vat_rate }}% Tax on vatable items)</span>
-                <span v-else-if="form.invoice_type === 'abbreviated'" class="font-medium text-amber-700">IRD Abbreviated Bill (Max NPR 10,000.00 ceiling)</span>
-                <span v-else-if="form.invoice_type === 'pan'" class="font-medium text-emerald-700">Non-VAT PAN invoice (0.00% Tax enforced)</span>
-            </div>
-        </div>
+            </template>
 
-        <div v-if="isAbitOverCeiling" class="border-[1.5px] border-danger bg-danger-bg px-4 py-3 text-sm text-danger">
-            <strong>ABIT Bill Exceeds Statutory Limit:</strong> Abbreviated tax invoices cannot exceed NPR 10,000.00 under IRD Rule 18. Current total is NPR {{ totals?.total }}. Please switch to VAT Invoice or reduce quantities before posting.
-        </div>
-            <div v-if="showPicker" class="border-[1.5px] border-border bg-white px-4 py-2.5 sm:max-w-sm">
-                <BranchSelect v-model="branchId" :options="branchOptions" :error="form.errors.branch_id" />
-            </div>
-            <SaleCreateCustomerCard :form="form" :customers="customers" @add-customer="openCustomerModal" />
-
-            <!-- Items: staging row + the bill's committed lines, merged into
-                 one section instead of two separate cards. -->
-            <Card variant="panel" class="!p-4">
-                <template #title>
-                    <div class="flex items-center justify-between">
-                        <span>Items</span>
-                        <button type="button" class="text-xs font-semibold tracking-normal text-primary normal-case" @click="showLineExtras = !showLineExtras">
-                            {{ showLineExtras ? 'Hide' : 'Show' }} bonus &amp; MRP columns
-                        </button>
-                    </div>
-                </template>
-
-                <SaleCreateStagingRow
-                    :item-options="itemOptions"
-                    :items-by-id="itemsById"
-                    :show-line-extras="showLineExtras"
-                    :select-item="selectLineItem"
-                    :select-unit="selectLineUnit"
-                    :apply-mrp="applyLineMrp"
-                    @add="(line) => form.lines.push(line)"
-                />
-
-                <SaleCreateLinesTable
-                    :lines="form.lines"
-                    :errors="form.errors"
-                    :item-options="itemOptions"
-                    :items-by-id="itemsById"
-                    :show-line-extras="showLineExtras"
-                    :effective-vat-rate="effectiveVatRate"
-                    :totals="totals"
-                    :select-item="selectLineItem"
-                    :select-unit="selectLineUnit"
-                    :apply-mrp="applyLineMrp"
-                    @remove="(index) => form.lines.splice(index, 1)"
-                />
-
-                <p v-if="previewError" class="mt-2 border-[1.5px] border-danger bg-danger-bg px-3 py-2 text-sm text-danger">
-                    {{ previewError }}
-                </p>
-            </Card>
-
-            <SaleCreatePaymentNotes
-                :form="form"
-                :bank-accounts="bankAccounts"
-                :note-templates="noteTemplates"
-                :show-bank-field="showBankField"
-                :show-partial-fields="showPartialFields"
+            <SaleCreateStagingRow
+                ref="stagingRow"
+                :item-options="itemOptions"
+                :items-by-id="itemsById"
+                :show-line-extras="showLineExtras"
+                :select-item="selectLineItem"
+                :select-unit="selectLineUnit"
+                :apply-mrp="applyLineMrp"
+                @add="(line) => form.lines.push(line)"
+                @add-item="openItemModal"
             />
 
-            <!-- Toggled from the sticky bar below (left side, chevron
-                 indicator) - the panel itself still renders here, directly
-                 above the totals, so it never fights the floating bar for
-                 space. -->
-            <Transition name="extras">
-                <SaleCreateMoreOptions
-                    v-if="showMoreOptions"
-                    :form="form"
-                    :stores="storeChoices"
-                    :tds-accounts="tdsAccounts"
-                    :agents="agents"
-                    @toggle-discount-type="toggleHeaderDiscountType"
-                    @select-agent="selectAgent"
-                />
-            </Transition>
-
-            <SaleCreateTotalsBar
-                v-model:show-more-options="showMoreOptions"
-                v-model:round-off="form.round_off"
+            <SaleCreateLinesTable
+                :lines="form.lines"
+                :errors="form.errors"
+                :item-options="itemOptions"
+                :items-by-id="itemsById"
+                :show-line-extras="showLineExtras"
+                :effective-vat-rate="effectiveVatRate"
                 :totals="totals"
-                :round-off-enabled="roundOffEnabled"
-                :round-off-precision="String(invoiceSettings.round_off_precision ?? '1')"
-                :total-before-round-off="totalBeforeRoundOff"
-                :round-off-error="form.errors.round_off"
-                :show-partial-fields="showPartialFields"
-                :partial-balanced="partialBalanced"
-                :can-submit="canSubmit && !isAbitOverCeiling"
-                :is-pan="form.invoice_type === 'pan'"
-                :processing="form.processing"
-                :can-estimate="form.lines.length > 0 && !isAbitOverCeiling"
-                @cancel="requestCancel"
-                @estimate="openEstimate"
-                @print="(copies) => submit(true, copies)"
+                :select-item="selectLineItem"
+                :select-unit="selectLineUnit"
+                :apply-mrp="applyLineMrp"
+                @remove="(index) => form.lines.splice(index, 1)"
             />
-        </form>
+
+            <p v-if="previewError" class="mt-2 border-[1.5px] border-danger bg-danger-bg px-3 py-2 text-sm text-danger">
+                {{ previewError }}
+            </p>
+        </Card>
+
+        <SaleCreatePaymentNotes
+            :form="form"
+            :bank-accounts="bankAccounts"
+            :note-templates="noteTemplates"
+            :show-bank-field="showBankField"
+            :show-partial-fields="showPartialFields"
+        />
+
+        <!-- Toggled from the sticky bar below (left side, chevron
+             indicator) - the panel itself still renders here, directly
+             above the totals, so it never fights the floating bar for
+             space. -->
+        <Transition name="extras">
+            <SaleCreateMoreOptions
+                v-if="showMoreOptions"
+                :form="form"
+                :stores="storeChoices"
+                :tds-accounts="tdsAccounts"
+                :agents="agents"
+                @toggle-discount-type="toggleHeaderDiscountType"
+                @select-agent="selectAgent"
+            />
+        </Transition>
+
+        <SaleCreateTotalsBar
+            v-model:show-more-options="showMoreOptions"
+            v-model:round-off="form.round_off"
+            :totals="totals"
+            :round-off-enabled="roundOffEnabled"
+            :round-off-precision="String(invoiceSettings.round_off_precision ?? '1')"
+            :total-before-round-off="totalBeforeRoundOff"
+            :round-off-error="form.errors.round_off"
+            :show-partial-fields="showPartialFields"
+            :partial-balanced="partialBalanced"
+            :can-submit="canSubmit && !isAbitOverCeiling"
+            :is-pan="form.invoice_type === 'pan'"
+            :processing="form.processing"
+            :can-estimate="form.lines.length > 0 && !isAbitOverCeiling"
+            @cancel="requestCancel"
+            @estimate="openEstimate"
+            @print="(copies) => submit(true, copies)"
+        />
+    </form>
 
     <SaleCreateCustomerModal
         :open="customerModalOpen"
         :customer-form="customerForm"
         @close="closeCustomerModal"
         @submit="submitCustomer"
+    />
+
+    <SaleCreateItemModal
+        :open="itemModalOpen"
+        :item-form="itemForm"
+        :item-category-options="itemCategoryOptions"
+        @close="closeItemModal"
+        @submit="submitItem"
     />
 
     <PosEstimateModal :open="estimateOpen" :url="estimateUrl" :loading="estimateLoading" @close="closeEstimate" />

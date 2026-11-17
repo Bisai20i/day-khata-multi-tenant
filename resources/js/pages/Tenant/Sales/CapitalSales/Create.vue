@@ -12,7 +12,6 @@ import NepaliDateInput from '@/components/ui/NepaliDateInput.vue';
 import Label from '@/components/ui/Label.vue';
 import { addMoney, calculateDocument, formatMoney, moneyEquals, parseMoney } from '@/lib/money';
 import { todayInKathmandu } from '@/lib/format';
-import BranchSelect from '@/components/branch/BranchSelect.vue';
 import { useDocumentBranchStore } from '@/composables/useDocumentBranchStore';
 
 const props = defineProps({
@@ -174,7 +173,7 @@ function submit() {
         <p v-if="form.errors.expected_total" class="mb-4 border-[1.5px] border-danger bg-danger-bg px-3 py-2 text-sm text-danger">
             {{ form.errors.expected_total }}
         </p>
-        <p v-if="!showPicker && form.errors.branch_id" class="mb-4 border-[1.5px] border-danger bg-danger-bg px-3 py-2 text-sm text-danger" role="alert">
+        <p v-if="form.errors.branch_id" class="mb-4 border-[1.5px] border-danger bg-danger-bg px-3 py-2 text-sm text-danger" role="alert">
             {{ form.errors.branch_id }}
         </p>
 
@@ -207,9 +206,6 @@ function submit() {
                             @update:model-value="(v) => (form.store_id = v)"
                         />
                         <p v-if="form.errors.store_id" class="mt-1 text-sm text-danger">{{ form.errors.store_id }}</p>
-                    </div>
-                    <div v-if="showPicker">
-                        <BranchSelect v-model="branchId" :options="branchOptions" :error="form.errors.branch_id" />
                     </div>
                 </div>
             </Card>

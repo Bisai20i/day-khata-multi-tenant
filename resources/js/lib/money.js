@@ -421,10 +421,10 @@ export function percentOf(money, pct) {
  *
  * @param {string|number} inclusiveRate the MRP, at most 4 decimals
  * @param {string|number} vatRate percentage, 0 to 100, at most 2 decimals
- * @returns {{ok: true, value: string}|{ok: false, reason: string}} `value` is a 4dp rate
- *   string, e.g. `"100.0000"`.
+ * @param {number} [targetScale=QUANTITY_SCALE] scale for the result (e.g. 2 or 4)
+ * @returns {{ok: true, value: string}|{ok: false, reason: string}} `value` is a rate string
  */
-export function rateExcludingVat(inclusiveRate, vatRate) {
+export function rateExcludingVat(inclusiveRate, vatRate, targetScale = QUANTITY_SCALE) {
     const price = parseScaled(inclusiveRate, QUANTITY_SCALE);
     if (!price.ok) {
         return price;
@@ -442,9 +442,50 @@ export function rateExcludingVat(inclusiveRate, vatRate) {
     }
 
     // (scale 4 x scale 2) / scale 2 lands back on scale 4 with one rounding.
-    const quotient = divideRoundHalfUp(price.value * ONE_HUNDRED_PERCENT, ONE_HUNDRED_PERCENT + percent.value);
+    let quotient = divideRoundHalfUp(price.value * ONE_HUNDRED_PERCENT, ONE_HUNDRED_PERCENT + percent.value);
+    if (targetScale !== QUANTITY_SCALE) {
+        quotient = rescale(quotient, QUANTITY_SCALE, targetScale);
+    }
 
-    return { ok: true, value: toScaledString(quotient, QUANTITY_SCALE) };
+    return { ok: true, value: toScaledString(quotient, targetScale) };
+}
+
+/**
+ * The VAT-inclusive MRP for a given exclusive sales rate:
+ *
+ *     mrp = rate x (1 + vat / 100) = rate x (100 + vat) / 100
+ *
+ * `vatRate` is 0 for a non-vatable item, where the MRP equals the rate itself.
+ *
+ * @param {string|number} exclusiveRate
+ * @param {string|number} vatRate percentage, 0 to 100, at most 2 decimals
+ * @param {number} [targetScale=MONEY_SCALE] scale for the result (defaults to 2 for MRP)
+ * @returns {{ok: true, value: string}|{ok: false, reason: string}}
+ */
+export function rateIncludingVat(exclusiveRate, vatRate, targetScale = MONEY_SCALE) {
+    const price = parseScaled(exclusiveRate, QUANTITY_SCALE);
+    if (!price.ok) {
+        return price;
+    }
+    if (price.value < 0n) {
+        return { ok: false, reason: 'negative_rate' };
+    }
+
+    const percent = parseScaled(vatRate, PERCENT_SCALE);
+    if (!percent.ok) {
+        return percent;
+    }
+    if (percent.value < 0n || percent.value > ONE_HUNDRED_PERCENT) {
+        return { ok: false, reason: 'percentage_out_of_range' };
+    }
+
+    const product = price.value * (ONE_HUNDRED_PERCENT + percent.value);
+    let scaled = divideRoundHalfUp(product, ONE_HUNDRED_PERCENT);
+    if (targetScale !== QUANTITY_SCALE) {
+        scaled = rescale(scaled, QUANTITY_SCALE, targetScale);
+    }
+
+    return { ok: true, value: toScaledString(scaled, targetScale) };
 }
 
 /**

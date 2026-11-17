@@ -45,6 +45,7 @@ const props = defineProps({
     },
     customers: { type: Array, default: () => [] },
     items: { type: Array, default: () => [] },
+    itemCategories: { type: Array, default: () => [] },
     bankAccounts: { type: Array, default: () => [] },
     tdsAccounts: { type: Array, default: () => [] },
     stores: { type: Array, default: () => [] },
@@ -430,6 +431,7 @@ const columns = [
             <Create
                 :customers="customers"
                 :items="items"
+                :item-categories="itemCategories"
                 :bank-accounts="bankAccounts"
                 :tds-accounts="tdsAccounts"
                 :stores="stores"

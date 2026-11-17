@@ -117,10 +117,16 @@ class AccountController extends Controller
         $showBranchControlAccounts = ActiveBranchSelection::isMultiBranch($request);
 
         return Inertia::render('Tenant/Accounting/Accounts/Index', [
-            'accountGroups' => AccountGroup::query()->orderBy('name')->get(['id', 'name']),
-            'accountSubgroups' => AccountSubgroup::query()->orderBy('name')->get(['id', 'account_group_id', 'name']),
+            'accountGroups' => AccountGroup::query()->with('accountHead:id,name')->orderBy('name')->get(['id', 'account_head_id', 'name']),
+            'accountSubgroups' => AccountSubgroup::query()->with(['accountGroup.accountHead:id,name', 'accountGroup:id,account_head_id,name'])->orderBy('name')->get(['id', 'account_group_id', 'name']),
+            'parentAccounts' => Account::query()->orderBy('name')->get(['id', 'name', 'code']),
             'accounts' => Account::query()
-                ->with(['group:id,name', 'subgroup:id,name'])
+                ->with([
+                    'group.accountHead:id,name',
+                    'subgroup.accountGroup.accountHead:id,name',
+                    'subgroup.accountGroup:id,account_head_id,name',
+                    'parent:id,name,code',
+                ])
                 ->when(! $showBranchControlAccounts, fn (Builder $query) => $query->where(
                     function (Builder $inner): void {
                         $inner->whereNull('code')
@@ -864,13 +870,42 @@ class AccountController extends Controller
      */
     private function validated(Request $request, ?Account $account = null): array
     {
-        return $request->validate([
-            'account_group_id' => ['nullable', 'required_without:account_subgroup_id', 'exists:account_groups,id'],
-            'account_subgroup_id' => ['nullable', 'required_without:account_group_id', 'exists:account_subgroups,id'],
+        $disallowedParents = $account ? array_merge([$account->id], $account->allSubAccountIds()) : [];
+
+        $data = $request->validate([
+            'parent_type' => ['nullable', 'string', 'in:group,subgroup,account'],
+            'parent_account_id' => [
+                'nullable',
+                'required_if:parent_type,account',
+                'required_without_all:account_group_id,account_subgroup_id',
+                'integer',
+                'exists:accounts,id',
+                Rule::notIn($disallowedParents),
+            ],
+            'account_group_id' => ['nullable', 'required_without_all:account_subgroup_id,parent_account_id', 'exists:account_groups,id'],
+            'account_subgroup_id' => ['nullable', 'required_without_all:account_group_id,parent_account_id', 'exists:account_subgroups,id'],
             'code' => ['nullable', 'string', 'max:50', Rule::unique('accounts')->ignore($account)],
             'name' => ['required', 'string', 'max:255'],
             'phone' => ['nullable', 'string', 'max:20'],
             'address' => ['nullable', 'string', 'max:255'],
+        ], [
+            'parent_account_id.required_if' => 'Please select a parent account.',
+            'parent_account_id.required_without_all' => 'Please select a parent account, group, or subgroup.',
+            'parent_account_id.not_in' => 'An account cannot have itself or one of its sub-accounts as parent.',
+            'account_group_id.required_without_all' => 'Please select an account group.',
+            'account_subgroup_id.required_without_all' => 'Please select an account subgroup.',
         ]);
+
+        if (! empty($data['parent_account_id']) && empty($data['account_group_id']) && empty($data['account_subgroup_id'])) {
+            $parent = Account::query()->find($data['parent_account_id']);
+            if ($parent) {
+                $data['account_group_id'] = $parent->account_group_id;
+                $data['account_subgroup_id'] = $parent->account_subgroup_id;
+            }
+        }
+
+        unset($data['parent_type']);
+
+        return $data;
     }
 }

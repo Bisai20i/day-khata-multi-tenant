@@ -10,7 +10,6 @@ import Combobox from '@/components/ui/Combobox.vue';
 import InfoTip from '@/components/ui/InfoTip.vue';
 import NepaliDateInput from '@/components/ui/NepaliDateInput.vue';
 import Label from '@/components/ui/Label.vue';
-import BranchSelect from '@/components/branch/BranchSelect.vue';
 import BranchBadge from '@/components/branch/BranchBadge.vue';
 import { useBranchField } from '@/composables/useBranchField';
 import { compareMoney, formatMoney, parseMoney, sumMoney } from '@/lib/money';
@@ -28,12 +27,22 @@ const props = defineProps({
 
 const emit = defineEmits(['cancel', 'posted']);
 
-const bankAccountOptions = computed(() =>
-    props.bankAccounts.map((account) => ({
+const bankAccountOptions = computed(() => {
+    const banks = props.bankAccounts.filter((account) => {
+        const name = (account.name || '').toLowerCase();
+        const code = (account.code || '').toLowerCase();
+        return name.includes('bank') || code.startsWith('bank');
+    });
+
+    const list = banks.length > 0
+        ? banks
+        : props.bankAccounts.filter((a) => a.code !== 'AS1' && !['AS11', 'AS12', 'AS13', 'AS14', 'ASA23', 'AS31'].includes(a.code));
+
+    return list.map((account) => ({
         value: account.id,
         label: account.code ? `${account.code} - ${account.name}` : account.name,
-    })),
-);
+    }));
+});
 
 const paymentModeOptions = [
     { value: 'cash', label: 'Cash' },
@@ -166,16 +175,13 @@ function submit() {
             <Button variant="secondary" tone="purple" type="button" @click="emit('cancel')">Cancel</Button>
         </PageHeader>
 
+        <p v-if="form.errors.branch_id" class="mb-4 border-[1.5px] border-danger bg-danger-bg px-3 py-2 text-sm text-danger" role="alert">
+            {{ form.errors.branch_id }}
+        </p>
+
         <form class="flex flex-col gap-4" @submit.prevent="submit">
             <Card variant="panel" class="!p-4">
-                <div class="grid grid-cols-1 gap-4 sm:grid-cols-3">
-                    <BranchSelect
-                        v-model="branchId"
-                        :options="branchOptions"
-                        :error="form.errors.branch_id"
-                        :required="false"
-                        help="Paid from. Leave blank for the payslips' branch."
-                    />
+                <div class="grid grid-cols-1 gap-4 sm:grid-cols-2">
                     <div>
                         <Label class="mb-1">Payment date (BS) <span class="text-danger">*</span></Label>
                         <NepaliDateInput v-model="form.date" required />

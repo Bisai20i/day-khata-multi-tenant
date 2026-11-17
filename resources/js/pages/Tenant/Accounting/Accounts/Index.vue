@@ -21,6 +21,7 @@ import { useConfirm } from '@/composables/useConfirm';
 import { usePermissions } from '@/composables/usePermissions';
 import { formatMoney } from '@/lib/money';
 import { formatBsDate } from '@/lib/format';
+import ChartOfAccountsTabs from '@/components/accounting/ChartOfAccountsTabs.vue';
 
 defineOptions({ layout: AppLayout });
 
@@ -37,6 +38,10 @@ const props = defineProps({
         type: Array,
         default: () => [],
     },
+    parentAccounts: {
+        type: Array,
+        default: () => [],
+    },
     // Every opening-balance import posted so far, newest first. A re-import
     // reverses whatever is still posted before writing the new batch, so at
     // most one row here is ever 'posted'.
@@ -48,7 +53,7 @@ const props = defineProps({
 
 const page = usePage();
 const { can } = usePermissions();
-useLayoutChrome('Accounts');
+useLayoutChrome('Chart of Accounts');
 
 const { toast } = useToast();
 const { confirm } = useConfirm();
@@ -59,13 +64,54 @@ onMounted(() => {
     }
 });
 
-const groupOptions = computed(() => props.accountGroups.map((group) => ({ value: group.id, label: group.name })));
-const subgroupOptions = computed(() => props.accountSubgroups.map((subgroup) => ({ value: subgroup.id, label: subgroup.name })));
+const groupOptions = computed(() =>
+    props.accountGroups.map((group) => ({
+        value: group.id,
+        label: group.account_head?.name ? `${group.account_head.name} › ${group.name}` : group.name,
+    })),
+);
+
+const subgroupOptions = computed(() =>
+    props.accountSubgroups.map((subgroup) => {
+        const head = subgroup.account_group?.account_head?.name;
+        const grp = subgroup.account_group?.name;
+        const prefix = head && grp ? `${head} › ${grp} › ` : grp ? `${grp} › ` : '';
+        return {
+            value: subgroup.id,
+            label: `${prefix}${subgroup.name}`,
+        };
+    }),
+);
 
 const parentTypeOptions = [
     { value: 'group', label: 'Group' },
     { value: 'subgroup', label: 'Subgroup' },
+    { value: 'account', label: 'Parent Account (Sub-ledger)' },
 ];
+
+const parentAccountOptions = computed(() => {
+    const disallowed = new Set();
+    if (editing.value) {
+        disallowed.add(editing.value.id);
+        const queue = [editing.value.id];
+        while (queue.length > 0) {
+            const current = queue.shift();
+            props.accounts.forEach((acc) => {
+                if (acc.parent_account_id === current && !disallowed.has(acc.id)) {
+                    disallowed.add(acc.id);
+                    queue.push(acc.id);
+                }
+            });
+        }
+    }
+    const source = props.parentAccounts.length ? props.parentAccounts : props.accounts;
+    return source
+        .filter((acc) => !disallowed.has(acc.id))
+        .map((acc) => ({
+            value: acc.id,
+            label: acc.code ? `[${acc.code}] ${acc.name}` : acc.name,
+        }));
+});
 
 const showModal = ref(false);
 const editing = ref(null);
@@ -115,8 +161,10 @@ function submitImport() {
 }
 
 const form = useForm({
+    parent_type: 'group',
     account_group_id: null,
     account_subgroup_id: null,
+    parent_account_id: null,
     code: '',
     name: '',
     phone: '',
@@ -124,10 +172,16 @@ const form = useForm({
 });
 
 watch(parentType, (value) => {
+    form.parent_type = value;
     if (value === 'group') {
         form.account_subgroup_id = null;
+        form.parent_account_id = null;
+    } else if (value === 'subgroup') {
+        form.account_group_id = null;
+        form.parent_account_id = null;
     } else {
         form.account_group_id = null;
+        form.account_subgroup_id = null;
     }
 });
 
@@ -135,6 +189,8 @@ function openCreate() {
     editing.value = null;
     form.reset();
     form.clearErrors();
+    form.parent_type = 'group';
+    form.parent_account_id = null;
     parentType.value = 'group';
     showModal.value = true;
 }
@@ -148,7 +204,15 @@ function openEdit(account) {
     form.address = account.address ?? '';
     form.account_group_id = account.account_group_id;
     form.account_subgroup_id = account.account_subgroup_id;
-    parentType.value = account.account_subgroup_id ? 'subgroup' : 'group';
+    form.parent_account_id = account.parent_account_id ?? null;
+    if (account.parent_account_id) {
+        parentType.value = 'account';
+    } else if (account.account_subgroup_id) {
+        parentType.value = 'subgroup';
+    } else {
+        parentType.value = 'group';
+    }
+    form.parent_type = parentType.value;
     showModal.value = true;
 }
 
@@ -169,10 +233,16 @@ function onModalOpenChange(value) {
 }
 
 function submit() {
+    form.parent_type = parentType.value;
     if (parentType.value === 'group') {
         form.account_subgroup_id = null;
+        form.parent_account_id = null;
+    } else if (parentType.value === 'subgroup') {
+        form.account_group_id = null;
+        form.parent_account_id = null;
     } else {
         form.account_group_id = null;
+        form.account_subgroup_id = null;
     }
 
     if (editing.value) {
@@ -221,12 +291,55 @@ async function destroy(account) {
 // the row actions are hidden rather than left to fail with a 403.
 const columns = [
     { accessorKey: 'code', header: 'Code' },
-    { accessorKey: 'name', header: 'Account name' },
+    {
+        accessorKey: 'name',
+        header: 'Account name',
+        cell: ({ row }) => {
+            const acc = row.original;
+            if (acc.parent) {
+                return h('div', { class: 'flex flex-col' }, [
+                    h('div', { class: 'flex items-center gap-1.5' }, [
+                        h('span', { class: 'text-text-muted font-mono text-xs' }, '↳'),
+                        h('span', { class: 'font-semibold text-text-strong' }, acc.name),
+                    ]),
+                    h('span', { class: 'text-[11px] text-text-muted' }, `Sub-ledger of: ${acc.parent.name}`),
+                ]);
+            }
+            return h('span', { class: 'font-semibold text-text-strong' }, acc.name);
+        },
+    },
     {
         id: 'parent',
-        header: 'Group / subgroup',
+        header: 'Chart of Account',
         numeric: false,
-        cell: ({ row }) => row.original.group?.name ?? row.original.subgroup?.name ?? '-',
+        cell: ({ row }) => {
+            const acc = row.original;
+            if (acc.subgroup) {
+                const head = acc.subgroup.account_group?.account_head?.name;
+                const group = acc.subgroup.account_group?.name;
+                const sub = acc.subgroup.name;
+                return h('div', { class: 'flex items-center gap-1.5 flex-wrap' }, [
+                    h('span', { class: 'inline-block text-[9.5px] font-bold uppercase tracking-wider px-1.5 py-0.5 bg-[#DCFCE7] text-[#16A34A] rounded' }, 'Subgroup'),
+                    h('span', { class: 'text-xs text-text-muted' }, [
+                        head ? `${head} › ` : '',
+                        group ? `${group} › ` : '',
+                        h('strong', { class: 'font-semibold text-text-strong' }, sub),
+                    ]),
+                ]);
+            }
+            if (acc.group) {
+                const head = acc.group.account_head?.name;
+                const group = acc.group.name;
+                return h('div', { class: 'flex items-center gap-1.5 flex-wrap' }, [
+                    h('span', { class: 'inline-block text-[9.5px] font-bold uppercase tracking-wider px-1.5 py-0.5 bg-[#FEF3C7] text-[#D97706] rounded' }, 'Group'),
+                    h('span', { class: 'text-xs text-text-muted' }, [
+                        head ? `${head} › ` : '',
+                        h('strong', { class: 'font-semibold text-text-strong' }, group),
+                    ]),
+                ]);
+            }
+            return '-';
+        },
     },
     { accessorKey: 'phone', header: 'Phone' },
     { accessorKey: 'address', header: 'Address' },
@@ -265,12 +378,14 @@ const columns = [
 
 <template>
     <div>
-        <PageHeader title="Accounts" description="Your chart of accounts: every ledger that money is recorded against. Open an account's Ledger to see its full history and running balance.">
+        <PageHeader title="Chart of Accounts" description="Your chart of accounts: every ledger that money is recorded against. Open an account's Ledger to see its full history and running balance.">
             <Button v-if="can('accounts.create')" variant="primary" tone="purple" @click="openCreate">
                 <Plus class="size-4" />
                 New account
             </Button>
         </PageHeader>
+
+        <ChartOfAccountsTabs current="accounts" />
 
         <Card variant="panel" class="bg-white">
             <div v-if="can('opening_balances.import')" class="mb-3 flex flex-wrap items-center justify-between gap-2">
@@ -345,7 +460,11 @@ const columns = [
                 </div>
 
                 <div v-if="parentType === 'group'">
-                    <Label for="account_group_id" class="mb-1">Account group <span class="text-danger">*</span></Label>
+                    <Label for="account_group_id" class="mb-1">
+                        Account Group
+                        <span class="ml-2 inline-block rounded bg-primary-tint px-1.5 py-0.5 text-[9.5px] font-bold text-primary">Head › Group</span>
+                        <span class="text-danger">*</span>
+                    </Label>
                     <Select
                         id="account_group_id"
                         v-model="form.account_group_id"
@@ -355,8 +474,12 @@ const columns = [
                     <p v-if="form.errors.account_group_id" class="mt-1 text-sm text-danger">{{ form.errors.account_group_id }}</p>
                 </div>
 
-                <div v-else>
-                    <Label for="account_subgroup_id" class="mb-1">Account subgroup <span class="text-danger">*</span></Label>
+                <div v-else-if="parentType === 'subgroup'">
+                    <Label for="account_subgroup_id" class="mb-1">
+                        Account Subgroup
+                        <span class="ml-2 inline-block rounded bg-primary-tint px-1.5 py-0.5 text-[9.5px] font-bold text-primary">Head › Group › Subgroup</span>
+                        <span class="text-danger">*</span>
+                    </Label>
                     <Select
                         id="account_subgroup_id"
                         v-model="form.account_subgroup_id"
@@ -364,6 +487,23 @@ const columns = [
                         placeholder="Select account subgroup"
                     />
                     <p v-if="form.errors.account_subgroup_id" class="mt-1 text-sm text-danger">{{ form.errors.account_subgroup_id }}</p>
+                </div>
+
+                <div v-else>
+                    <Label for="parent_account_id" class="mb-1">
+                        Parent Account (Sub-ledger of)
+                        <span class="ml-2 inline-block rounded bg-primary-tint px-1.5 py-0.5 text-[9.5px] font-bold text-primary">Parent Ledger</span>
+                        <span class="text-danger">*</span>
+                    </Label>
+                    <Select
+                        id="parent_account_id"
+                        v-model="form.parent_account_id"
+                        :options="parentAccountOptions"
+                        placeholder="Select parent account / ledger"
+                    />
+                    <p v-if="form.errors.parent_account_id || form.errors.account_group_id || form.errors.account_subgroup_id" class="mt-1 text-sm text-danger">
+                        {{ form.errors.parent_account_id || form.errors.account_group_id || form.errors.account_subgroup_id }}
+                    </p>
                 </div>
 
                 <div>

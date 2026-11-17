@@ -11,7 +11,6 @@ import Label from '@/components/ui/Label.vue';
 import JournalVoucherStagingRow from '@/components/accounting/JournalVoucherStagingRow.vue';
 import JournalVoucherLinesTable from '@/components/accounting/JournalVoucherLinesTable.vue';
 import JournalVoucherTotalsBar from '@/components/accounting/JournalVoucherTotalsBar.vue';
-import BranchSelect from '@/components/branch/BranchSelect.vue';
 import { useBranchField } from '@/composables/useBranchField';
 import { useBranchLabel } from '@/composables/useBranchLabel';
 import { useConfirm } from '@/composables/useConfirm';
@@ -190,7 +189,7 @@ function submit(print = false) {
     <p v-if="form.errors.lines" class="mb-4 border-[1.5px] border-danger bg-danger-bg px-3 py-2 text-sm text-danger">
         {{ form.errors.lines }}
     </p>
-    <p v-if="!showPicker && form.errors.branch_id" class="mb-4 border-[1.5px] border-danger bg-danger-bg px-3 py-2 text-sm text-danger" role="alert">
+    <p v-if="form.errors.branch_id" class="mb-4 border-[1.5px] border-danger bg-danger-bg px-3 py-2 text-sm text-danger" role="alert">
         {{ form.errors.branch_id }}
     </p>
 
@@ -211,12 +210,6 @@ function submit(print = false) {
                     <p id="jv-narration-help" class="sr-only">Printed on the voucher and shown in every ledger it touches.</p>
                     <p v-if="form.errors.narration" class="mt-1 text-sm text-danger" role="alert">{{ form.errors.narration }}</p>
                 </div>
-                <BranchSelect
-                    v-model="branchId"
-                    :options="branchOptions"
-                    :error="form.errors.branch_id"
-                    :help="`Lines post in this ${branchLabel('lower')} unless a line names another.`"
-                />
                 <div v-if="canPostCorrection && correctionFiscalYear">
                     <div class="mb-1 flex items-center gap-1">
                         <Label for="jv-fiscal-year">Fiscal year</Label>

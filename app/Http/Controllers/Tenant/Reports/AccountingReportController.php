@@ -104,7 +104,19 @@ class AccountingReportController extends Controller
         $fiscalYear = $this->resolveFiscalYear($request);
         $filter = BranchFilter::fromRequest($request);
         $accountId = $request->integer('account_id') ?: null;
-        $accounts = Account::orderBy('name')->get(['id', 'code', 'name', 'type', 'group']);
+        $includeSubAccounts = $request->boolean('include_sub_accounts', true);
+        $accounts = Account::with(['parent:id,name', 'group.accountHead', 'subgroup.accountGroup.accountHead'])
+            ->orderBy('name')
+            ->get(['id', 'code', 'name', 'account_group_id', 'account_subgroup_id', 'parent_account_id'])
+            ->map(fn (Account $acc) => [
+                'id' => $acc->id,
+                'code' => $acc->code,
+                'name' => $acc->name,
+                'parent_account_id' => $acc->parent_account_id,
+                'parent' => $acc->parent ? ['id' => $acc->parent->id, 'name' => $acc->parent->name] : null,
+                'group' => $acc->group?->name ?? $acc->subgroup?->name,
+                'type' => $acc->group?->accountHead?->name ?? $acc->subgroup?->accountGroup?->accountHead?->name,
+            ]);
 
         $data = $this->emptyAccountBook();
         $account = null;
@@ -114,9 +126,9 @@ class AccountingReportController extends Controller
             [$from, $to] = $this->resolveWindow($request, $fiscalYear);
 
             if ($accountId) {
-                $account = Account::find($accountId);
+                $account = Account::with(['subAccounts:id,parent_account_id,name,code', 'group.accountHead', 'subgroup.accountGroup.accountHead'])->find($accountId);
                 if ($account) {
-                    $data = $this->accountBook($account, $fiscalYear, $from, $to, $filter->lineBranchIds());
+                    $data = $this->accountBook($account, $fiscalYear, $from, $to, $filter->lineBranchIds(), $includeSubAccounts);
                 }
             }
         }
@@ -130,9 +142,16 @@ class AccountingReportController extends Controller
                 'id' => $account->id,
                 'name' => $account->name,
                 'code' => $account->code,
-                'type' => $account->type,
-                'group' => $account->group,
+                'type' => $account->group?->accountHead?->name ?? $account->subgroup?->accountGroup?->accountHead?->name ?? '',
+                'group' => $account->group?->name ?? $account->subgroup?->name ?? '',
+                'parent_account_id' => $account->parent_account_id,
             ] : null,
+            'subAccounts' => $account ? $account->subAccounts->map(fn ($sub) => [
+                'id' => $sub->id,
+                'name' => $sub->name,
+                'code' => $sub->code,
+            ])->values()->all() : [],
+            'includeSubAccounts' => $includeSubAccounts,
             'from' => $from,
             'to' => $to,
             'openingBalance' => $data['openingBalance'],
@@ -1165,7 +1184,8 @@ class AccountingReportController extends Controller
 
         $filter = BranchFilter::fromRequest($request);
         [$from, $to] = $this->resolveWindow($request, $fiscalYear);
-        $data = $this->accountBook($account, $fiscalYear, $from, $to, $filter->lineBranchIds());
+        $includeSubAccounts = $request->boolean('include_sub_accounts', true);
+        $data = $this->accountBook($account, $fiscalYear, $from, $to, $filter->lineBranchIds(), $includeSubAccounts);
 
         $pdf = Pdf::loadView('pdf.account-book', array_merge([
             'title' => "{$title} - {$account->name}",
@@ -1190,7 +1210,8 @@ class AccountingReportController extends Controller
 
         [$from, $to] = $this->resolveWindow($request, $fiscalYear);
         $filter = BranchFilter::fromRequest($request);
-        $data = $this->accountBook($account, $fiscalYear, $from, $to, $filter->lineBranchIds());
+        $includeSubAccounts = $request->boolean('include_sub_accounts', true);
+        $data = $this->accountBook($account, $fiscalYear, $from, $to, $filter->lineBranchIds(), $includeSubAccounts);
 
         return Excel::download(
             new AccountBookExport($data['entries'], $data['openingBalance'], $data['closingBalance'], $this->branchFilterLabel($filter)),
@@ -2097,12 +2118,17 @@ class AccountingReportController extends Controller
      * @param  list<int>|null  $branchIds
      * @return array{entries: array<int, array<string, mixed>>, openingBalance: string, closingBalance: string}
      */
-    private function accountBook(Account $account, FiscalYear $fiscalYear, string $from, string $to, ?array $branchIds = null): array
+    private function accountBook(Account $account, FiscalYear $fiscalYear, string $from, string $to, ?array $branchIds = null, bool $includeSubAccounts = false): array
     {
         $cast = JournalVoucherLine::query()->getConnection()->getDriverName() === 'sqlite' ? 'INTEGER' : 'SIGNED';
 
+        $accountIds = [$account->id];
+        if ($includeSubAccounts) {
+            $accountIds = array_unique(array_merge($accountIds, $account->allSubAccountIds()));
+        }
+
         $openingScaled = JournalVoucherLine::query()
-            ->where('account_id', $account->id)
+            ->whereIn('account_id', $accountIds)
             ->whereHas('journalVoucher', function (Builder $query) use ($fiscalYear, $from) {
                 $query->where('fiscal_year_id', $fiscalYear->id)
                     ->where(fn (Builder $q) => $q
@@ -2118,7 +2144,7 @@ class AccountingReportController extends Controller
         $openingBalance = Money::of(BigDecimal::of((int) $openingScaled)->dividedBy(100, 2, RoundingMode::Unnecessary));
 
         $lines = JournalVoucherLine::query()
-            ->where('account_id', $account->id)
+            ->whereIn('account_id', $accountIds)
             ->whereHas('journalVoucher', function (Builder $query) use ($fiscalYear, $from, $to) {
                 $query->where('fiscal_year_id', $fiscalYear->id)
                     ->where('voucher_type', '!=', VoucherType::OpeningBalance->value)
@@ -2126,7 +2152,7 @@ class AccountingReportController extends Controller
                     ->whereDate('date', '<=', $to);
             })
             ->tap(fn (Builder $lines) => BranchFilter::narrowLines($lines, $branchIds))
-            ->with('journalVoucher')
+            ->with(['journalVoucher', 'account:id,name,code'])
             ->get()
             ->sortBy([['journalVoucher.date', 'asc'], ['id', 'asc']])
             ->values();
@@ -2135,16 +2161,21 @@ class AccountingReportController extends Controller
 
         $runningBalance = $openingBalance;
 
-        $entries = $lines->map(function (JournalVoucherLine $line) use (&$runningBalance) {
+        $entries = $lines->map(function (JournalVoucherLine $line) use (&$runningBalance, $account) {
             $debit = Money::of($line->debit);
             $credit = Money::of($line->credit);
             $runningBalance = $runningBalance->plus($debit)->minus($credit);
+
+            $subAccountTag = $line->account_id !== $account->id && $line->account ? " [{$line->account->name}]" : '';
 
             return [
                 'date' => $line->journalVoucher->date->toDateString(),
                 'voucherType' => $line->journalVoucher->voucher_type->value,
                 'voucherNumber' => $line->journalVoucher->displayNumber(),
-                'narration' => $line->narration ?? $line->journalVoucher->narration,
+                'narration' => ($line->narration ?? $line->journalVoucher->narration).$subAccountTag,
+                'accountName' => $line->account?->name,
+                'accountCode' => $line->account?->code,
+                'isSubAccount' => $line->account_id !== $account->id,
                 'debit' => $debit->toString(),
                 'credit' => $credit->toString(),
                 'balance' => $runningBalance->toString(),

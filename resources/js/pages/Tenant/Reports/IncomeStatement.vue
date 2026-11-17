@@ -1,6 +1,6 @@
 <script setup>
 import { computed, ref, watch } from 'vue';
-import { router } from '@inertiajs/vue3';
+import { Link, router } from '@inertiajs/vue3';
 import AppLayout from '@/layouts/AppLayout.vue';
 import { useLayoutChrome } from '@/composables/useLayoutChrome';
 import Card from '@/components/ui/Card.vue';
@@ -195,7 +195,15 @@ function exportUrl() {
                         class="flex items-center px-1 py-1.5 text-[13px] text-text-base"
                     >
                         <div class="flex-1">
-                            {{ account.name }} <span class="text-text-muted">· {{ account.code ?? '-' }}</span>
+                            <Link
+                                v-if="account.id && can('account_ledger.view')"
+                                :href="`/reports/ledger?account_id=${account.id}&fiscal_year_id=${fiscalYearId ?? ''}&from=${from ?? ''}&to=${to ?? ''}`"
+                                class="text-primary hover:underline"
+                            >
+                                {{ account.name }}
+                            </Link>
+                            <template v-else>{{ account.name }}</template>
+                            <span class="text-text-muted">· {{ account.code ?? '-' }}</span>
                             <span v-if="account.computed" class="text-text-muted">· computed</span>
                         </div>
                         <div class="w-32 text-right">{{ formatMoney(account.amount) }}</div>
@@ -219,7 +227,15 @@ function exportUrl() {
                         class="flex items-center px-1 py-1.5 text-[13px] text-text-base"
                     >
                         <div class="flex-1">
-                            {{ account.name }} <span class="text-text-muted">· {{ account.code ?? '-' }}</span>
+                            <Link
+                                v-if="account.id && can('account_ledger.view')"
+                                :href="`/reports/ledger?account_id=${account.id}&fiscal_year_id=${fiscalYearId ?? ''}&from=${from ?? ''}&to=${to ?? ''}`"
+                                class="text-primary hover:underline"
+                            >
+                                {{ account.name }}
+                            </Link>
+                            <template v-else>{{ account.name }}</template>
+                            <span class="text-text-muted">· {{ account.code ?? '-' }}</span>
                             <span v-if="account.computed" class="text-text-muted">· computed</span>
                         </div>
                         <div class="w-32 text-right">{{ formatMoney(account.amount) }}</div>

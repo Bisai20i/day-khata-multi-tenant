@@ -194,6 +194,13 @@ test('staff can be added with recurring pay and listed', function () {
         'pay_effective_from' => '2026-01-01',
         'pay_items' => [['pay_component_id' => $salary, 'amount' => '100.123']],
     ])->assertSessionHasErrors('pay_items.0.amount');
+
+    // Add another redirects back to create form instead of edit page.
+    test()->post("http://{$domain}/hr/staff", [
+        'name' => 'Bikram Thapa',
+        'pay_effective_from' => '2026-01-01',
+        'add_another' => true,
+    ])->assertRedirect("http://{$domain}/hr/staff/create");
 });
 
 test('payroll goes from draft to posted to paid through the routes and shows on the balance sheet', function () {

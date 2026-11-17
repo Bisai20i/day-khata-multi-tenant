@@ -12,6 +12,7 @@ use App\Models\CompanySetting;
 use App\Models\Customer;
 use App\Models\FiscalYear;
 use App\Models\Item;
+use App\Models\ItemCategory;
 use App\Models\PrintLog;
 use App\Models\Sale;
 use App\Models\SaleNoteTemplate;
@@ -109,6 +110,7 @@ class SaleController extends Controller
             'totals' => $this->filteredTotals($filters, $request),
             'customers' => Customer::query()->orderBy('name')->get(['id', 'name', 'mobile_no']),
             'items' => $this->itemsForPicker($stockDisplay),
+            'itemCategories' => ItemCategory::query()->orderBy('name')->get(['id', 'name']),
             // What the picker's stock figures cover; null when not
             // multi-branch.
             'stockScope' => $stockDisplay->scope(),

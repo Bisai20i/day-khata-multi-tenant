@@ -9,7 +9,6 @@ import Select from '@/components/ui/Select.vue';
 import Combobox from '@/components/ui/Combobox.vue';
 import NepaliDateInput from '@/components/ui/NepaliDateInput.vue';
 import Label from '@/components/ui/Label.vue';
-import BranchSelect from '@/components/branch/BranchSelect.vue';
 import BranchBadge from '@/components/branch/BranchBadge.vue';
 import { useBranchField } from '@/composables/useBranchField';
 import { compareMoney, formatMoney, parseMoney } from '@/lib/money';
@@ -34,12 +33,22 @@ const staffOptions = computed(() =>
     })),
 );
 
-const bankAccountOptions = computed(() =>
-    props.bankAccounts.map((account) => ({
+const bankAccountOptions = computed(() => {
+    const banks = props.bankAccounts.filter((account) => {
+        const name = (account.name || '').toLowerCase();
+        const code = (account.code || '').toLowerCase();
+        return name.includes('bank') || code.startsWith('bank');
+    });
+
+    const list = banks.length > 0
+        ? banks
+        : props.bankAccounts.filter((a) => a.code !== 'AS1' && !['AS11', 'AS12', 'AS13', 'AS14', 'ASA23', 'AS31'].includes(a.code));
+
+    return list.map((account) => ({
         value: account.id,
         label: account.code ? `${account.code} - ${account.name}` : account.name,
-    })),
-);
+    }));
+});
 
 const paymentModeOptions = [
     { value: 'cash', label: 'Cash' },
@@ -135,7 +144,7 @@ function submit() {
                         <Label class="mb-1">Amount (Rs.) <span class="text-danger">*</span></Label>
                         <Input v-model="form.amount" type="text" inputmode="decimal" placeholder="0.00" class="text-right" required />
                         <p v-if="form.errors.amount" class="mt-1 text-sm text-danger">{{ form.errors.amount }}</p>
-                        <p v-if="!showPicker && form.errors.branch_id" class="mt-1 text-sm text-danger" role="alert">{{ form.errors.branch_id }}</p>
+                        <p v-if="form.errors.branch_id" class="mt-1 text-sm text-danger" role="alert">{{ form.errors.branch_id }}</p>
                         <p v-else-if="amountState.message" class="mt-1 text-sm text-danger">{{ amountState.message }}</p>
                     </div>
                     <div>
@@ -143,13 +152,6 @@ function submit() {
                         <Select :model-value="form.payment_mode" :options="paymentModeOptions" @update:model-value="(v) => (form.payment_mode = v)" />
                         <p v-if="form.errors.payment_mode" class="mt-1 text-sm text-danger">{{ form.errors.payment_mode }}</p>
                     </div>
-                    <BranchSelect
-                        v-model="branchId"
-                        :options="branchOptions"
-                        :error="form.errors.branch_id"
-                        :required="false"
-                        help="Paid from. Leave blank for the staff member's branch."
-                    />
                     <div v-if="showBankAccount">
                         <Label class="mb-1">Bank account <span class="text-danger">*</span></Label>
                         <Combobox

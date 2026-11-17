@@ -46,7 +46,7 @@ test('the sales index page renders its expected Inertia component', function () 
 
     $this->get("http://{$domain}/sales")
         ->assertOk()
-        ->assertInertia(fn ($page) => $page->component('Tenant/Sales/Index'));
+        ->assertInertia(fn ($page) => $page->component('Tenant/Sales/Index')->has('itemCategories'));
 
     $tenant->delete();
 });

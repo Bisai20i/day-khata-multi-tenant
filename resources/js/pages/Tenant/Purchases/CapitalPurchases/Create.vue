@@ -13,7 +13,6 @@ import NepaliDateInput from '@/components/ui/NepaliDateInput.vue';
 import Label from '@/components/ui/Label.vue';
 import { addMoney, calculateDocument, formatMoney, moneyEquals, parseMoney } from '@/lib/money';
 import { todayInKathmandu } from '@/lib/format';
-import BranchSelect from '@/components/branch/BranchSelect.vue';
 import { useBranchField } from '@/composables/useBranchField';
 
 const props = defineProps({
@@ -275,7 +274,6 @@ function submit() {
                         <Input v-model="form.supplier_pan" type="text" placeholder="From the supplier record" />
                         <p v-if="form.errors.supplier_pan" class="mt-1 text-sm text-danger">{{ form.errors.supplier_pan }}</p>
                     </div>
-                    <BranchSelect v-model="branchId" :options="branchOptions" :error="form.errors.branch_id" />
                     <div>
                         <Label class="mb-1">Store</Label>
                         <Combobox
@@ -285,7 +283,7 @@ function submit() {
                             @update:model-value="(v) => (form.store_id = v)"
                         />
                         <p v-if="form.errors.store_id" class="mt-1 text-sm text-danger">{{ form.errors.store_id }}</p>
-                        <p v-if="!showPicker && form.errors.branch_id" class="mt-1 text-sm text-danger" role="alert">{{ form.errors.branch_id }}</p>
+                        <p v-if="form.errors.branch_id" class="mt-1 text-sm text-danger" role="alert">{{ form.errors.branch_id }}</p>
                     </div>
                 </div>
             </Card>

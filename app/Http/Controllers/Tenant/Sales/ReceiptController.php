@@ -9,10 +9,9 @@ use App\Models\Customer;
 use App\Models\PrintLog;
 use App\Models\Receipt;
 use App\Models\Sale;
-use App\Models\SalesReturn;
+use App\Rules\AccountUnderHead;
 use App\Support\AmountInWords;
 use App\Support\Branches\ActiveBranchSelection;
-use App\Support\Branches\BranchAccounts;
 use App\Support\Branches\BranchContext;
 use App\Support\Branches\BranchFormOptions;
 use App\Support\Branches\BranchListFilter;
@@ -63,9 +62,8 @@ class ReceiptController extends Controller
         return Inertia::render('Tenant/Sales/Receipts/Index', [
             'receipts' => $receipts,
             'customers' => Customer::query()->orderBy('name')->get(['id', 'name']),
-            // Never the inter-branch control accounts, which only the system
-            // posts (BranchAccounts).
-            'accounts' => BranchAccounts::exclude(Account::query())->orderBy('name')->get(['id', 'code', 'name']),
+            // Only balance sheet accounts (Assets, Liabilities, Capital), excluding party and control accounts.
+            'accounts' => Receipt::settlementAccountQuery()->orderBy('name')->get(['id', 'code', 'name']),
             'outstandingSales' => Sale::query()
                 ->where('status', 'posted')
                 ->with('customer:id,name')
@@ -125,7 +123,7 @@ class ReceiptController extends Controller
             'date' => ['required', 'date'],
             'amount' => ['required', 'numeric', 'decimal:0,2', 'min:0.01'],
             'payment_mode' => ['required', 'in:cash,bank'],
-            'bank_account_id' => ['nullable', 'integer', Rule::in(SalesReturn::refundAccountQuery()->pluck('id')->all())],
+            'bank_account_id' => ['nullable', 'integer', 'exists:accounts,id', new AccountUnderHead(['Assets', 'Liabilities', 'Capital'])],
             'reference_number' => ['nullable', 'string', 'max:255'],
             'narration' => ['nullable', 'string', 'max:255'],
             // Where the money came in (plan 12, BR07); Receipt::post()

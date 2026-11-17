@@ -660,6 +660,51 @@ class ItemController extends Controller
         return redirect()->route('tenant.items.index')->with('status', "Marked {$updated} item(s) vatable.");
     }
 
+    public function markNonVatable(Request $request): RedirectResponse
+    {
+        $data = $request->validate([
+            'item_ids' => ['required', 'array', 'min:1'],
+            'item_ids.*' => ['integer', 'distinct', 'exists:items,id'],
+        ]);
+
+        $updated = Item::whereIn('id', $data['item_ids'])->update(['is_vatable' => false]);
+
+        return redirect()->route('tenant.items.index')->with('status', "Marked {$updated} item(s) non-vatable.");
+    }
+
+    public function markInactive(Request $request): RedirectResponse
+    {
+        $data = $request->validate([
+            'item_ids' => ['required', 'array', 'min:1'],
+            'item_ids.*' => ['integer', 'distinct', 'exists:items,id'],
+        ]);
+
+        $items = Item::whereIn('id', $data['item_ids'])->get();
+        $deactivated = 0;
+        $skipped = 0;
+
+        foreach ($items as $item) {
+            if ($item->is_active) {
+                $onHand = $item->currentStock();
+                if (! $onHand->isZero()) {
+                    $skipped++;
+
+                    continue;
+                }
+                $item->update(['is_active' => false]);
+                $deactivated++;
+            }
+        }
+
+        if ($skipped > 0) {
+            return redirect()->route('tenant.items.index')
+                ->with('status', "Marked {$deactivated} item(s) inactive. {$skipped} item(s) skipped because they still have stock on hand.");
+        }
+
+        return redirect()->route('tenant.items.index')
+            ->with('status', "Marked {$deactivated} item(s) inactive.");
+    }
+
     /**
      * Per-unit barcode scan (item 6): a scanner fires this on Sales/Create,
      * Pos.vue and Purchases/Create (cross-file wiring, those pages are owned

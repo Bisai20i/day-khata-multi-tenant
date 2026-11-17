@@ -8,6 +8,7 @@ import Combobox from '@/components/ui/Combobox.vue';
 import Label from '@/components/ui/Label.vue';
 import { formatQuantity } from '@/lib/money';
 import { emptyLine, toggleDiscountTypeOn, unitOptionsFor } from '@/lib/saleCreate';
+import { usePermissions } from '@/composables/usePermissions';
 
 // --- Add item: staging panel -----------------------------------------------
 // One row of entry fields, separate from the lines already committed to the
@@ -23,7 +24,9 @@ const props = defineProps({
     applyMrp: { type: Function, required: true },
 });
 
-const emit = defineEmits(['add']);
+const emit = defineEmits(['add', 'add-item']);
+
+const { can } = usePermissions();
 
 const stagingLine = ref(emptyLine());
 const stagingLineEl = ref(null);
@@ -84,6 +87,15 @@ function onStagingEnter(field) {
 
     addStagingLine();
 }
+function stage(itemId, unitId = '') {
+    props.selectItem(stagingLine.value, itemId);
+    if (unitId !== '' && unitId !== null) {
+        props.selectUnit(stagingLine.value, unitId);
+    }
+    focusStagingField(stagingQuantityEl);
+}
+
+defineExpose({ stage });
 </script>
 
 <template>
@@ -96,7 +108,19 @@ function onStagingEnter(field) {
                     :options="itemOptions"
                     placeholder="Search or scan barcode"
                     @update:model-value="selectStagingItem"
-                />
+                >
+                    <template v-if="can('items.create')" #addon>
+                        <button
+                            type="button"
+                            class="flex items-center justify-center text-text-muted hover:text-primary"
+                            aria-label="Add new item"
+                            title="Add new item"
+                            @click="emit('add-item')"
+                        >
+                            <Plus class="h-3.5 w-3.5" />
+                        </button>
+                    </template>
+                </Combobox>
             </div>
             <div>
                 <Label class="mb-1">Unit</Label>

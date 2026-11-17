@@ -113,6 +113,10 @@ class StaffController extends Controller
             return $staff;
         });
 
+        if ($request->boolean('add_another')) {
+            return redirect()->route('tenant.hr.staff.create')->with('status', 'Staff member added.');
+        }
+
         return redirect()->route('tenant.hr.staff.edit', $staff)->with('status', 'Staff member added.');
     }
 

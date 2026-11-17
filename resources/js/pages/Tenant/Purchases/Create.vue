@@ -13,7 +13,6 @@ import PurchaseCreatePaymentNotes from '@/components/purchases/PurchaseCreatePay
 import PurchaseCreateMoreOptions from '@/components/purchases/PurchaseCreateMoreOptions.vue';
 import PurchaseCreateTotalsBar from '@/components/purchases/PurchaseCreateTotalsBar.vue';
 import PurchaseCreateModals from '@/components/purchases/PurchaseCreateModals.vue';
-import BranchSelect from '@/components/branch/BranchSelect.vue';
 import { useBranchField } from '@/composables/useBranchField';
 import { useConfirm } from '@/composables/useConfirm';
 import { usePermissions } from '@/composables/usePermissions';
@@ -402,7 +401,7 @@ function submit(print = false) {
         {{ form.errors.expected_total }}
     </p>
     <!-- A branch refusal when there is no picker to show it on (plan 12). -->
-    <p v-if="!showPicker && form.errors.branch_id" class="mb-4 border-[1.5px] border-danger bg-danger-bg px-3 py-2 text-sm text-danger" role="alert">
+    <p v-if="form.errors.branch_id" class="mb-4 border-[1.5px] border-danger bg-danger-bg px-3 py-2 text-sm text-danger" role="alert">
         {{ form.errors.branch_id }}
     </p>
     <!-- The store field is hidden when the branch has a single store. -->
@@ -415,17 +414,6 @@ function submit(print = false) {
     </p>
 
     <form class="flex flex-1 flex-col gap-4" @submit.prevent="submit(false)">
-        <Card v-if="showPicker" variant="panel" class="!p-4">
-            <div class="grid grid-cols-1 gap-4 sm:grid-cols-3">
-                <BranchSelect
-                    v-model="branchId"
-                    :options="branchOptions"
-                    :error="form.errors.branch_id"
-                    help="The bill is booked here and its stock received into a store of this branch."
-                />
-            </div>
-        </Card>
-
         <Card v-if="canPostCorrection && correctionFiscalYear" variant="panel" title="Fiscal year" class="!p-4">
             <div class="grid grid-cols-1 gap-4 sm:grid-cols-3">
                 <div>
@@ -491,6 +479,7 @@ function submit(print = false) {
                 :select-unit="selectLineUnit"
                 :hold-scans="priceConfirm.asking.value"
                 @add="addLine"
+                @add-item="openItemModal"
             />
 
             <PurchaseCreateLinesTable

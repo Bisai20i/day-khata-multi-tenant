@@ -32,6 +32,9 @@ const props = defineProps({
     openingBalance: { type: String, default: '0.00' },
     closingBalance: { type: String, default: '0.00' },
     entries: { type: Array, default: () => [] },
+    // Sub-accounts belonging to the selected account, if any.
+    subAccounts: { type: Array, default: () => [] },
+    includeSubAccounts: { type: Boolean, default: true },
     // Branch filter; null when the company has no branches.
     branchReport: { type: [Object, null], default: null },
 });
@@ -46,17 +49,27 @@ const fiscalYearOptions = computed(() =>
 );
 
 const accountOptions = computed(() =>
-    props.accounts.map((acc) => ({
-        value: acc.id,
-        label: acc.code ? `${acc.name} (${acc.code})` : acc.name,
-        searchValue: acc.code ? `${acc.name} ${acc.code} ${acc.group ?? ''}` : acc.name,
-    })),
+    props.accounts.map((acc) => {
+        const parentTag = acc.parent ? ` ↳ ${acc.parent.name}` : '';
+        const codeTag = acc.code ? ` (${acc.code})` : '';
+        return {
+            value: acc.id,
+            label: `${acc.name}${codeTag}${parentTag}`,
+            searchValue: `${acc.name} ${acc.code ?? ''} ${acc.group ?? ''} ${acc.parent?.name ?? ''}`,
+        };
+    }),
 );
 
 const fiscalYear = ref(props.fiscalYearId);
 const accountId = ref(props.accountId);
 const from = ref(props.from);
 const to = ref(props.to);
+const includeSubAccounts = ref(props.includeSubAccounts);
+
+watch(
+    () => props.includeSubAccounts,
+    (v) => (includeSubAccounts.value = v),
+);
 
 const branchFilter = useBranchReportFilter(() => props.branchReport);
 
@@ -77,6 +90,7 @@ function apply() {
             account_id: accountId.value ?? undefined,
             from: from.value ?? undefined,
             to: to.value ?? undefined,
+            include_sub_accounts: includeSubAccounts.value ? '1' : '0',
             ...branchFilter.toQuery(),
         },
         { preserveState: true, preserveScroll: true },
@@ -107,6 +121,7 @@ function printUrl() {
         account_id: accountId.value ?? '',
         from: from.value ?? '',
         to: to.value ?? '',
+        include_sub_accounts: includeSubAccounts.value ? '1' : '0',
     });
     branchFilter.appendTo(params);
     return `/reports/ledger/print?${params.toString()}`;
@@ -118,6 +133,7 @@ function exportUrl() {
         account_id: accountId.value ?? '',
         from: from.value ?? '',
         to: to.value ?? '',
+        include_sub_accounts: includeSubAccounts.value ? '1' : '0',
     });
     branchFilter.appendTo(params);
     return `/reports/ledger/export?${params.toString()}`;
@@ -245,6 +261,54 @@ const columns = [
 
         <!-- Account Ledger Details -->
         <div v-else class="space-y-4">
+            <!-- Sub-ledgers Info & Toggle Banner -->
+            <Card v-if="subAccounts.length > 0" variant="panel" class="border-primary/20 bg-primary/5">
+                <div class="flex flex-col gap-2.5 sm:flex-row sm:items-center sm:justify-between">
+                    <div>
+                        <div class="flex items-center gap-2">
+                            <span class="text-xs font-bold uppercase tracking-wider text-primary">Sub-ledgers of {{ account.name }}:</span>
+                            <span class="text-xs text-text-muted">({{ subAccounts.length }} child accounts)</span>
+                        </div>
+                        <div class="mt-1.5 flex flex-wrap items-center gap-1.5">
+                            <button
+                                v-for="sub in subAccounts"
+                                :key="sub.id"
+                                type="button"
+                                class="inline-flex items-center gap-1 rounded border border-primary/30 bg-white px-2 py-0.5 text-xs font-semibold text-primary shadow-xs transition-colors hover:bg-primary hover:text-white cursor-pointer"
+                                @click="onAccountSelect(sub.id)"
+                            >
+                                <span>{{ sub.name }}</span>
+                                <span v-if="sub.code" class="text-[10px] opacity-75">({{ sub.code }})</span>
+                            </button>
+                        </div>
+                    </div>
+
+                    <div class="flex items-center gap-2 pt-1 sm:pt-0">
+                        <input
+                            id="include-sub-accounts"
+                            v-model="includeSubAccounts"
+                            type="checkbox"
+                            class="size-4 rounded border-border text-primary focus:ring-primary cursor-pointer"
+                            @change="apply"
+                        />
+                        <Label for="include-sub-accounts" class="cursor-pointer text-xs font-semibold text-text-strong">
+                            Include transactions from sub-ledgers
+                        </Label>
+                    </div>
+                </div>
+            </Card>
+
+            <div v-else-if="account.parent_account_id" class="flex items-center gap-2 rounded border border-border bg-bg-subtle px-3 py-2 text-xs text-text-muted">
+                <span>↳ This account is a sub-ledger.</span>
+                <button
+                    type="button"
+                    class="font-semibold text-primary hover:underline cursor-pointer"
+                    @click="onAccountSelect(account.parent_account_id)"
+                >
+                    View parent ledger
+                </button>
+            </div>
+
             <!-- Account Summary Card -->
             <div class="grid grid-cols-2 gap-3 sm:grid-cols-4">
                 <Card variant="panel" class="p-3">

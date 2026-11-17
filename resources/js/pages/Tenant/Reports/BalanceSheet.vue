@@ -1,6 +1,6 @@
 <script setup>
 import { computed, ref, watch } from 'vue';
-import { router } from '@inertiajs/vue3';
+import { Link, router } from '@inertiajs/vue3';
 import AppLayout from '@/layouts/AppLayout.vue';
 import { useLayoutChrome } from '@/composables/useLayoutChrome';
 import Card from '@/components/ui/Card.vue';
@@ -176,7 +176,16 @@ function exportUrl() {
                                     :key="`acc-${account.id}`"
                                     class="flex items-center px-1 py-1 pl-4 text-[13px] text-text-base"
                                 >
-                                    <div class="flex-1">{{ account.name }}</div>
+                                    <div class="flex-1">
+                                        <Link
+                                            v-if="account.id && can('account_ledger.view')"
+                                            :href="`/reports/ledger?account_id=${account.id}&fiscal_year_id=${fiscalYearId ?? ''}&to=${to ?? ''}`"
+                                            class="text-primary hover:underline"
+                                        >
+                                            {{ account.name }}
+                                        </Link>
+                                        <template v-else>{{ account.name }}</template>
+                                    </div>
                                     <div class="w-32 text-right">{{ formatMoney(account.debit) }}</div>
                                     <BranchReportCells v-if="hasBranchColumns" :columns="branchColumns" :values="account.by_branch" cell-class="w-32" />
                                 </div>
@@ -187,7 +196,16 @@ function exportUrl() {
                                         :key="`acc-${account.id}`"
                                         class="flex items-center px-1 py-1 pl-8 text-[13px] text-text-base"
                                     >
-                                        <div class="flex-1">{{ account.name }}</div>
+                                        <div class="flex-1">
+                                            <Link
+                                                v-if="account.id && can('account_ledger.view')"
+                                                :href="`/reports/ledger?account_id=${account.id}&fiscal_year_id=${fiscalYearId ?? ''}&to=${to ?? ''}`"
+                                                class="text-primary hover:underline"
+                                            >
+                                                {{ account.name }}
+                                            </Link>
+                                            <template v-else>{{ account.name }}</template>
+                                        </div>
                                         <div class="w-32 text-right">{{ formatMoney(account.debit) }}</div>
                                         <BranchReportCells v-if="hasBranchColumns" :columns="branchColumns" :values="account.by_branch" cell-class="w-32" />
                                     </div>
@@ -231,7 +249,16 @@ function exportUrl() {
                                     :key="`acc-${account.id}`"
                                     class="flex items-center px-1 py-1 pl-8 text-[13px] text-text-base"
                                 >
-                                    <div class="flex-1">{{ account.name }}</div>
+                                    <div class="flex-1">
+                                        <Link
+                                            v-if="account.id && can('account_ledger.view')"
+                                            :href="`/reports/ledger?account_id=${account.id}&fiscal_year_id=${fiscalYearId ?? ''}&to=${to ?? ''}`"
+                                            class="text-primary hover:underline"
+                                        >
+                                            {{ account.name }}
+                                        </Link>
+                                        <template v-else>{{ account.name }}</template>
+                                    </div>
                                     <div class="w-32 text-right">{{ formatMoney(account.credit) }}</div>
                                     <BranchReportCells v-if="hasBranchColumns" :columns="branchColumns" :values="account.by_branch" cell-class="w-32" />
                                 </div>
@@ -242,7 +269,16 @@ function exportUrl() {
                                         :key="`acc-${account.id}`"
                                         class="flex items-center px-1 py-1 pl-12 text-[13px] text-text-base"
                                     >
-                                        <div class="flex-1">{{ account.name }}</div>
+                                        <div class="flex-1">
+                                            <Link
+                                                v-if="account.id && can('account_ledger.view')"
+                                                :href="`/reports/ledger?account_id=${account.id}&fiscal_year_id=${fiscalYearId ?? ''}&to=${to ?? ''}`"
+                                                class="text-primary hover:underline"
+                                            >
+                                                {{ account.name }}
+                                            </Link>
+                                            <template v-else>{{ account.name }}</template>
+                                        </div>
                                         <div class="w-32 text-right">{{ formatMoney(account.credit) }}</div>
                                         <BranchReportCells v-if="hasBranchColumns" :columns="branchColumns" :values="account.by_branch" cell-class="w-32" />
                                     </div>

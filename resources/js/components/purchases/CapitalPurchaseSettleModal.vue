@@ -8,7 +8,6 @@ import Select from '@/components/ui/Select.vue';
 import Combobox from '@/components/ui/Combobox.vue';
 import NepaliDateInput from '@/components/ui/NepaliDateInput.vue';
 import Label from '@/components/ui/Label.vue';
-import BranchSelect from '@/components/branch/BranchSelect.vue';
 import { useBranchField } from '@/composables/useBranchField';
 import { useBranchLabel } from '@/composables/useBranchLabel';
 import { compareMoney, formatMoney } from '@/lib/money';
@@ -118,14 +117,8 @@ function submitSettle() {
                     <Label class="mb-1">Amount <span class="text-danger">*</span></Label>
                     <Input v-model="settleForm.amount" type="text" inputmode="decimal" required />
                     <p v-if="settleForm.errors.amount" class="mt-1 text-sm text-danger">{{ settleForm.errors.amount }}</p>
-                    <p v-if="!showPicker && settleForm.errors.branch_id" class="mt-1 text-sm text-danger" role="alert">{{ settleForm.errors.branch_id }}</p>
+                    <p v-if="settleForm.errors.branch_id" class="mt-1 text-sm text-danger" role="alert">{{ settleForm.errors.branch_id }}</p>
                 </div>
-                <BranchSelect
-                    v-model="branchId"
-                    :options="branchOptions"
-                    :error="settleForm.errors.branch_id"
-                    help="Where the money was paid from."
-                />
                 <div>
                     <Label class="mb-1">Paid by <span class="text-danger">*</span></Label>
                     <Select :model-value="settleForm.payment_mode" :options="settleModeOptions" @update:model-value="(v) => (settleForm.payment_mode = v)" />

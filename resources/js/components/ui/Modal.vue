@@ -1,7 +1,7 @@
 <script setup>
 import { ref } from 'vue';
 import { X } from '@lucide/vue';
-import { DialogClose, DialogContent, DialogDescription, DialogOverlay, DialogPortal, DialogRoot, DialogTitle } from 'reka-ui';
+import { DialogContent, DialogDescription, DialogOverlay, DialogPortal, DialogRoot, DialogTitle } from 'reka-ui';
 import { cn } from '@/lib/utils';
 import { useConfirm } from '@/composables/useConfirm';
 
@@ -97,12 +97,14 @@ function onOpenAutoFocus(event) {
                                 {{ description }}
                             </DialogDescription>
                         </div>
-                        <DialogClose
-                            class="mt-0.5 shrink-0 text-text-muted transition-colors duration-150 hover:text-danger"
+                        <button
+                            type="button"
+                            class="mt-0.5 shrink-0 cursor-pointer text-text-muted transition-colors duration-150 hover:text-danger"
                             aria-label="Close"
+                            @click="onOpenChange(false)"
                         >
                             <X class="h-4 w-4" />
-                        </DialogClose>
+                        </button>
                     </div>
                     <div ref="body" class="min-h-0 flex-1 overflow-y-auto px-5 py-4">
                         <slot />
