@@ -157,6 +157,7 @@ class PayrollRunController extends Controller
                 'staff_name' => $line->staff->name,
                 'gross' => $line->gross,
                 'advance_recovery' => $line->advance_recovery,
+                'tds' => $line->tds,
                 'net' => $line->net,
                 'note' => $line->note,
                 'paid' => ($paid[$line->id] ?? Money::zero())->toString(),
@@ -170,7 +171,7 @@ class PayrollRunController extends Controller
             ])->values(),
             // Only a draft is editable, so only a draft needs the pickers.
             'components' => $isDraft ? PayComponent::query()->where('is_active', true)->orderBy('sort_order')->get(['id', 'code', 'name']) : [],
-            'staffOptions' => $isDraft ? StaffMember::query()->active()->orderBy('name')->get(['id', 'staff_code', 'name']) : [],
+            'staffOptions' => $isDraft ? StaffMember::query()->active()->orderBy('name')->get(['id', 'staff_code', 'name', 'tds_rate']) : [],
             'advanceBalances' => $isDraft
                 ? collect(StaffBalances::advances())->map(fn (Money $amount): string => $amount->toString())
                 : (object) [],
@@ -261,6 +262,7 @@ class PayrollRunController extends Controller
             'lines_count' => $run->lines_count ?? $run->lines->count(),
             'total_gross' => $run->total_gross,
             'total_recovery' => $run->total_recovery,
+            'total_tds' => $run->total_tds,
             'total_net' => $run->total_net,
         ];
     }

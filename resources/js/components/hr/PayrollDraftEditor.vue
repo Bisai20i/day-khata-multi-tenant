@@ -13,7 +13,7 @@ import { compareMoney, formatMoney } from '@/lib/money.js';
 /**
  * The editable grid of a draft payroll run: the run's header fields, then one
  * block per staff member holding their pay items (component + amount + note),
- * the advance recovery and a note, with live gross/net from usePayrollDraft.
+ * the advance recovery, TDS and a note, with live gross/net from usePayrollDraft.
  *
  * `form` is the page's useForm instance and is edited in place (the same
  * pattern as PurchaseCreatePaymentNotes); `draft` is usePayrollDraft()'s
@@ -110,7 +110,7 @@ function err(path) {
             </template>
 
             <p class="mb-3 text-xs text-text-muted">
-                Each staff member needs at least one pay item. Advance recovery is deducted from gross pay and cannot exceed either the gross pay or the staff member's outstanding advance.
+                Each staff member needs at least one pay item. Advance recovery and TDS are deducted from gross pay; together they cannot exceed the gross pay, and the recovery cannot exceed the staff member's outstanding advance.
             </p>
 
             <p v-if="err('lines')" class="mb-3 border-[1.5px] border-danger bg-danger-bg px-3 py-2 text-sm text-danger" role="alert">
@@ -132,6 +132,7 @@ function err(path) {
                     <div class="ml-auto flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-text-muted">
                         <span>Gross <span class="font-bold text-text-strong">{{ formatMoney(draft.figuresFor(line).gross) }}</span></span>
                         <span>Recovery <span class="font-bold text-text-strong">{{ formatMoney(draft.figuresFor(line).recovery) }}</span></span>
+                        <span>TDS <span class="font-bold text-text-strong">{{ formatMoney(draft.figuresFor(line).tds) }}</span></span>
                         <span>Net <span class="font-bold text-text-strong">{{ formatMoney(draft.figuresFor(line).net) }}</span></span>
                     </div>
                     <button
@@ -220,7 +221,7 @@ function err(path) {
                         <Plus class="h-3.5 w-3.5" /> Add pay item
                     </button>
 
-                    <div class="grid grid-cols-1 gap-3 border-t border-border-soft pt-3 sm:grid-cols-[200px_1fr]">
+                    <div class="grid grid-cols-1 gap-3 border-t border-border-soft pt-3 sm:grid-cols-[200px_200px_1fr]">
                         <div>
                             <Label :for="`payroll-recovery-${line.key}`" class="mb-1">Advance recovery</Label>
                             <Input
@@ -235,6 +236,21 @@ function err(path) {
                             <p class="mt-1 text-xs" :class="hasAdvance(line) ? 'text-text-muted' : 'text-text-faint'">{{ advanceHint(line) }}</p>
                             <p v-if="err(`lines.${lineIndex}.advance_recovery`)" class="mt-1 text-xs text-danger" role="alert">
                                 {{ err(`lines.${lineIndex}.advance_recovery`) }}
+                            </p>
+                        </div>
+                        <div>
+                            <Label :for="`payroll-tds-${line.key}`" class="mb-1">TDS</Label>
+                            <Input
+                                :id="`payroll-tds-${line.key}`"
+                                v-model="line.tds"
+                                type="text"
+                                inputmode="decimal"
+                                placeholder="0.00"
+                                class="text-right"
+                                :disabled="readonly"
+                            />
+                            <p v-if="err(`lines.${lineIndex}.tds`)" class="mt-1 text-xs text-danger" role="alert">
+                                {{ err(`lines.${lineIndex}.tds`) }}
                             </p>
                         </div>
                         <div>

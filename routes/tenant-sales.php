@@ -35,6 +35,7 @@ Route::name('tenant.')->group(function () {
         Route::post('/estimate', [SaleController::class, 'estimate'])->middleware('can:sales.create')->name('estimate');
         Route::post('/{sale}/cancel', [SaleController::class, 'cancel'])->middleware('can:sales.cancel')->name('cancel');
         Route::get('/{sale}/print', [SaleController::class, 'print'])->middleware('can:sales.print')->name('print');
+        Route::get('/{sale}', [SaleController::class, 'show'])->middleware('can:sales.view')->name('show');
         // Sale::create()'s saved-note picker (audit section 4 polish, "note
         // templates") - a simple CRUD kept inside the Sales module rather
         // than under Settings, per the task's own "or a simple page under

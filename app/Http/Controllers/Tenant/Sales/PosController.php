@@ -82,7 +82,7 @@ class PosController extends Controller
             // What the tile badges cover; null when not multi-branch.
             'stockScope' => $stockDisplay->scope(),
             'categories' => ItemCategory::query()->where('is_active', true)->orderBy('name')->get(['id', 'name']),
-            'bankAccounts' => $this->settlementAccounts(),
+            'bankAccounts' => $this->bankAccounts(),
             'tdsAccounts' => $this->settlementAccounts(),
             'stores' => $this->branchStoreOptions($request),
             // POS defaults every new cart to the walk-in customer (audit
@@ -105,6 +105,14 @@ class PosController extends Controller
             ],
             ...BranchFormOptions::props($request),
         ]);
+    }
+
+    /**
+     * @return Collection<int, Account>
+     */
+    private function bankAccounts(): Collection
+    {
+        return Account::bankAccountQuery()->orderBy('name')->get(['id', 'code', 'name']);
     }
 
     /**

@@ -9,7 +9,7 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
 /**
- * Gives a master-data model (Customer, Supplier, Agent, StaffMember) its own ledger
+ * Gives a master-data model (Customer, Supplier, Agent) its own ledger
  * Account, auto-created on first save and kept in sync on update. Mirrors the
  * legacy app's "creating a customer/supplier also writes a mainaccount
  * row" behavior (see CustomerController::store/update), normalized onto
@@ -44,14 +44,6 @@ trait HasLedgerAccount
     abstract protected function ledgerAccountSubgroupName(): string;
 
     /**
-     * Optional parent account code to attach the generated account to.
-     */
-    protected function ledgerAccountParentCode(): ?string
-    {
-        return null;
-    }
-
-    /**
      * @return BelongsTo<Account, $this>
      */
     public function account(): BelongsTo
@@ -77,22 +69,10 @@ trait HasLedgerAccount
             ]);
         }
 
-        $attributes = [
+        return $subgroup->accounts()->create([
             'name' => $this->name,
             'phone' => $this->mobile_no,
             'address' => $this->address,
-        ];
-
-        if (method_exists($this, 'ledgerAccountParentCode') && ($code = $this->ledgerAccountParentCode())) {
-            $parent = Account::where('code', $code)
-                ->orWhere('name', 'Salary Payable')
-                ->first();
-
-            if ($parent) {
-                $attributes['parent_account_id'] = $parent->id;
-            }
-        }
-
-        return $subgroup->accounts()->create($attributes);
+        ]);
     }
 }

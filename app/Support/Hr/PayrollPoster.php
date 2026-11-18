@@ -23,10 +23,13 @@ use InvalidArgumentException;
  *
  *   Dr Salaries & Wages / Staff Bonus / Staff Allowances   (one line per expense account)
  *       Cr Salary Payable          (total net: what is owed to staff)
+ *       Cr TDS Payable             (salary TDS withheld; only when > 0)
  *       Cr Staff Advances Receivable (total advance recovered; only when > 0)
  *
- * so the unpaid part shows as a Payable on the Balance Sheet and a recovered
- * advance reduces the Receivable.
+ * so the unpaid part shows as a Payable on the Balance Sheet, withheld TDS as
+ * a liability to the tax office, and a recovered advance reduces the
+ * Receivable. Per payslip: gross = net + TDS + recovery, so every branch's
+ * group balances on its own.
  *
  * Branches (plan 12, section 5.4, BR09): the voucher's header branch is the
  * run's branch, and every payslip's expense, Salary Payable and advance
@@ -79,10 +82,11 @@ class PayrollPoster
 
             static::assertNoOverlappingRun($locked, $staffIds->all(), $staff);
 
-            /** @var array<int, array{debit: array<int, Money>, payable: Money, recovery: Money}> $byBranch */
+            /** @var array<int, array{debit: array<int, Money>, payable: Money, recovery: Money, tds: Money}> $byBranch */
             $byBranch = [];
             $totalGross = Money::zero();
             $totalRecovery = Money::zero();
+            $totalTds = Money::zero();
 
             $runBranchId = (int) $locked->branch_id;
 
@@ -102,7 +106,7 @@ class PayrollPoster
                     throw new InvalidArgumentException("{$member->name} has moved to a different branch since this run was saved; open the run and save it again before posting.");
                 }
 
-                $byBranch[$lineBranchId] ??= ['debit' => [], 'payable' => Money::zero(), 'recovery' => Money::zero()];
+                $byBranch[$lineBranchId] ??= ['debit' => [], 'payable' => Money::zero(), 'recovery' => Money::zero(), 'tds' => Money::zero()];
                 $gross = Money::zero();
 
                 foreach ($line->items as $item) {
@@ -127,10 +131,16 @@ class PayrollPoster
                     throw new InvalidArgumentException("The advance recovery for {$member->name} must be between zero and their gross pay; open the run and save it again.");
                 }
 
+                $tds = Money::of($line->tds);
+
+                if ($tds->isNegative() || $recovery->plus($tds)->isGreaterThan($gross)) {
+                    throw new InvalidArgumentException("The TDS and advance recovery for {$member->name} must be between zero and their gross pay together; open the run and save it again.");
+                }
+
                 $net = Money::of($line->net);
 
-                if ($net->isNegative() || ! $net->isEqualTo($gross->minus($recovery))) {
-                    throw new InvalidArgumentException("{$member->name}'s net pay is not gross minus advance recovery; open the run and save it again.");
+                if ($net->isNegative() || ! $net->isEqualTo($gross->minus($recovery)->minus($tds))) {
+                    throw new InvalidArgumentException("{$member->name}'s net pay is not gross minus advance recovery and TDS; open the run and save it again.");
                 }
 
                 // Only a real recovery is checked against the advance balance:
@@ -141,16 +151,18 @@ class PayrollPoster
 
                 $byBranch[$lineBranchId]['payable'] = $byBranch[$lineBranchId]['payable']->plus($net);
                 $byBranch[$lineBranchId]['recovery'] = $byBranch[$lineBranchId]['recovery']->plus($recovery);
+                $byBranch[$lineBranchId]['tds'] = $byBranch[$lineBranchId]['tds']->plus($tds);
 
                 $totalGross = $totalGross->plus($gross);
                 $totalRecovery = $totalRecovery->plus($recovery);
+                $totalTds = $totalTds->plus($tds);
             }
 
             if (! $totalGross->isPositive()) {
                 throw new InvalidArgumentException('A payroll run must pay something.');
             }
 
-            $totalNet = $totalGross->minus($totalRecovery);
+            $totalNet = $totalGross->minus($totalRecovery)->minus($totalTds);
 
             $voucherLines = static::voucherLines($byBranch, $runBranchId);
 
@@ -178,6 +190,7 @@ class PayrollPoster
                 'series_branch_id' => $voucher->series_branch_id,
                 'total_gross' => $totalGross->toString(),
                 'total_recovery' => $totalRecovery->toString(),
+                'total_tds' => $totalTds->toString(),
                 'total_net' => $totalNet->toString(),
                 'posted_by' => $actor->id,
                 'posted_at' => now(),
@@ -190,10 +203,10 @@ class PayrollPoster
     /**
      * The voucher lines, one group per branch (the run's branch first, then
      * ascending id): that branch's expense debits by account id, then its
-     * Salary Payable credit, then its advance recovery credit, each only when
-     * positive. Every line names its branch.
+     * Salary Payable credit, then its TDS Payable credit, then its advance
+     * recovery credit, each only when positive. Every line names its branch.
      *
-     * @param  array<int, array{debit: array<int, Money>, payable: Money, recovery: Money}>  $byBranch
+     * @param  array<int, array{debit: array<int, Money>, payable: Money, recovery: Money, tds: Money}>  $byBranch
      * @return list<array{account_id: int, debit: string, credit: string, narration: string, branch_id: int}>
      */
     private static function voucherLines(array $byBranch, int $runBranchId): array
@@ -212,6 +225,10 @@ class PayrollPoster
 
             if ($group['payable']->isPositive()) {
                 $voucherLines[] = ['account_id' => HrAccounts::id(HrAccounts::SALARY_PAYABLE), 'debit' => '0', 'credit' => $group['payable']->toString(), 'narration' => 'Salary payable', 'branch_id' => $branchId];
+            }
+
+            if ($group['tds']->isPositive()) {
+                $voucherLines[] = ['account_id' => HrAccounts::id(HrAccounts::TDS_PAYABLE), 'debit' => '0', 'credit' => $group['tds']->toString(), 'narration' => 'Salary TDS withheld', 'branch_id' => $branchId];
             }
 
             if ($group['recovery']->isPositive()) {

@@ -92,6 +92,7 @@ class ChartOfAccountsSeeder extends Seeder
         $subgroups = collect([
             ['group' => 'Current Assets', 'name' => 'Sundry Debtors'],
             ['group' => 'Current Assets', 'name' => 'Cash-In-Hand'],
+            ['group' => 'Current Assets', 'name' => 'Bank Accounts'],
             ['group' => 'Current Assets', 'name' => 'Stock'],
             ['group' => 'Current Liabilities', 'name' => 'Sundry Creditors'],
             ['group' => 'Current Liabilities', 'name' => 'Sales Agents'],

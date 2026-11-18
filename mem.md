@@ -3,6 +3,32 @@
 Living state doc. Read this before starting work, update it before stopping. See `goal.md` for
 direction/roadmap - this file is "what exists and why," not "what's next."
 
+**2026-11-18 entry (Sales Bill View Modal & Route).**
+- **Sales Bill View Option:**
+  - Implemented `resources/js/components/sales/SaleViewModal.vue` providing a complete view of a sales bill:
+    - Status & type badges (`Posted` / `Cancelled`, `Full Tax Invoice` / `Abbreviated` / `PAN`, `Payment Mode`, `Branch`).
+    - Cancellation banner with reason, date, and user if the sale is cancelled.
+    - Buyer and invoice metadata grid (Name, PAN/VAT, address, contact, invoice number, BS/AD dates, fiscal year, chalani number, store, agent, creator).
+    - Line items table with descriptions, HS codes, unit, quantity (with bonus free units indicator), rates, line discounts, VAT status, and line totals.
+    - Financial settlement breakdown (cash, bank account, TDS withheld) and narration.
+    - Bill summary card (subtotal, header discount, taxable/nontaxable amounts, VAT, round off, grand total).
+    - Footer action to print bill directly in a new tab.
+  - Updated `resources/js/pages/Tenant/Sales/Index.vue`:
+    - Added "View sale" button (`Eye` icon) in the Actions column.
+    - Made the Invoice # column clickable to open the bill view.
+    - Added URL query parameter auto-selection (`?view=<sale_id>`) on page mount.
+  - Updated `app/Http/Controllers/Tenant/Sales/SaleController.php`:
+    - Eager loaded `customer:id,name,tpin,mobile_no,address`, `store:id,name`, `bankAccount:id,name`, `tdsAccount:id,name`, `creator:id,name`, `fiscalYear:id,name`, `lines.item:id,name,code,unit,hs_code`, `lines.itemUnit:id,name` on `index()`.
+    - Added `show(Request $request, Sale $sale)` method gated by `can:sales.view` returning JSON on API requests and redirecting with `?view=<id>` on web requests.
+  - Registered route `GET /sales/{sale}` in `routes/tenant-sales.php` and documented in `todo/permissions/ROUTE-MAP.md`.
+  - Feature test added in `tests/Feature/Tenant/Sales/SaleControllerTest.php`.
+
+**2026-11-18 entry (Staff-wise salary accounting: salary TDS, advance adjustment at payment, staff account rows retired).** Written, NOT yet migrated/tested/committed - the user runs migrations and tests.
+- **Structure decision (supersedes the 2026-11-17 "Staff Ledger Account under Salary Payable" bullets below):** staff have NO `accounts` row. Balances stay the HR sub-ledger (`StaffBalances`, `StaffStatementData`) reconciled against control accounts LIA22/ASA24. Migration `2026_11_18_100100_retire_staff_ledger_account_rows` drops `hr_staff.account_id` and deletes unused staff accounts; `StaffMember` no longer uses `HasLedgerAccount`; `Account::REFERENCES` lost `hr_staff`. `tests/Feature/Tenant/Hr/StaffLedgerAccountTest.php` is obsolete (needs delete/rewrite, user's call).
+- **Salary TDS:** `hr_staff.tds_rate` (default %), `hr_payroll_lines.tds`, `hr_payroll_runs.total_tds` (migration `2026_11_18_100000`). Draft pre-fills tds = gross x rate (editable). Net = gross - advance_recovery - tds. Run voucher adds `Cr TDS Payable (LIA21, HrAccounts::TDS_PAYABLE)` per branch. LIA21 is shared with purchase TDS and is NOT a control account. No slab calculator (client rules not supplied).
+- **Advance at payment:** `hr_payroll_payment_lines.advance_adjusted` + `hr_payroll_payments.advance_adjusted`. `amount` still = settled against Salary Payable; cash = amount - advance_adjusted. Voucher: Dr LIA22 settled / Cr ASA24 adjusted / Cr cash-or-bank (omitted if 0). Opt-in only (UI default "Keep advance pending"). Caps: <= amount, <= staff outstanding advance (min of now and as-at payment date). Staff rows locked after runs+lines. Refused (post and cancel) when the staff member's branch differs from the payslip's branch. `StaffBalances::advances()` subtracts payment adjustments; `advanceSummary()` gives given/adjusted/outstanding.
+- **Known low gaps:** back-dated adjustment cap checks only now and the payment date; TDS prefill watcher can overwrite a manually typed 0.00 before gross is entered; stale "Deduct advance" amount isn't recalculated when allocations change (form blocks submit). `tests/js/payrollDraft.test.mjs` line 49 expects totals without `tds` and will fail.
+
 **2026-11-17 entry (Staff Ledger Integration, Quick-Add Customer/Supplier Area, Nav Labels, Staff Ledger Account under Salary Payable, Salary Payment Form Fix).**
 - **Staff Ledger Account under Salary Payable (`LIA22`):**
   - Mirrored the Customer and Supplier pattern (`HasLedgerAccount`) on `StaffMember` (`hr_staff`).

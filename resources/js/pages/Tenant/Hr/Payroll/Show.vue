@@ -169,6 +169,7 @@ const figures = computed(() => {
             { label: 'Staff', value: String(live.count) },
             { label: 'Gross pay', value: formatMoney(live.gross) },
             { label: 'Advance recovered', value: formatMoney(live.recovery) },
+            { label: 'Salary TDS withheld', value: formatMoney(live.tds ?? '0.00') },
             { label: 'Net pay', value: formatMoney(live.net) },
         ];
     }
@@ -177,6 +178,7 @@ const figures = computed(() => {
         { label: 'Staff', value: String(props.run.lines_count ?? props.lines.length) },
         { label: 'Gross pay', value: formatMoney(props.run.total_gross) },
         { label: 'Advance recovered', value: formatMoney(props.run.total_recovery) },
+        { label: 'Salary TDS withheld', value: formatMoney(props.run.total_tds ?? '0.00') },
         { label: 'Net pay', value: formatMoney(props.run.total_net) },
     ];
     if (isPosted.value) {

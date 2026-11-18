@@ -6,7 +6,7 @@ import { compareMoney, formatMoney, sumMoney } from '@/lib/money.js';
 /**
  * Read-only payslip table of a posted or cancelled payroll run: one row per
  * staff member, one column per pay component used anywhere in the run, then
- * gross, advance recovered and net. A posted run also shows what has been
+ * gross, advance recovered, salary TDS and net. A posted run also shows what has been
  * paid against each payslip and what is still outstanding (Salary Payable).
  *
  * Every figure is a server decimal string; the column and footer totals are
@@ -54,6 +54,7 @@ const componentTotals = computed(
 const totals = computed(() => ({
     gross: sumMoney(props.lines.map((line) => line.gross)),
     recovery: sumMoney(props.lines.map((line) => line.advance_recovery)),
+    tds: sumMoney(props.lines.map((line) => line.tds ?? '0.00')),
     net: sumMoney(props.lines.map((line) => line.net)),
     paid: sumMoney(props.lines.map((line) => line.paid ?? '0.00')),
     outstanding: sumMoney(props.lines.map((line) => line.outstanding ?? '0.00')),
@@ -79,6 +80,7 @@ function itemNotes(line) {
                     <th v-for="column in componentColumns" :key="column.id" class="px-2 py-2 text-right">{{ column.name }}</th>
                     <th class="px-2 py-2 text-right">Gross</th>
                     <th class="px-2 py-2 text-right">Advance recovered</th>
+                    <th class="px-2 py-2 text-right">TDS</th>
                     <th class="px-2 py-2 text-right">Net</th>
                     <th v-if="showPayments" class="px-2 py-2 text-right">Paid</th>
                     <th v-if="showPayments" class="py-2 pl-2 text-right">Outstanding</th>
@@ -98,6 +100,7 @@ function itemNotes(line) {
                     </td>
                     <td class="px-2 py-2 text-right font-semibold">{{ formatMoney(line.gross) }}</td>
                     <td class="px-2 py-2 text-right">{{ formatMoney(line.advance_recovery) }}</td>
+                    <td class="px-2 py-2 text-right">{{ formatMoney(line.tds ?? '0.00') }}</td>
                     <td class="px-2 py-2 text-right font-semibold text-text-strong">{{ formatMoney(line.net) }}</td>
                     <td v-if="showPayments" class="px-2 py-2 text-right">{{ formatMoney(line.paid ?? '0.00') }}</td>
                     <td v-if="showPayments" class="py-2 pl-2 text-right" :class="isPositive(line.outstanding) ? 'font-semibold text-warning-text' : 'text-text-faint'">
@@ -111,6 +114,7 @@ function itemNotes(line) {
                     <td v-for="column in componentColumns" :key="column.id" class="px-2 py-2 text-right">{{ formatMoney(componentTotals.get(column.id)) }}</td>
                     <td class="px-2 py-2 text-right">{{ formatMoney(totals.gross) }}</td>
                     <td class="px-2 py-2 text-right">{{ formatMoney(totals.recovery) }}</td>
+                    <td class="px-2 py-2 text-right">{{ formatMoney(totals.tds) }}</td>
                     <td class="px-2 py-2 text-right">{{ formatMoney(totals.net) }}</td>
                     <td v-if="showPayments" class="px-2 py-2 text-right">{{ formatMoney(totals.paid) }}</td>
                     <td v-if="showPayments" class="py-2 pl-2 text-right">{{ formatMoney(totals.outstanding) }}</td>

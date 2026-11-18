@@ -199,3 +199,41 @@ test('the bank and TDS pickers are available on the create form data', function 
 
     $tenant->delete();
 });
+
+test('an authenticated user can view a sale through the show route', function () {
+    $domain = 'sales-show-view.tenant-test';
+    $tenant = provisionSaleControllerTestTenant($domain);
+
+    $saleId = null;
+    $invoiceNumber = null;
+    $tenant->run(function () use (&$saleId, &$invoiceNumber) {
+        $user = User::factory()->create(['email' => 'owner@example.com']);
+        FiscalYear::create(['name' => 'FY1', 'start_date' => '2026-01-01', 'end_date' => '2026-12-31', 'status' => FiscalYearStatus::Open]);
+        $customer = Customer::factory()->create(['name' => 'Ram Shrestha', 'tpin' => '123456789']);
+        $item = Item::factory()->create(['name' => 'Test Item', 'is_vatable' => false, 'is_stockable' => false]);
+
+        $sale = Sale::post(
+            ['customer_id' => $customer->id, 'invoice_type' => 'full', 'date' => '2026-06-01', 'payment_mode' => 'cash'],
+            [['item_id' => $item->id, 'quantity' => 2, 'rate' => 150, 'discount' => 0]],
+            $user,
+        );
+        $saleId = $sale->id;
+        $invoiceNumber = $sale->invoice_number;
+    });
+
+    loginSaleControllerTestUser($domain);
+
+    // JSON response returns full sale details
+    $this->getJson("http://{$domain}/sales/{$saleId}")
+        ->assertOk()
+        ->assertJsonPath('id', $saleId)
+        ->assertJsonPath('invoice_number', $invoiceNumber)
+        ->assertJsonPath('customer.name', 'Ram Shrestha')
+        ->assertJsonPath('lines.0.quantity', '2.0000');
+
+    // Standard web request redirects to sales list with view query
+    $this->get("http://{$domain}/sales/{$saleId}")
+        ->assertRedirect("http://{$domain}/sales?search={$invoiceNumber}&view={$saleId}");
+
+    $tenant->delete();
+});

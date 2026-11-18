@@ -1,6 +1,6 @@
 import { computed, ref, watch } from 'vue';
 // Relative (not `@/`) so the pure helpers below can be imported by a plain `node --test` file.
-import { compareMoney, parseMoney, subtractMoney, sumMoney } from '../lib/money.js';
+import { addMoney, compareMoney, parseMoney, percentOf, subtractMoney, sumMoney } from '../lib/money.js';
 
 /**
  * State, totals and validation for the editable grid of a draft payroll run
@@ -81,6 +81,7 @@ export function draftFromRun(run, lines) {
             staff_code: line.staff_code ?? '',
             staff_name: line.staff_name ?? '',
             advance_recovery: line.advance_recovery ?? '',
+            tds: line.tds ?? '0.00',
             note: line.note ?? '',
             items: (line.items ?? []).map((item) => ({
                 key: nextKey(),
@@ -112,6 +113,7 @@ export function payrollDraftPayload(state) {
         lines: (state.lines ?? []).map((line) => ({
             staff_id: line.staff_id,
             advance_recovery: isBlank(line.advance_recovery) ? '0.00' : (moneyOrNull(line.advance_recovery) ?? trimmed(line.advance_recovery)),
+            tds: isBlank(line.tds) ? '0.00' : (moneyOrNull(line.tds) ?? trimmed(line.tds)),
             note: trimmed(line.note) || null,
             items: (line.items ?? []).map((item) => ({
                 pay_component_id: item.pay_component_id,
@@ -133,19 +135,22 @@ export function payrollDraftFingerprint(state) {
 }
 
 /**
- * Live gross / recovery / net of one staff line. Unparseable entries count
- * as zero here; validatePayrollDraft() is what reports them.
+ * Live gross / recovery / TDS / net of one staff line (net = gross - recovery
+ * - TDS). Unparseable entries count as zero here; validatePayrollDraft() is
+ * what reports them.
  *
- * @returns {{gross: string, recovery: string, net: string}}
+ * @returns {{gross: string, recovery: string, tds: string, net: string}}
  */
 export function payrollLineFigures(line) {
     const gross = sumMoney((line.items ?? []).map((item) => moneyOrNull(item.amount) ?? '0.00'));
     const recovery = moneyOrNull(line.advance_recovery) ?? '0.00';
 
-    return { gross, recovery, net: subtractMoney(gross, recovery) };
+    const tds = moneyOrNull(line.tds) ?? '0.00';
+
+    return { gross, recovery, tds, net: subtractMoney(subtractMoney(gross, recovery), tds) };
 }
 
-/** @returns {{count: number, gross: string, recovery: string, net: string}} */
+/** @returns {{count: number, gross: string, recovery: string, tds: string, net: string}} */
 export function payrollDraftTotals(lines) {
     const figures = (lines ?? []).map((line) => payrollLineFigures(line));
 
@@ -153,6 +158,7 @@ export function payrollDraftTotals(lines) {
         count: figures.length,
         gross: sumMoney(figures.map((f) => f.gross)),
         recovery: sumMoney(figures.map((f) => f.recovery)),
+        tds: sumMoney(figures.map((f) => f.tds)),
         net: sumMoney(figures.map((f) => f.net)),
     };
 }
@@ -179,6 +185,7 @@ export function payrollDraftFieldValues(state) {
 
         values[`${base}.staff_id`] = line.staff_id;
         values[`${base}.advance_recovery`] = line.advance_recovery;
+        values[`${base}.tds`] = line.tds;
         values[`${base}.note`] = line.note;
         values[`${base}.items`] = (line.items ?? []).length;
         (line.items ?? []).forEach((item, itemIndex) => {
@@ -336,6 +343,25 @@ export function validatePayrollDraft(state, { advanceBalances = {}, activeCompon
             }
         }
 
+        if (!isBlank(line.tds)) {
+            const invalidTds = amountError(line.tds, 'TDS');
+            if (invalidTds) {
+                errors[`${base}.tds`] = invalidTds;
+            } else {
+                const tds = moneyOrNull(line.tds);
+                const { gross } = payrollLineFigures(line);
+                const recovery = moneyOrNull(line.advance_recovery) ?? '0.00';
+
+                if (compareMoney(tds, '0.00') < 0) {
+                    errors[`${base}.tds`] = 'The TDS cannot be negative.';
+                } else if (compareMoney(tds, MAX_AMOUNT) > 0) {
+                    errors[`${base}.tds`] = 'The TDS is too large.';
+                } else if (compareMoney(addMoney(recovery, tds), gross) > 0) {
+                    errors[`${base}.tds`] = 'The advance recovery and TDS together cannot exceed the gross pay.';
+                }
+            }
+        }
+
         if (trimmed(line.note).length > 255) {
             errors[`${base}.note`] = 'The note can be at most 255 characters.';
         }
@@ -453,10 +479,33 @@ export function usePayrollDraft(form, source) {
             staff_code: staff.staff_code ?? '',
             staff_name: staff.name ?? '',
             advance_recovery: '0.00',
+            tds: '0.00',
+            // Local only (never sent): the staff member's TDS rate and the last
+            // value the editor itself wrote into `tds`. While `tds` still equals
+            // that value the user has not touched it, so it follows the gross.
+            tds_rate: moneyOrNull(staff.tds_rate),
+            tds_auto_value: '0.00',
             note: '',
             items: [emptyPayItem()],
         });
     }
+
+    // Pre-fill TDS for newly added staff as percentOf(gross, rate). A value the
+    // user has typed over is never replaced.
+    watch(
+        () => form.lines.map((line) => payrollLineFigures(line).gross).join('|'),
+        () => {
+            form.lines.forEach((line) => {
+                if (!line.tds_rate || line.tds !== line.tds_auto_value) {
+                    return;
+                }
+                const next = percentOf(payrollLineFigures(line).gross, line.tds_rate);
+
+                line.tds = next;
+                line.tds_auto_value = next;
+            });
+        },
+    );
 
     // Removing a row shifts the indices the server's error keys point at,
     // so stale server messages are dropped rather than shown on the wrong row.

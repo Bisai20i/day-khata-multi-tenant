@@ -1,7 +1,7 @@
 <script setup>
 import { computed, h, onMounted, reactive, ref, watch } from 'vue';
 import { Link, router, useForm, usePage } from '@inertiajs/vue3';
-import { Ban, ChevronDown, ChevronUp, ChevronsUpDown, Download, Plus, Printer, Search, SlidersHorizontal, X } from '@lucide/vue';
+import { Ban, ChevronDown, ChevronUp, ChevronsUpDown, Download, Eye, Plus, Printer, Search, SlidersHorizontal, X } from '@lucide/vue';
 import AppLayout from '@/layouts/AppLayout.vue';
 import { useLayoutChrome } from '@/composables/useLayoutChrome';
 import Card from '@/components/ui/Card.vue';
@@ -24,6 +24,7 @@ import { useBranchListColumn } from '@/composables/useBranchListColumn';
 import { formatMoney, isZeroMoney } from '@/lib/money';
 import { formatBsDate } from '@/lib/format';
 import Create from './Create.vue';
+import SaleViewModal from '@/components/sales/SaleViewModal.vue';
 
 defineOptions({ layout: AppLayout });
 
@@ -257,7 +258,42 @@ const showCreateForm = ref(false);
 const DRAFT_KEY = 'sales-create-draft';
 const initialDraft = ref(null);
 
+const viewingSale = ref(null);
+
+function openView(sale) {
+    viewingSale.value = sale;
+}
+
+function onViewOpenChange(value) {
+    if (!value) {
+        viewingSale.value = null;
+        try {
+            const url = new URL(window.location.href);
+            if (url.searchParams.has('view')) {
+                url.searchParams.delete('view');
+                window.history.replaceState({}, '', url.toString());
+            }
+        } catch {
+            // Ignore URL mutation errors
+        }
+    }
+}
+
 onMounted(() => {
+    // Check if ?view=<id> query parameter is present to auto-open sale details
+    try {
+        const params = new URLSearchParams(window.location.search);
+        const viewId = params.get('view');
+        if (viewId && props.sales?.data) {
+            const target = props.sales.data.find((s) => s.id === Number(viewId));
+            if (target) {
+                viewingSale.value = target;
+            }
+        }
+    } catch {
+        // Ignore URL parsing errors
+    }
+
     let raw;
     try {
         raw = sessionStorage.getItem(DRAFT_KEY);
@@ -342,7 +378,17 @@ const columns = [
         id: 'voucher',
         header: sortableHeader('voucher', 'Invoice #'),
         numeric: false,
-        cell: ({ row }) => invoiceLabel(row.original),
+        cell: ({ row }) =>
+            h(
+                'button',
+                {
+                    type: 'button',
+                    class: 'cursor-pointer text-left font-semibold text-primary hover:underline focus-visible:outline-2 focus-visible:outline-primary',
+                    onClick: () => openView(row.original),
+                    title: 'View sale details',
+                },
+                invoiceLabel(row.original),
+            ),
     },
     {
         id: 'invoice_type',
@@ -391,6 +437,18 @@ const columns = [
         numeric: false,
         cell: ({ row }) =>
             h('div', { class: 'flex items-center gap-1' }, [
+                h(Tooltip, { label: 'View sale' }, () =>
+                    h(
+                        'button',
+                        {
+                            type: 'button',
+                            class: 'flex h-[26px] w-[26px] items-center justify-center bg-bg-subtle text-text-faint transition-colors duration-150 hover:bg-primary-tint hover:text-primary',
+                            'aria-label': 'View sale',
+                            onClick: () => openView(row.original),
+                        },
+                        [h(Eye, { class: 'h-[13px] w-[13px]' })],
+                    ),
+                ),
                 can('sales.print')
                     ? h(Tooltip, { label: 'Print sale' }, () =>
                           h(
@@ -621,5 +679,11 @@ const columns = [
                 </Button>
             </template>
         </Modal>
+
+        <SaleViewModal
+            :open="!!viewingSale"
+            :sale="viewingSale"
+            @update:open="onViewOpenChange"
+        />
     </div>
 </template>

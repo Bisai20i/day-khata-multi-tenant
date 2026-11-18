@@ -25,7 +25,8 @@ class StaffStatementData
      *     closingSalary: string,
      *     closingAdvance: string,
      *     salaryEntries: list<array<string, mixed>>,
-     *     advanceEntries: list<array<string, mixed>>
+     *     advanceEntries: list<array<string, mixed>>,
+     *     advanceSummary: array{given: string, recovered_in_payroll: string, adjusted_at_payment: string, adjusted: string, outstanding: string}
      * }
      */
     public static function build(StaffMember $staff, ?string $from = null, ?string $to = null): array
@@ -41,6 +42,12 @@ class StaffStatementData
             ->with(['run:id,period_label,date,run_number,series_branch_id,status,reversal_journal_voucher_id', 'run.reversalJournalVoucher:id,date'])
             ->get())
             ->each(function (PayrollLine $line) use ($salary, $advance): void {
+                // The payroll voucher credits Salary Payable with the net and
+                // TDS Payable with the TDS; this payable-side history shows the
+                // salary credited before TDS and the TDS withheld as its own
+                // line, which together add up to exactly that net credit.
+                $tds = Money::of($line->tds);
+
                 self::pushWithReversal($salary, $line->run, [
                     'date' => $line->run->date->toDateString(),
                     'date_bs' => NepaliCalendar::formatBs($line->run->date),
@@ -48,8 +55,20 @@ class StaffStatementData
                     'reference' => $line->run->displayNumber(),
                     'description' => 'Payroll '.$line->run->period_label,
                     'debit' => '0.00',
-                    'credit' => $line->net,
+                    'credit' => Money::of($line->net)->plus($tds)->toString(),
                 ]);
+
+                if ($tds->isPositive()) {
+                    self::pushWithReversal($salary, $line->run, [
+                        'date' => $line->run->date->toDateString(),
+                        'date_bs' => NepaliCalendar::formatBs($line->run->date),
+                        'order' => 1,
+                        'reference' => $line->run->displayNumber(),
+                        'description' => 'Salary TDS withheld - '.$line->run->period_label,
+                        'debit' => $tds->toString(),
+                        'credit' => '0.00',
+                    ]);
+                }
 
                 if (Money::of($line->advance_recovery)->isPositive()) {
                     self::pushWithReversal($advance, $line->run, [
@@ -69,16 +88,46 @@ class StaffStatementData
             ->whereHas('payment', fn ($payment) => $payment->whereIn('status', $statuses))
             ->with(['payment:id,date,payment_number,payment_mode,status,reversal_journal_voucher_id', 'payment.reversalJournalVoucher:id,date'])
             ->get())
-            ->each(function (PayrollPaymentLine $row) use ($salary): void {
-                self::pushWithReversal($salary, $row->payment, [
-                    'date' => $row->payment->date->toDateString(),
-                    'date_bs' => NepaliCalendar::formatBs($row->payment->date),
-                    'order' => 2,
-                    'reference' => $row->payment->payment_number,
-                    'description' => 'Salary payment ('.$row->payment->payment_mode.')',
-                    'debit' => $row->amount,
-                    'credit' => '0.00',
-                ]);
+            ->each(function (PayrollPaymentLine $row) use ($salary, $advance): void {
+                $adjusted = Money::of($row->advance_adjusted);
+                $paid = Money::of($row->amount)->minus($adjusted);
+                $date = $row->payment->date;
+
+                // Settled against Salary Payable = paid out + offset against the
+                // advance; shown as two lines (only the one that exists).
+                if ($paid->isPositive()) {
+                    self::pushWithReversal($salary, $row->payment, [
+                        'date' => $date->toDateString(),
+                        'date_bs' => NepaliCalendar::formatBs($date),
+                        'order' => 2,
+                        'reference' => $row->payment->payment_number,
+                        'description' => 'Salary payment ('.$row->payment->payment_mode.')',
+                        'debit' => $paid->toString(),
+                        'credit' => '0.00',
+                    ]);
+                }
+
+                if ($adjusted->isPositive()) {
+                    self::pushWithReversal($salary, $row->payment, [
+                        'date' => $date->toDateString(),
+                        'date_bs' => NepaliCalendar::formatBs($date),
+                        'order' => 2,
+                        'reference' => $row->payment->payment_number,
+                        'description' => 'Advance adjusted against salary',
+                        'debit' => $adjusted->toString(),
+                        'credit' => '0.00',
+                    ]);
+
+                    self::pushWithReversal($advance, $row->payment, [
+                        'date' => $date->toDateString(),
+                        'date_bs' => NepaliCalendar::formatBs($date),
+                        'order' => 2,
+                        'reference' => $row->payment->payment_number,
+                        'description' => 'Adjusted against salary payment',
+                        'debit' => '0.00',
+                        'credit' => $adjusted->toString(),
+                    ]);
+                }
             });
 
         BranchContext::unrestricted(fn () => StaffAdvance::query()
@@ -121,6 +170,7 @@ class StaffStatementData
             'closingAdvance' => $closingAdvance,
             'salaryEntries' => $salaryEntries,
             'advanceEntries' => $advanceEntries,
+            'advanceSummary' => StaffBalances::advanceSummary($staff->id),
         ];
     }
 

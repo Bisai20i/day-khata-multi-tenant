@@ -12,6 +12,8 @@ use App\Support\Branches\BranchFormOptions;
 use App\Support\Branches\BranchListFilter;
 use App\Support\Hr\HrAccounts;
 use App\Support\Hr\SalaryPaymentPoster;
+use App\Support\Hr\StaffBalances;
+use App\Support\Money\Money;
 use Illuminate\Auth\Access\AuthorizationException;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
@@ -52,6 +54,8 @@ class PayrollPaymentController extends Controller
                     'payment_number' => $payment->payment_number,
                     'date' => $payment->date->toDateString(),
                     'amount' => $payment->amount,
+                    'advance_adjusted' => $payment->advance_adjusted,
+                    'cash_paid' => Money::of($payment->amount)->minus($payment->advance_adjusted)->toString(),
                     'payment_mode' => $payment->payment_mode,
                     'reference_number' => $payment->reference_number,
                     'status' => $payment->status,
@@ -62,6 +66,9 @@ class PayrollPaymentController extends Controller
                     'branch' => $branchNames[(int) $payment->branch_id] ?? null,
                 ])),
             'outstandingLines' => $this->outstandingLines($isMultiBranch),
+            // Outstanding advance per staff id, for the "keep pending / deduct
+            // advance" choice on the payment form.
+            'advanceBalances' => collect(StaffBalances::advances())->map(fn (Money $amount): string => $amount->toString()),
             ...BranchFormOptions::props($request),
             // Money leaves through a non-party asset account, so only those are offered.
             'bankAccounts' => HrAccounts::paymentSourceAccounts(),
@@ -83,6 +90,11 @@ class PayrollPaymentController extends Controller
             'allocations' => ['required', 'array', 'min:1'],
             'allocations.*.payroll_line_id' => ['required', 'distinct', 'exists:hr_payroll_lines,id'],
             'allocations.*.amount' => ['required', 'numeric', 'min:0.01', 'decimal:0,2', 'max:999999999999999999.99'],
+            // Optional: the part of this allocation offset against the staff
+            // member's advance instead of paid out. Absent or 0 keeps the
+            // advance pending; the poster caps it at the allocation and at the
+            // outstanding advance.
+            'allocations.*.advance_adjusted' => ['nullable', 'numeric', 'min:0', 'decimal:0,2', 'max:999999999999999999.99'],
         ]);
 
         try {
@@ -138,6 +150,9 @@ class PayrollPaymentController extends Controller
                 'run_number' => $line->run->displayNumber(),
                 'period_label' => $line->run->period_label,
                 'run_date' => $line->run->date->toDateString(),
+                'gross' => $line->gross,
+                'tds' => $line->tds,
+                'advance_recovery' => $line->advance_recovery,
                 'net' => $line->net,
                 'outstanding' => $outstanding[$line->id]->toString(),
                 ...($withBranch ? ['branch_id' => (int) $line->branch_id] : []),

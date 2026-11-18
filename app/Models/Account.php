@@ -2,8 +2,12 @@
 
 namespace App\Models;
 
+use App\Support\Branches\BranchAccounts;
 use App\Support\Branches\BranchContext;
+use App\Support\Hr\HrAccounts;
+use App\Support\Manufacturing\ManufacturingAccounts;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
@@ -57,7 +61,6 @@ class Account extends Model
         'customers' => 'account_id',
         'suppliers' => 'account_id',
         'agents' => 'account_id',
-        'hr_staff' => 'account_id',
         'fixed_assets' => 'account_id',
         'items' => 'account_id',
         'purchase_lines' => 'account_id',
@@ -283,5 +286,52 @@ class Account extends Model
         $head = $this->group?->accountHead ?? $this->subgroup?->accountGroup?->accountHead;
 
         return $head?->is_profit_and_loss ?? false;
+    }
+
+    /**
+     * Accounts that represent bank accounts (Assets / Liabilities balance sheet accounts,
+     * excluding control accounts, party subgroups, and non-bank categories).
+     *
+     * @return Builder<Account>
+     */
+    public static function bankAccountQuery(): Builder
+    {
+        return BranchAccounts::exclude(static::query())
+            ->where(fn (Builder $q) => $q
+                ->whereHas('group.accountHead', fn (Builder $h) => $h->where('is_profit_and_loss', false))
+                ->orWhereHas('subgroup.accountGroup.accountHead', fn (Builder $h) => $h->where('is_profit_and_loss', false))
+            )
+            ->whereDoesntHave('subgroup', fn (Builder $sq) => $sq->whereIn('name', [
+                'Sundry Debtors',
+                'Sundry Creditors',
+                'Sales Agents',
+                'Salary Payable',
+                'Cash-In-Hand',
+                'Stock',
+                'Reserve Surplus',
+            ]))
+            ->whereDoesntHave('group', fn (Builder $gq) => $gq->where('name', 'Fixed Assets'))
+            ->where(fn (Builder $q) => $q->whereNull('code')->orWhereNotIn('code', [
+                ...BranchAccounts::CONTROL_CODES,
+                ...HrAccounts::CONTROL_CODES,
+                ...ManufacturingAccounts::CONTROL_CODES,
+                'AS1', 'CA2', 'AS11', 'AS12', 'AS13', 'AS14', 'ASA23', 'LIA20', 'LIA21', 'LIA22', 'AS31',
+            ]))
+            ->where(function (Builder $q) {
+                $q->whereHas('subgroup', function (Builder $sq) {
+                    $sq->whereIn('name', ['Bank Accounts', 'Bank Account', 'Bank', 'Banks'])
+                        ->orWhereRaw('LOWER(name) LIKE ?', ['%bank%']);
+                })
+                    ->orWhereHas('group', function (Builder $gq) {
+                        $gq->whereIn('name', ['Bank Accounts', 'Bank Account', 'Bank', 'Banks', 'Bank Loans'])
+                            ->orWhereRaw('LOWER(name) LIKE ?', ['%bank%']);
+                    })
+                    ->orWhereRaw('LOWER(name) LIKE ?', ['%bank%'])
+                    ->orWhere('code', 'like', 'BANK%')
+                    ->orWhereHas('parent', function (Builder $pq) {
+                        $pq->whereRaw('LOWER(name) LIKE ?', ['%bank%'])
+                            ->orWhere('code', 'like', 'BANK%');
+                    });
+            });
     }
 }

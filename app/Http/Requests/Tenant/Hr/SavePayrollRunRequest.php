@@ -32,6 +32,7 @@ class SavePayrollRunRequest extends FormRequest
             'lines' => ['required', 'array', 'min:1'],
             'lines.*.staff_id' => ['required', 'integer', 'distinct', 'exists:hr_staff,id'],
             'lines.*.advance_recovery' => ['nullable', 'numeric', 'decimal:0,2', 'min:0', 'max:999999999999999999.99'],
+            'lines.*.tds' => ['nullable', 'numeric', 'decimal:0,2', 'min:0', 'max:999999999999999999.99'],
             'lines.*.note' => ['nullable', 'string', 'max:255'],
             'lines.*.items' => ['required', 'array', 'min:1'],
             'lines.*.items.*.pay_component_id' => ['required', 'integer', Rule::exists('hr_pay_components', 'id')->where('is_active', true)],

@@ -95,6 +95,20 @@ class StaffBalances
                 ->each(function (PayrollLine $line) use (&$balance, $sign): void {
                     $balance[$line->staff_id] = static::apply($balance[$line->staff_id] ?? Money::zero(), $line->advance_recovery, -$sign);
                 });
+
+            // The second way an advance is adjusted: offset against salary when
+            // a payment is recorded (credited to Staff Advances Receivable on
+            // the payment's own voucher, so the ledger side agrees).
+            PayrollPaymentLine::query()
+                ->where('advance_adjusted', '>', 0)
+                ->whereHas('payment', static::documentsAt($asOf, $reversals))
+                ->whereHas('payrollLine', fn ($line) => $line->when($staffId, fn ($q) => $q->where('staff_id', $staffId)))
+                ->with('payrollLine:id,staff_id')
+                ->get(['payroll_line_id', 'advance_adjusted'])
+                ->each(function (PayrollPaymentLine $row) use (&$balance, $sign): void {
+                    $id = $row->payrollLine->staff_id;
+                    $balance[$id] = static::apply($balance[$id] ?? Money::zero(), $row->advance_adjusted, -$sign);
+                });
         }
 
         return array_filter($balance, fn (Money $amount): bool => ! $amount->isZero());
@@ -103,6 +117,48 @@ class StaffBalances
     public static function advance(int $staffId, ?string $asOf = null): Money
     {
         return static::advances($asOf, $staffId)[$staffId] ?? Money::zero();
+    }
+
+    /**
+     * One staff member's advance position, current (posted documents only):
+     * the total given, the total adjusted (recovered in payroll runs plus
+     * offset at salary payment) and what is still outstanding. Always
+     * `given - adjusted = outstanding`, because all three are read from the
+     * same documents `advance()` uses.
+     *
+     * @return array{given: string, recovered_in_payroll: string, adjusted_at_payment: string, adjusted: string, outstanding: string}
+     */
+    public static function advanceSummary(int $staffId): array
+    {
+        $given = Money::sum(
+            StaffAdvance::query()->where('staff_id', $staffId)->where('status', 'posted')->pluck('amount')->map(fn ($amount) => Money::of($amount))->all()
+        );
+
+        $recovered = Money::sum(
+            PayrollLine::query()
+                ->where('staff_id', $staffId)
+                ->whereHas('run', static::documentsAt(null, 0))
+                ->pluck('advance_recovery')
+                ->map(fn ($amount) => Money::of($amount))
+                ->all()
+        );
+
+        $offset = Money::sum(
+            PayrollPaymentLine::query()
+                ->whereHas('payrollLine', fn ($line) => $line->where('staff_id', $staffId))
+                ->whereHas('payment', static::documentsAt(null, 0))
+                ->pluck('advance_adjusted')
+                ->map(fn ($amount) => Money::of($amount))
+                ->all()
+        );
+
+        return [
+            'given' => $given->toString(),
+            'recovered_in_payroll' => $recovered->toString(),
+            'adjusted_at_payment' => $offset->toString(),
+            'adjusted' => $recovered->plus($offset)->toString(),
+            'outstanding' => $given->minus($recovered)->minus($offset)->toString(),
+        ];
     }
 
     /**

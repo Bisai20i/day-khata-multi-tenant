@@ -220,6 +220,7 @@ Decisions and justifications:
 | tenant.sales.estimate | POST /sales/estimate | SaleController@estimate | new | sales.create |
 | tenant.sales.cancel | POST /sales/{sale}/cancel | SaleController@cancel | admin | sales.cancel |
 | tenant.sales.print | GET /sales/{sale}/print | SaleController@print | any auth | sales.print |
+| tenant.sales.show | GET /sales/{sale} | SaleController@show | any auth | sales.view |
 | tenant.sales.note-templates.store | POST /sales/note-templates | SaleController@storeNoteTemplate | any auth | sales.create |
 | tenant.sales.note-templates.destroy | DELETE /sales/note-templates/{saleNoteTemplate} | SaleController@destroyNoteTemplate | any auth | sales.create |
 | tenant.capital-sales.index | GET /capital-sales | CapitalSaleController@index | any auth | capital_sales.view |

@@ -2,8 +2,7 @@
 
 namespace App\Models;
 
-use App\Models\Concerns\HasLedgerAccount;
-use App\Support\Hr\HrAccounts;
+use App\Casts\Decimal;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
@@ -17,9 +16,14 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
  * the ones who do. Named StaffMember rather than Employee because "employees"
  * already means login users in routes/tenant-employees.php.
  *
- * Each staff member has their own ledger account under the "Salary Payable"
- * subgroup, parented to the Salary Payable control account (LIA22). Created
- * automatically on staff creation and kept in sync on update via HasLedgerAccount.
+ * A staff member has NO ledger account of their own: salary, TDS and advance
+ * postings go through the Salary Payable (LIA22), TDS Payable (LIA21) and Staff
+ * Advances Receivable (ASA24) control accounts, and the per-staff balance and
+ * history are the HR sub-ledger (StaffBalances, StaffStatementData), which
+ * StaffBalances::reconciliation() checks against those accounts.
+ *
+ * `tds_rate` is the default salary TDS percentage (0-100, 2 decimals) the
+ * payroll draft pre-fills each payslip with; the payslip's own `tds` posts.
  *
  * `branch_id` is the staff member's home branch (NOT NULL, foreign key to
  * branches; plan 12, section 5.4): their payslip's expense, Salary Payable
@@ -33,12 +37,12 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
  * (balances, payroll locks) that must see every branch.
  */
 #[Fillable([
-    'staff_code', 'name', 'account_id', 'mobile_no', 'address', 'designation', 'department', 'join_date', 'end_date',
-    'pan_no', 'bank_name', 'bank_account_no', 'user_id', 'is_active', 'branch_id',
+    'staff_code', 'name', 'mobile_no', 'address', 'designation', 'department', 'join_date', 'end_date',
+    'pan_no', 'bank_name', 'bank_account_no', 'user_id', 'is_active', 'tds_rate', 'branch_id',
 ])]
 class StaffMember extends Model
 {
-    use HasFactory, HasLedgerAccount;
+    use HasFactory;
 
     protected $table = 'hr_staff';
 
@@ -79,18 +83,8 @@ class StaffMember extends Model
             'end_date' => 'date:Y-m-d',
             'is_active' => 'boolean',
             'branch_id' => 'integer',
-            'account_id' => 'integer',
+            'tds_rate' => Decimal::class.':2',
         ];
-    }
-
-    protected function ledgerAccountSubgroupName(): string
-    {
-        return 'Salary Payable';
-    }
-
-    protected function ledgerAccountParentCode(): ?string
-    {
-        return HrAccounts::SALARY_PAYABLE;
     }
 
     /**

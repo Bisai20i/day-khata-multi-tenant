@@ -105,6 +105,7 @@ class StaffController extends Controller
             $staff = StaffMember::create([
                 ...Arr::only($data, self::FIELDS),
                 'is_active' => $data['is_active'] ?? true,
+                'tds_rate' => $data['tds_rate'] ?? '0',
                 'branch_id' => $branchId,
             ]);
 
@@ -140,6 +141,7 @@ class StaffController extends Controller
                 'payable' => StaffBalances::payable($staff->id)->toString(),
                 'advance' => StaffBalances::advance($staff->id)->toString(),
             ],
+            'advanceSummary' => StaffBalances::advanceSummary($staff->id),
             'today' => $this->today(),
         ]);
     }
@@ -162,6 +164,7 @@ class StaffController extends Controller
                     ...Arr::only($data, array_diff(self::FIELDS, ['staff_code'])),
                     ...(filled($data['staff_code'] ?? null) ? ['staff_code' => $data['staff_code']] : []),
                     'is_active' => $data['is_active'] ?? $staff->is_active,
+                    ...(array_key_exists('tds_rate', $data) ? ['tds_rate' => $data['tds_rate'] ?? '0'] : []),
                     ...$branchChange,
                 ]);
 

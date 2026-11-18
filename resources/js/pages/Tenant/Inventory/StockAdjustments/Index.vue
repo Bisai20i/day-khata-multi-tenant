@@ -144,14 +144,27 @@ function openImport() {
     importModalOpen.value = true;
 }
 
+function cleanImportUrl(rawUrl) {
+    const [path, search] = (rawUrl ?? '').split('?');
+    if (!search) return path;
+    const params = new URLSearchParams(search);
+    params.delete('import');
+    const query = params.toString();
+    return query ? `${path}?${query}` : path;
+}
+
 function closeImportModal() {
     importModalOpen.value = false;
     importForm.reset();
     importForm.date = todayInKathmandu();
     importForm.clearErrors();
     importResult.value = null;
-    if (page.url.includes('import=true')) {
-        router.replace('/stock-adjustments');
+    if (page.url?.includes('import=true')) {
+        router.replace({
+            url: cleanImportUrl(page.url),
+            preserveState: true,
+            preserveScroll: true,
+        });
     }
 }
 

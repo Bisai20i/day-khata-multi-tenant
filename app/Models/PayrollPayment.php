@@ -20,7 +20,7 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
  * two differ.
  */
 #[Fillable([
-    'date', 'amount', 'payment_mode', 'bank_account_id', 'reference_number', 'narration', 'status',
+    'date', 'amount', 'advance_adjusted', 'payment_mode', 'bank_account_id', 'reference_number', 'narration', 'status',
     'payment_number', 'fiscal_year_id', 'journal_voucher_id', 'reversal_journal_voucher_id', 'branch_id',
     'created_by', 'cancelled_at', 'cancelled_by', 'cancel_reason',
 ])]
@@ -38,6 +38,7 @@ class PayrollPayment extends Model
         return [
             'date' => 'date:Y-m-d',
             'amount' => Decimal::class.':2',
+            'advance_adjusted' => Decimal::class.':2',
             'cancelled_at' => 'datetime',
             'branch_id' => 'integer',
         ];

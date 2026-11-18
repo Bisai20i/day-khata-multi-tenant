@@ -26,6 +26,8 @@ const props = defineProps({
     openingAdvance: { type: String, default: '0.00' },
     salaryEntries: { type: Array, default: () => [] },
     advanceEntries: { type: Array, default: () => [] },
+    // Current (not period-filtered): { given, recovered_in_payroll, adjusted_at_payment, adjusted, outstanding }.
+    advanceSummary: { type: Object, default: null },
 });
 
 useLayoutChrome('Staff Statement');
@@ -135,7 +137,7 @@ const ledgers = computed(() => [
     {
         key: 'advance',
         title: 'Advance ledger',
-        note: 'Debit is an advance given to the staff member; credit is the amount recovered in payroll. The balance is the amount still to recover.',
+        note: 'Debit is an advance given to the staff member; credit is the amount recovered in payroll or deducted at salary payment. The balance is the amount still to recover.',
         closingLabel: 'Closing balance (advance receivable)',
         opening: props.openingAdvance,
         entries: props.advanceEntries,
@@ -195,6 +197,25 @@ const totalCellClass = 'border-y-[1.5px] border-border bg-primary-tint/40 px-[9p
         <Card v-for="ledger in ledgers" :key="ledger.key" variant="panel" class="mb-4">
             <h2 class="text-[13px] font-bold text-text-strong">{{ ledger.title }}</h2>
             <p class="mb-3 text-[12px] text-text-muted">{{ ledger.note }}</p>
+
+            <div v-if="ledger.key === 'advance' && advanceSummary" class="mb-3 grid grid-cols-1 gap-3 border-y-[1.5px] border-border py-3 sm:grid-cols-3">
+                <div>
+                    <p class="text-[10px] font-bold tracking-[.8px] text-text-muted uppercase">Total advance given (all time)</p>
+                    <p class="text-sm font-bold text-text-strong [font-variant-numeric:tabular-nums]">Rs. {{ formatMoney(advanceSummary.given) }}</p>
+                </div>
+                <div>
+                    <p class="text-[10px] font-bold tracking-[.8px] text-text-muted uppercase">Adjusted (all time)</p>
+                    <p class="text-sm font-bold text-text-strong [font-variant-numeric:tabular-nums]">Rs. {{ formatMoney(advanceSummary.adjusted) }}</p>
+                    <p class="text-[11px] text-text-muted">
+                        Recovered in payroll {{ formatMoney(advanceSummary.recovered_in_payroll) }}
+                        / Deducted at salary payment {{ formatMoney(advanceSummary.adjusted_at_payment) }}
+                    </p>
+                </div>
+                <div>
+                    <p class="text-[10px] font-bold tracking-[.8px] text-text-muted uppercase">Outstanding advance (current)</p>
+                    <p class="text-sm font-bold text-text-strong [font-variant-numeric:tabular-nums]">Rs. {{ formatMoney(advanceSummary.outstanding) }}</p>
+                </div>
+            </div>
 
             <div
                 v-if="ledger.entries.length === 0 && !filters.from"

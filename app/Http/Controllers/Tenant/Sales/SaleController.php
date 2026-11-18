@@ -96,7 +96,17 @@ class SaleController extends Controller
         // follow the top-bar switcher (filteredSalesQuery()); each row names
         // its branch only when several branches can appear.
         $sales = $this->filteredSalesQuery($filters, $request)
-            ->with(['customer:id,name', 'agent:id,name', 'lines.item:id,name,unit'])
+            ->with([
+                'customer:id,name,tpin,mobile_no,address',
+                'agent:id,name',
+                'store:id,name',
+                'bankAccount:id,name',
+                'tdsAccount:id,name',
+                'creator:id,name',
+                'fiscalYear:id,name',
+                'lines.item:id,name,code,unit,hs_code',
+                'lines.itemUnit:id,name',
+            ])
             ->when(BranchListFilter::columnVisible($request), fn ($query) => $query->with('branch:id,name,code'))
             ->paginate(25)
             ->withQueryString();
@@ -116,7 +126,7 @@ class SaleController extends Controller
             // What the picker's stock figures cover; null when not
             // multi-branch.
             'stockScope' => $stockDisplay->scope(),
-            'bankAccounts' => $this->settlementAccounts(),
+            'bankAccounts' => $this->bankAccounts(),
             'tdsAccounts' => $this->settlementAccounts(),
             'stores' => $this->branchStoreOptions($request),
             'agents' => Agent::query()->where('is_active', true)->orderBy('name')->get(['id', 'name', 'commission_rate']),
@@ -288,6 +298,14 @@ class SaleController extends Controller
     }
 
     /**
+     * @return Collection<int, Account>
+     */
+    private function bankAccounts(): Collection
+    {
+        return Account::bankAccountQuery()->orderBy('name')->get(['id', 'code', 'name']);
+    }
+
+    /**
      * Accounts that may hold a settlement: cash, bank and TDS ledgers.
      *
      * The chart of accounts has no dedicated "Bank" or "TDS" group, so
@@ -450,6 +468,7 @@ class SaleController extends Controller
     private function storeRules(): array
     {
         $settlementAccount = Rule::in($this->settlementAccountQuery()->pluck('id')->all());
+        $bankAccount = Rule::in(Account::bankAccountQuery()->pluck('id')->all());
 
         return [
             'customer_id' => ['required', 'exists:customers,id'],
@@ -461,7 +480,7 @@ class SaleController extends Controller
             'chalani_number' => ['nullable', 'string', 'max:100'],
             'date' => ['required', 'date'],
             'payment_mode' => ['required', 'in:cash,bank,partial,credit'],
-            'bank_account_id' => ['nullable', 'integer', $settlementAccount],
+            'bank_account_id' => ['nullable', 'integer', $bankAccount],
             // Retired stores and items cannot take new documents (flags G-13).
             'store_id' => ['nullable', 'integer', Rule::exists('stores', 'id')->where('is_active', true)],
             // Sent by the branch picker of a multi-branch company (BR12),
@@ -576,6 +595,34 @@ class SaleController extends Controller
         }
 
         return $this->salePdf($rendered, $company)->stream("sale-{$sale->id}.pdf");
+    }
+
+    /**
+     * Show a single sale's details.
+     */
+    public function show(Request $request, Sale $sale): mixed
+    {
+        $sale->load([
+            'customer:id,name,tpin,mobile_no,address',
+            'agent:id,name',
+            'store:id,name',
+            'branch:id,name,code',
+            'bankAccount:id,name',
+            'tdsAccount:id,name',
+            'creator:id,name',
+            'fiscalYear:id,name',
+            'lines.item:id,name,code,unit,hs_code',
+            'lines.itemUnit:id,name',
+        ]);
+
+        if ($request->wantsJson()) {
+            return response()->json($sale);
+        }
+
+        return redirect()->route('tenant.sales.index', [
+            'search' => $sale->invoice_number,
+            'view' => $sale->id,
+        ]);
     }
 
     /**

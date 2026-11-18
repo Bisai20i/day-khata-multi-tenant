@@ -33,6 +33,8 @@ defineProps({
         default: () => ({ data: [], current_page: 1, last_page: 1, total: 0, from: 0, to: 0, prev_page_url: null, next_page_url: null }),
     },
     outstandingLines: { type: Array, default: () => [] },
+    // Staff id -> outstanding advance; an empty collection arrives as [].
+    advanceBalances: { type: [Object, Array], default: () => ({}) },
     bankAccounts: { type: Array, default: () => [] },
     today: { type: String, default: '' },
     // Branch picker (BranchFormOptions::props()).
@@ -123,9 +125,21 @@ const columns = [
     },
     {
         id: 'amount',
-        header: 'Amount paid (Rs.)',
+        header: 'Settled (Rs.)',
         numeric: true,
         cell: ({ row }) => cellText(row.original, formatMoney(row.original.amount)),
+    },
+    {
+        id: 'advance_adjusted',
+        header: 'Advance adjusted (Rs.)',
+        numeric: true,
+        cell: ({ row }) => cellText(row.original, formatMoney(row.original.advance_adjusted ?? '0.00')),
+    },
+    {
+        id: 'cash_paid',
+        header: 'Paid in cash/bank (Rs.)',
+        numeric: true,
+        cell: ({ row }) => cellText(row.original, formatMoney(row.original.cash_paid ?? row.original.amount)),
     },
     {
         id: 'payment_mode',
@@ -179,6 +193,7 @@ const columns = [
         <template v-if="showCreateForm">
             <SalaryPaymentForm
                 :outstanding-lines="outstandingLines"
+                :advance-balances="advanceBalances"
                 :bank-accounts="bankAccounts"
                 :today="today"
                 :branch-options="branchOptions"

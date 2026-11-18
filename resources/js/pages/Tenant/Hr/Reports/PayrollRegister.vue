@@ -25,7 +25,7 @@ const props = defineProps({
     rows: { type: Array, default: () => [] },
     totals: {
         type: Object,
-        default: () => ({ components: {}, gross: '0.00', advance_recovery: '0.00', net: '0.00', paid: '0.00', outstanding: '0.00' }),
+        default: () => ({ components: {}, gross: '0.00', advance_recovery: '0.00', tds: '0.00', net: '0.00', paid: '0.00', outstanding: '0.00' }),
     },
 });
 
@@ -183,6 +183,7 @@ const totalCellClass = 'border-y-[1.5px] border-border bg-primary-tint/40 px-[9p
                             </th>
                             <th scope="col" :class="[headerClass, 'text-right']">Gross</th>
                             <th scope="col" :class="[headerClass, 'text-right']">Advance recovered</th>
+                            <th scope="col" :class="[headerClass, 'text-right']">TDS</th>
                             <th scope="col" :class="[headerClass, 'text-right']">Net</th>
                             <th scope="col" :class="[headerClass, 'text-right']">Paid</th>
                             <th scope="col" :class="[headerClass, 'text-right']">Outstanding</th>
@@ -207,6 +208,7 @@ const totalCellClass = 'border-y-[1.5px] border-border bg-primary-tint/40 px-[9p
                             </td>
                             <td :class="numericCellClass">{{ formatMoney(row.gross) }}</td>
                             <td :class="numericCellClass">{{ formatMoney(row.advance_recovery) }}</td>
+                            <td :class="numericCellClass">{{ formatMoney(row.tds ?? '0.00') }}</td>
                             <td :class="[numericCellClass, 'font-semibold']">{{ formatMoney(row.net) }}</td>
                             <td :class="numericCellClass">{{ formatMoney(row.paid) }}</td>
                             <td :class="numericCellClass">{{ formatMoney(row.outstanding) }}</td>
@@ -220,6 +222,7 @@ const totalCellClass = 'border-y-[1.5px] border-border bg-primary-tint/40 px-[9p
                             </td>
                             <td :class="[totalCellClass, 'text-right whitespace-nowrap']">{{ formatMoney(totals.gross) }}</td>
                             <td :class="[totalCellClass, 'text-right whitespace-nowrap']">{{ formatMoney(totals.advance_recovery) }}</td>
+                            <td :class="[totalCellClass, 'text-right whitespace-nowrap']">{{ formatMoney(totals.tds ?? '0.00') }}</td>
                             <td :class="[totalCellClass, 'text-right whitespace-nowrap']">{{ formatMoney(totals.net) }}</td>
                             <td :class="[totalCellClass, 'text-right whitespace-nowrap']">{{ formatMoney(totals.paid) }}</td>
                             <td :class="[totalCellClass, 'text-right whitespace-nowrap']">{{ formatMoney(totals.outstanding) }}</td>

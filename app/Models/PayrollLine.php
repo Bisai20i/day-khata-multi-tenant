@@ -13,7 +13,8 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
 /**
  * One staff member's payslip inside a run. `gross` is the sum of its items,
  * `advance_recovery` is taken off against the staff member's outstanding
- * advance, and `net` (gross - recovery) is what the business owes them and is
+ * advance, `tds` is the salary TDS withheld (credited to TDS Payable), and
+ * `net` (gross - recovery - tds) is what the business owes them and is
  * credited to Salary Payable. What is still unpaid is derived, never stored:
  * net minus the posted payments allocated to this line.
  *
@@ -24,7 +25,7 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
  * rule). PayrollPoster refuses to post a payslip whose staff member has
  * since moved branch.
  */
-#[Fillable(['payroll_run_id', 'staff_id', 'branch_id', 'gross', 'advance_recovery', 'net', 'note'])]
+#[Fillable(['payroll_run_id', 'staff_id', 'branch_id', 'gross', 'advance_recovery', 'tds', 'net', 'note'])]
 class PayrollLine extends Model
 {
     use HasFactory;
@@ -39,6 +40,7 @@ class PayrollLine extends Model
         return [
             'gross' => Decimal::class.':2',
             'advance_recovery' => Decimal::class.':2',
+            'tds' => Decimal::class.':2',
             'net' => Decimal::class.':2',
             'branch_id' => 'integer',
         ];

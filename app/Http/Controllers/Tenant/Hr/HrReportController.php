@@ -39,7 +39,7 @@ class HrReportController extends Controller
         $data = $this->registerData($request);
         $components = $data['components'];
 
-        $headings = ['Run', 'Period', 'Date', 'Staff', ...array_column($components, 'name'), 'Gross', 'Advance recovered', 'Net', 'Paid', 'Outstanding'];
+        $headings = ['Run', 'Period', 'Date', 'Staff', ...array_column($components, 'name'), 'Gross', 'Advance recovered', 'Salary TDS', 'Net', 'Paid', 'Outstanding'];
 
         $rows = array_map(fn (array $row): array => [
             $row['run_number'],
@@ -47,13 +47,13 @@ class HrReportController extends Controller
             $row['date'],
             $row['staff_name'],
             ...array_map(fn (array $component): string => $row['amounts'][$component['id']] ?? '0.00', $components),
-            $row['gross'], $row['advance_recovery'], $row['net'], $row['paid'], $row['outstanding'],
+            $row['gross'], $row['advance_recovery'], $row['tds'], $row['net'], $row['paid'], $row['outstanding'],
         ], $data['rows']);
 
         $rows[] = [
             '', '', '', 'Total',
             ...array_map(fn (array $component): string => $data['totals']['components'][$component['id']] ?? '0.00', $components),
-            $data['totals']['gross'], $data['totals']['advance_recovery'], $data['totals']['net'], $data['totals']['paid'], $data['totals']['outstanding'],
+            $data['totals']['gross'], $data['totals']['advance_recovery'], $data['totals']['tds'], $data['totals']['net'], $data['totals']['paid'], $data['totals']['outstanding'],
         ];
 
         $moneyColumns = range(4, count($headings) - 1);
@@ -112,6 +112,7 @@ class HrReportController extends Controller
             'closingAdvance' => $data['closingAdvance'],
             'salaryEntries' => $data['salaryEntries'],
             'advanceEntries' => $data['advanceEntries'],
+            'advanceSummary' => $data['advanceSummary'],
             'staffOptions' => StaffMember::query()
                 ->orderBy('name')
                 ->get(['id', 'staff_code', 'name'])
@@ -180,6 +181,7 @@ class HrReportController extends Controller
                 'amounts' => $amounts,
                 'gross' => $line->gross,
                 'advance_recovery' => $line->advance_recovery,
+                'tds' => $line->tds,
                 'net' => $line->net,
                 'paid' => $paid[$line->id]->toString(),
                 'outstanding' => Money::of($line->net)->minus($paid[$line->id])->toString(),
@@ -197,6 +199,7 @@ class HrReportController extends Controller
                 'components' => array_map(fn (Money $amount): string => $amount->toString(), $componentTotals),
                 'gross' => $column('gross'),
                 'advance_recovery' => $column('advance_recovery'),
+                'tds' => $column('tds'),
                 'net' => $column('net'),
                 'paid' => $column('paid'),
                 'outstanding' => $column('outstanding'),

@@ -107,6 +107,7 @@ const { can } = usePermissions();
                         placeholder="Select bank account"
                         @update:model-value="(v) => (form.bank_account_id = v)"
                     />
+                    <p v-if="bankAccountOptions.length === 0" class="mt-1 text-xs text-amber-600">No bank accounts found. Create a bank account under Chart of Accounts.</p>
                 </div>
             </div>
             <p v-if="form.errors.bank_account_id" class="mt-1 text-sm text-danger">{{ form.errors.bank_account_id }}</p>

@@ -89,9 +89,15 @@ class PayrollDraft
                     ->values();
 
                 if ($items->isNotEmpty()) {
+                    // Salary TDS pre-fill: the staff member's default rate on
+                    // gross pay. Editable on the draft; what posts is the
+                    // payslip's own `tds`, never the rate.
+                    $gross = Money::sum($items->map(fn (StaffPayItem $item): Money => Money::of($item->amount))->all());
+
                     $rows[] = [
                         'staff_id' => $member->id,
                         'advance_recovery' => '0.00',
+                        'tds' => $gross->percent($member->tds_rate ?? '0')->toString(),
                         'note' => null,
                         'items' => $items->map(fn (StaffPayItem $item): array => [
                             'pay_component_id' => $item->pay_component_id,
@@ -130,7 +136,7 @@ class PayrollDraft
      * and usable by the actor, so the form shows the problem now rather than
      * at posting.
      *
-     * @param  array{period_label: string, period_start: string, period_end: string, date: string, narration?: string|null, lines: array<int, array{staff_id: int|string, advance_recovery?: mixed, note?: string|null, items: array<int, array{pay_component_id: int|string, amount: mixed, note?: string|null}>}>}  $data
+     * @param  array{period_label: string, period_start: string, period_end: string, date: string, narration?: string|null, lines: array<int, array{staff_id: int|string, advance_recovery?: mixed, tds?: mixed, note?: string|null, items: array<int, array{pay_component_id: int|string, amount: mixed, note?: string|null}>}>}  $data
      *
      * @throws InvalidArgumentException
      */
@@ -240,7 +246,7 @@ class PayrollDraft
      * Writes lines and items, validating each, and stores the run's totals.
      * Each payslip is stamped with its staff member's current home branch.
      *
-     * @param  array<int, array{staff_id: int|string, advance_recovery?: mixed, note?: string|null, items: array<int, array{pay_component_id: int|string, amount: mixed, note?: string|null}>}>  $lines
+     * @param  array<int, array{staff_id: int|string, advance_recovery?: mixed, tds?: mixed, note?: string|null, items: array<int, array{pay_component_id: int|string, amount: mixed, note?: string|null}>}>  $lines
      */
     private static function writeLines(PayrollRun $run, array $lines, ?User $actor = null): void
     {
@@ -250,6 +256,7 @@ class PayrollDraft
 
         $totalGross = Money::zero();
         $totalRecovery = Money::zero();
+        $totalTds = Money::zero();
         $seenStaff = [];
         $checkedBranches = [];
 
@@ -317,13 +324,24 @@ class PayrollDraft
                 throw new InvalidArgumentException("The advance recovery for {$staff->name} is more than their outstanding advance.");
             }
 
+            $tds = Money::ofNullable($line['tds'] ?? null) ?? Money::zero();
+
+            if ($tds->isNegative()) {
+                throw new InvalidArgumentException("The TDS for {$staff->name} cannot be negative.");
+            }
+
+            if ($recovery->plus($tds)->isGreaterThan($gross)) {
+                throw new InvalidArgumentException("The advance recovery and TDS for {$staff->name} together cannot exceed their gross pay.");
+            }
+
             $payslip = $run->lines()->create([
                 'staff_id' => $staffId,
                 // The payslip follows the staff member's home branch.
                 'branch_id' => $staffBranchId,
                 'gross' => $gross->toString(),
                 'advance_recovery' => $recovery->toString(),
-                'net' => $gross->minus($recovery)->toString(),
+                'tds' => $tds->toString(),
+                'net' => $gross->minus($recovery)->minus($tds)->toString(),
                 'note' => $line['note'] ?? null,
             ]);
 
@@ -337,12 +355,14 @@ class PayrollDraft
 
             $totalGross = $totalGross->plus($gross);
             $totalRecovery = $totalRecovery->plus($recovery);
+            $totalTds = $totalTds->plus($tds);
         }
 
         $run->update([
             'total_gross' => $totalGross->toString(),
             'total_recovery' => $totalRecovery->toString(),
-            'total_net' => $totalGross->minus($totalRecovery)->toString(),
+            'total_tds' => $totalTds->toString(),
+            'total_net' => $totalGross->minus($totalRecovery)->minus($totalTds)->toString(),
         ]);
     }
 }

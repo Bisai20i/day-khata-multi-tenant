@@ -115,6 +115,7 @@ const pageTotals = computed(() => {
     return {
         gross: sumMoney(rows.map((run) => run.total_gross ?? '0')),
         recovery: sumMoney(rows.map((run) => run.total_recovery ?? '0')),
+        tds: sumMoney(rows.map((run) => run.total_tds ?? '0')),
         net: sumMoney(rows.map((run) => run.total_net ?? '0')),
     };
 });
@@ -155,6 +156,7 @@ const columns = [
     { id: 'lines_count', header: 'Staff', numeric: true, cell: ({ row }) => String(row.original.lines_count ?? 0) },
     { id: 'total_gross', header: 'Gross', numeric: true, cell: ({ row }) => formatMoney(row.original.total_gross ?? '0') },
     { id: 'total_recovery', header: 'Advance recovery', numeric: true, cell: ({ row }) => formatMoney(row.original.total_recovery ?? '0') },
+    { id: 'total_tds', header: 'TDS', numeric: true, cell: ({ row }) => formatMoney(row.original.total_tds ?? '0') },
     { id: 'total_net', header: 'Net pay', numeric: true, cell: ({ row }) => formatMoney(row.original.total_net ?? '0') },
     {
         id: 'status',
@@ -261,6 +263,7 @@ const columns = [
                             <tr class="divide-x divide-border border-b-[1.5px] border-border bg-bg-subtle">
                                 <th class="px-3 py-1.5 text-left text-[10px] font-bold tracking-[.8px] text-text-muted uppercase">Gross (posted runs on this page)</th>
                                 <th class="px-3 py-1.5 text-left text-[10px] font-bold tracking-[.8px] text-text-muted uppercase">Advance recovery (posted)</th>
+                                <th class="px-3 py-1.5 text-left text-[10px] font-bold tracking-[.8px] text-text-muted uppercase">TDS (posted)</th>
                                 <th class="bg-primary-tint px-3 py-1.5 text-left text-[10px] font-bold tracking-[.8px] text-primary uppercase">Net pay (posted)</th>
                             </tr>
                         </thead>
@@ -268,6 +271,7 @@ const columns = [
                             <tr class="divide-x divide-border">
                                 <td class="px-3 py-1.5 font-bold text-text-strong">{{ formatMoney(pageTotals.gross) }}</td>
                                 <td class="px-3 py-1.5 font-bold text-text-strong">{{ formatMoney(pageTotals.recovery) }}</td>
+                                <td class="px-3 py-1.5 font-bold text-text-strong">{{ formatMoney(pageTotals.tds) }}</td>
                                 <td class="bg-primary-tint px-3 py-1.5 text-base font-extrabold text-primary">{{ formatMoney(pageTotals.net) }}</td>
                             </tr>
                         </tbody>

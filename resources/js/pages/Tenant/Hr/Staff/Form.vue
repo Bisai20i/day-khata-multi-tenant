@@ -28,6 +28,8 @@ const props = defineProps({
     users: { type: Array, default: () => [] },
     // { payable, advance } decimal strings, or null on create.
     balances: { type: Object, default: null },
+    // { given, recovered_in_payroll, adjusted_at_payment, adjusted, outstanding } money strings, or null on create.
+    advanceSummary: { type: Object, default: null },
     today: { type: String, default: '' },
 });
 
@@ -75,6 +77,7 @@ function initialData() {
         bank_account_no: staff?.bank_account_no ?? '',
         user_id: staff?.user_id ?? null,
         is_active: staff?.is_active ?? true,
+        tds_rate: staff?.tds_rate ?? '0',
         pay_effective_from: props.today,
         pay_items: props.payItems.map((item) => newRow(item.pay_component_id, item.amount)),
     };
@@ -135,8 +138,33 @@ function rowError(index, field) {
 
 const payItemsError = computed(() => form.errors.pay_items ?? '');
 
+// Blank, or a decimal from 0 to 100 with at most 2 decimals (string check, no float math).
+const TDS_RATE_PATTERN = /^(?:100(?:\.0{1,2})?|\d{1,2}(?:\.\d{1,2})?)$/;
+const clientTdsError = ref('');
+
+function tdsRateIsValid(value) {
+    const text = String(value ?? '').trim();
+
+    return text === '' || TDS_RATE_PATTERN.test(text);
+}
+
+const tdsRateError = computed(() => clientTdsError.value || form.errors.tds_rate || '');
+
+watch(
+    () => form.tds_rate,
+    () => {
+        clientTdsError.value = '';
+    },
+);
+
 function submit() {
     if (!canSave.value) return;
+
+    if (!tdsRateIsValid(form.tds_rate)) {
+        clientTdsError.value = 'Enter a rate from 0 to 100 with at most 2 decimals.';
+
+        return;
+    }
 
     const url = isEdit.value ? `/hr/staff/${props.staff.id}` : '/hr/staff';
     const method = isEdit.value ? 'put' : 'post';
@@ -147,6 +175,7 @@ function submit() {
             ...rest,
             // Blank code means "auto" on create and "keep current" on edit.
             staff_code: rest.staff_code === '' ? null : rest.staff_code,
+            tds_rate: String(rest.tds_rate ?? '').trim(),
             pay_items: rows.map((row) => {
                 const parsed = parseMoney(row.amount);
 
@@ -266,9 +295,26 @@ function discard() {
                         description="What this person earns each pay period. Changes apply from the date you choose; earlier payroll keeps the amounts it was run with."
                     >
                         <div class="flex flex-col gap-4">
-                            <div class="max-w-xs">
+                            <div class="grid grid-cols-1 gap-4 sm:grid-cols-2">
                                 <FormField v-slot="{ describedBy }" label="Applies from (BS)" for="pay_effective_from" :error="form.errors.pay_effective_from">
                                     <NepaliDateInput id="pay_effective_from" v-model="form.pay_effective_from" :aria-describedby="describedBy" />
+                                </FormField>
+                                <FormField
+                                    v-slot="{ describedBy }"
+                                    label="Salary TDS rate (%)"
+                                    for="tds_rate"
+                                    help="Default % of gross pay withheld as TDS when a payroll draft is generated; editable per payslip."
+                                    :error="tdsRateError"
+                                >
+                                    <Input
+                                        id="tds_rate"
+                                        v-model="form.tds_rate"
+                                        type="text"
+                                        inputmode="decimal"
+                                        placeholder="0"
+                                        class="text-right"
+                                        :aria-describedby="describedBy"
+                                    />
                                 </FormField>
                             </div>
 
@@ -333,6 +379,32 @@ function discard() {
                             <div>
                                 <p class="text-[10px] font-bold tracking-[.8px] text-text-muted uppercase">Advance receivable (they owe)</p>
                                 <p class="text-base font-bold text-text-strong">Rs. {{ formatMoney(balances.advance) }}</p>
+                            </div>
+                        </div>
+                    </FormSection>
+
+                    <FormSection
+                        v-if="isEdit && advanceSummary"
+                        title="Advance"
+                        description="Advances given, and how much has been adjusted so far, either recovered in payroll or deducted when salary was paid."
+                    >
+                        <div class="grid grid-cols-1 gap-4 sm:grid-cols-3">
+                            <div>
+                                <p class="text-[10px] font-bold tracking-[.8px] text-text-muted uppercase">Total advance given</p>
+                                <p class="text-base font-bold text-text-strong">Rs. {{ formatMoney(advanceSummary.given) }}</p>
+                            </div>
+                            <div>
+                                <p class="text-[10px] font-bold tracking-[.8px] text-text-muted uppercase">Adjusted</p>
+                                <p class="text-base font-bold text-text-strong">Rs. {{ formatMoney(advanceSummary.adjusted) }}</p>
+                                <p class="text-[12px] text-text-muted">
+                                    Recovered in payroll Rs. {{ formatMoney(advanceSummary.recovered_in_payroll) }}
+                                    <span aria-hidden="true">/</span>
+                                    Deducted at salary payment Rs. {{ formatMoney(advanceSummary.adjusted_at_payment) }}
+                                </p>
+                            </div>
+                            <div>
+                                <p class="text-[10px] font-bold tracking-[.8px] text-text-muted uppercase">Outstanding</p>
+                                <p class="text-base font-bold text-text-strong">Rs. {{ formatMoney(advanceSummary.outstanding) }}</p>
                             </div>
                         </div>
                     </FormSection>

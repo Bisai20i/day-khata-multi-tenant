@@ -12,11 +12,14 @@ import NepaliDateInput from '@/components/ui/NepaliDateInput.vue';
 import Label from '@/components/ui/Label.vue';
 import BranchBadge from '@/components/branch/BranchBadge.vue';
 import { useBranchField } from '@/composables/useBranchField';
-import { compareMoney, formatMoney, parseMoney, sumMoney } from '@/lib/money';
+import { compareMoney, formatMoney, parseMoney, subtractMoney, sumMoney } from '@/lib/money';
 import { formatBsDate } from '@/lib/format';
 
 const props = defineProps({
     outstandingLines: { type: Array, default: () => [] },
+    // Staff id -> outstanding advance (2dp string); staff with none are absent.
+    // An empty PHP collection arrives as a JSON array, hence both types.
+    advanceBalances: { type: [Object, Array], default: () => ({}) },
     // Only accounts money can actually leave through, filtered server-side.
     bankAccounts: { type: Array, default: () => [] },
     today: { type: String, default: '' },
@@ -89,13 +92,40 @@ function isSelected(line) {
     return allocationAmounts[line.id] !== undefined;
 }
 
-/** Ticking fills the full outstanding (still editable); unticking drops the row. */
+/**
+ * Ticking fills the full outstanding (still editable); unticking drops the row.
+ * Unticking a staff member's last payslip also forgets their advance choice,
+ * so re-ticking starts again from "Keep advance pending".
+ */
 function toggleLine(line, checked) {
     if (checked) {
         allocationAmounts[line.id] = line.outstanding;
-    } else {
-        delete allocationAmounts[line.id];
+        return;
     }
+
+    delete allocationAmounts[line.id];
+
+    const staffStillSelected = props.outstandingLines.some((other) => other.staff_id === line.staff_id && isSelected(other));
+
+    if (!staffStillSelected) {
+        delete advanceChoices[line.staff_id];
+    }
+}
+
+/** Exact decimal min of two 2dp strings. */
+function minMoney(a, b) {
+    return compareMoney(a, b) <= 0 ? a : b;
+}
+
+/** Outstanding advance for a staff member, or null when they have none. */
+function advanceFor(staffId) {
+    const advance = props.advanceBalances?.[staffId];
+
+    if (advance === undefined || advance === null || compareMoney(advance, '0.00') <= 0) {
+        return null;
+    }
+
+    return advance;
 }
 
 /**
@@ -124,14 +154,138 @@ const rowStates = computed(() => {
     return states;
 });
 
+/**
+ * Staff id -> { mode: 'keep' | 'deduct', amount }. No entry means "Keep
+ * advance pending": nothing is offset unless the user explicitly picks
+ * "Deduct advance".
+ */
+const advanceChoices = reactive({});
+
+/**
+ * One group per staff member with an outstanding advance among the ticked
+ * payslips, with their ticked line ids in display order and the total of
+ * their valid allocation amounts.
+ */
+const advanceGroups = computed(() => {
+    const groups = new Map();
+
+    for (const line of props.outstandingLines) {
+        if (!isSelected(line)) continue;
+
+        const advance = advanceFor(line.staff_id);
+        if (advance === null) continue;
+
+        if (!groups.has(line.staff_id)) {
+            groups.set(line.staff_id, { staffId: line.staff_id, staffName: line.staff_name, staffCode: line.staff_code, advance, lineIds: [] });
+        }
+
+        groups.get(line.staff_id).lineIds.push(line.id);
+    }
+
+    return [...groups.values()].map((group) => ({
+        ...group,
+        settled: sumMoney(group.lineIds.map((id) => rowStates.value[id]?.amount).filter((amount) => amount !== undefined)),
+    }));
+});
+
+function isDeducting(staffId) {
+    return advanceChoices[staffId]?.mode === 'deduct';
+}
+
+/** Choosing "Deduct advance" pre-fills min(outstanding advance, settled for this staff). */
+function setAdvanceMode(group, mode) {
+    if (mode === 'deduct') {
+        advanceChoices[group.staffId] = { mode: 'deduct', amount: minMoney(group.advance, group.settled) };
+    } else {
+        delete advanceChoices[group.staffId];
+    }
+}
+
+/** Staff id -> { amount } (validated 2dp deduction, '0.00' when kept pending) or { error }. */
+const deductionStates = computed(() => {
+    const states = {};
+
+    for (const group of advanceGroups.value) {
+        if (!isDeducting(group.staffId)) {
+            states[group.staffId] = { amount: '0.00' };
+            continue;
+        }
+
+        const parsed = parseMoney(advanceChoices[group.staffId].amount);
+
+        if (!parsed.ok) {
+            states[group.staffId] = { error: parsed.reason === 'too_many_decimals' ? 'Use at most 2 decimal places.' : 'Enter a valid amount.' };
+        } else if (compareMoney(parsed.value, '0.00') < 0) {
+            states[group.staffId] = { error: 'Deduction cannot be negative.' };
+        } else if (compareMoney(parsed.value, group.settled) > 0) {
+            states[group.staffId] = { error: `Cannot exceed the ${formatMoney(group.settled)} being settled for this staff member.` };
+        } else if (compareMoney(parsed.value, group.advance) > 0) {
+            states[group.staffId] = { error: `Cannot exceed the outstanding advance ${formatMoney(group.advance)}.` };
+        } else {
+            states[group.staffId] = { amount: parsed.value };
+        }
+    }
+
+    return states;
+});
+
+const hasInvalidDeduction = computed(() => Object.values(deductionStates.value).some((state) => state.error !== undefined));
+
+/**
+ * Payslip line id -> advance_adjusted. Each staff member's deduction is spread
+ * over their ticked payslips in display order, never more than a line's own
+ * allocation amount.
+ */
+const lineAdvanceAdjusted = computed(() => {
+    const byLineId = {};
+
+    for (const group of advanceGroups.value) {
+        const deduction = deductionStates.value[group.staffId]?.amount;
+        if (deduction === undefined) continue;
+
+        let remaining = deduction;
+
+        for (const lineId of group.lineIds) {
+            const lineAmount = rowStates.value[lineId]?.amount;
+            if (lineAmount === undefined) continue;
+
+            const take = minMoney(remaining, lineAmount);
+            byLineId[lineId] = take;
+            remaining = subtractMoney(remaining, take);
+        }
+    }
+
+    return byLineId;
+});
+
 const validAllocations = computed(() =>
     props.outstandingLines
         .filter((line) => rowStates.value[line.id]?.amount !== undefined)
-        .map((line) => ({ payroll_line_id: line.id, amount: rowStates.value[line.id].amount })),
+        .map((line) => ({
+            payroll_line_id: line.id,
+            amount: rowStates.value[line.id].amount,
+            advance_adjusted: lineAdvanceAdjusted.value[line.id] ?? '0.00',
+        })),
 );
 
 const hasInvalidRow = computed(() => Object.values(rowStates.value).some((state) => state.error !== undefined));
-const totalPaid = computed(() => sumMoney(validAllocations.value.map((row) => row.amount)));
+const totalSettled = computed(() => sumMoney(validAllocations.value.map((row) => row.amount)));
+const totalDeducted = computed(() => sumMoney(validAllocations.value.map((row) => row.advance_adjusted)));
+const cashToPay = computed(() => subtractMoney(totalSettled.value, totalDeducted.value));
+
+/** Still owed on a ticked payslip once this payment's valid amount is applied. */
+function owedAfter(line) {
+    const amount = rowStates.value[line.id]?.amount;
+
+    return amount === undefined ? null : subtractMoney(line.outstanding, amount);
+}
+
+/** A staff member's advance left after this payment's deduction (null while invalid). */
+function advanceRemaining(group) {
+    const deduction = deductionStates.value[group.staffId]?.amount;
+
+    return deduction === undefined ? null : subtractMoney(group.advance, deduction);
+}
 
 /** Server field errors are keyed by position in `allocations`; map them to the payslip row. */
 const serverRowErrors = computed(() => {
@@ -154,6 +308,7 @@ const canSubmit = computed(
         !form.processing &&
         validAllocations.value.length > 0 &&
         !hasInvalidRow.value &&
+        !hasInvalidDeduction.value &&
         (!showBankAccount.value || !!form.bank_account_id),
 );
 
@@ -234,18 +389,20 @@ function submit() {
                     <p v-if="visibleLines.length === 0" class="text-sm text-text-muted">No payslips match this staff filter.</p>
 
                     <div v-else class="flex flex-col gap-2 overflow-x-auto">
-                        <div class="grid min-w-[760px] grid-cols-[32px_1fr_1fr_110px_110px_130px] gap-2 text-[10px] font-bold tracking-[.8px] text-text-muted uppercase">
+                        <div class="grid min-w-[980px] grid-cols-[32px_1fr_1fr_100px_100px_100px_130px_110px] gap-2 text-[10px] font-bold tracking-[.8px] text-text-muted uppercase">
                             <span></span>
                             <span>Staff</span>
                             <span>Payroll run</span>
+                            <span class="flex items-center gap-1">TDS withheld <InfoTip text="Already withheld on the payslip; net pay is after TDS." /></span>
                             <span>Net pay</span>
                             <span>Still owed</span>
-                            <span>Pay now (Rs.)</span>
+                            <span>Settle now (Rs.)</span>
+                            <span>Owed after</span>
                         </div>
                         <div
                             v-for="line in visibleLines"
                             :key="line.id"
-                            class="grid min-w-[760px] grid-cols-[32px_1fr_1fr_110px_110px_130px] items-center gap-2"
+                            class="grid min-w-[980px] grid-cols-[32px_1fr_1fr_100px_100px_100px_130px_110px] items-center gap-2"
                         >
                             <input
                                 type="checkbox"
@@ -263,6 +420,7 @@ function submit() {
                                 {{ line.run_number }} - {{ line.period_label }}
                                 <span class="text-xs text-text-muted">{{ formatBsDate(line.run_date) }}</span>
                             </span>
+                            <span class="text-sm text-text-muted">{{ formatMoney(line.tds ?? '0.00') }}</span>
                             <span class="text-sm text-text-base">{{ formatMoney(line.net) }}</span>
                             <span class="text-sm text-text-base">{{ formatMoney(line.outstanding) }}</span>
                             <Input
@@ -275,7 +433,9 @@ function submit() {
                                 :aria-label="`Amount to pay ${line.staff_name} for ${line.period_label}`"
                             />
                             <span v-else class="text-sm text-text-faint">-</span>
-                            <p v-if="rowStates[line.id]?.error || serverRowErrors[line.id]" class="col-span-6 text-xs text-danger">
+                            <span v-if="owedAfter(line) !== null" class="text-sm text-text-base">{{ formatMoney(owedAfter(line)) }}</span>
+                            <span v-else class="text-sm text-text-faint">-</span>
+                            <p v-if="rowStates[line.id]?.error || serverRowErrors[line.id]" class="col-span-8 text-xs text-danger">
                                 {{ rowStates[line.id]?.error ?? serverRowErrors[line.id] }}
                             </p>
                         </div>
@@ -284,10 +444,81 @@ function submit() {
 
                 <p v-if="form.errors.allocations" class="mt-2 text-sm text-danger">{{ form.errors.allocations }}</p>
                 <p v-if="!showPicker && form.errors.branch_id" class="mt-2 text-sm text-danger" role="alert">{{ form.errors.branch_id }}</p>
-                <p class="mt-2 text-sm font-semibold text-text-strong" aria-live="polite">
-                    Total to pay: Rs. {{ formatMoney(totalPaid) }}
-                    <span class="font-normal text-text-muted">({{ validAllocations.length }} payslip{{ validAllocations.length === 1 ? '' : 's' }})</span>
-                </p>
+            </Card>
+
+            <Card v-if="advanceGroups.length > 0" variant="panel" class="!p-4">
+                <template #title>
+                    <div class="flex items-center gap-1">
+                        <span>Staff advances</span>
+                        <InfoTip text="These staff members have an advance outstanding. Keep it pending, or deduct part of it from this payment instead of paying that part in cash or bank." />
+                    </div>
+                </template>
+
+                <div class="flex flex-col gap-3">
+                    <div v-for="group in advanceGroups" :key="group.staffId" class="flex flex-col gap-2 border-b border-border pb-3 last:border-b-0 last:pb-0">
+                        <p class="text-sm text-text-base">
+                            <span class="font-semibold">{{ group.staffName }}</span>
+                            <span v-if="group.staffCode" class="text-xs text-text-muted"> ({{ group.staffCode }})</span>
+                            <span class="text-text-muted"> - outstanding advance Rs. {{ formatMoney(group.advance) }}, settling Rs. {{ formatMoney(group.settled) }} now</span>
+                        </p>
+                        <div class="flex flex-wrap items-center gap-4" role="radiogroup" :aria-label="`Advance choice for ${group.staffName}`">
+                            <label class="flex items-center gap-2 text-sm text-text-base">
+                                <input
+                                    type="radio"
+                                    class="size-4 border-[1.5px] border-border"
+                                    :name="`advance-choice-${group.staffId}`"
+                                    :checked="!isDeducting(group.staffId)"
+                                    @change="setAdvanceMode(group, 'keep')"
+                                />
+                                Keep advance pending
+                            </label>
+                            <label class="flex items-center gap-2 text-sm text-text-base">
+                                <input
+                                    type="radio"
+                                    class="size-4 border-[1.5px] border-border"
+                                    :name="`advance-choice-${group.staffId}`"
+                                    :checked="isDeducting(group.staffId)"
+                                    @change="setAdvanceMode(group, 'deduct')"
+                                />
+                                Deduct advance
+                            </label>
+                            <div v-if="isDeducting(group.staffId)" class="w-40">
+                                <Input
+                                    v-model="advanceChoices[group.staffId].amount"
+                                    type="text"
+                                    inputmode="decimal"
+                                    placeholder="0.00"
+                                    class="text-right"
+                                    :aria-label="`Advance to deduct for ${group.staffName}`"
+                                />
+                            </div>
+                        </div>
+                        <p v-if="deductionStates[group.staffId]?.error" class="text-xs text-danger">{{ deductionStates[group.staffId].error }}</p>
+                        <p v-else-if="advanceRemaining(group) !== null" class="text-xs text-text-muted">
+                            Advance remaining after this payment: Rs. {{ formatMoney(advanceRemaining(group)) }}
+                        </p>
+                    </div>
+                </div>
+            </Card>
+
+            <Card variant="panel" class="!p-4">
+                <dl class="grid grid-cols-1 gap-2 text-sm sm:grid-cols-3" aria-live="polite">
+                    <div>
+                        <dt class="text-text-muted">Settled against salary payable</dt>
+                        <dd class="font-semibold text-text-strong">
+                            Rs. {{ formatMoney(totalSettled) }}
+                            <span class="font-normal text-text-muted">({{ validAllocations.length }} payslip{{ validAllocations.length === 1 ? '' : 's' }})</span>
+                        </dd>
+                    </div>
+                    <div>
+                        <dt class="text-text-muted">Advance deducted</dt>
+                        <dd class="font-semibold text-text-strong">Rs. {{ formatMoney(totalDeducted) }}</dd>
+                    </div>
+                    <div>
+                        <dt class="text-text-muted">{{ form.payment_mode === 'bank' ? 'Bank' : 'Cash' }} to pay</dt>
+                        <dd class="font-semibold text-text-strong">Rs. {{ formatMoney(cashToPay) }}</dd>
+                    </div>
+                </dl>
             </Card>
 
             <div class="flex items-center justify-end gap-2">

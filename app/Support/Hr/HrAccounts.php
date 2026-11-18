@@ -35,6 +35,14 @@ class HrAccounts
     /** Current Assets: advances given to staff and not yet recovered (the Balance Sheet "Receivable"). */
     public const STAFF_ADVANCES_RECEIVABLE = 'ASA24';
 
+    /**
+     * Current Liabilities: TDS withheld and not yet paid to the tax office. The
+     * same account purchase TDS credits, so it is deliberately NOT a control
+     * account (no sub-ledger drift to protect); salary TDS per staff member is
+     * read from their payslips (`hr_payroll_lines.tds`).
+     */
+    public const TDS_PAYABLE = 'LIA21';
+
     public const SALARIES_AND_WAGES = 'EXE25';
 
     public const STAFF_BONUS = 'EXE26';
