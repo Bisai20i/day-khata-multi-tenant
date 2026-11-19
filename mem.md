@@ -3,6 +3,24 @@
 Living state doc. Read this before starting work, update it before stopping. See `goal.md` for
 direction/roadmap - this file is "what exists and why," not "what's next."
 
+**2026-11-18 entry (Bank Account Selection in Sales & POS: Filtering & Validation).**
+- **Bank Account Isolation in Sales & POS:**
+  - Resolved user issue where selecting a bank account in Sales / POS presented all general ledger accounts (Profit & Loss, Stock in hand, Raw Materials, VAT, TDS, Salary Payable, etc.) instead of genuine bank accounts.
+  - Implemented `App\Models\Account::bankAccountQuery(): Builder`:
+    - Filters balance-sheet accounts (`is_profit_and_loss === false`) under Assets / Liabilities.
+    - Excludes party subgroups (`Sundry Debtors`, `Sundry Creditors`, `Sales Agents`, `Salary Payable`).
+    - Excludes non-bank subgroups (`Cash-In-Hand`, `Stock`, `Reserve Surplus`).
+    - Excludes `Fixed Assets` group.
+    - Excludes inter-branch accounts (`BranchAccounts::exclude()`), HR/manufacturing control codes, and system non-bank codes (`AS1`, `CA2`, `AS11`-`AS14`, `ASA23`, `LIA20`-`LIA22`, `AS31`).
+    - Robustly matches bank identifiers: subgroup in `['Bank Accounts', 'Bank Account', 'Bank', 'Banks']` or subgroup name matching `%bank%` (case-insensitive); group in `['Bank Accounts', 'Bank Account', 'Bank', 'Banks', 'Bank Loans']` or group name matching `%bank%`; account name matching `%bank%`; code starting with `BANK%`; or parent account matching `%bank%`.
+  - Added additive idempotent tenant migration `database/migrations/tenant/2026_11_18_200000_ensure_bank_accounts_subgroup_exists.php` ensuring the `'Bank Accounts'` subgroup exists under `'Current Assets'` across all tenants.
+  - Updated `database/seeders/Tenant/ChartOfAccountsSeeder.php` to include `['group' => 'Current Assets', 'name' => 'Bank Accounts']` in starter subgroups.
+  - Updated `SaleController::index()` and `PosController::index()` to supply `'bankAccounts' => $this->bankAccounts()`.
+  - Updated `SaleController::storeRules()` to validate `'bank_account_id'` strictly against `Account::bankAccountQuery()` (`$bankAccount = Rule::in(Account::bankAccountQuery()->pluck('id')->all());`), rejecting non-bank accounts while keeping `$settlementAccount` for TDS accounts.
+  - Enhanced frontend components (`SaleCreatePaymentNotes.vue` and `PosPaymentPanel.vue`) to show a helpful hint when no bank accounts are configured in Chart of Accounts.
+  - Feature test added in `tests/Feature/Tenant/Sales/SaleBankAccountPickerTest.php` covering positive and negative bank account filtering on `/sales`, `/pos`, and `POST /sales` store validation.
+  - Verified syntax clean (`php -l`), Pint clean (`vendor/bin/pint`), and zero float arithmetic invariant maintained.
+
 **2026-11-18 entry (Sales Bill View Modal & Route).**
 - **Sales Bill View Option:**
   - Implemented `resources/js/components/sales/SaleViewModal.vue` providing a complete view of a sales bill:
@@ -28,6 +46,7 @@ direction/roadmap - this file is "what exists and why," not "what's next."
 - **Salary TDS:** `hr_staff.tds_rate` (default %), `hr_payroll_lines.tds`, `hr_payroll_runs.total_tds` (migration `2026_11_18_100000`). Draft pre-fills tds = gross x rate (editable). Net = gross - advance_recovery - tds. Run voucher adds `Cr TDS Payable (LIA21, HrAccounts::TDS_PAYABLE)` per branch. LIA21 is shared with purchase TDS and is NOT a control account. No slab calculator (client rules not supplied).
 - **Advance at payment:** `hr_payroll_payment_lines.advance_adjusted` + `hr_payroll_payments.advance_adjusted`. `amount` still = settled against Salary Payable; cash = amount - advance_adjusted. Voucher: Dr LIA22 settled / Cr ASA24 adjusted / Cr cash-or-bank (omitted if 0). Opt-in only (UI default "Keep advance pending"). Caps: <= amount, <= staff outstanding advance (min of now and as-at payment date). Staff rows locked after runs+lines. Refused (post and cancel) when the staff member's branch differs from the payslip's branch. `StaffBalances::advances()` subtracts payment adjustments; `advanceSummary()` gives given/adjusted/outstanding.
 - **Known low gaps:** back-dated adjustment cap checks only now and the payment date; TDS prefill watcher can overwrite a manually typed 0.00 before gross is entered; stale "Deduct advance" amount isn't recalculated when allocations change (form blocks submit). `tests/js/payrollDraft.test.mjs` line 49 expects totals without `tds` and will fail.
+- **Verification round (6 parallel read-only reviewers, nothing executed):** payroll TDS posting, payment/advance poster, balances/statements/reports, payroll frontend, payment/staff frontend, staff-account retirement + migrations. No HIGH/MEDIUM defects. Only change made: `StaffStatement.vue` advance note now mentions deduction at payment, and the summary tiles are labelled "(all time)". Known LOW leftovers (not changed): salary TDS is absent from the TDS report (ledger LIA21 exceeds the report by salary TDS); empty "Salary Payable" subgroup still seeded by `ChartOfAccountsSeeder`; retire migration does not check `nullOnDelete` references (draft docs) before deleting orphan staff accounts; register "Paid" = settled (includes advance offset); advance-adjusted payment narration overrides per-line labels; a fully offset payment still stores bank account/branch; a payment whose staff moved branch and later took a new advance cannot be cancelled (branch guard).
 
 **2026-11-17 entry (Staff Ledger Integration, Quick-Add Customer/Supplier Area, Nav Labels, Staff Ledger Account under Salary Payable, Salary Payment Form Fix).**
 - **Staff Ledger Account under Salary Payable (`LIA22`):**
