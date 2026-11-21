@@ -21,22 +21,31 @@ use InvalidArgumentException;
  *
  * A run posts ONE voucher (VoucherType::Payroll):
  *
- *   Dr Salaries & Wages / Staff Bonus / Staff Allowances   (one line per expense account)
+ *   Dr Salaries & Wages / Staff Bonus / Staff Allowances / Direct Wages
+ *      (one line per pay component expense account; Direct Wages, EXE28, is a
+ *      Direct Expense and so lands in cost of sales above Gross Profit)
+ *   Dr Employer SSF Contribution (EXE32; employer SSF; only when > 0)
+ *   Dr Employer CIT Contribution (EXE33; employer CIT; only when > 0)
  *       Cr Salary Payable          (total net: what is owed to staff)
  *       Cr TDS Payable             (salary TDS withheld; only when > 0)
  *       Cr Staff Advances Receivable (total advance recovered; only when > 0)
+ *       Cr SSF Payable             (employee + employer SSF; only when > 0)
+ *       Cr CIT Payable             (employee + employer CIT; only when > 0)
  *
  * so the unpaid part shows as a Payable on the Balance Sheet, withheld TDS as
- * a liability to the tax office, and a recovered advance reduces the
- * Receivable. Per payslip: gross = net + TDS + recovery, so every branch's
- * group balances on its own.
+ * a liability to the tax office, SSF and CIT (both shares) as liabilities to
+ * the fund, and a recovered advance reduces the Receivable. Per payslip:
+ * gross = net + TDS + recovery + employee SSF + employee CIT, and the employer
+ * shares are debited and credited in equal measure, so every branch's group
+ * balances on its own. The amounts posted are the payslip's stored ones,
+ * never the staff member's rates.
  *
  * Branches (plan 12, section 5.4, BR09): the voucher's header branch is the
  * run's branch, and every payslip's expense, Salary Payable and advance
  * recovery lines post in that payslip's branch (its staff member's home
  * branch). The lines above are therefore built once per branch, run branch
  * first and then by id, and each branch's group balances on its own because
- * every payslip's gross equals its net plus its recovery. No Inter-Branch
+ * every payslip's gross equals its net plus its deductions. No Inter-Branch
  * Clearing is ever needed, so the voucher is posted without autoBalance: a
  * branch that did not balance would be a bug and must throw (I1), not be
  * papered over with clearing lines. With one branch the lines, their order
@@ -82,11 +91,15 @@ class PayrollPoster
 
             static::assertNoOverlappingRun($locked, $staffIds->all(), $staff);
 
-            /** @var array<int, array{debit: array<int, Money>, payable: Money, recovery: Money, tds: Money}> $byBranch */
+            /** @var array<int, array{debit: array<int, Money>, payable: Money, recovery: Money, tds: Money, ssf_employee: Money, ssf_employer: Money, cit_employee: Money, cit_employer: Money}> $byBranch */
             $byBranch = [];
             $totalGross = Money::zero();
             $totalRecovery = Money::zero();
             $totalTds = Money::zero();
+            $totalSsfEmployee = Money::zero();
+            $totalSsfEmployer = Money::zero();
+            $totalCitEmployee = Money::zero();
+            $totalCitEmployer = Money::zero();
 
             $runBranchId = (int) $locked->branch_id;
 
@@ -106,7 +119,16 @@ class PayrollPoster
                     throw new InvalidArgumentException("{$member->name} has moved to a different branch since this run was saved; open the run and save it again before posting.");
                 }
 
-                $byBranch[$lineBranchId] ??= ['debit' => [], 'payable' => Money::zero(), 'recovery' => Money::zero(), 'tds' => Money::zero()];
+                $byBranch[$lineBranchId] ??= [
+                    'debit' => [],
+                    'payable' => Money::zero(),
+                    'recovery' => Money::zero(),
+                    'tds' => Money::zero(),
+                    'ssf_employee' => Money::zero(),
+                    'ssf_employer' => Money::zero(),
+                    'cit_employee' => Money::zero(),
+                    'cit_employer' => Money::zero(),
+                ];
                 $gross = Money::zero();
 
                 foreach ($line->items as $item) {
@@ -137,10 +159,25 @@ class PayrollPoster
                     throw new InvalidArgumentException("The TDS and advance recovery for {$member->name} must be between zero and their gross pay together; open the run and save it again.");
                 }
 
+                $ssfEmployee = Money::of($line->ssf_employee ?? '0');
+                $ssfEmployer = Money::of($line->ssf_employer ?? '0');
+                $citEmployee = Money::of($line->cit_employee ?? '0');
+                $citEmployer = Money::of($line->cit_employer ?? '0');
+
+                if ($ssfEmployee->isNegative() || $ssfEmployer->isNegative() || $citEmployee->isNegative() || $citEmployer->isNegative()) {
+                    throw new InvalidArgumentException("The SSF and CIT contributions for {$member->name} cannot be negative; open the run and save it again.");
+                }
+
+                $deductions = $recovery->plus($tds)->plus($ssfEmployee)->plus($citEmployee);
+
+                if ($deductions->isGreaterThan($gross)) {
+                    throw new InvalidArgumentException("The advance recovery, TDS, employee SSF and employee CIT for {$member->name} must not exceed their gross pay together; open the run and save it again.");
+                }
+
                 $net = Money::of($line->net);
 
-                if ($net->isNegative() || ! $net->isEqualTo($gross->minus($recovery)->minus($tds))) {
-                    throw new InvalidArgumentException("{$member->name}'s net pay is not gross minus advance recovery and TDS; open the run and save it again.");
+                if ($net->isNegative() || ! $net->isEqualTo($gross->minus($deductions))) {
+                    throw new InvalidArgumentException("{$member->name}'s net pay is not gross minus advance recovery, TDS, employee SSF and employee CIT; open the run and save it again.");
                 }
 
                 // Only a real recovery is checked against the advance balance:
@@ -152,17 +189,26 @@ class PayrollPoster
                 $byBranch[$lineBranchId]['payable'] = $byBranch[$lineBranchId]['payable']->plus($net);
                 $byBranch[$lineBranchId]['recovery'] = $byBranch[$lineBranchId]['recovery']->plus($recovery);
                 $byBranch[$lineBranchId]['tds'] = $byBranch[$lineBranchId]['tds']->plus($tds);
+                $byBranch[$lineBranchId]['ssf_employee'] = $byBranch[$lineBranchId]['ssf_employee']->plus($ssfEmployee);
+                $byBranch[$lineBranchId]['ssf_employer'] = $byBranch[$lineBranchId]['ssf_employer']->plus($ssfEmployer);
+                $byBranch[$lineBranchId]['cit_employee'] = $byBranch[$lineBranchId]['cit_employee']->plus($citEmployee);
+                $byBranch[$lineBranchId]['cit_employer'] = $byBranch[$lineBranchId]['cit_employer']->plus($citEmployer);
 
                 $totalGross = $totalGross->plus($gross);
                 $totalRecovery = $totalRecovery->plus($recovery);
                 $totalTds = $totalTds->plus($tds);
+                $totalSsfEmployee = $totalSsfEmployee->plus($ssfEmployee);
+                $totalSsfEmployer = $totalSsfEmployer->plus($ssfEmployer);
+                $totalCitEmployee = $totalCitEmployee->plus($citEmployee);
+                $totalCitEmployer = $totalCitEmployer->plus($citEmployer);
             }
 
             if (! $totalGross->isPositive()) {
                 throw new InvalidArgumentException('A payroll run must pay something.');
             }
 
-            $totalNet = $totalGross->minus($totalRecovery)->minus($totalTds);
+            $totalNet = $totalGross->minus($totalRecovery)->minus($totalTds)
+                ->minus($totalSsfEmployee)->minus($totalCitEmployee);
 
             $voucherLines = static::voucherLines($byBranch, $runBranchId);
 
@@ -191,6 +237,10 @@ class PayrollPoster
                 'total_gross' => $totalGross->toString(),
                 'total_recovery' => $totalRecovery->toString(),
                 'total_tds' => $totalTds->toString(),
+                'total_ssf_employee' => $totalSsfEmployee->toString(),
+                'total_ssf_employer' => $totalSsfEmployer->toString(),
+                'total_cit_employee' => $totalCitEmployee->toString(),
+                'total_cit_employer' => $totalCitEmployer->toString(),
                 'total_net' => $totalNet->toString(),
                 'posted_by' => $actor->id,
                 'posted_at' => now(),
@@ -203,10 +253,13 @@ class PayrollPoster
     /**
      * The voucher lines, one group per branch (the run's branch first, then
      * ascending id): that branch's expense debits by account id, then its
-     * Salary Payable credit, then its TDS Payable credit, then its advance
-     * recovery credit, each only when positive. Every line names its branch.
+     * employer SSF and employer CIT expense debits, then its Salary Payable
+     * credit, then its TDS Payable credit, then its advance recovery credit,
+     * then its SSF Payable and CIT Payable credits (employee plus employer
+     * share), each only when positive. Every line names its branch. With all
+     * SSF and CIT amounts zero the lines are exactly what was posted before.
      *
-     * @param  array<int, array{debit: array<int, Money>, payable: Money, recovery: Money, tds: Money}>  $byBranch
+     * @param  array<int, array{debit: array<int, Money>, payable: Money, recovery: Money, tds: Money, ssf_employee: Money, ssf_employer: Money, cit_employee: Money, cit_employer: Money}>  $byBranch
      * @return list<array{account_id: int, debit: string, credit: string, narration: string, branch_id: int}>
      */
     private static function voucherLines(array $byBranch, int $runBranchId): array
@@ -223,6 +276,14 @@ class PayrollPoster
                 $voucherLines[] = ['account_id' => $accountId, 'debit' => $amount->toString(), 'credit' => '0', 'narration' => 'Payroll expense', 'branch_id' => $branchId];
             }
 
+            if ($group['ssf_employer']->isPositive()) {
+                $voucherLines[] = ['account_id' => HrAccounts::id(HrAccounts::EMPLOYER_SSF_EXPENSE), 'debit' => $group['ssf_employer']->toString(), 'credit' => '0', 'narration' => 'Employer SSF contribution', 'branch_id' => $branchId];
+            }
+
+            if ($group['cit_employer']->isPositive()) {
+                $voucherLines[] = ['account_id' => HrAccounts::id(HrAccounts::EMPLOYER_CIT_EXPENSE), 'debit' => $group['cit_employer']->toString(), 'credit' => '0', 'narration' => 'Employer CIT contribution', 'branch_id' => $branchId];
+            }
+
             if ($group['payable']->isPositive()) {
                 $voucherLines[] = ['account_id' => HrAccounts::id(HrAccounts::SALARY_PAYABLE), 'debit' => '0', 'credit' => $group['payable']->toString(), 'narration' => 'Salary payable', 'branch_id' => $branchId];
             }
@@ -233,6 +294,18 @@ class PayrollPoster
 
             if ($group['recovery']->isPositive()) {
                 $voucherLines[] = ['account_id' => HrAccounts::id(HrAccounts::STAFF_ADVANCES_RECEIVABLE), 'debit' => '0', 'credit' => $group['recovery']->toString(), 'narration' => 'Advance recovered', 'branch_id' => $branchId];
+            }
+
+            $ssfPayable = $group['ssf_employee']->plus($group['ssf_employer']);
+
+            if ($ssfPayable->isPositive()) {
+                $voucherLines[] = ['account_id' => HrAccounts::id(HrAccounts::SSF_PAYABLE), 'debit' => '0', 'credit' => $ssfPayable->toString(), 'narration' => 'SSF payable', 'branch_id' => $branchId];
+            }
+
+            $citPayable = $group['cit_employee']->plus($group['cit_employer']);
+
+            if ($citPayable->isPositive()) {
+                $voucherLines[] = ['account_id' => HrAccounts::id(HrAccounts::CIT_PAYABLE), 'debit' => '0', 'credit' => $citPayable->toString(), 'narration' => 'CIT payable', 'branch_id' => $branchId];
             }
         }
 

@@ -190,6 +190,15 @@ Decisions and justifications:
 | tenant.areas.update | PUT /areas/{area} | AreaController@update | new | areas.manage |
 | tenant.areas.destroy | DELETE /areas/{area} | AreaController@destroy | new | areas.manage |
 
+### routes/tenant-projects.php (4)
+
+| route name | method + URI | controller@method | gated today | proposed key |
+|---|---|---|---|---|
+| tenant.projects.index | GET /projects | ProjectController@index | new | projects.view |
+| tenant.projects.store | POST /projects | ProjectController@store | new | projects.manage |
+| tenant.projects.update | PUT /projects/{project} | ProjectController@update | new | projects.manage |
+| tenant.projects.destroy | DELETE /projects/{project} | ProjectController@destroy | new | projects.manage |
+
 ### routes/tenant-ledger.php (15)
 
 | route name | method + URI | controller@method | gated today | proposed key |
@@ -403,11 +412,17 @@ Decisions and justifications:
 | tenant.reports.purchase-return-register | GET /reports/purchase-return-register | SalesPurchaseReportController@purchaseReturnRegister | any auth | purchase_reports.view |
 | tenant.reports.purchase-return-register.export | GET /reports/purchase-return-register/export | SalesPurchaseReportController@purchaseReturnRegisterExport | any auth | purchase_reports.export |
 | tenant.reports.aged-receivables | GET /reports/aged-receivables | SalesPurchaseReportController@agedReceivables | any auth | receivables_reports.view |
+| tenant.reports.aged-receivables.pdf | GET /reports/aged-receivables/pdf | SalesPurchaseReportController@agedReceivablesPdf | any auth | receivables_reports.export |
+| tenant.reports.aged-receivables.export | GET /reports/aged-receivables/export | SalesPurchaseReportController@agedReceivablesExport | any auth | receivables_reports.export |
 | tenant.reports.aged-payables | GET /reports/aged-payables | SalesPurchaseReportController@agedPayables | any auth | payables_reports.view |
+| tenant.reports.aged-payables.pdf | GET /reports/aged-payables/pdf | SalesPurchaseReportController@agedPayablesPdf | any auth | payables_reports.export |
+| tenant.reports.aged-payables.export | GET /reports/aged-payables/export | SalesPurchaseReportController@agedPayablesExport | any auth | payables_reports.export |
 | tenant.reports.debtors | GET /reports/debtors | SalesPurchaseReportController@debtors | any auth | receivables_reports.view |
 | tenant.reports.debtors.export | GET /reports/debtors/export | SalesPurchaseReportController@debtorsExport | any auth | receivables_reports.export |
+| tenant.reports.debtors.pdf | GET /reports/debtors/pdf | SalesPurchaseReportController@debtorsPdf | any auth | receivables_reports.export |
 | tenant.reports.creditors | GET /reports/creditors | SalesPurchaseReportController@creditors | any auth | payables_reports.view |
 | tenant.reports.creditors.export | GET /reports/creditors/export | SalesPurchaseReportController@creditorsExport | any auth | payables_reports.export |
+| tenant.reports.creditors.pdf | GET /reports/creditors/pdf | SalesPurchaseReportController@creditorsPdf | any auth | payables_reports.export |
 
 ### Single-purpose report files (15)
 
@@ -432,6 +447,42 @@ Decisions and justifications:
 
 (inventory 1, tds 1, stock-valuation 1, item-wise-sales 1, item-wise-purchase 1, category-wise 3,
 vat-summary 2, stock-movement-register 1, sales-with-note 1, damage-lost-stock 1, brand-wise 1, print-log 1 = 15.)
+
+Reports parity batch 3 additions (todo/reports-parity). Every route below is already gated with `can:`; exports
+carry both the `.view` and the `.export` key.
+
+| file | route name | method + URI | controller@method | gated by |
+|---|---|---|---|---|
+| tenant-reports-item-wise-sales | tenant.reports.item-wise-sales.export | GET /reports/item-wise-sales/export | ItemWiseSalesReportController@export | sales_reports.view + sales_reports.export |
+| tenant-reports-item-wise-purchase | tenant.reports.item-wise-purchase.export | GET /reports/item-wise-purchase/export | ItemWisePurchaseReportController@export | purchase_reports.view + purchase_reports.export |
+| tenant-reports-category-wise | tenant.reports.sales-by-category.items | GET /reports/sales-by-category/items | CategoryWiseReportController@salesByCategoryItems | sales_reports.view |
+| tenant-reports-category-wise | tenant.reports.sales-by-category.export | GET /reports/sales-by-category/export | CategoryWiseReportController@salesByCategoryExport | sales_reports.view + sales_reports.export |
+| tenant-reports-category-wise | tenant.reports.purchase-by-category.items | GET /reports/purchase-by-category/items | CategoryWiseReportController@purchaseByCategoryItems | purchase_reports.view |
+| tenant-reports-category-wise | tenant.reports.purchase-by-category.export | GET /reports/purchase-by-category/export | CategoryWiseReportController@purchaseByCategoryExport | purchase_reports.view + purchase_reports.export |
+| tenant-reports-sales-with-note | tenant.reports.sales-with-note.export | GET /reports/sales-with-note/export | SalesWithNoteReportController@export | sales_reports.view + sales_reports.export |
+| tenant-reports-party-wise-sales (new) | tenant.reports.party-wise-sales | GET /reports/party-wise-sales | PartyWiseSalesReportController@index | sales_reports.view |
+| tenant-reports-party-wise-sales (new) | tenant.reports.party-wise-sales.export | GET /reports/party-wise-sales/export | PartyWiseSalesReportController@export | sales_reports.view + sales_reports.export |
+| tenant-reports-party-wise-purchase (new) | tenant.reports.party-wise-purchase | GET /reports/party-wise-purchase | PartyWisePurchaseReportController@index | purchase_reports.view |
+| tenant-reports-party-wise-purchase (new) | tenant.reports.party-wise-purchase.export | GET /reports/party-wise-purchase/export | PartyWisePurchaseReportController@export | purchase_reports.view + purchase_reports.export |
+| tenant-reports-stock-potential-profit (new) | tenant.reports.stock-potential-profit | GET /reports/stock-potential-profit | StockPotentialProfitReportController@index | stock_valuation.view (same gate as Stock Valuation and its catalog tile) |
+| tenant-reports-stock-potential-profit (new) | tenant.reports.stock-potential-profit.export | GET /reports/stock-potential-profit/export | StockPotentialProfitReportController@export | stock_valuation.view + stock_reports.export |
+| tenant-manufacturing | tenant.reports.manufacturing.print / .export | GET /reports/manufacturing/{report}/print and /export | ManufacturingReportController@print / @export | manufacturing_reports.view + manufacturing_reports.export (was export only) |
+| tenant-reports-brand-wise | tenant.reports.stock-by-brand.items | GET /reports/stock-by-brand/items | BrandWiseReportController@stockByBrandItems | stock_reports.view |
+| tenant-reports-brand-wise | tenant.reports.stock-by-brand.export | GET /reports/stock-by-brand/export | BrandWiseReportController@stockByBrandExport | stock_reports.view + stock_reports.export |
+| tenant-reports-category-wise | tenant.reports.stock-by-category.items | GET /reports/stock-by-category/items | CategoryWiseReportController@stockByCategoryItems | stock_reports.view |
+| tenant-reports-category-wise | tenant.reports.stock-by-category.export | GET /reports/stock-by-category/export | CategoryWiseReportController@stockByCategoryExport | stock_reports.view + stock_reports.export |
+| tenant-reports-damage-lost-stock | tenant.reports.damage-lost-stock.export | GET /reports/damage-lost-stock/export | DamageLostStockReportController@export | stock_reports.view + stock_reports.export |
+| tenant-reports-inventory | tenant.reports.stock-summary.export | GET /reports/stock-summary/export | InventoryReportController@stockSummaryExport | stock_reports.view + stock_reports.export |
+| tenant-reports-stock-ageing | tenant.reports.stock-ageing.export | GET /reports/stock-ageing/export | StockAgeingReportController@export | stock_ageing.view + stock_reports.export |
+| tenant-reports-stock-movement-register | tenant.reports.stock-movement-register.export | GET /reports/stock-movement-register/export | StockMovementRegisterController@export | stock_reports.view + stock_reports.export |
+| tenant-reports-stock-valuation | tenant.reports.stock-valuation.export | GET /reports/stock-valuation/export | StockValuationReportController@export | stock_valuation.view + stock_reports.export |
+| tenant-reports-vat-register (new) | tenant.reports.vat-register | GET /reports/vat-register | UnifiedVatRegisterController@index | tax_reports.view |
+| tenant-reports-vat-register (new) | tenant.reports.vat-register.export | GET /reports/vat-register/export | UnifiedVatRegisterController@export | tax_reports.view + tax_reports.export |
+
+Review fix (2026-11-20): every `*.export` / `*.print` / `*.pdf` route in routes/tenant-reports-*.php now also
+carries its report's `.view` key (accounting, day/cash/bank book, cancelled documents, VAT books, VAT summary,
+return registers, debtors/creditors and aged reports, all stock exports), so an export-only role cannot download
+a report it cannot view.
 
 ### routes/tenant-employees.php (3, group `role:admin`)
 
@@ -709,6 +760,8 @@ Legacy column omitted: `config/privileges.php` is absent from this repo.
 | item_varieties.manage | inventory | Stores and varieties | Add, edit and delete item varieties | no | 3 |
 | journal_vouchers.view | accounting | Vouchers | View vouchers | no | 1 |
 | journal_vouchers.create | accounting | Vouchers | Post journal vouchers | no | 1 |
+| projects.view | accounting | Projects | View projects | no | 1 |
+| projects.manage | accounting | Projects | Add, edit and delete projects | no | 3 |
 | cash_bank_vouchers.create | accounting | Vouchers | Post cash and bank vouchers | no | 1 |
 | journal_vouchers.print | accounting | Vouchers | Print vouchers | no | 1 |
 | journal_vouchers.export | accounting | Vouchers | Export vouchers | no | 1 |

@@ -17,7 +17,9 @@ use Inertia\Response;
  * Pay components (Salary, Bonus, Allowance and whatever a tenant adds). Each
  * maps to the expense account its amounts are debited to. The starter three
  * are system components: renamable and remappable, but never deactivated, and
- * their codes never change. Nothing is deleted - a component in use is
+ * their codes never change. `is_contribution_base` marks the components whose
+ * amounts form the basic pay that SSF and CIT percentages apply to (any
+ * component, system or not, may be flagged). Nothing is deleted - a component in use is
  * referenced by posted payslips.
  */
 class PayComponentController extends Controller
@@ -54,6 +56,7 @@ class PayComponentController extends Controller
             'code' => ['required', 'string', 'max:40', 'alpha_dash', Rule::unique('hr_pay_components', 'code')],
             'name' => ['required', 'string', 'max:100'],
             'expense_account_id' => ['required', 'integer', 'exists:accounts,id', new AccountUnderHead('Expenses')],
+            'is_contribution_base' => ['sometimes', 'boolean'],
         ]);
 
         PayComponent::create([
@@ -63,6 +66,7 @@ class PayComponentController extends Controller
             'expense_account_id' => $data['expense_account_id'],
             'is_system' => false,
             'is_active' => true,
+            'is_contribution_base' => (bool) ($data['is_contribution_base'] ?? false),
             'sort_order' => (int) PayComponent::query()->max('sort_order') + 1,
         ]);
 
@@ -75,10 +79,12 @@ class PayComponentController extends Controller
             'name' => ['required', 'string', 'max:100'],
             'expense_account_id' => ['required', 'integer', 'exists:accounts,id', new AccountUnderHead('Expenses')],
             'is_active' => ['required', 'boolean'],
+            // Any component's flag may change, a system one's included.
+            'is_contribution_base' => ['sometimes', 'boolean'],
         ]);
 
         if ($component->is_system && ! $data['is_active']) {
-            return back()->withErrors(['is_active' => 'A starter pay component (Salary, Bonus, Allowance) cannot be deactivated.']);
+            return back()->withErrors(['is_active' => 'A starter pay component (Salary, Bonus, Allowance, Direct Wages) cannot be deactivated.']);
         }
 
         $component->update($data);

@@ -62,7 +62,7 @@ use InvalidArgumentException;
     'date', 'store_id', 'reason', 'taxable_amount', 'nontaxable_amount', 'vat_rate', 'vat_amount', 'tds_amount',
     'total', 'round_off', 'status', 'refund_account_id', 'refund_journal_voucher_id', 'cash_amount', 'bank_amount',
     'bank_account_id', 'created_by', 'cancelled_at', 'cancelled_by', 'cancel_reason', 'reversal_journal_voucher_id',
-    'branch_id',
+    'branch_id', 'project_id',
 ])]
 class PurchaseReturn extends Model
 {
@@ -88,7 +88,19 @@ class PurchaseReturn extends Model
             'cash_amount' => Decimal::class.':2',
             'bank_amount' => Decimal::class.':2',
             'branch_id' => 'integer',
+            'project_id' => 'integer',
         ];
+    }
+
+    /**
+     * The project (cost centre) every ledger line of this return, and of its
+     * refund voucher, is tagged with.
+     *
+     * @return BelongsTo<Project, $this>
+     */
+    public function project(): BelongsTo
+    {
+        return $this->belongsTo(Project::class);
     }
 
     /**
@@ -227,7 +239,7 @@ class PurchaseReturn extends Model
      * there, and the goods leave a store of that branch, by default the store
      * the purchase brought them into.
      *
-     * @param  array{purchase_id: int, date: string, reason?: string|null, refund_account_id?: int|null, store_id?: int|null, branch_id?: int|null}  $data
+     * @param  array{purchase_id: int, date: string, reason?: string|null, refund_account_id?: int|null, store_id?: int|null, branch_id?: int|null, project_id?: int|null}  $data
      * @param  array<int, array{purchase_line_id: int, quantity: mixed}>  $lines
      */
     public static function post(array $data, array $lines, User $actor): self
@@ -242,6 +254,10 @@ class PurchaseReturn extends Model
 
             $date = static::validatedDate($data['date'], $purchase, $actor);
             $placement = DocumentBranch::inherited($actor, (int) $purchase->branch_id, $purchase->store_id, $data['branch_id'] ?? null, $data['store_id'] ?? null);
+            // The project the form chose (null for none); a caller that does
+            // not pass the key at all inherits the purchase's project, so the
+            // return nets against the bill inside the same cost centre.
+            $projectId = array_key_exists('project_id', $data) ? $data['project_id'] : $purchase->project_id;
             $storeId = $placement->requireStoreId();
 
             $requested = static::aggregatedQuantities($lines);
@@ -326,6 +342,8 @@ class PurchaseReturn extends Model
                     'date' => $date,
                     'narration' => $data['reason'] ?? "Return against purchase #{$purchase->id}",
                     'branch_id' => $placement->branchId,
+                    'project_id' => $projectId,
+                    'allow_inactive_project' => JournalVoucher::isSameProject($projectId, $purchase->project_id),
                 ],
                 $voucherLines,
                 $actor,
@@ -345,6 +363,7 @@ class PurchaseReturn extends Model
                 'date' => $date,
                 'store_id' => $storeId,
                 'branch_id' => $placement->branchId,
+                'project_id' => $projectId,
                 'reason' => $data['reason'] ?? null,
                 'taxable_amount' => $taxable,
                 'nontaxable_amount' => $nonTaxable,
@@ -415,6 +434,8 @@ class PurchaseReturn extends Model
                         // legs sit in the return's branch (plan 12, section
                         // 5.3 party-line rule).
                         'branch_id' => $placement->branchId,
+                        'project_id' => $purchaseReturn->project_id,
+                        'allow_inactive_project' => JournalVoucher::isSameProject($purchaseReturn->project_id, $purchase->project_id),
                     ],
                     [
                         ['account_id' => $data['refund_account_id'], 'debit' => $supplierDebit->toString(), 'credit' => '0', 'narration' => 'Refund received'],
@@ -557,7 +578,7 @@ class PurchaseReturn extends Model
      * return usually has no ongoing supplier ledger relationship to leave a
      * balance sitting on.
      *
-     * @param  array{date: string, supplier_id?: int|null, vat_rate?: mixed, payment_mode: string, bank_account_id?: int|null, cash_amount?: mixed, bank_amount?: mixed, store_id?: int|null, branch_id?: int|null, reason?: string|null, expected_total?: string|null}  $data
+     * @param  array{date: string, supplier_id?: int|null, vat_rate?: mixed, payment_mode: string, bank_account_id?: int|null, cash_amount?: mixed, bank_amount?: mixed, store_id?: int|null, branch_id?: int|null, reason?: string|null, expected_total?: string|null, project_id?: int|null}  $data
      * @param  array<int, array{item_id: int, item_unit_id?: int|null, quantity: mixed, rate?: mixed}>  $lines
      */
     public static function postUnlinked(array $data, array $lines, User $actor): self
@@ -641,6 +662,7 @@ class PurchaseReturn extends Model
                     'date' => $date,
                     'narration' => $data['reason'] ?? ($supplier ? "Unlinked purchase return - {$supplier->name}" : 'Unlinked purchase return (opening stock)'),
                     'branch_id' => $placement->branchId,
+                    'project_id' => $data['project_id'] ?? null,
                 ],
                 $voucherLines,
                 $actor,
@@ -660,6 +682,7 @@ class PurchaseReturn extends Model
                 'date' => $date,
                 'store_id' => $storeId,
                 'branch_id' => $placement->branchId,
+                'project_id' => $data['project_id'] ?? null,
                 'reason' => $data['reason'] ?? null,
                 'vat_rate' => $vatRate,
                 'taxable_amount' => $taxable,

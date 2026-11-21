@@ -109,6 +109,8 @@ final class RoleTemplates
         'party_ledger.export',
         'areas.view',
         'areas.manage',
+        'projects.view',
+        'projects.manage',
         'items.view',
         'items.create',
         'items.edit',

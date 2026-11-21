@@ -13,8 +13,10 @@ use App\Models\CapitalPurchaseSettlement;
 use App\Models\CompanySetting;
 use App\Models\JournalVoucher;
 use App\Models\PrintLog;
+use App\Models\Project;
 use App\Models\Store;
 use App\Models\Supplier;
+use App\Rules\OpenProject;
 use App\Support\AmountInWords;
 use App\Support\Billing\BillingException;
 use App\Support\Branches\ActiveBranchSelection;
@@ -48,7 +50,7 @@ class CapitalPurchaseController extends Controller
         // names each row's branch only when several branches can appear. A
         // tenant that is not multi-branch gets the same query as before.
         $capitalPurchases = BranchListFilter::apply(CapitalPurchase::query(), $request)
-            ->with(['supplier:id,name,tpin', 'lines.account:id,code,name', 'journalVoucher:id,voucher_number,series_branch_id', 'settlements', 'canceller:id,name'])
+            ->with(['supplier:id,name,tpin', 'lines.account:id,code,name', 'journalVoucher:id,voucher_number,series_branch_id', 'settlements', 'canceller:id,name', 'project:id,code,name'])
             ->when(BranchListFilter::columnVisible($request), fn ($query) => $query->with('branch:id,name,code'))
             ->orderByDesc('date')
             ->orderByDesc('id')
@@ -98,6 +100,16 @@ class CapitalPurchaseController extends Controller
             // bill's own branch when it is one of these (no clearing lines).
             // The create form's picker uses the same two props.
             ...BranchFormOptions::props($request),
+            // Project picker of the create form: active projects only, since
+            // a closed project cannot take a new entry.
+            'projects' => Project::query()->active()->orderBy('name')->get(['id', 'code', 'name']),
+            // Project picker of the settlement form: the active projects, plus
+            // any (since closed) project a listed bill carries, so the form
+            // defaulting to its bill's project can show it.
+            'settlementProjects' => Project::query()
+                ->where(fn ($query) => $query->active()->orWhereIn('id', $capitalPurchases->pluck('project_id')->filter()->unique()->values()))
+                ->orderBy('name')
+                ->get(['id', 'code', 'name']),
         ]);
     }
 
@@ -167,6 +179,8 @@ class CapitalPurchaseController extends Controller
             // store's branch, then the user's posting branch, and refuses a
             // store of another branch.
             'branch_id' => ['nullable', 'integer', 'exists:branches,id'],
+            // Optional project; every line of the bill's voucher is tagged with it.
+            'project_id' => ['nullable', 'integer', new OpenProject],
             'cash_amount' => ['nullable', 'numeric', 'min:0', 'decimal:0,2'],
             'bank_amount' => ['nullable', 'numeric', 'min:0', 'decimal:0,2'],
             // The company rate or 0, nothing typed in between (flags G-03);

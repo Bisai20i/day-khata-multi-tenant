@@ -37,6 +37,7 @@ use InvalidArgumentException;
     'bank_account_id', 'reference_number', 'narration', 'status',
     'journal_voucher_id', 'created_by',
     'cancelled_at', 'cancelled_by', 'cancel_reason', 'reversal_journal_voucher_id', 'branch_id',
+    'project_id',
 ])]
 class CapitalPurchaseSettlement extends Model
 {
@@ -52,7 +53,19 @@ class CapitalPurchaseSettlement extends Model
             'cancelled_at' => 'datetime',
             'amount' => Decimal::class.':2',
             'branch_id' => 'integer',
+            'project_id' => 'integer',
         ];
+    }
+
+    /**
+     * The project (cost centre) every line of this settlement's voucher is
+     * tagged with; null when untagged.
+     *
+     * @return BelongsTo<Project, $this>
+     */
+    public function project(): BelongsTo
+    {
+        return $this->belongsTo(Project::class);
     }
 
     /**
@@ -100,7 +113,7 @@ class CapitalPurchaseSettlement extends Model
      * (DocumentBranch::forDocument()); it must be active and accessible, and
      * so must the bill's branch (I6).
      *
-     * @param  array{date: string, amount: mixed, payment_mode: string, bank_account_id?: int|null, reference_number?: string|null, narration?: string|null, branch_id?: int|string|null}  $data
+     * @param  array{date: string, amount: mixed, payment_mode: string, bank_account_id?: int|null, reference_number?: string|null, narration?: string|null, branch_id?: int|string|null, project_id?: int|string|null}  $data
      *
      * @throws InvalidArgumentException
      */
@@ -163,6 +176,13 @@ class CapitalPurchaseSettlement extends Model
                 throw new InvalidArgumentException('Settlement mode must be cash or bank.');
             }
 
+            // Project: the one the caller names (null clears it), else the
+            // bill's own, so a settlement follows its bill by default.
+            // JournalVoucher::post() checks it exists and tags every line.
+            $projectId = array_key_exists('project_id', $data)
+                ? (filled($data['project_id']) ? $data['project_id'] : null)
+                : $locked->project_id;
+
             try {
                 $voucher = JournalVoucher::post(
                     [
@@ -170,6 +190,8 @@ class CapitalPurchaseSettlement extends Model
                         'date' => $data['date'],
                         'narration' => $data['narration'] ?? "Settlement of capital purchase #{$locked->id} to {$supplier->name}",
                         'branch_id' => $branchId,
+                        'project_id' => $projectId,
+                        'allow_inactive_project' => JournalVoucher::isSameProject($projectId, $locked->project_id),
                     ],
                     [
                         ['account_id' => $supplier->account_id, 'debit' => $amount->toString(), 'credit' => '0.00', 'branch_id' => $billBranchId],
@@ -187,6 +209,7 @@ class CapitalPurchaseSettlement extends Model
 
             return static::create([
                 'branch_id' => $branchId,
+                'project_id' => $projectId,
                 'capital_purchase_id' => $locked->id,
                 'supplier_id' => $supplier->id,
                 'date' => $data['date'],

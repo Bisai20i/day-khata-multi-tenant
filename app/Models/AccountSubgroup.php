@@ -8,7 +8,7 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 
-#[Fillable(['account_group_id', 'name'])]
+#[Fillable(['account_group_id', 'name', 'name_np'])]
 class AccountSubgroup extends Model
 {
     use HasFactory;

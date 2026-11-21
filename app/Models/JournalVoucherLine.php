@@ -17,7 +17,7 @@ use LogicException;
  * are fillable on purpose: mass assignment drops an unlisted column, and the
  * column default (Main) would then hide the loss.
  */
-#[Fillable(['journal_voucher_id', 'account_id', 'debit', 'credit', 'narration', 'branch_id', 'counterparty_branch_id'])]
+#[Fillable(['journal_voucher_id', 'account_id', 'debit', 'credit', 'narration', 'branch_id', 'counterparty_branch_id', 'project_id'])]
 class JournalVoucherLine extends Model
 {
     use BelongsToBranch;
@@ -56,6 +56,7 @@ class JournalVoucherLine extends Model
             'credit' => Decimal::class.':2',
             'branch_id' => 'integer',
             'counterparty_branch_id' => 'integer',
+            'project_id' => 'integer',
         ];
     }
 
@@ -73,6 +74,16 @@ class JournalVoucherLine extends Model
     public function account(): BelongsTo
     {
         return $this->belongsTo(Account::class);
+    }
+
+    /**
+     * The project this line is tagged with; null when untagged.
+     *
+     * @return BelongsTo<Project, $this>
+     */
+    public function project(): BelongsTo
+    {
+        return $this->belongsTo(Project::class);
     }
 
     /**

@@ -10,6 +10,9 @@ import NepaliDateInput from '@/components/ui/NepaliDateInput.vue';
 import Select from '@/components/ui/Select.vue';
 import DataTable from '@/components/ui/DataTable.vue';
 import Label from '@/components/ui/Label.vue';
+import Input from '@/components/ui/Input.vue';
+import CheckboxField from '@/components/ui/CheckboxField.vue';
+import { FileSpreadsheet } from '@lucide/vue';
 import { formatMoney, formatQuantity, formatRate } from '@/lib/money';
 import { formatBsDate } from '@/lib/format';
 import { itemLedgerColumn } from '@/lib/itemLedger';
@@ -19,6 +22,7 @@ import { useStockValuationBranchColumns } from '@/composables/useStockValuationB
 import BranchReportFilter from '@/components/branch/BranchReportFilter.vue';
 import BranchReportNotes from '@/components/branch/BranchReportNotes.vue';
 import { useBranchLabel } from '@/composables/useBranchLabel';
+import { usePermissions } from '@/composables/usePermissions';
 
 defineOptions({ layout: AppLayout });
 
@@ -29,23 +33,47 @@ const props = defineProps({
     stores: { type: Array, default: () => [] },
     storeId: { type: [Number, null], default: null },
     stockStatus: { type: String, default: 'all' },
+    // Applied item filters (null / '' when not filtering) and the select options for them.
+    includeEmpty: { type: Boolean, default: false },
+    itemCategoryId: { type: [Number, null], default: null },
+    itemSubcategoryId: { type: [Number, null], default: null },
+    brandId: { type: [Number, null], default: null },
+    search: { type: String, default: '' },
+    filterOptions: {
+        type: Object,
+        default: () => ({ categories: [], subcategories: [], brands: [] }),
+    },
     // Branch filter and by-branch columns; null when the company has no branches.
     branchReport: { type: [Object, null], default: null },
 });
 
 const { label } = useBranchLabel();
+const { can } = usePermissions();
 
 useLayoutChrome('Stock Valuation');
 
 const asOfInput = ref(props.asOf);
-const storeId = ref(props.storeId);
-const stockStatus = ref(props.stockStatus);
+const storeIdInput = ref(props.storeId);
+const stockStatusInput = ref(props.stockStatus);
+const includeEmptyInput = ref(props.includeEmpty);
+const categoryInput = ref(props.itemCategoryId);
+const subcategoryInput = ref(props.itemSubcategoryId);
+const brandInput = ref(props.brandId);
+const searchInput = ref(props.search);
 
-// The server drops a store outside the chosen branches; follow what it applied.
+// Follow what the server applied (it drops a store outside the chosen branches,
+// and a fresh visit or Back button brings new props).
 watch(
-    () => [props.storeId, props.stores],
+    () => [props.asOf, props.storeId, props.stores, props.stockStatus, props.includeEmpty, props.itemCategoryId, props.itemSubcategoryId, props.brandId, props.search],
     () => {
-        storeId.value = props.storeId;
+        asOfInput.value = props.asOf;
+        storeIdInput.value = props.storeId;
+        stockStatusInput.value = props.stockStatus;
+        includeEmptyInput.value = props.includeEmpty;
+        categoryInput.value = props.itemCategoryId;
+        subcategoryInput.value = props.itemSubcategoryId;
+        brandInput.value = props.brandId;
+        searchInput.value = props.search;
     },
 );
 
@@ -59,6 +87,31 @@ const storeOptions = computed(() => [
     ...props.stores.map((store) => ({ value: store.id, label: store.name })),
 ]);
 
+const categoryOptions = computed(() => [
+    { value: null, label: 'All categories' },
+    ...props.filterOptions.categories.map((category) => ({ value: category.id, label: category.name })),
+]);
+
+// Sub-categories narrow to the chosen category.
+const subcategoryOptions = computed(() => [
+    { value: null, label: 'All sub-categories' },
+    ...props.filterOptions.subcategories
+        .filter((sub) => categoryInput.value === null || sub.item_category_id === categoryInput.value)
+        .map((sub) => ({ value: sub.id, label: sub.name })),
+]);
+
+const brandOptions = computed(() => [
+    { value: null, label: 'All brands' },
+    ...props.filterOptions.brands.map((brand) => ({ value: brand.id, label: brand.name })),
+]);
+
+// A sub-category from another category can no longer be chosen.
+watch(categoryInput, () => {
+    if (!subcategoryOptions.value.some((option) => option.value === subcategoryInput.value)) {
+        subcategoryInput.value = null;
+    }
+});
+
 // Mirrors legacy's stock_status filter: hunting down negative-stock
 // data-entry errors is the whole reason this control exists. 'all' applies
 // no sign filter, the same rows the report has always shown.
@@ -70,11 +123,25 @@ const stockStatusOptions = [
 
 const isLoading = ref(false);
 
-const hasActiveFilter = computed(() => storeId.value !== null || stockStatus.value !== 'all');
+const hasActiveFilter = computed(
+    () =>
+        storeIdInput.value !== null
+        || stockStatusInput.value !== 'all'
+        || includeEmptyInput.value
+        || categoryInput.value !== null
+        || subcategoryInput.value !== null
+        || brandInput.value !== null
+        || searchInput.value.trim() !== '',
+);
 
 function resetFilters() {
-    storeId.value = null;
-    stockStatus.value = 'all';
+    storeIdInput.value = null;
+    stockStatusInput.value = 'all';
+    includeEmptyInput.value = false;
+    categoryInput.value = null;
+    subcategoryInput.value = null;
+    brandInput.value = null;
+    searchInput.value = '';
     applyFilter();
 }
 
@@ -83,9 +150,14 @@ function applyFilter() {
         window.location.pathname,
         {
             as_of: asOfInput.value,
-            store_id: storeId.value ?? undefined,
-            stock_status: stockStatus.value,
-            ...stockBranchQuery(branchFilter, storeId.value),
+            store_id: storeIdInput.value ?? undefined,
+            stock_status: stockStatusInput.value,
+            include_empty: includeEmptyInput.value ? 1 : undefined,
+            item_category_id: categoryInput.value ?? undefined,
+            item_subcategory_id: subcategoryInput.value ?? undefined,
+            brand_id: brandInput.value ?? undefined,
+            search: searchInput.value.trim() || undefined,
+            ...stockBranchQuery(branchFilter, storeIdInput.value),
         },
         {
             preserveState: true,
@@ -95,6 +167,33 @@ function applyFilter() {
         },
     );
 }
+
+// Built from the currently-applied props (never the unapplied inputs) so the export matches what's on screen.
+const exportUrl = computed(() => {
+    const params = new URLSearchParams({ as_of: props.asOf, stock_status: props.stockStatus });
+
+    if (props.storeId) {
+        params.set('store_id', String(props.storeId));
+    }
+    if (props.includeEmpty) {
+        params.set('include_empty', '1');
+    }
+    if (props.itemCategoryId) {
+        params.set('item_category_id', String(props.itemCategoryId));
+    }
+    if (props.itemSubcategoryId) {
+        params.set('item_subcategory_id', String(props.itemSubcategoryId));
+    }
+    if (props.brandId) {
+        params.set('brand_id', String(props.brandId));
+    }
+    if (props.search !== '') {
+        params.set('search', props.search);
+    }
+    branchFilter.appendTo(params);
+
+    return `/reports/stock-valuation/export?${params.toString()}`;
+});
 
 const asOfLabel = computed(() => `As of BS ${formatBsDate(props.asOf)} (AD ${props.asOf})`);
 
@@ -107,8 +206,20 @@ const baseColumns = [
     { accessorKey: 'valuation', header: 'Valuation', numeric: true, cell: ({ row }) => formatMoney(row.original.valuation) },
 ];
 
+// The applied as-of date, store and branch, so the item ledger's balance matches the row.
+const ledgerQuery = computed(() => {
+    const branchQuery = branchFilter.toQuery();
+    delete branchQuery.by_branch;
+
+    return { to: props.asOf, store_id: props.storeId, ...branchQuery };
+});
+
 // The ledger link stays last; the branch columns (quantity over value) sit before it.
-const columns = computed(() => [...baseColumns, ...branchColumns.value, itemLedgerColumn((row) => row.itemId)]);
+const columns = computed(() => [
+    ...baseColumns,
+    ...branchColumns.value,
+    itemLedgerColumn((row) => row.itemId, () => ledgerQuery.value),
+]);
 </script>
 
 <template>
@@ -122,11 +233,15 @@ const columns = computed(() => [...baseColumns, ...branchColumns.value, itemLedg
                 v-model:choice="branchFilter.choice.value"
                 v-model:by-branch="branchFilter.byBranch.value"
                 :report="branchReport"
-                :allow-by-branch="storeId === null"
+                :allow-by-branch="storeIdInput === null"
                 id-prefix="stock-valuation-branch"
                 hide-label
                 @change="applyFilter"
             />
+            <Button v-if="can('stock_reports.export')" as="a" :href="exportUrl" variant="secondary" tone="purple">
+                <FileSpreadsheet class="h-[14px] w-[14px]" aria-hidden="true" />
+                Export to Excel
+            </Button>
         </PageHeader>
 
         <p class="mb-1 text-[12.5px] text-text-muted">Showing report: {{ asOfLabel }}</p>
@@ -142,12 +257,35 @@ const columns = computed(() => [...baseColumns, ...branchColumns.value, itemLedg
             </div>
             <div class="w-56">
                 <Label class="mb-1 text-[11px]">Store</Label>
-                <Select v-model="storeId" :options="storeOptions" />
+                <Select v-model="storeIdInput" :options="storeOptions" />
             </div>
             <div class="w-40">
                 <Label class="mb-1 text-[11px]">Stock status</Label>
-                <Select v-model="stockStatus" :options="stockStatusOptions" />
+                <Select v-model="stockStatusInput" :options="stockStatusOptions" />
             </div>
+            <div class="w-48">
+                <Label class="mb-1 text-[11px]">Category</Label>
+                <Select v-model="categoryInput" :options="categoryOptions" />
+            </div>
+            <div class="w-48">
+                <Label class="mb-1 text-[11px]">Sub-category</Label>
+                <Select v-model="subcategoryInput" :options="subcategoryOptions" />
+            </div>
+            <div class="w-48">
+                <Label class="mb-1 text-[11px]">Brand</Label>
+                <Select v-model="brandInput" :options="brandOptions" />
+            </div>
+            <div class="w-56">
+                <Label class="mb-1 text-[11px]">Item name</Label>
+                <Input v-model="searchInput" placeholder="Search items..." @keydown.enter.prevent="applyFilter" />
+            </div>
+            <CheckboxField
+                id="stock-valuation-include-empty"
+                v-model="includeEmptyInput"
+                label="Show zero-stock items"
+                hint="Also list items with no quantity and no value on this date."
+                class="pb-2"
+            />
             <Button variant="primary" tone="purple" :loading="isLoading" @click="applyFilter">Generate report</Button>
             <Button v-if="hasActiveFilter" variant="secondary" tone="purple" :disabled="isLoading" @click="resetFilters">Reset</Button>
         </div>

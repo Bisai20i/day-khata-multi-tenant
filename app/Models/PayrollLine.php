@@ -18,6 +18,13 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
  * credited to Salary Payable. What is still unpaid is derived, never stored:
  * net minus the posted payments allocated to this line.
  *
+ * `ssf_employee` and `cit_employee` are the employee's social security and CIT
+ * withholdings, also taken off net (net = gross - recovery - tds -
+ * ssf_employee - cit_employee) and credited to SSF / CIT Payable.
+ * `ssf_employer` and `cit_employer` are the employer's own contributions: an
+ * extra employer cost debited to the employer contribution expense accounts
+ * and credited to the same payables; they change neither gross nor net.
+ *
  * `branch_id` is the staff member's home branch when the payslip was saved;
  * PayrollDraft writes it explicitly. The payslip's expense, Salary Payable
  * and advance-recovery lines post in it, and a salary payment debits Salary
@@ -25,7 +32,10 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
  * rule). PayrollPoster refuses to post a payslip whose staff member has
  * since moved branch.
  */
-#[Fillable(['payroll_run_id', 'staff_id', 'branch_id', 'gross', 'advance_recovery', 'tds', 'net', 'note'])]
+#[Fillable([
+    'payroll_run_id', 'staff_id', 'branch_id', 'gross', 'advance_recovery', 'tds',
+    'ssf_employee', 'ssf_employer', 'cit_employee', 'cit_employer', 'net', 'note',
+])]
 class PayrollLine extends Model
 {
     use HasFactory;
@@ -41,6 +51,10 @@ class PayrollLine extends Model
             'gross' => Decimal::class.':2',
             'advance_recovery' => Decimal::class.':2',
             'tds' => Decimal::class.':2',
+            'ssf_employee' => Decimal::class.':2',
+            'ssf_employer' => Decimal::class.':2',
+            'cit_employee' => Decimal::class.':2',
+            'cit_employer' => Decimal::class.':2',
             'net' => Decimal::class.':2',
             'branch_id' => 'integer',
         ];

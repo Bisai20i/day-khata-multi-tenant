@@ -25,7 +25,8 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
  */
 #[Fillable([
     'period_label', 'period_start', 'period_end', 'date', 'status', 'run_number', 'series_branch_id', 'fiscal_year_id',
-    'journal_voucher_id', 'reversal_journal_voucher_id', 'total_gross', 'total_recovery', 'total_tds', 'total_net',
+    'journal_voucher_id', 'reversal_journal_voucher_id', 'total_gross', 'total_recovery', 'total_tds',
+    'total_ssf_employee', 'total_ssf_employer', 'total_cit_employee', 'total_cit_employer', 'total_net',
     'narration', 'branch_id', 'created_by', 'posted_by', 'posted_at', 'cancelled_at', 'cancelled_by', 'cancel_reason',
 ])]
 class PayrollRun extends Model
@@ -59,6 +60,10 @@ class PayrollRun extends Model
             'total_gross' => Decimal::class.':2',
             'total_recovery' => Decimal::class.':2',
             'total_tds' => Decimal::class.':2',
+            'total_ssf_employee' => Decimal::class.':2',
+            'total_ssf_employer' => Decimal::class.':2',
+            'total_cit_employee' => Decimal::class.':2',
+            'total_cit_employer' => Decimal::class.':2',
             'total_net' => Decimal::class.':2',
             'branch_id' => 'integer',
             'series_branch_id' => 'integer',

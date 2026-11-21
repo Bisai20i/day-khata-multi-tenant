@@ -13,6 +13,7 @@ import Label from '@/components/ui/Label.vue';
 import { formatMoney, formatQuantity, formatRate } from '@/lib/money';
 import { todayInKathmandu } from '@/lib/format';
 import PurchaseReturnUnlinkedForm from '@/components/purchases/PurchaseReturnUnlinkedForm.vue';
+import PurchaseSideProjectField from '@/components/purchases/PurchaseSideProjectField.vue';
 import BranchBadge from '@/components/branch/BranchBadge.vue';
 import { usePermissions } from '@/composables/usePermissions';
 
@@ -37,6 +38,8 @@ const props = defineProps({
     // Branch picker of the unlinked form only (BranchFormOptions::props()).
     branchOptions: { type: Array, default: () => [] },
     defaultBranchId: { type: Number, default: null },
+    // Active projects for the optional project picker.
+    projects: { type: Array, default: () => [] },
 });
 
 const emit = defineEmits(['cancel', 'posted']);
@@ -91,6 +94,8 @@ const form = useForm({
     reason: '',
     refund_account_id: null,
     store_id: null,
+    // Defaults to the bill's project when a purchase is picked.
+    project_id: null,
     lines: [],
 });
 
@@ -121,6 +126,9 @@ watch(
         // The return leaves the store the goods were received into unless the
         // user picks another one.
         form.store_id = purchase?.store_id ?? null;
+        // The return nets against the bill inside the same project unless the
+        // user picks another one.
+        form.project_id = purchase?.project?.id ?? null;
         form.lines = purchase
             ? purchase.lines.map((line) => ({
                   purchase_line_id: line.id,
@@ -139,6 +147,18 @@ watch(
             : [];
     },
 );
+
+// Active projects, plus the selected bill's own project when it is no longer
+// active, so the defaulted value always has a label.
+const linkedProjects = computed(() => {
+    const billProject = selectedPurchase.value?.project ?? null;
+
+    if (billProject === null || props.projects.some((project) => project.id === billProject.id)) {
+        return props.projects;
+    }
+
+    return [...props.projects, billProject];
+});
 
 const hasReturnableLine = computed(() => form.lines.some((line) => line.quantity !== '' && line.quantity !== '0'));
 
@@ -164,6 +184,7 @@ function submit() {
         reason: data.reason || null,
         refund_account_id: data.refund_account_id || null,
         store_id: data.store_id || null,
+        project_id: data.project_id || null,
         // Quantities go out as typed. Number() would round 0.00004 into a
         // charge with no stock behind it (audit P0-5).
         lines: data.lines
@@ -234,7 +255,7 @@ function submit() {
                 </div>
             </div>
 
-            <div class="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-5">
+            <div class="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-6">
                 <div>
                     <Label class="mb-1">Original purchase <span class="text-danger">*</span></Label>
                     <Combobox
@@ -283,6 +304,13 @@ function submit() {
                     />
                     <p v-if="form.errors.store_id" class="mt-1 text-sm text-danger">{{ form.errors.store_id }}</p>
                 </div>
+                <PurchaseSideProjectField
+                    v-if="linkedProjects.length > 0"
+                    id="purchase-return-project"
+                    v-model="form.project_id"
+                    :projects="linkedProjects"
+                    :error="form.errors.project_id"
+                />
             </div>
             </Card>
 
@@ -356,6 +384,7 @@ function submit() {
             :default-vat-rate="defaultVatRate"
             :branch-options="branchOptions"
             :default-branch-id="defaultBranchId"
+            :projects="projects"
             @cancel="emit('cancel')"
             @posted="emit('posted')"
         />

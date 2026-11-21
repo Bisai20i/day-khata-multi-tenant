@@ -61,6 +61,7 @@ use InvalidArgumentException;
     'vat_rate', 'vat_amount', 'total', 'round_off', 'cash_amount', 'bank_amount',
     'tds_account_id', 'tds_amount', 'narration', 'status', 'created_by',
     'cancelled_at', 'cancelled_by', 'cancel_reason', 'reversal_journal_voucher_id', 'branch_id',
+    'project_id',
 ])]
 class Sale extends Model
 {
@@ -90,6 +91,7 @@ class Sale extends Model
             'tds_amount' => Decimal::class.':2',
             'commission_amount' => Decimal::class.':2',
             'branch_id' => 'integer',
+            'project_id' => 'integer',
         ];
     }
 
@@ -158,6 +160,16 @@ class Sale extends Model
     public function tdsAccount(): BelongsTo
     {
         return $this->belongsTo(Account::class, 'tds_account_id');
+    }
+
+    /**
+     * The project (cost centre) every line of this sale's voucher is tagged with.
+     *
+     * @return BelongsTo<Project, $this>
+     */
+    public function project(): BelongsTo
+    {
+        return $this->belongsTo(Project::class);
     }
 
     /**
@@ -275,6 +287,75 @@ class Sale extends Model
     }
 
     /**
+     * outstandingAmount() for many invoices in two queries in total, not two
+     * per invoice (the party-wise report would otherwise ask every credit
+     * invoice separately). The same rule as outstandingAmount(), term by
+     * term: what is due after TDS, less what was settled at posting, less
+     * the net credit of posted returns, plus the refunds already paid out on
+     * them, less allocations of non-cancelled receipts. Returns and
+     * allocations are read outside the branch access scope, for the same
+     * reason as there.
+     *
+     * Pass a few hundred invoices at a time (chunk(500)) to stay inside the
+     * database's bound-parameter limit.
+     *
+     * @param  \Illuminate\Database\Eloquent\Collection<int, static>  $sales  needs id, total, tds_amount, payment_mode
+     * @return array<int, Money>
+     */
+    public static function outstandingAmounts(\Illuminate\Database\Eloquent\Collection $sales): array
+    {
+        $ids = $sales->modelKeys();
+
+        if ($ids === []) {
+            return [];
+        }
+
+        $returns = BranchContext::unrestricted(fn () => SalesReturn::query()
+            ->whereIn('sale_id', $ids)
+            ->where('status', 'posted')
+            ->get(['id', 'sale_id', 'total', 'tds_amount', 'refund_journal_voucher_id']))
+            ->groupBy('sale_id');
+
+        $allocations = BranchContext::unrestricted(fn () => ReceiptAllocation::query()
+            ->whereIn('sale_id', $ids)
+            ->whereHas('receipt', fn ($query) => $query->where('status', '!=', 'cancelled'))
+            ->get(['sale_id', 'amount']))
+            ->groupBy('sale_id');
+
+        $outstanding = [];
+
+        foreach ($sales as $sale) {
+            $settlementDue = Money::of($sale->total)->minus(Money::of($sale->tds_amount));
+            $settledAtPosting = $sale->payment_mode === 'credit' ? Money::zero() : $settlementDue;
+
+            $returnedNet = Money::zero();
+            $refunded = Money::zero();
+
+            foreach ($returns->get($sale->id, []) as $return) {
+                $credit = Money::of($return->total)->minus(Money::of($return->tds_amount));
+
+                $returnedNet = $returnedNet->plus($credit);
+
+                if ($return->refund_journal_voucher_id !== null) {
+                    $refunded = $refunded->plus($credit);
+                }
+            }
+
+            $allocated = Money::sum(
+                collect($allocations->get($sale->id, []))->map(fn ($allocation) => Money::of($allocation->amount))
+            );
+
+            $outstanding[$sale->id] = $settlementDue
+                ->minus($settledAtPosting)
+                ->minus($returnedNet)
+                ->plus($refunded)
+                ->minus($allocated);
+        }
+
+        return $outstanding;
+    }
+
+    /**
      * The rupee amount the header discount removed from this bill.
      *
      * Stored at posting since this rewrite (see the 2026_09_12_040000
@@ -300,7 +381,7 @@ class Sale extends Model
      * what closes P0-10: PAN bills used to charge a hidden 13% that the PDF
      * then hid from the customer while it still posted to LIA20.
      *
-     * @param  array{customer_id: int, chalani_number?: string|null, date: string, payment_mode: string, bank_account_id?: int|null, discount?: string|float, discount_type?: string, cash_amount?: string|float|null, bank_amount?: string|float|null, tds_account_id?: int|null, tds_amount?: string|float, round_off?: string|float|null, agent_id?: int|null, commission_amount?: string|float, narration?: string|null, store_id?: int|null, branch_id?: int|null, expected_total?: string|null}  $data
+     * @param  array{customer_id: int, chalani_number?: string|null, date: string, payment_mode: string, bank_account_id?: int|null, discount?: string|float, discount_type?: string, cash_amount?: string|float|null, bank_amount?: string|float|null, tds_account_id?: int|null, tds_amount?: string|float, round_off?: string|float|null, agent_id?: int|null, commission_amount?: string|float, narration?: string|null, store_id?: int|null, branch_id?: int|null, project_id?: int|null, expected_total?: string|null}  $data
      * @param  array<int, array{item_id: int, item_unit_id?: int|null, quantity: string|float, rate: string|float, discount?: string|float, discount_type?: string}>  $lines
      */
     public static function post(array $data, array $lines, User $actor): self
@@ -359,12 +440,15 @@ class Sale extends Model
 
             [$paymentMode, $cashAmount, $bankAmount, $bankAccountId] = static::resolvePayment($data, $totals->settlementDue);
 
+            $projectId = isset($data['project_id']) && $data['project_id'] !== '' ? (int) $data['project_id'] : null;
+
             $voucher = JournalVoucher::post(
                 [
                     'voucher_type' => static::voucherTypeFor($invoiceType)->value,
                     'date' => $data['date'],
                     'narration' => $data['narration'] ?? "Sale to {$customer->name}",
                     'branch_id' => $placement->branchId,
+                    'project_id' => $projectId,
                 ],
                 static::voucherLines($customer, $totals, $preparedLines, $paymentMode, $cashAmount, $bankAmount, $bankAccountId, $tdsAccountId, $agent, $commissionAmount, $perpetualCosts),
                 $actor,
@@ -383,6 +467,7 @@ class Sale extends Model
                 'commission_amount' => $commissionAmount,
                 'store_id' => $storeId,
                 'branch_id' => $placement->branchId,
+                'project_id' => $projectId,
                 'journal_voucher_id' => $voucher->id,
                 'fiscal_year_id' => $voucher->fiscal_year_id,
                 'invoice_number' => static::invoiceNumberFor($invoiceType, $voucher, $settings),

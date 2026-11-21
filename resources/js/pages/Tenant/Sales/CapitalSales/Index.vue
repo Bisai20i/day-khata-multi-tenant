@@ -36,6 +36,8 @@ defineProps({
     // Branch picker of the create form (BranchFormOptions::props()).
     branchOptions: { type: Array, default: () => [] },
     defaultBranchId: { type: Number, default: null },
+    // Project picker of the create form.
+    projects: { type: Array, default: () => [] },
 });
 
 const { branchColumns } = useBranchListColumn();
@@ -211,6 +213,7 @@ const columns = [
                 :default-vat-rate="defaultVatRate"
                 :branch-options="branchOptions"
                 :default-branch-id="defaultBranchId"
+                :projects="projects"
                 @cancel="showCreateForm = false"
                 @posted="showCreateForm = false"
             />

@@ -10,6 +10,7 @@ import InfoTip from '@/components/ui/InfoTip.vue';
 import Select from '@/components/ui/Select.vue';
 import NepaliDateInput from '@/components/ui/NepaliDateInput.vue';
 import Label from '@/components/ui/Label.vue';
+import PurchaseSideProjectField from '@/components/purchases/PurchaseSideProjectField.vue';
 import { addMoney, formatMoney, formatQuantity, moneyEquals, parseMoney } from '@/lib/money';
 import { todayInKathmandu } from '@/lib/format';
 import { useBranchField } from '@/composables/useBranchField';
@@ -42,6 +43,8 @@ const props = defineProps({
     // Branch picker (BranchFormOptions::props() on the server, plan 12).
     branchOptions: { type: Array, default: () => [] },
     defaultBranchId: { type: Number, default: null },
+    // Active projects for the optional project picker.
+    projects: { type: Array, default: () => [] },
 });
 
 const emit = defineEmits(['cancel', 'posted']);
@@ -89,6 +92,7 @@ const form = useForm({
     supplier_id: null,
     store_id: null,
     reason: '',
+    project_id: null,
     vat_rate: props.defaultVatRate,
     payment_mode: 'cash',
     bank_account_id: null,
@@ -261,6 +265,7 @@ function submit() {
         supplier_id: data.supplier_id || null,
         store_id: data.store_id || null,
         reason: data.reason,
+        project_id: data.project_id || null,
         vat_rate: data.vat_rate === '' ? null : data.vat_rate,
         payment_mode: data.payment_mode,
         bank_account_id: unlinkedModeNeedsBank(data.payment_mode) ? data.bank_account_id || null : null,
@@ -322,6 +327,13 @@ function submit() {
                 <Input v-model="form.reason" type="text" maxlength="255" placeholder="e.g. Damaged goods" required />
                 <p v-if="form.errors.reason" class="mt-1 text-sm text-danger">{{ form.errors.reason }}</p>
             </div>
+            <PurchaseSideProjectField
+                v-if="projects.length > 0"
+                id="unlinked-purchase-return-project"
+                v-model="form.project_id"
+                :projects="projects"
+                :error="form.errors.project_id"
+            />
         </div>
         </Card>
 

@@ -1,42 +1,22 @@
 <script setup>
-import { computed, ref } from 'vue';
-import { router } from '@inertiajs/vue3';
 import AppLayout from '@/layouts/AppLayout.vue';
 import { useLayoutChrome } from '@/composables/useLayoutChrome';
-import { useAreaReportFilter } from '@/composables/useAreaReportFilter';
-import Card from '@/components/ui/Card.vue';
-import NepaliDateInput from '@/components/ui/NepaliDateInput.vue';
-import Select from '@/components/ui/Select.vue';
-import Button from '@/components/ui/Button.vue';
-import PageHeader from '@/components/ui/PageHeader.vue';
-import DataTable from '@/components/ui/DataTable.vue';
-import Label from '@/components/ui/Label.vue';
-import AreaFilterBar from '@/components/parties/AreaFilterBar.vue';
-import AreaGroupedTable from '@/components/parties/AreaGroupedTable.vue';
-import { formatMoney } from '@/lib/money';
-import { formatBsDate } from '@/lib/format';
-import { useBranchReportFilter } from '@/composables/useBranchReportFilter';
-import BranchReportFilter from '@/components/branch/BranchReportFilter.vue';
-import BranchReportNotes from '@/components/branch/BranchReportNotes.vue';
+import AgedPartyReport from '@/components/parties/AgedPartyReport.vue';
 
 defineOptions({ layout: AppLayout });
 
-const props = defineProps({
+// Every prop the controller sends is declared (an undeclared one would render
+// as an HTML attribute) and forwarded to the shared report.
+defineProps({
     rows: { type: Array, default: () => [] },
-    totals: {
-        type: Object,
-        default: () => ({
-            opening: '0.00',
-            current: '0.00',
-            days31_60: '0.00',
-            days61_90: '0.00',
-            days90Plus: '0.00',
-            total: '0.00',
-        }),
-    },
-    stores: { type: Array, default: () => [] },
+    totals: { type: Object, default: undefined },
+    advances: { type: String, default: '0.00' },
+    parties: { type: Array, default: () => [] },
+    partyId: { type: [Number, null], default: null },
+    partyName: { type: [String, null], default: null },
+    hideZero: { type: Boolean, default: true },
     asOf: { type: String, required: true },
-    storeId: { type: [Number, null], default: null },
+    fiscalYearId: { type: [Number, null], default: null },
     areas: { type: Array, default: () => [] },
     area: { type: String, default: '' },
     areaLabel: { type: [String, null], default: null },
@@ -47,118 +27,35 @@ const props = defineProps({
 });
 
 useLayoutChrome('Aged Receivables');
-
-const asOf = ref(props.asOf);
-const storeId = ref(props.storeId);
-const areaFilter = useAreaReportFilter(props);
-const branchFilter = useBranchReportFilter(() => props.branchReport);
-
-const storeOptions = computed(() => [
-    { value: null, label: 'All stores' },
-    ...props.stores.map((store) => ({ value: store.id, label: store.name })),
-]);
-
-const asOfLabel = computed(() => `As of BS ${formatBsDate(props.asOf)} (AD ${props.asOf})`);
-
-function applyFilter() {
-    router.get(
-        window.location.pathname,
-        { as_of: asOf.value, store_id: storeId.value ?? undefined, ...areaFilter.toQuery(), ...branchFilter.toQuery() },
-        { preserveState: true, preserveScroll: true },
-    );
-}
-
-const amountColumns = [
-    { id: 'opening', header: 'Opening / unallocated', numeric: true, cell: ({ row }) => formatMoney(row.original.opening) },
-    { id: 'current', header: 'Current (0-30)', numeric: true, cell: ({ row }) => formatMoney(row.original.current) },
-    { id: 'days31_60', header: '31-60 days overdue', numeric: true, cell: ({ row }) => formatMoney(row.original.days31_60) },
-    { id: 'days61_90', header: '61-90 days overdue', numeric: true, cell: ({ row }) => formatMoney(row.original.days61_90) },
-    { id: 'days90Plus', header: 'Over 90 days overdue', numeric: true, cell: ({ row }) => formatMoney(row.original.days90Plus) },
-    { id: 'total', header: 'Total', numeric: true, cell: ({ row }) => formatMoney(row.original.total) },
-];
-const partyColumn = { id: 'party', header: 'Customer', numeric: false, cell: ({ row }) => row.original.party };
-const areaColumn = { id: 'area', header: 'Area', numeric: false, cell: ({ row }) => row.original.area ?? '-' };
-
-// The flat list shows the area on each row; the grouped layout shows it as the heading instead.
-const flatColumns = [partyColumn, areaColumn, ...amountColumns];
-const groupedColumns = [partyColumn, ...amountColumns];
-const subtotalColumns = amountColumns.map((column) => column.id);
-
-const emptyMessage = computed(() =>
-    props.areaLabel
-        ? `Nothing outstanding for "${props.areaLabel}" as of this date. Try a later date.`
-        : 'Nothing outstanding as of this date. Try a later date.',
-);
 </script>
 
 <template>
-    <div>
-        <PageHeader
-            title="Aged Receivables"
-            description="How much each customer owes you, grouped by how long the invoices have been outstanding."
-        >
-            <BranchReportFilter
-                v-if="branchReport"
-                v-model:choice="branchFilter.choice.value"
-                :report="branchReport"
-                id-prefix="aged-receivables-branch"
-                hide-label
-                @change="applyFilter"
-            />
-        </PageHeader>
-
-        <Card variant="panel" class="mb-4">
-            <div class="flex flex-wrap items-end gap-3">
-                <div>
-                    <Label class="mb-1">As of date (BS)</Label>
-                    <NepaliDateInput v-model="asOf" />
-                </div>
-                <div class="w-56">
-                    <Label class="mb-1">Store</Label>
-                    <Select v-model="storeId" :options="storeOptions" />
-                </div>
-                <AreaFilterBar
-                    v-model:area="areaFilter.area.value"
-                    v-model:group-by-area="areaFilter.groupByArea.value"
-                    :areas="areas"
-                    id-prefix="aged-receivables"
-                />
-                <Button variant="primary" tone="purple" @click="applyFilter">Generate report</Button>
-            </div>
-            <p class="mt-2 text-[12px] text-text-muted">Showing report {{ asOfLabel.charAt(0).toLowerCase() + asOfLabel.slice(1) }}</p>
-            <p v-if="areaLabel" class="mt-1 text-xs font-semibold text-text-strong">Area: {{ areaLabel }}</p>
-            <BranchReportNotes v-if="branchReport" :report="branchReport" hide-label />
-        </Card>
-
-        <Card variant="panel">
-            <AreaGroupedTable
-                v-if="groupByArea"
-                :columns="groupedColumns"
-                :groups="groups ?? []"
-                :subtotal-columns="subtotalColumns"
-                :empty-message="emptyMessage"
-            />
-            <DataTable v-else :columns="flatColumns" :data="rows" :page-size="25" :empty-message="emptyMessage" />
-
-            <div class="mt-3 flex flex-wrap justify-end gap-6 border-t-[1.5px] border-border pt-3 text-[12.5px]">
-                <div><span class="text-text-muted">Opening:</span> <span class="font-semibold">{{ formatMoney(totals.opening) }}</span></div>
-                <div><span class="text-text-muted">Current (0-30 days):</span> <span class="font-semibold">{{ formatMoney(totals.current) }}</span></div>
-                <div><span class="text-text-muted">31-60 days overdue:</span> <span class="font-semibold">{{ formatMoney(totals.days31_60) }}</span></div>
-                <div><span class="text-text-muted">61-90 days overdue:</span> <span class="font-semibold">{{ formatMoney(totals.days61_90) }}</span></div>
-                <div><span class="text-text-muted">Over 90 days overdue:</span> <span class="font-semibold">{{ formatMoney(totals.days90Plus) }}</span></div>
-                <div><span class="font-bold text-text-strong">Total:</span> <span class="font-bold">{{ formatMoney(totals.total) }}</span></div>
-            </div>
-
-            <p class="mt-3 text-[11.5px] text-text-faint">
-                The ageing buckets cover open credit invoices. Anything else the customer's ledger carries -
-                a migrated opening due, an advance or receipt on account (shown as a negative amount), a manual
-                journal voucher - sits in "Opening / unallocated". With All stores, the total equals the customer's
-                ledger balance as of the chosen date, so it matches the Debtors report only when that report is run for the
-                same fiscal year and the date is today (the list shows closing balances). Invoice balances use
-                every payment recorded so far, so for a past date part of the difference lands in Opening / unallocated.
-                When a store is selected the ledger balance cannot be split by store, so the total covers
-                open invoices only. Choosing an area keeps only the customers assigned to it.
-            </p>
-        </Card>
-    </div>
+    <AgedPartyReport
+        :rows="rows"
+        :totals="totals"
+        :advances="advances"
+        :parties="parties"
+        :party-id="partyId"
+        :party-name="partyName"
+        :hide-zero="hideZero"
+        :as-of="asOf"
+        :fiscal-year-id="fiscalYearId"
+        :areas="areas"
+        :area="area"
+        :area-label="areaLabel"
+        :group-by-area="groupByArea"
+        :groups="groups"
+        :branch-report="branchReport"
+        page-title="Aged Receivables"
+        description="How much each customer owes you, aged from the oldest unpaid entry in their ledger as of the chosen date."
+        party-label="Customer"
+        document-label="invoices"
+        opening-term="opening due"
+        advance-term="receipt"
+        party-param="customer_id"
+        counter-report-label="Debtors"
+        export-permission="receivables_reports.export"
+        base-path="/reports/aged-receivables"
+        id-prefix="aged-receivables"
+    />
 </template>

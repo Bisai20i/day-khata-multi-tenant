@@ -1,6 +1,6 @@
 <script setup>
-import { ref } from 'vue';
-import { router } from '@inertiajs/vue3';
+import { computed, ref, watch } from 'vue';
+import { router, usePage } from '@inertiajs/vue3';
 import AppLayout from '@/layouts/AppLayout.vue';
 import { useLayoutChrome } from '@/composables/useLayoutChrome';
 import { usePermissions } from '@/composables/usePermissions';
@@ -29,20 +29,39 @@ const props = defineProps({
 
 useLayoutChrome('COGM and COGS Schedule');
 
-const from = ref(props.from);
-const to = ref(props.to);
+// Unapplied inputs; named *Input so neither shadows the `from` / `to` props in the template.
+const fromInput = ref(props.from);
+const toInput = ref(props.to);
+
+// Follow what the server applied (it fills in the fiscal-year defaults).
+watch(
+    () => [props.from, props.to],
+    () => {
+        fromInput.value = props.from;
+        toInput.value = props.to;
+    },
+);
 
 const branchFilter = useBranchReportFilter(() => props.branchReport);
 
+// A malformed filter (a bad date) redirects back with validation errors; show them
+// instead of leaving the page looking unchanged.
+const page = usePage();
+const filterErrors = computed(() => ['from', 'to'].map((key) => page.props.errors?.[key]).filter(Boolean));
+
 function apply() {
-    router.get(window.location.pathname, { from: from.value, to: to.value, ...branchFilter.toQuery() }, { preserveState: true, preserveScroll: true });
+    router.get(window.location.pathname, { from: fromInput.value, to: toInput.value, ...branchFilter.toQuery() }, { preserveState: true, preserveScroll: true });
 }
 
+// Print and Export follow the applied props (what is on screen), never the unapplied inputs.
 function fileUrl(suffix) {
-    const params = new URLSearchParams({ from: from.value, to: to.value });
+    const params = new URLSearchParams({ from: props.from, to: props.to });
     branchFilter.appendTo(params);
-    return `${window.location.pathname}/${suffix}?${params}`;
+    return `/reports/manufacturing/cogs-schedule/${suffix}?${params}`;
 }
+
+const printUrl = computed(() => fileUrl('print'));
+const exportUrl = computed(() => fileUrl('export'));
 
 const rowClass = (style) => ({
     'font-semibold': style === 'subtotal',
@@ -62,9 +81,17 @@ const rowClass = (style) => ({
                 hide-label
                 @change="apply"
             />
-            <a v-if="can('manufacturing_reports.export')" :href="fileUrl('print')" target="_blank" rel="noopener"><Button variant="secondary" tone="purple">Print</Button></a>
-            <a v-if="can('manufacturing_reports.export')" :href="fileUrl('export')"><Button variant="secondary" tone="purple">Export</Button></a>
+            <Button v-if="can('manufacturing_reports.export')" as="a" :href="printUrl" target="_blank" rel="noopener" variant="secondary" tone="purple">Print</Button>
+            <Button v-if="can('manufacturing_reports.export')" as="a" :href="exportUrl" variant="secondary" tone="purple">Export to Excel</Button>
         </PageHeader>
+
+        <div
+            v-if="filterErrors.length"
+            class="mb-4 border-[1.5px] border-red-600 bg-red-50 px-4 py-2 text-[13px] font-semibold text-red-700"
+            role="alert"
+        >
+            <p v-for="message in filterErrors" :key="message">{{ message }}</p>
+        </div>
 
         <p class="mb-4 text-[12.5px] text-text-muted">
             BS {{ formatBsDate(schedule.from) }} to BS {{ formatBsDate(schedule.to) }} (AD {{ schedule.from }} to {{ schedule.to }})
@@ -74,11 +101,11 @@ const rowClass = (style) => ({
             <div class="flex flex-wrap items-end gap-3">
                 <div>
                     <Label class="mb-1">From (BS)</Label>
-                    <NepaliDateInput v-model="from" />
+                    <NepaliDateInput v-model="fromInput" />
                 </div>
                 <div>
                     <Label class="mb-1">To (BS)</Label>
-                    <NepaliDateInput v-model="to" />
+                    <NepaliDateInput v-model="toInput" />
                 </div>
                 <Button variant="primary" tone="purple" @click="apply">Generate report</Button>
             </div>
@@ -91,6 +118,13 @@ const rowClass = (style) => ({
             role="alert"
         >
             The computed cost of goods sold does not match the ledger (EXE10) by {{ formatMoney(schedule.difference) }}. Review the reconciling line below before relying on this schedule.
+        </div>
+        <div
+            v-else
+            class="mb-4 border-[1.5px] border-green-600 bg-green-50 px-4 py-2 text-[13px] font-semibold text-green-800"
+            role="status"
+        >
+            Reconciles: the computed cost of goods sold equals the ledger (EXE10).
         </div>
 
         <Card variant="panel">

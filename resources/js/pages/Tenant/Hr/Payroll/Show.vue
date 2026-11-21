@@ -170,6 +170,10 @@ const figures = computed(() => {
             { label: 'Gross pay', value: formatMoney(live.gross) },
             { label: 'Advance recovered', value: formatMoney(live.recovery) },
             { label: 'Salary TDS withheld', value: formatMoney(live.tds ?? '0.00') },
+            { label: 'SSF withheld (employee)', value: formatMoney(live.ssf_employee) },
+            { label: 'SSF employer contribution', value: formatMoney(live.ssf_employer) },
+            { label: 'CIT withheld (employee)', value: formatMoney(live.cit_employee) },
+            { label: 'CIT employer contribution', value: formatMoney(live.cit_employer) },
             { label: 'Net pay', value: formatMoney(live.net) },
         ];
     }
@@ -179,6 +183,10 @@ const figures = computed(() => {
         { label: 'Gross pay', value: formatMoney(props.run.total_gross) },
         { label: 'Advance recovered', value: formatMoney(props.run.total_recovery) },
         { label: 'Salary TDS withheld', value: formatMoney(props.run.total_tds ?? '0.00') },
+        { label: 'SSF withheld (employee)', value: formatMoney(props.run.total_ssf_employee ?? '0.00') },
+        { label: 'SSF employer contribution', value: formatMoney(props.run.total_ssf_employer ?? '0.00') },
+        { label: 'CIT withheld (employee)', value: formatMoney(props.run.total_cit_employee ?? '0.00') },
+        { label: 'CIT employer contribution', value: formatMoney(props.run.total_cit_employer ?? '0.00') },
         { label: 'Net pay', value: formatMoney(props.run.total_net) },
     ];
     if (isPosted.value) {
@@ -305,7 +313,7 @@ function formatPeriodDate(iso) {
         </Card>
 
         <Card variant="panel" class="mb-4 !p-4">
-            <div class="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-6">
+            <div class="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-5">
                 <DetailField v-for="figure in figures" :key="figure.label" :label="figure.label">
                     <span class="text-base font-bold">{{ figure.value }}</span>
                 </DetailField>

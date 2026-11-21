@@ -64,6 +64,7 @@ export function reportCategories({ branchLabel = 'Branch', isMultiBranch = true 
             items: [
                 { label: 'Sales Register', description: 'Every sale in the period.', href: '/reports/sales-register', permission: 'sales_reports.view' },
                 { label: 'Item-wise Sales', description: 'Quantity and value sold per item.', href: '/reports/item-wise-sales', permission: 'sales_reports.view' },
+                { label: 'Customer-wise Sales', description: 'Sales, returns, receipts and dues per customer.', href: '/reports/party-wise-sales', permission: 'sales_reports.view' },
                 { label: 'Sales by Category', description: 'Sales grouped by item category.', href: '/reports/sales-by-category', permission: 'sales_reports.view' },
                 { label: 'Sales With Note', description: 'Sales that carry a note.', href: '/reports/sales-with-note', permission: 'sales_reports.view' },
             ],
@@ -75,6 +76,7 @@ export function reportCategories({ branchLabel = 'Branch', isMultiBranch = true 
             items: [
                 { label: 'Purchase Register', description: 'Every purchase in the period.', href: '/reports/purchase-register', permission: 'purchase_reports.view' },
                 { label: 'Item-wise Purchase', description: 'Quantity and value bought per item.', href: '/reports/item-wise-purchase', permission: 'purchase_reports.view' },
+                { label: 'Supplier-wise Purchase', description: 'Purchases, returns, payments and dues per supplier.', href: '/reports/party-wise-purchase', permission: 'purchase_reports.view' },
                 { label: 'Purchase by Category', description: 'Purchases grouped by item category.', href: '/reports/purchase-by-category', permission: 'purchase_reports.view' },
             ],
         },
@@ -84,6 +86,7 @@ export function reportCategories({ branchLabel = 'Branch', isMultiBranch = true 
             icon: Receipt,
             items: [
                 { label: 'VAT Summary', description: 'Output and input VAT for the period.', href: '/reports/vat-summary', permission: 'tax_reports.view' },
+                { label: 'Unified VAT Register', description: 'Sales, purchases and their returns in one list.', href: '/reports/vat-register', permission: 'tax_reports.view' },
                 { label: 'Sales VAT Book', description: 'Sales invoices in the statutory VAT format.', href: '/reports/sales-vat-book', permission: 'tax_reports.view' },
                 { label: 'Purchase VAT Book', description: 'Purchase bills in the statutory VAT format.', href: '/reports/purchase-vat-book', permission: 'tax_reports.view' },
                 { label: 'Sales Return Register', description: 'Credit notes issued to customers.', href: '/reports/sales-return-register', permission: 'sales_reports.view' },
@@ -99,6 +102,7 @@ export function reportCategories({ branchLabel = 'Branch', isMultiBranch = true 
                 { label: 'Stock Summary', description: 'Quantity on hand per item and store.', href: '/reports/stock-summary', permission: 'stock_reports.view' },
                 { label: 'Item-wise Ledger', description: 'Stock movement history and running balance for a single item.', href: '/reports/item-ledger', permission: 'stock_reports.view' },
                 { label: 'Stock Valuation', description: 'Closing stock value at cost.', href: '/reports/stock-valuation', permission: 'stock_valuation.view' },
+                { label: 'Stock with Potential Profit', description: 'Stock at cost and at selling rate, with the profit it would make.', href: '/reports/stock-potential-profit', permission: 'stock_valuation.view' },
                 { label: 'Stock Ageing', description: 'How long stock has been sitting.', href: '/reports/stock-ageing', permission: 'stock_ageing.view' },
                 { label: 'Stock Movement Register', description: 'Every stock in and out, with the document behind it.', href: '/reports/stock-movement-register', permission: 'stock_reports.view' },
                 { label: 'Stock by Category', description: 'Stock grouped by item category.', href: '/reports/stock-by-category', permission: 'stock_reports.view' },

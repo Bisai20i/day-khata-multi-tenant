@@ -31,6 +31,9 @@ const props = defineProps({
     to: { type: [String, null], default: null },
     voucherType: { type: [String, null], default: null },
     voucherTypeOptions: { type: Array, default: () => [] },
+    // Project selector options and the applied project (null: all projects).
+    projects: { type: Array, default: () => [] },
+    projectId: { type: [Number, null], default: null },
     // Branch filter; null when the company has no branches.
     branchReport: { type: [Object, null], default: null },
 });
@@ -48,6 +51,19 @@ const fiscalYear = ref(props.fiscalYearId);
 const from = ref(props.from);
 const to = ref(props.to);
 const voucherType = ref(props.voucherType);
+// 0 is "all projects": the select cannot hold an empty value, and the server
+// reads a blank or 0 project_id as no filter.
+const projectInput = ref(props.projectId ?? 0);
+
+const projectOptions = computed(() => [
+    { value: 0, label: 'All projects' },
+    ...props.projects.map((project) => ({ value: project.id, label: `${project.code} - ${project.name}` })),
+]);
+
+watch(
+    () => props.projectId,
+    (value) => (projectInput.value = value ?? 0),
+);
 
 const branchFilter = useBranchReportFilter(() => props.branchReport);
 
@@ -108,33 +124,29 @@ function applyFilter() {
             from: from.value ?? undefined,
             to: to.value ?? undefined,
             voucher_type: voucherType.value || undefined,
+            project_id: projectInput.value || undefined,
             ...branchFilter.toQuery(),
         },
         { preserveState: true, preserveScroll: true },
     );
 }
 
-function printUrl() {
+function reportUrl(path) {
     const params = new URLSearchParams({
         fiscal_year_id: fiscalYear.value ?? '',
         from: from.value ?? '',
         to: to.value ?? '',
         voucher_type: voucherType.value ?? '',
     });
+    if (projectInput.value) {
+        params.set('project_id', String(projectInput.value));
+    }
     branchFilter.appendTo(params);
-    return `/reports/day-book/print?${params.toString()}`;
+    return `${path}?${params.toString()}`;
 }
 
-function exportUrl() {
-    const params = new URLSearchParams({
-        fiscal_year_id: fiscalYear.value ?? '',
-        from: from.value ?? '',
-        to: to.value ?? '',
-        voucher_type: voucherType.value ?? '',
-    });
-    branchFilter.appendTo(params);
-    return `/reports/day-book/export?${params.toString()}`;
-}
+const printUrl = () => reportUrl('/reports/day-book/print');
+const exportUrl = () => reportUrl('/reports/day-book/export');
 
 function voucherLabel(voucher) {
     return `${voucherTypeLabels[voucher.voucherType] ?? voucher.voucherType} #${voucher.voucherNumber}`;
@@ -176,6 +188,10 @@ function voucherLabel(voucher) {
                     <Label class="mb-1">Voucher type</Label>
                     <Select v-model="voucherType" :options="voucherTypeFilterOptions" />
                 </div>
+                <div class="w-64">
+                    <Label class="mb-1">Project</Label>
+                    <Select v-model="projectInput" :options="projectOptions" />
+                </div>
                 <Button variant="primary" tone="purple" @click="applyFilter">Generate report</Button>
             </div>
             <p v-if="from && to" class="mt-2 text-[12px] text-text-muted">
@@ -200,6 +216,8 @@ function voucherLabel(voucher) {
                             {{ formatBsDate(voucher.date) }} <span class="font-normal text-text-muted">({{ voucher.date }})</span> ·
                             {{ voucherLabel(voucher) }}
                             <BranchBadge v-if="branchReport && voucher.branch" :branch="{ name: voucher.branch }" class="ml-1 align-middle" />
+                            <span v-if="voucher.party" class="font-semibold text-primary"> · {{ voucher.party }}</span>
+                            <span class="font-normal text-text-muted"> · Total {{ formatMoney(voucher.total) }}</span>
                         </div>
                         <div class="text-[12.5px] text-text-muted">{{ voucher.narration ?? '-' }}</div>
                     </div>

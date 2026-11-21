@@ -17,8 +17,12 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
  * `kind` is only 'earning' today; it is the hook for deductions later.
  * The three starter components are is_system: they cannot be deactivated or
  * remapped away from their code, but can be renamed.
+ *
+ * `is_contribution_base` marks a component whose amounts count as the basic
+ * pay that a staff member's SSF and CIT percentages apply to (only the starter
+ * Salary component by default).
  */
-#[Fillable(['code', 'name', 'kind', 'expense_account_id', 'is_system', 'is_active', 'sort_order'])]
+#[Fillable(['code', 'name', 'kind', 'expense_account_id', 'is_system', 'is_active', 'is_contribution_base', 'sort_order'])]
 class PayComponent extends Model
 {
     use HasFactory;
@@ -35,6 +39,7 @@ class PayComponent extends Model
         return [
             'is_system' => 'boolean',
             'is_active' => 'boolean',
+            'is_contribution_base' => 'boolean',
             'sort_order' => 'integer',
         ];
     }

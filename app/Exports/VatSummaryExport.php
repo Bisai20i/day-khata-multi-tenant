@@ -3,12 +3,16 @@
 namespace App\Exports;
 
 use App\Support\Money\Money;
+use App\Support\NepaliCalendar;
 use Illuminate\Support\Collection;
 use Maatwebsite\Excel\Concerns\FromCollection;
 use Maatwebsite\Excel\Concerns\WithColumnFormatting;
 use Maatwebsite\Excel\Concerns\WithHeadings;
 use Maatwebsite\Excel\Concerns\WithMapping;
+use Maatwebsite\Excel\Concerns\WithStrictNullComparison;
+use Maatwebsite\Excel\Concerns\WithStyles;
 use PhpOffice\PhpSpreadsheet\Style\NumberFormat;
+use PhpOffice\PhpSpreadsheet\Worksheet\Worksheet;
 
 /**
  * One row per VAT Summary metric, mirroring VatSummaryReportController's own
@@ -23,17 +27,19 @@ use PhpOffice\PhpSpreadsheet\Style\NumberFormat;
  * legacy predecessor's DOM-scraped VAT export unusable for Excel math.
  * `Money::toFloat()` appears only at that cell boundary (C1).
  *
- * In a multi-branch tenant the sheet opens with the branch filter's label
- * (plan 12, BR14) above the headings; with no label the layout is exactly
- * what it always was.
+ * Heading rows above the Metric / Amount headings: the title, the period
+ * (when the caller passes it), in a multi-branch tenant the branch filter's
+ * label (plan 12, BR14), and a blank spacer. Columns A and B are unchanged.
  */
-class VatSummaryExport implements FromCollection, WithColumnFormatting, WithHeadings, WithMapping
+class VatSummaryExport implements FromCollection, WithColumnFormatting, WithHeadings, WithMapping, WithStrictNullComparison, WithStyles
 {
     /**
      * @param  array{gross: string, capital: string, cancelled: string, returns: string, net: string}  $outputVat
      * @param  array{gross: string, capital: string, cancelled: string, returns: string, net: string}  $inputVat
      * @param  array<string, mixed>  $reconciliation
      * @param  string|null  $branchLabel  BranchFilter::label() in a multi-branch tenant, else null
+     * @param  string|null  $from  Period start (AD, Y-m-d); null (an older caller) omits the period row
+     * @param  string|null  $to  Period end (AD, Y-m-d)
      */
     public function __construct(
         private readonly array $outputVat,
@@ -41,6 +47,8 @@ class VatSummaryExport implements FromCollection, WithColumnFormatting, WithHead
         private readonly string $netVatPayable,
         private readonly array $reconciliation = ['applicable' => false],
         private readonly ?string $branchLabel = null,
+        private readonly ?string $from = null,
+        private readonly ?string $to = null,
     ) {}
 
     /**
@@ -77,13 +85,32 @@ class VatSummaryExport implements FromCollection, WithColumnFormatting, WithHead
     }
 
     /**
-     * @return array<int, string>|list<list<string>>
+     * @return list<list<string>>
      */
     public function headings(): array
     {
-        $headings = ['Metric', 'Amount'];
+        $rows = [['VAT Summary']];
 
-        return $this->branchLabel === null ? $headings : [[$this->branchLabel], $headings];
+        if ($this->from !== null && $this->to !== null) {
+            $rows[] = ['Period: BS '.NepaliCalendar::formatBs($this->from).' to '.NepaliCalendar::formatBs($this->to)." (AD {$this->from} to {$this->to})"];
+        }
+
+        if ($this->branchLabel !== null) {
+            $rows[] = [$this->branchLabel];
+        }
+
+        return [...$rows, [''], ['Metric', 'Amount']];
+    }
+
+    /**
+     * @return array<int, array<string, mixed>>
+     */
+    public function styles(Worksheet $sheet): array
+    {
+        return [
+            1 => ['font' => ['bold' => true, 'size' => 13]],
+            count($this->headings()) => ['font' => ['bold' => true]],
+        ];
     }
 
     /**

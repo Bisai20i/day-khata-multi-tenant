@@ -188,8 +188,15 @@ class JournalVoucher extends Model
      * $autoBalance and BranchBalancer adds the Inter-Branch Clearing lines.
      * A restricted actor may only post into branches they can access.
      *
-     * @param  array{voucher_type?: string, date: string, narration: string, reason?: string, fiscal_year_id?: int, branch_id?: int|null}  $header
-     * @param  array<int, array{account_id: int, debit?: float|string, credit?: float|string, narration?: string, branch_id?: int|null, counterparty_branch_id?: int|null}>  $lines
+     * Projects: $header['project_id'] tags every line with that project,
+     * unless a line carries its own project_id (see write()). A completed or
+     * on-hold project is refused, except when the header sets
+     * `allow_inactive_project`: a return, refund or settlement against a
+     * document already posted to that project keeps following it (see
+     * isSameProject()).
+     *
+     * @param  array{voucher_type?: string, date: string, narration: string, reason?: string, fiscal_year_id?: int, branch_id?: int|null, project_id?: int|null, allow_inactive_project?: bool}  $header
+     * @param  array<int, array{account_id: int, debit?: float|string, credit?: float|string, narration?: string, branch_id?: int|null, counterparty_branch_id?: int|null, project_id?: int|null}>  $lines
      * @param  (Closure(self): string)|null  $lineNarration
      *
      * @throws AuthorizationException When $actor may not post into one of the branches.
@@ -241,6 +248,8 @@ class JournalVoucher extends Model
                 $lineNarration,
                 $branchId,
                 $autoBalance,
+                static::projectIdOrNull($header['project_id'] ?? null),
+                (bool) ($header['allow_inactive_project'] ?? false),
             );
 
             if ($isOverride) {
@@ -270,9 +279,19 @@ class JournalVoucher extends Model
      * close) pass it. Branch access is not checked here: write() is the
      * system path, and post() and reverse() check the actor themselves.
      *
-     * @param  array<int, array{account_id: int, debit?: float|string, credit?: float|string, narration?: string, branch_id?: int|null, counterparty_branch_id?: int|null}>  $lines
+     * Projects: each line is tagged with its own project_id, else $projectId,
+     * else none. Every named project must exist and be active (a completed or
+     * on-hold project takes no new postings), checked before any row is
+     * written. $allowInactiveProjects lifts only the active check, for the
+     * system paths that replay lines already posted to a project (reversal,
+     * roll-forward). Inter-Branch Clearing lines added by $autoBalance stay
+     * untagged.
+     *
+     * @param  array<int, array{account_id: int, debit?: float|string, credit?: float|string, narration?: string, branch_id?: int|null, counterparty_branch_id?: int|null, project_id?: int|null}>  $lines
      * @param  (Closure(self): string)|null  $lineNarration  See post().
      * @param  bool  $autoBalance  See post().
+     * @param  int|null  $projectId  Document-level project for lines that name none.
+     * @param  bool  $allowInactiveProjects  Skip the active-project check (replays of existing lines only).
      */
     public static function write(
         FiscalYear $fiscalYear,
@@ -285,10 +304,12 @@ class JournalVoucher extends Model
         ?Closure $lineNarration = null,
         ?int $branchId = null,
         bool $autoBalance = false,
+        ?int $projectId = null,
+        bool $allowInactiveProjects = false,
     ): self {
         $date = static::assertDateInsideFiscalYear($fiscalYear, $date);
         $branchId ??= BranchContext::postingBranchId($actor);
-        $lines = static::validateLines($lines, $branchId, $autoBalance);
+        $lines = static::validateLines($lines, $branchId, $autoBalance, $projectId, $allowInactiveProjects);
 
         // Per-branch numbering (BR20): the header branch picks the series in
         // a per_branch year; a shared year resolves to 0 with no query.
@@ -420,10 +441,14 @@ class JournalVoucher extends Model
      * it comes back with the same lines, amounts and order as before
      * branches existed, and never reads the clearing account.
      *
-     * @param  array<int, array{account_id: int, debit?: float|string, credit?: float|string, narration?: string, branch_id?: int|null, counterparty_branch_id?: int|null}>  $lines
-     * @return list<array{account_id: int, debit: string, credit: string, narration: string|null, branch_id: int, counterparty_branch_id: int|null}>
+     * Projects: every line comes back with a project_id (its own, else
+     * $headerProjectId, else null), and each distinct project must exist and,
+     * unless $allowInactiveProjects, be active.
+     *
+     * @param  array<int, array{account_id: int, debit?: float|string, credit?: float|string, narration?: string, branch_id?: int|null, counterparty_branch_id?: int|null, project_id?: int|null}>  $lines
+     * @return list<array{account_id: int, debit: string, credit: string, narration: string|null, branch_id: int, counterparty_branch_id: int|null, project_id: int|null}>
      */
-    private static function validateLines(array $lines, int $headerBranchId, bool $autoBalance = false): array
+    private static function validateLines(array $lines, int $headerBranchId, bool $autoBalance = false, ?int $headerProjectId = null, bool $allowInactiveProjects = false): array
     {
         if (count($lines) < 2) {
             throw new InvalidArgumentException('A journal voucher needs at least two lines.');
@@ -433,6 +458,7 @@ class JournalVoucher extends Model
         $debits = [];
         $credits = [];
         $branchesSeen = [];
+        $projectIds = [];
 
         foreach ($lines as $line) {
             // ofNullable so a blank box ('' or null) reads as zero; anything
@@ -477,6 +503,12 @@ class JournalVoucher extends Model
 
             $branchesSeen[$lineBranchId] = true;
 
+            $lineProjectId = static::projectIdOrNull($line['project_id'] ?? null) ?? $headerProjectId;
+
+            if ($lineProjectId !== null) {
+                $projectIds[$lineProjectId] = true;
+            }
+
             $normalised[] = [
                 'account_id' => $line['account_id'],
                 'debit' => $debit->toString(),
@@ -484,8 +516,11 @@ class JournalVoucher extends Model
                 'narration' => $line['narration'] ?? null,
                 'branch_id' => $lineBranchId,
                 'counterparty_branch_id' => $counterpartyBranchId,
+                'project_id' => $lineProjectId,
             ];
         }
+
+        static::assertProjectsUsable(array_keys($projectIds), $allowInactiveProjects);
 
         if (! Money::sum($debits)->isEqualTo(Money::sum($credits))) {
             throw new InvalidArgumentException('Total debit must equal total credit.');
@@ -505,6 +540,71 @@ class JournalVoucher extends Model
         static::assertEachBranchBalances($normalised);
 
         return $normalised;
+    }
+
+    /**
+     * True when $projectId is set and equals the project of the document being
+     * adjusted. A credit note, refund or settlement follows its original into
+     * that project even after the project is completed, so a closed project's
+     * books can still be corrected; a different project must be open.
+     */
+    public static function isSameProject(mixed $projectId, mixed $originalProjectId): bool
+    {
+        return $projectId !== null && $projectId !== ''
+            && $originalProjectId !== null && $originalProjectId !== ''
+            && (int) $projectId === (int) $originalProjectId;
+    }
+
+    /**
+     * Reads a project id off a caller's input: null or blank is "no project",
+     * a positive integer is that id, anything else is refused.
+     */
+    private static function projectIdOrNull(mixed $value): ?int
+    {
+        if ($value === null || $value === '') {
+            return null;
+        }
+
+        if (is_int($value) && $value > 0) {
+            return $value;
+        }
+
+        if (is_string($value) && ctype_digit($value) && (int) $value > 0) {
+            return (int) $value;
+        }
+
+        throw new InvalidArgumentException('A journal voucher line names an invalid project.');
+    }
+
+    /**
+     * Every named project must exist, and (unless $allowInactive) be active:
+     * the usual project-accounting rule that a completed or on-hold project
+     * takes no new postings while everything already posted to it stays put.
+     * One query for all the ids, checked before any row is written.
+     *
+     * @param  list<int>  $projectIds
+     */
+    private static function assertProjectsUsable(array $projectIds, bool $allowInactive = false): void
+    {
+        if ($projectIds === []) {
+            return;
+        }
+
+        $found = Project::query()->whereIn('id', $projectIds)->get(['id', 'code', 'status'])->keyBy('id');
+
+        foreach ($projectIds as $projectId) {
+            $project = $found->get($projectId);
+
+            if ($project === null) {
+                throw new InvalidArgumentException("Project #{$projectId} does not exist.");
+            }
+
+            if (! $allowInactive && $project->status !== Project::STATUS_ACTIVE) {
+                $state = $project->status === Project::STATUS_COMPLETED ? 'completed' : 'on hold';
+
+                throw new InvalidArgumentException("Project \"{$project->code}\" is {$state} and cannot take new entries. Reopen it on the Projects page first.");
+            }
+        }
     }
 
     /**
@@ -784,6 +884,7 @@ class JournalVoucher extends Model
                 'narration' => "Roll-forward of voucher #{$voucher->seriesNumber()}",
                 'branch_id' => $line->branch_id,
                 'counterparty_branch_id' => $line->counterparty_branch_id,
+                'project_id' => $line->project_id,
             ];
         })->all();
 
@@ -809,6 +910,7 @@ class JournalVoucher extends Model
                 $retargetedLines,
                 null,
                 (int) $voucher->branch_id,
+                allowInactiveProjects: true,
             );
 
             if ($year->status === FiscalYearStatus::Open) {
@@ -849,7 +951,8 @@ class JournalVoucher extends Model
      * through a restricted actor's view could drop another branch's lines,
      * and because every branch balances on its own the partial reversal
      * would still validate. The actor must still be allowed to post into
-     * every branch the reversal touches.
+     * every branch the reversal touches. Each mirrored line also keeps its
+     * project, so a reversed document nets to zero inside that project.
      *
      * @throws InvalidArgumentException When $original is already reversed, its fiscal year is closed, or it is itself a reversal, closing entry or roll-forward adjustment (unless $allowSystemVoucher).
      * @throws AuthorizationException When $actor may not post into one of the original's branches.
@@ -888,6 +991,7 @@ class JournalVoucher extends Model
                 'narration' => $line->narration,
                 'branch_id' => $line->branch_id,
                 'counterparty_branch_id' => $line->counterparty_branch_id,
+                'project_id' => $line->project_id,
             ])->all();
 
             $branchId = (int) $locked->branch_id;
@@ -916,6 +1020,7 @@ class JournalVoucher extends Model
                 $mirroredLines,
                 null,
                 $branchId,
+                allowInactiveProjects: true,
             );
 
             $reversal->update(['reversal_of_id' => $locked->id]);
@@ -942,7 +1047,7 @@ class JournalVoucher extends Model
      * it gets the same date-in-year guard, closed-year override and gapless
      * numbering as every other voucher.
      *
-     * @param  array{voucher_type: string, date: string, narration: string, fiscal_year_id?: int, reason?: string, branch_id?: int|null, bank_account_id?: int, from_account_id?: int, to_account_id?: int, amount?: string|float, lines?: array<int, array{account_id: int, amount: string|float, narration?: string|null}>}  $data
+     * @param  array{voucher_type: string, date: string, narration: string, fiscal_year_id?: int, reason?: string, branch_id?: int|null, project_id?: int|null, bank_account_id?: int, from_account_id?: int, to_account_id?: int, amount?: string|float, lines?: array<int, array{account_id: int, amount: string|float, narration?: string|null}>}  $data
      */
     public static function postCashBank(array $data, User $actor): self
     {
@@ -964,6 +1069,7 @@ class JournalVoucher extends Model
                 'date' => $data['date'],
                 'narration' => $data['narration'],
                 'branch_id' => $data['branch_id'] ?? null,
+                'project_id' => $data['project_id'] ?? null,
             ],
             $lines,
             $actor,

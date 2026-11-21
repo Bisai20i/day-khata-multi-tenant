@@ -183,6 +183,9 @@ function close() {
                         <span class="text-text-muted">Fiscal Year:</span>
                         <span class="text-text-base">{{ sale.fiscal_year?.name ?? '-' }}</span>
 
+                        <span v-if="sale.project" class="text-text-muted">Project:</span>
+                        <span v-if="sale.project" class="text-text-base">{{ sale.project.code }} - {{ sale.project.name }}</span>
+
                         <span v-if="sale.chalani_number" class="text-text-muted">Chalani #:</span>
                         <span v-if="sale.chalani_number" class="text-text-base">{{ sale.chalani_number }}</span>
 

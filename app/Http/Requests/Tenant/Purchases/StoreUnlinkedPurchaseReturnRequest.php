@@ -5,6 +5,7 @@ namespace App\Http\Requests\Tenant\Purchases;
 use App\Models\Item;
 use App\Models\ItemUnit;
 use App\Rules\AccountUnderHead;
+use App\Rules\OpenProject;
 use App\Support\Inventory\StockCosting;
 use App\Support\Money\Quantity;
 use Brick\Math\BigDecimal;
@@ -49,6 +50,8 @@ class StoreUnlinkedPurchaseReturnRequest extends FormRequest
             // the store's branch, then the user's posting branch, and refuses
             // a store of another branch.
             'branch_id' => ['nullable', 'integer', 'exists:branches,id'],
+            // Optional project (cost centre) tagged on every ledger line.
+            'project_id' => ['nullable', 'integer', new OpenProject],
             'reason' => ['required', 'string', 'max:255'],
             'expected_total' => ['required', 'numeric', 'decimal:0,2'],
             'lines' => ['required', 'array', 'min:1'],

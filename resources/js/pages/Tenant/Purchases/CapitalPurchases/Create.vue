@@ -25,6 +25,8 @@ const props = defineProps({
     // Branch picker (BranchFormOptions::props() on the server, plan 12).
     branchOptions: { type: Array, default: () => [] },
     defaultBranchId: { type: Number, default: null },
+    // Projects ({ id, code, name }) the bill may be tagged with; empty hides the picker.
+    projects: { type: Array, default: () => [] },
 });
 
 const emit = defineEmits(['cancel', 'posted']);
@@ -45,6 +47,17 @@ const accountOptions = computed(() =>
         label: account.code ? `${account.code} - ${account.name}` : account.name,
     })),
 );
+
+// reka-ui's Select cannot hold an empty value, so "no project" is a
+// sentinel option, stored back as null.
+const NO_PROJECT = 'none';
+const projectOptions = computed(() => [
+    { value: NO_PROJECT, label: 'No project' },
+    ...props.projects.map((project) => ({
+        value: project.id,
+        label: project.code ? `${project.code} - ${project.name}` : project.name,
+    })),
+]);
 
 const typeOptions = [
     { value: 'capital', label: 'Capital' },
@@ -100,6 +113,8 @@ const form = useForm({
     cash_amount: '',
     bank_amount: '',
     vat_rate: props.defaultVatRate,
+    // Optional project; every line of the bill's voucher is tagged with it.
+    project_id: null,
     lines: [emptyLine()],
 });
 
@@ -197,6 +212,7 @@ function submit() {
         vat_rate: orZero(data.vat_rate),
         bill_number: data.bill_number || undefined,
         supplier_pan: data.supplier_pan || undefined,
+        project_id: data.project_id ?? undefined,
         expected_total: totals.value?.total,
         cash_amount: data.payment_mode === 'partial' ? orZero(data.cash_amount) : undefined,
         bank_amount: data.payment_mode === 'partial' ? orZero(data.bank_amount) : undefined,
@@ -284,6 +300,19 @@ function submit() {
                         />
                         <p v-if="form.errors.store_id" class="mt-1 text-sm text-danger">{{ form.errors.store_id }}</p>
                         <p v-if="form.errors.branch_id" class="mt-1 text-sm text-danger" role="alert">{{ form.errors.branch_id }}</p>
+                    </div>
+                    <div v-if="projects.length > 0">
+                        <div class="mb-1 flex items-center gap-1">
+                            <Label for="cp-project">Project</Label>
+                            <InfoTip text="Optional. Tags every ledger line of this bill with the project." />
+                        </div>
+                        <Select
+                            id="cp-project"
+                            :model-value="form.project_id ?? NO_PROJECT"
+                            :options="projectOptions"
+                            @update:model-value="(v) => (form.project_id = v === NO_PROJECT ? null : v)"
+                        />
+                        <p v-if="form.errors.project_id" class="mt-1 text-sm text-danger" role="alert">{{ form.errors.project_id }}</p>
                     </div>
                 </div>
             </Card>

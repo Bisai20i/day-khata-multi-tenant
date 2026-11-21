@@ -52,6 +52,8 @@ const props = defineProps({
     tdsAccounts: { type: Array, default: () => [] },
     stores: { type: Array, default: () => [] },
     agents: { type: Array, default: () => [] },
+    // Active projects for the create form's optional Project field.
+    projects: { type: Array, default: () => [] },
     // Forwarded straight to Create.vue - see its own props doc (audit
     // section 3 "Sales" walk-in customer, section 4 polish "note templates").
     noteTemplates: { type: Array, default: () => [] },
@@ -496,6 +498,7 @@ const columns = [
                 :tds-accounts="tdsAccounts"
                 :stores="stores"
                 :agents="agents"
+                :projects="projects"
                 :note-templates="noteTemplates"
                 :walk-in-customer-id="walkInCustomerId"
                 :invoice-settings="invoiceSettings"

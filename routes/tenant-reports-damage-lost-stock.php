@@ -19,4 +19,5 @@ use Illuminate\Support\Facades\Route;
 
 Route::name('tenant.reports.')->prefix('reports')->group(function () {
     Route::get('/damage-lost-stock', [DamageLostStockReportController::class, 'index'])->middleware('can:stock_reports.view')->name('damage-lost-stock');
+    Route::get('/damage-lost-stock/export', [DamageLostStockReportController::class, 'export'])->middleware(['can:stock_reports.view', 'can:stock_reports.export'])->name('damage-lost-stock.export');
 });

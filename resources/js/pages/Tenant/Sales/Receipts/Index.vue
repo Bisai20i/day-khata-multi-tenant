@@ -33,6 +33,8 @@ const props = defineProps({
     customers: { type: Array, default: () => [] },
     accounts: { type: Array, default: () => [] },
     outstandingSales: { type: Array, default: () => [] },
+    // Active projects for the create form's optional Project field.
+    projects: { type: Array, default: () => [] },
     // Branch picker of the create form (BranchFormOptions::props()).
     branchOptions: { type: Array, default: () => [] },
     defaultBranchId: { type: Number, default: null },
@@ -94,7 +96,20 @@ const columns = [
         id: 'customer',
         header: 'Customer',
         numeric: false,
-        cell: ({ row }) => row.original.customer?.name ?? '-',
+        // The receipt's project (if any) sits under the customer's name.
+        cell: ({ row }) => {
+            const name = row.original.customer?.name ?? '-';
+            const project = row.original.project;
+
+            if (!project) {
+                return name;
+            }
+
+            return h('div', [
+                h('span', name),
+                h('span', { class: 'block text-[11px] text-text-faint' }, `Project: ${project.code ? `${project.code} - ${project.name}` : project.name}`),
+            ]);
+        },
     },
     {
         id: 'amount',
@@ -174,6 +189,7 @@ const columns = [
                 :customers="customers"
                 :accounts="accounts"
                 :outstanding-sales="outstandingSales"
+                :projects="projects"
                 :branch-options="branchOptions"
                 :default-branch-id="defaultBranchId"
                 @cancel="showCreateForm = false"

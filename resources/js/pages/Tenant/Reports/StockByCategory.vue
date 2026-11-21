@@ -1,6 +1,7 @@
 <script setup>
 import { computed, ref, watch } from 'vue';
-import { router } from '@inertiajs/vue3';
+import { Link, router } from '@inertiajs/vue3';
+import { FileSpreadsheet } from '@lucide/vue';
 import AppLayout from '@/layouts/AppLayout.vue';
 import { useLayoutChrome } from '@/composables/useLayoutChrome';
 import Card from '@/components/ui/Card.vue';
@@ -14,6 +15,7 @@ import { formatBsDate } from '@/lib/format';
 import { useBranchReportFilter } from '@/composables/useBranchReportFilter';
 import BranchReportFilter from '@/components/branch/BranchReportFilter.vue';
 import BranchReportNotes from '@/components/branch/BranchReportNotes.vue';
+import { usePermissions } from '@/composables/usePermissions';
 
 defineOptions({ layout: AppLayout });
 
@@ -30,14 +32,17 @@ const props = defineProps({
 
 useLayoutChrome('Stock by Category');
 
-const asOf = ref(props.asOf);
-const storeId = ref(props.storeId);
+const { can } = usePermissions();
+
+const asOfInput = ref(props.asOf);
+const storeIdInput = ref(props.storeId);
 
 // The server drops a store outside the chosen branches; follow what it applied.
 watch(
-    () => [props.storeId, props.stores],
+    () => [props.asOf, props.storeId, props.stores],
     () => {
-        storeId.value = props.storeId;
+        asOfInput.value = props.asOf;
+        storeIdInput.value = props.storeId;
     },
 );
 
@@ -50,17 +55,17 @@ const storeOptions = computed(() => [
 
 const isLoading = ref(false);
 
-const hasActiveFilter = computed(() => storeId.value !== null);
+const hasActiveFilter = computed(() => storeIdInput.value !== null);
 
 function resetFilters() {
-    storeId.value = null;
+    storeIdInput.value = null;
     applyFilter();
 }
 
 function applyFilter() {
     router.get(
         window.location.pathname,
-        { as_of: asOf.value, store_id: storeId.value ?? undefined, ...branchFilter.toQuery() },
+        { as_of: asOfInput.value, store_id: storeIdInput.value ?? undefined, ...branchFilter.toQuery() },
         {
             preserveState: true,
             preserveScroll: true,
@@ -81,6 +86,35 @@ function quantityLabel(quantities) {
 
     return quantities.map((entry) => `${formatQuantity(entry.quantity)} ${entry.unit}`.trim()).join(', ');
 }
+
+// Built from the currently-applied filters (props, not the unsaved inputs)
+// so a link or an export always matches what's on screen.
+function appliedParams() {
+    const params = new URLSearchParams({ as_of: props.asOf });
+
+    if (props.storeId) {
+        params.set('store_id', String(props.storeId));
+    }
+
+    branchFilter.appendTo(params);
+
+    return params;
+}
+
+const exportUrl = computed(() => `/reports/stock-by-category/export?${appliedParams().toString()}`);
+
+// Legacy's groups -> sub-groups -> items drill-down. A null subcategory id
+// on a subcategory row is the "Uncategorized" bucket, sent as `none`.
+function itemsHref(categoryId, subcategory = undefined) {
+    const params = appliedParams();
+    params.set('category_id', categoryId);
+
+    if (subcategory !== undefined) {
+        params.set('subcategory_id', subcategory.subcategoryId ?? 'none');
+    }
+
+    return `/reports/stock-by-category/items?${params.toString()}`;
+}
 </script>
 
 <template>
@@ -97,6 +131,10 @@ function quantityLabel(quantities) {
                 hide-label
                 @change="applyFilter"
             />
+            <Button v-if="can('stock_reports.export')" as="a" :href="exportUrl" variant="secondary" tone="purple">
+                <FileSpreadsheet class="h-[14px] w-[14px]" aria-hidden="true" />
+                Export to Excel
+            </Button>
         </PageHeader>
 
         <p class="mb-1 text-[12.5px] text-text-muted">Showing report: {{ asOfLabel }}</p>
@@ -109,11 +147,11 @@ function quantityLabel(quantities) {
             <div class="flex flex-wrap items-end gap-3">
                 <div>
                     <Label class="mb-1">As of date (BS)</Label>
-                    <NepaliDateInput v-model="asOf" />
+                    <NepaliDateInput v-model="asOfInput" />
                 </div>
                 <div class="w-56">
                     <Label class="mb-1">Store</Label>
-                    <Select v-model="storeId" :options="storeOptions" />
+                    <Select v-model="storeIdInput" :options="storeOptions" />
                 </div>
                 <Button variant="primary" tone="purple" :loading="isLoading" @click="applyFilter">Generate report</Button>
                 <Button v-if="hasActiveFilter" variant="secondary" tone="purple" :disabled="isLoading" @click="resetFilters">Reset</Button>
@@ -135,7 +173,9 @@ function quantityLabel(quantities) {
 
                 <template v-for="category in rows" :key="category.categoryId">
                     <div class="flex items-center px-1 py-1.5 text-[13px] font-bold text-text-strong">
-                        <div class="flex-1">{{ category.categoryName }}</div>
+                        <div class="flex-1">
+                            <Link :href="itemsHref(category.categoryId)" class="hover:text-purple-600 hover:underline">{{ category.categoryName }}</Link>
+                        </div>
                         <div class="w-56 text-right">{{ quantityLabel(category.quantities) }}</div>
                         <div class="w-32 text-right">{{ formatMoney(category.value) }}</div>
                     </div>
@@ -145,7 +185,9 @@ function quantityLabel(quantities) {
                         :key="`sub-${category.categoryId}-${subcategory.subcategoryId ?? 'none'}`"
                         class="flex items-center px-1 py-1 pl-6 text-[13px] text-text-base"
                     >
-                        <div class="flex-1">{{ subcategory.subcategoryName }}</div>
+                        <div class="flex-1">
+                            <Link :href="itemsHref(category.categoryId, subcategory)" class="hover:text-purple-600 hover:underline">{{ subcategory.subcategoryName }}</Link>
+                        </div>
                         <div class="w-56 text-right">{{ quantityLabel(subcategory.quantities) }}</div>
                         <div class="w-32 text-right">{{ formatMoney(subcategory.value) }}</div>
                     </div>

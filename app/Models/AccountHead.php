@@ -7,7 +7,7 @@ use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 
-#[Fillable(['name', 'is_profit_and_loss'])]
+#[Fillable(['name', 'name_np', 'is_profit_and_loss'])]
 class AccountHead extends Model
 {
     use HasFactory;

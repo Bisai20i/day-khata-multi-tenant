@@ -42,11 +42,17 @@ class StaffStatementData
             ->with(['run:id,period_label,date,run_number,series_branch_id,status,reversal_journal_voucher_id', 'run.reversalJournalVoucher:id,date'])
             ->get())
             ->each(function (PayrollLine $line) use ($salary, $advance): void {
-                // The payroll voucher credits Salary Payable with the net and
-                // TDS Payable with the TDS; this payable-side history shows the
-                // salary credited before TDS and the TDS withheld as its own
-                // line, which together add up to exactly that net credit.
-                $tds = Money::of($line->tds);
+                // The payroll voucher credits Salary Payable with the net, TDS
+                // Payable with the TDS and SSF / CIT Payable with the employee
+                // shares; this payable-side history shows the salary credited
+                // before those withholdings and each one as its own line, which
+                // together add up to exactly that net credit. Employer SSF and
+                // CIT are employer cost and never appear here.
+                $withheld = [
+                    'Salary TDS withheld' => Money::of($line->tds),
+                    'SSF withheld' => Money::of($line->ssf_employee ?? '0'),
+                    'CIT withheld' => Money::of($line->cit_employee ?? '0'),
+                ];
 
                 self::pushWithReversal($salary, $line->run, [
                     'date' => $line->run->date->toDateString(),
@@ -55,19 +61,21 @@ class StaffStatementData
                     'reference' => $line->run->displayNumber(),
                     'description' => 'Payroll '.$line->run->period_label,
                     'debit' => '0.00',
-                    'credit' => Money::of($line->net)->plus($tds)->toString(),
+                    'credit' => Money::of($line->net)->plus(Money::sum($withheld))->toString(),
                 ]);
 
-                if ($tds->isPositive()) {
-                    self::pushWithReversal($salary, $line->run, [
-                        'date' => $line->run->date->toDateString(),
-                        'date_bs' => NepaliCalendar::formatBs($line->run->date),
-                        'order' => 1,
-                        'reference' => $line->run->displayNumber(),
-                        'description' => 'Salary TDS withheld - '.$line->run->period_label,
-                        'debit' => $tds->toString(),
-                        'credit' => '0.00',
-                    ]);
+                foreach ($withheld as $label => $amount) {
+                    if ($amount->isPositive()) {
+                        self::pushWithReversal($salary, $line->run, [
+                            'date' => $line->run->date->toDateString(),
+                            'date_bs' => NepaliCalendar::formatBs($line->run->date),
+                            'order' => 1,
+                            'reference' => $line->run->displayNumber(),
+                            'description' => $label.' - '.$line->run->period_label,
+                            'debit' => $amount->toString(),
+                            'credit' => '0.00',
+                        ]);
+                    }
                 }
 
                 if (Money::of($line->advance_recovery)->isPositive()) {

@@ -211,6 +211,8 @@ class FiscalYearArchiver
             // journal_vouchers.branch_id.
             $table->unsignedBigInteger('branch_id')->nullable();
             $table->unsignedBigInteger('counterparty_branch_id')->nullable();
+            // Project (cost centre) tag, id only like the branch columns.
+            $table->unsignedBigInteger('project_id')->nullable();
 
             $table->index('journal_voucher_id');
             $table->index('branch_id');
@@ -275,6 +277,7 @@ class FiscalYearArchiver
                             'narration' => $line->narration,
                             'branch_id' => $line->branch_id,
                             'counterparty_branch_id' => $line->counterparty_branch_id,
+                            'project_id' => $line->project_id,
                         ])->all();
 
                         if ($lineRows !== []) {

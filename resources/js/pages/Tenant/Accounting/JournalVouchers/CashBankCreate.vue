@@ -25,6 +25,8 @@ const props = defineProps({
     // line follows it.
     branchOptions: { type: Array, default: () => [] },
     defaultBranchId: { type: Number, default: null },
+    // Active projects ({ id, code, name }); empty hides the project picker.
+    projects: { type: Array, default: () => [] },
 });
 
 const emit = defineEmits(['cancel', 'posted']);
@@ -45,6 +47,18 @@ const accountOptions = computed(() =>
         label: account.code ? `${account.code} - ${account.name}` : account.name,
     })),
 );
+
+// reka-ui's Select cannot hold an empty value, so "no project" is a
+// sentinel option, stored back as null. Every line of the voucher, the
+// cash/bank leg included, is tagged with the chosen project.
+const NO_PROJECT = 'none';
+const projectOptions = computed(() => [
+    { value: NO_PROJECT, label: 'No project' },
+    ...props.projects.map((project) => ({
+        value: project.id,
+        label: project.code ? `${project.code} - ${project.name}` : project.name,
+    })),
+]);
 
 const voucherTypeOptions = [
     { value: 'cash_receipt', label: 'Cash Receipt' },
@@ -68,6 +82,7 @@ const form = useForm({
     from_account_id: null,
     to_account_id: null,
     amount: '',
+    project_id: null,
     lines: [emptyLine()],
 });
 
@@ -154,6 +169,8 @@ function submit(print = false) {
             narration: data.narration,
         };
 
+        if (data.project_id !== null) payload.project_id = data.project_id;
+
         if (isContra.value) {
             payload.from_account_id = data.from_account_id;
             payload.to_account_id = data.to_account_id;
@@ -232,6 +249,19 @@ function submit(print = false) {
                     <Input v-model="form.narration" type="text" placeholder="Describe this transaction" required />
                     <p v-if="form.errors.narration" class="mt-1 text-sm text-danger" role="alert">{{ form.errors.narration }}</p>
                     <p v-if="!showPicker && form.errors.branch_id" class="mt-1 text-sm text-danger" role="alert">{{ form.errors.branch_id }}</p>
+                </div>
+                <div v-if="projects.length > 0">
+                    <div class="mb-1 flex items-center gap-1">
+                        <Label for="cb-project">Project</Label>
+                        <InfoTip text="Optional. Tags every line of this voucher with the project." />
+                    </div>
+                    <Select
+                        id="cb-project"
+                        :model-value="form.project_id ?? NO_PROJECT"
+                        :options="projectOptions"
+                        @update:model-value="(v) => (form.project_id = v === NO_PROJECT ? null : v)"
+                    />
+                    <p v-if="form.errors.project_id" class="mt-1 text-sm text-danger" role="alert">{{ form.errors.project_id }}</p>
                 </div>
             </div>
         </Card>

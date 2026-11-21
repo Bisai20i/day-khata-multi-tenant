@@ -8,9 +8,11 @@ use App\Models\CompanySetting;
 use App\Models\Customer;
 use App\Models\Item;
 use App\Models\PrintLog;
+use App\Models\Project;
 use App\Models\Sale;
 use App\Models\SalesReturn;
 use App\Models\Store;
+use App\Rules\OpenProject;
 use App\Support\AmountInWords;
 use App\Support\Branches\ActiveBranchSelection;
 use App\Support\Branches\BranchFormOptions;
@@ -73,6 +75,7 @@ class SalesReturnController extends Controller
                 // an item off (C7 "returns without a bill"), so its own
                 // `customer_id` and per-line `item_id` are loaded alongside.
                 'customer:id,name', 'lines.saleLine.item:id,name,unit', 'lines.item:id,name,unit',
+                'project:id,code,name',
             ])
             ->when($showBranch, fn ($query) => $query->with('branch:id,name,code'))
             ->when($from, fn ($query, string $from) => $query->whereDate('date', '>=', $from))
@@ -88,7 +91,7 @@ class SalesReturnController extends Controller
 
         $pendingRequests = BranchListFilter::apply(SalesReturn::query(), $request)
             ->whereIn('status', ['pending', 'rejected'])
-            ->with(['sale:id,customer_id,invoice_number', 'sale.customer:id,name', 'lines.saleLine.item:id,name,unit', 'creator:id,name'])
+            ->with(['sale:id,customer_id,invoice_number', 'sale.customer:id,name', 'lines.saleLine.item:id,name,unit', 'creator:id,name', 'project:id,code,name'])
             ->when($showBranch, fn ($query) => $query->with('branch:id,name,code'))
             ->orderByDesc('date')
             ->orderByDesc('id')
@@ -114,6 +117,10 @@ class SalesReturnController extends Controller
                 ->get(['id', 'name', 'unit', 'is_vatable', 'is_stockable', 'sale_rate']),
             'walkInCustomerId' => Customer::walkIn()?->id,
             'refundAccounts' => SalesReturn::refundAccountQuery()->orderBy('name')->get(['id', 'code', 'name']),
+            // Optional cost centre. A linked return defaults to its sale's
+            // project, which selectedSale() sends along even when it is no
+            // longer active.
+            'projects' => Project::query()->active()->orderBy('name')->get(['id', 'code', 'name']),
             // Multi-branch: id, name, branch_id and is_branch_default, only
             // of the user's branches (OffersDocumentBranch). Otherwise the
             // same rows as before.
@@ -175,7 +182,7 @@ class SalesReturnController extends Controller
 
         $sale = Sale::query()
             ->where('status', 'posted')
-            ->with('customer:id,name')
+            ->with(['customer:id,name', 'project:id,code,name'])
             ->find((int) $request->input('sale_id'));
 
         if (! $sale) {
@@ -190,6 +197,9 @@ class SalesReturnController extends Controller
             'store_id' => $sale->store_id,
             'total' => (string) $sale->total,
             'lines' => SalesReturn::returnableLines($sale),
+            // The return defaults to the sale's project (SalesReturn::record()).
+            'project_id' => $sale->project_id,
+            'project' => $sale->project?->only(['id', 'code', 'name']),
             // A linked return inherits the sale's branch: shown read-only,
             // and its store dropdown offers only that branch's stores.
             ...(ActiveBranchSelection::isMultiBranch($request) ? ['branch_id' => (int) $sale->branch_id] : []),
@@ -225,6 +235,7 @@ class SalesReturnController extends Controller
             // Sent by the branch picker of a multi-branch company (BR12);
             // postUnlinked() checks it is active and usable.
             'branch_id' => ['nullable', 'integer', 'exists:branches,id'],
+            'project_id' => ['nullable', 'integer', new OpenProject],
             'refund_account_id' => ['nullable', 'integer', Rule::in(SalesReturn::refundAccountQuery()->pluck('id')->all())],
             'refund_cash_amount' => ['nullable', 'decimal:0,2', 'min:0'],
             'refund_bank_amount' => ['nullable', 'decimal:0,2', 'min:0'],
@@ -338,7 +349,7 @@ class SalesReturnController extends Controller
      * - SalesReturn::postRefund() via DocumentCalculator::assertExactSplit()
      * (C3). Leaving both blank keeps the original single-account behaviour.
      *
-     * @return array{sale_id: int, date: string, reason: ?string, refund_account_id: ?int, refund_cash_amount: ?string, refund_bank_amount: ?string, store_id: ?int, branch_id?: ?int, expected_total: ?string, lines: array<int, array{sale_line_id: int, quantity: string, bonus_quantity?: string}>}
+     * @return array{sale_id: int, date: string, reason: ?string, refund_account_id: ?int, refund_cash_amount: ?string, refund_bank_amount: ?string, store_id: ?int, branch_id?: ?int, project_id?: ?int, expected_total: ?string, lines: array<int, array{sale_line_id: int, quantity: string, bonus_quantity?: string}>}
      */
     private function validatedReturn(Request $request): array
     {
@@ -353,6 +364,9 @@ class SalesReturnController extends Controller
             // Optional: a linked return always lands in its sale's branch,
             // and naming any other branch is refused (plan 12, section 5.4).
             'branch_id' => ['nullable', 'integer'],
+            // Optional: when absent the return inherits its sale's project. A
+            // completed project is accepted only when it is the sale's own.
+            'project_id' => ['nullable', 'integer', new OpenProject(Sale::query()->whereKey($request->input('sale_id'))->value('project_id'))],
             'expected_total' => ['nullable', 'string'],
             'lines' => ['required', 'array', 'min:1'],
             'lines.*.sale_line_id' => ['required', 'integer', 'distinct', 'exists:sale_lines,id'],
@@ -365,7 +379,7 @@ class SalesReturnController extends Controller
 
     /**
      * @param  array<string, mixed>  $data
-     * @return array{sale_id: int, date: string, reason: ?string, refund_account_id: ?int, refund_cash_amount: ?string, refund_bank_amount: ?string, store_id: ?int, branch_id: ?int, expected_total: ?string}
+     * @return array{sale_id: int, date: string, reason: ?string, refund_account_id: ?int, refund_cash_amount: ?string, refund_bank_amount: ?string, store_id: ?int, branch_id: ?int, project_id?: ?int, expected_total: ?string}
      */
     private function header(array $data): array
     {
@@ -378,6 +392,9 @@ class SalesReturnController extends Controller
             'refund_bank_amount' => $data['refund_bank_amount'] ?? null,
             'store_id' => $data['store_id'] ?? null,
             'branch_id' => $data['branch_id'] ?? null,
+            // Only forwarded when sent, so an absent field keeps the sale's
+            // project and an explicit null clears it (SalesReturn::record()).
+            ...(array_key_exists('project_id', $data) ? ['project_id' => $data['project_id']] : []),
             'expected_total' => $data['expected_total'] ?? null,
         ];
     }

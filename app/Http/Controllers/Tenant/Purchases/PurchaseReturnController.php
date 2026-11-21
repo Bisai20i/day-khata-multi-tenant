@@ -10,6 +10,7 @@ use App\Models\Branch;
 use App\Models\CompanySetting;
 use App\Models\Item;
 use App\Models\PrintLog;
+use App\Models\Project;
 use App\Models\Purchase;
 use App\Models\PurchaseLine;
 use App\Models\PurchaseReturn;
@@ -17,6 +18,7 @@ use App\Models\PurchaseReturnLine;
 use App\Models\Store;
 use App\Models\Supplier;
 use App\Rules\AccountUnderHead;
+use App\Rules\OpenProject;
 use App\Support\AmountInWords;
 use App\Support\Branches\ActiveBranchSelection;
 use App\Support\Branches\BranchAccounts;
@@ -61,7 +63,7 @@ class PurchaseReturnController extends Controller
         $returns = $this->filteredReturnsQuery($from, $to, $supplierId, $request)
             ->with([
                 'purchase.supplier:id,name', 'supplier:id,name', 'lines.purchaseLine.item:id,name,unit',
-                'lines.item:id,name,unit', 'refundAccount:id,code,name',
+                'lines.item:id,name,unit', 'refundAccount:id,code,name', 'project:id,code,name',
             ])
             ->when(BranchListFilter::columnVisible($request), fn ($query) => $query->with('branch:id,name,code'))
             ->orderByDesc('date')
@@ -102,6 +104,10 @@ class PurchaseReturnController extends Controller
                 ->orderBy('name')
                 ->get(['id', 'code', 'name']),
             'stores' => $this->storeOptions($request),
+            // Optional project picker: only active projects take new returns
+            // (a linked return defaults to its bill's project, sent with the
+            // bill in searchablePurchases even when that project is closed).
+            'projects' => Project::query()->active()->orderBy('name')->get(['id', 'code', 'name']),
             // Item 4 - the unlinked return form (opening stock / before
             // go-live) picks an item directly rather than a purchase line.
             'items' => Item::query()->where('is_active', true)->where('is_stockable', true)->orderBy('name')
@@ -128,6 +134,10 @@ class PurchaseReturnController extends Controller
             // branch, and naming any other branch is refused (plan 12,
             // section 5.4).
             'branch_id' => ['nullable', 'integer', 'exists:branches,id'],
+            // Optional project; omitted entirely, the return inherits its
+            // purchase's project (PurchaseReturn::post()). A completed project
+            // is accepted only when it is the purchase's own.
+            'project_id' => ['nullable', 'integer', new OpenProject(Purchase::query()->whereKey($request->input('purchase_id'))->value('project_id'))],
             'lines' => ['required', 'array', 'min:1'],
             // `distinct` plus the model's own per-line aggregation: naming the
             // same purchase line twice in one payload used to slip past the
@@ -373,7 +383,7 @@ class PurchaseReturnController extends Controller
                 ->where('bill_number', 'like', "%{$search}%")
                 ->orWhere('id', $search)
                 ->orWhereHas('supplier', fn ($supplier) => $supplier->where('name', 'like', "%{$search}%"))))
-            ->with(['supplier:id,name', 'store:id,name', 'lines.item:id,name,unit', 'lines.itemUnit:id,name'])
+            ->with(['supplier:id,name', 'store:id,name', 'project:id,code,name', 'lines.item:id,name,unit', 'lines.itemUnit:id,name'])
             ->orderByDesc('date')
             ->orderByDesc('id')
             ->paginate(15, ['*'], 'purchase_page')
@@ -392,6 +402,8 @@ class PurchaseReturnController extends Controller
             'bill_number' => $purchase->bill_number,
             'total' => $purchase->total,
             'store_id' => $purchase->store_id,
+            // The return form defaults its project picker to the bill's.
+            'project' => $purchase->project?->only(['id', 'code', 'name']),
             ...($withBranch ? ['branch_id' => (int) $purchase->branch_id] : []),
             'supplier' => ['id' => $purchase->supplier?->id, 'name' => $purchase->supplier?->name],
             'lines' => $purchase->lines->map(fn (PurchaseLine $line): array => [

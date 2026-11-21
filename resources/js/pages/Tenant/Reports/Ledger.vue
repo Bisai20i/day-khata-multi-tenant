@@ -1,6 +1,6 @@
 <script setup>
 import { computed, ref, watch } from 'vue';
-import { Link, router } from '@inertiajs/vue3';
+import { router } from '@inertiajs/vue3';
 import AppLayout from '@/layouts/AppLayout.vue';
 import { useLayoutChrome } from '@/composables/useLayoutChrome';
 import Card from '@/components/ui/Card.vue';
@@ -9,10 +9,11 @@ import Combobox from '@/components/ui/Combobox.vue';
 import Button from '@/components/ui/Button.vue';
 import PageHeader from '@/components/ui/PageHeader.vue';
 import NepaliDateInput from '@/components/ui/NepaliDateInput.vue';
-import DataTable from '@/components/ui/DataTable.vue';
 import Label from '@/components/ui/Label.vue';
-import { compareMoney, formatMoney, sumMoney } from '@/lib/money.js';
-import { formatBsDate } from '@/lib/format.js';
+import LedgerEntriesTable from '@/components/accounting/LedgerEntriesTable.vue';
+import StaffLedgerSection from '@/components/accounting/StaffLedgerSection.vue';
+import SubLedgerSummaryTable from '@/components/accounting/SubLedgerSummaryTable.vue';
+import { formatMoney } from '@/lib/money.js';
 import { usePermissions } from '@/composables/usePermissions';
 import { useBranchReportFilter } from '@/composables/useBranchReportFilter';
 import BranchReportFilter from '@/components/branch/BranchReportFilter.vue';
@@ -39,12 +40,22 @@ const props = defineProps({
     staffClosingAdvance: { type: String, default: '0.00' },
     from: { type: [String, null], default: null },
     to: { type: [String, null], default: null },
+    // Signed (debit-positive) balances; the Dr/Cr side is computed by the server.
     openingBalance: { type: String, default: '0.00' },
+    openingSide: { type: String, default: '' },
     closingBalance: { type: String, default: '0.00' },
+    closingSide: { type: String, default: '' },
+    periodDebit: { type: String, default: '0.00' },
+    periodCredit: { type: String, default: '0.00' },
     entries: { type: Array, default: () => [] },
     // Sub-accounts belonging to the selected account, if any.
     subAccounts: { type: Array, default: () => [] },
     includeSubAccounts: { type: Boolean, default: true },
+    // Opening / Dr / Cr / Closing of every sub-ledger of the selected account.
+    subLedgerSummary: { type: Object, default: () => ({ rows: [], total: null }) },
+    // Project selector options and the applied project (null: all projects).
+    projects: { type: Array, default: () => [] },
+    projectId: { type: [Number, null], default: null },
     // Branch filter; null when the company has no branches.
     branchReport: { type: [Object, null], default: null },
 });
@@ -90,32 +101,49 @@ const targetOptions = computed(() => {
     return list;
 });
 
-const fiscalYear = ref(props.fiscalYearId);
-const accountId = ref(props.accountId);
-const staffId = ref(props.staffId);
-const from = ref(props.from);
-const to = ref(props.to);
-const includeSubAccounts = ref(props.includeSubAccounts);
+// Editable copies of the applied filters; the page shows the applied props and
+// only sends these to the server on apply().
+const fiscalYearInput = ref(props.fiscalYearId);
+const accountIdInput = ref(props.accountId);
+const staffIdInput = ref(props.staffId);
+const fromInput = ref(props.from);
+const toInput = ref(props.to);
+const includeSubAccountsInput = ref(props.includeSubAccounts);
+// 0 is "all projects": the select cannot hold an empty value, and the server
+// reads a blank or 0 project_id as no filter.
+const projectInput = ref(props.projectId ?? 0);
+
+const projectOptions = computed(() => [
+    { value: 0, label: 'All projects' },
+    ...props.projects.map((project) => ({ value: project.id, label: `${project.code} - ${project.name}` })),
+]);
+
+const appliedProject = computed(() => props.projects.find((project) => project.id === props.projectId) ?? null);
+
+watch(
+    () => props.projectId,
+    (v) => (projectInput.value = v ?? 0),
+);
 
 const selectedTarget = computed({
     get: () => {
-        if (staffId.value) return `staff-${staffId.value}`;
-        if (accountId.value) return `acc-${accountId.value}`;
+        if (staffIdInput.value) return `staff-${staffIdInput.value}`;
+        if (accountIdInput.value) return `acc-${accountIdInput.value}`;
         return null;
     },
     set: (val) => {
         if (!val) {
-            accountId.value = null;
-            staffId.value = null;
+            accountIdInput.value = null;
+            staffIdInput.value = null;
         } else if (String(val).startsWith('staff-')) {
-            accountId.value = null;
-            staffId.value = Number(String(val).replace('staff-', ''));
+            accountIdInput.value = null;
+            staffIdInput.value = Number(String(val).replace('staff-', ''));
         } else if (String(val).startsWith('acc-')) {
-            staffId.value = null;
-            accountId.value = Number(String(val).replace('acc-', ''));
+            staffIdInput.value = null;
+            accountIdInput.value = Number(String(val).replace('acc-', ''));
         } else {
-            staffId.value = null;
-            accountId.value = Number(val);
+            staffIdInput.value = null;
+            accountIdInput.value = Number(val);
         }
         apply();
     },
@@ -123,44 +151,63 @@ const selectedTarget = computed({
 
 watch(
     () => props.includeSubAccounts,
-    (v) => (includeSubAccounts.value = v),
+    (v) => (includeSubAccountsInput.value = v),
 );
 
 watch(
     () => props.accountId,
-    (v) => (accountId.value = v),
+    (v) => (accountIdInput.value = v),
 );
 
 watch(
     () => props.staffId,
-    (v) => (staffId.value = v),
+    (v) => (staffIdInput.value = v),
+);
+
+watch(
+    () => props.fiscalYearId,
+    (v) => (fiscalYearInput.value = v),
+);
+
+watch(
+    () => props.from,
+    (v) => (fromInput.value = v),
+);
+
+watch(
+    () => props.to,
+    (v) => (toInput.value = v),
 );
 
 const branchFilter = useBranchReportFilter(() => props.branchReport);
 
-// Sum of debits and credits in the period (exact decimal strings, never floats)
-const totalPeriodDebit = computed(() => sumMoney(props.entries.map((e) => e.debit || '0.00')));
-const totalPeriodCredit = computed(() => sumMoney(props.entries.map((e) => e.credit || '0.00')));
+// The server always sends the fiscal year's own start/end, so "Clear dates" only
+// matters once the applied window differs from them.
+const hasCustomWindow = computed(() => {
+    const year = props.fiscalYears.find((candidate) => candidate.id === props.fiscalYearId);
 
-const staffTotalSalaryDebit = computed(() => sumMoney(props.staffSalaryEntries.map((e) => e.debit || '0.00')));
-const staffTotalSalaryCredit = computed(() => sumMoney(props.staffSalaryEntries.map((e) => e.credit || '0.00')));
-const staffTotalAdvanceDebit = computed(() => sumMoney(props.staffAdvanceEntries.map((e) => e.debit || '0.00')));
-const staffTotalAdvanceCredit = computed(() => sumMoney(props.staffAdvanceEntries.map((e) => e.credit || '0.00')));
+    if (!year) {
+        return Boolean(props.from || props.to);
+    }
 
-// Dr/Cr side and unsigned amount of a signed balance, through the money helpers.
-const isDebitBalance = (balance) => compareMoney(balance, '0.00') >= 0;
+    return (props.from !== null && props.from !== year.startDate) || (props.to !== null && props.to !== year.endDate);
+});
+
+// Unsigned amount of a signed balance, through the money helper (the Dr/Cr side comes from the server).
 const absoluteMoney = (balance) => formatMoney(balance).replace(/^-/, '');
+const sideClass = (side) => (side === 'Cr' ? 'text-danger' : 'text-primary');
 
 function apply() {
     router.get(
         '/reports/ledger',
         {
-            fiscal_year_id: fiscalYear.value ?? undefined,
-            account_id: accountId.value ?? undefined,
-            staff_id: staffId.value ?? undefined,
-            from: from.value ?? undefined,
-            to: to.value ?? undefined,
-            include_sub_accounts: includeSubAccounts.value ? '1' : '0',
+            fiscal_year_id: fiscalYearInput.value ?? undefined,
+            account_id: accountIdInput.value ?? undefined,
+            staff_id: staffIdInput.value ?? undefined,
+            from: fromInput.value ?? undefined,
+            to: toInput.value ?? undefined,
+            include_sub_accounts: includeSubAccountsInput.value ? '1' : '0',
+            project_id: projectInput.value || undefined,
             ...branchFilter.toQuery(),
         },
         { preserveState: true, preserveScroll: true },
@@ -168,112 +215,44 @@ function apply() {
 }
 
 function clearWindow() {
-    from.value = null;
-    to.value = null;
+    fromInput.value = null;
+    toInput.value = null;
     apply();
 }
 
 function onAccountSelect(val) {
-    staffId.value = null;
-    accountId.value = val;
+    staffIdInput.value = null;
+    accountIdInput.value = val;
     apply();
 }
 
-watch(fiscalYear, (value) => {
+function onFiscalYearChange(value) {
     const chosen = props.fiscalYears.find((year) => year.id === value);
-    from.value = chosen?.startDate ?? null;
-    to.value = chosen?.endDate ?? null;
+    fiscalYearInput.value = value;
+    fromInput.value = chosen?.startDate ?? null;
+    toInput.value = chosen?.endDate ?? null;
     apply();
-});
+}
 
-function printUrl() {
+// Print / Export follow the applied filters (props), not unapplied edits.
+function reportUrl(path) {
     const params = new URLSearchParams({
-        fiscal_year_id: fiscalYear.value ?? '',
-        account_id: accountId.value ?? '',
-        staff_id: staffId.value ?? '',
-        from: from.value ?? '',
-        to: to.value ?? '',
-        include_sub_accounts: includeSubAccounts.value ? '1' : '0',
+        fiscal_year_id: props.fiscalYearId ?? '',
+        account_id: props.accountId ?? '',
+        staff_id: props.staffId ?? '',
+        from: props.from ?? '',
+        to: props.to ?? '',
+        include_sub_accounts: props.includeSubAccounts ? '1' : '0',
     });
+    if (props.projectId) {
+        params.set('project_id', String(props.projectId));
+    }
     branchFilter.appendTo(params);
-    return `/reports/ledger/print?${params.toString()}`;
+    return `${path}?${params.toString()}`;
 }
 
-function exportUrl() {
-    const params = new URLSearchParams({
-        fiscal_year_id: fiscalYear.value ?? '',
-        account_id: accountId.value ?? '',
-        staff_id: staffId.value ?? '',
-        from: from.value ?? '',
-        to: to.value ?? '',
-        include_sub_accounts: includeSubAccounts.value ? '1' : '0',
-    });
-    branchFilter.appendTo(params);
-    return `/reports/ledger/export?${params.toString()}`;
-}
-
-const voucherTypeLabels = {
-    sale: 'Sale Invoice',
-    purchase: 'Purchase Bill',
-    'sales-return': 'Sales Return',
-    'purchase-return': 'Purchase Return',
-    receipt: 'Receipt',
-    payment: 'Payment',
-    journal: 'Journal Voucher',
-    'opening-balance': 'Opening Balance',
-};
-
-function voucherLabel(entry) {
-    const type = voucherTypeLabels[entry.voucherType] ?? entry.voucherType;
-    return `${type} #${entry.voucherNumber}`;
-}
-
-const columns = [
-    {
-        id: 'dateBs',
-        header: 'Date (BS)',
-        numeric: false,
-        cell: ({ row }) => formatBsDate(row.original.date) || '-',
-    },
-    { accessorKey: 'date', header: 'Date (AD)' },
-    {
-        id: 'voucher',
-        header: 'Voucher',
-        numeric: false,
-        cell: ({ row }) => voucherLabel(row.original),
-    },
-    {
-        accessorKey: 'narration',
-        header: 'Narration / Particulars',
-        numeric: false,
-        cell: ({ row }) => row.original.narration ?? '-',
-    },
-    {
-        accessorKey: 'debit',
-        header: 'Debit (Rs.)',
-        cell: ({ row }) => (compareMoney(row.original.debit || '0.00', '0.00') > 0 ? formatMoney(row.original.debit) : '-'),
-    },
-    {
-        accessorKey: 'credit',
-        header: 'Credit (Rs.)',
-        cell: ({ row }) => (compareMoney(row.original.credit || '0.00', '0.00') > 0 ? formatMoney(row.original.credit) : '-'),
-    },
-    {
-        accessorKey: 'balance',
-        header: 'Running Balance (Rs.)',
-        cell: ({ row }) => {
-            const sign = compareMoney(row.original.balance, '0.00');
-            if (sign > 0) return `${formatMoney(row.original.balance)} Dr`;
-            if (sign < 0) return `${absoluteMoney(row.original.balance)} Cr`;
-            return '0.00';
-        },
-    },
-];
-
-const staffTableHeadClass = 'px-3 py-2 text-[11px] font-bold tracking-wider text-text-muted uppercase whitespace-nowrap bg-bg-subtle';
-const staffTableCellClass = 'border-t border-border px-3 py-2.5 text-[12.5px] align-middle';
-const staffTableNumClass = `${staffTableCellClass} text-right whitespace-nowrap [font-variant-numeric:tabular-nums]`;
-const staffTableTotalClass = 'border-t-2 border-border bg-primary-tint/30 px-3 py-2 text-xs font-bold text-text-strong';
+const printUrl = () => reportUrl('/reports/ledger/print');
+const exportUrl = () => reportUrl('/reports/ledger/export');
 </script>
 
 <template>
@@ -302,7 +281,7 @@ const staffTableTotalClass = 'border-t-2 border-border bg-primary-tint/30 px-3 p
 
         <!-- Filters Card -->
         <Card variant="panel" class="mb-4">
-            <div class="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
+            <div class="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-5">
                 <div>
                     <Label class="mb-1">Select Account or Staff <span class="text-danger">*</span></Label>
                     <Combobox
@@ -314,218 +293,55 @@ const staffTableTotalClass = 'border-t-2 border-border bg-primary-tint/30 px-3 p
                 </div>
                 <div>
                     <Label class="mb-1">Fiscal Year</Label>
-                    <Select :model-value="fiscalYear" :options="fiscalYearOptions" @update:model-value="(v) => (fiscalYear = v)" />
+                    <Select :model-value="fiscalYearInput" :options="fiscalYearOptions" @update:model-value="onFiscalYearChange" />
                 </div>
                 <div>
                     <Label class="mb-1">From Date (BS)</Label>
-                    <NepaliDateInput v-model="from" />
+                    <NepaliDateInput v-model="fromInput" />
                 </div>
                 <div>
                     <Label class="mb-1">To Date (BS)</Label>
-                    <NepaliDateInput v-model="to" />
+                    <NepaliDateInput v-model="toInput" />
+                </div>
+                <div v-if="!staffIdInput">
+                    <Label class="mb-1">Project</Label>
+                    <Select v-model="projectInput" :options="projectOptions" />
                 </div>
             </div>
+            <p v-if="appliedProject && account" class="mt-2 text-[12px] text-text-muted">
+                Project: {{ appliedProject.code }} - {{ appliedProject.name }}. Only lines posted to this project are
+                included, so the opening balance is the project's own earlier postings.
+            </p>
             <div class="mt-3 flex items-center justify-end gap-2 border-t border-border pt-3">
-                <Button v-if="from || to" variant="secondary" tone="purple" type="button" @click="clearWindow">Clear dates</Button>
+                <Button v-if="hasCustomWindow" variant="secondary" tone="purple" type="button" @click="clearWindow">Clear dates</Button>
                 <Button variant="primary" type="button" @click="apply">Filter Ledger</Button>
             </div>
         </Card>
 
+        <!-- Empty State when the company has no fiscal year yet -->
+        <Card v-if="fiscalYearId === null" variant="panel" class="py-12 text-center">
+            <p class="text-base font-medium text-text-strong">No fiscal year</p>
+            <p class="mt-1 text-sm text-text-muted">No fiscal year has been created yet. Create one under Fiscal Years to see ledger activity.</p>
+        </Card>
+
         <!-- Empty State when neither account nor staff chosen -->
-        <Card v-if="!account && !staff" variant="panel" class="py-12 text-center">
+        <Card v-else-if="!account && !staff" variant="panel" class="py-12 text-center">
             <p class="text-base font-medium text-text-strong">No account or staff selected</p>
             <p class="mt-1 text-sm text-text-muted">Pick an account or staff member from the search box above to view ledger entries.</p>
         </Card>
 
         <!-- Staff Member Ledger Details -->
-        <div v-else-if="staff" class="space-y-4">
-            <!-- Staff Summary Banner -->
-            <Card variant="panel" class="border-primary/20 bg-primary/5 p-4">
-                <div class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-                    <div>
-                        <div class="flex items-center gap-2">
-                            <span class="rounded bg-primary px-2 py-0.5 text-xs font-bold text-white uppercase tracking-wider">Staff</span>
-                            <h2 class="text-base font-bold text-text-strong">{{ staff.name }}</h2>
-                            <span class="text-xs text-text-muted">({{ staff.staff_code }})</span>
-                        </div>
-                        <p v-if="staff.designation || staff.department" class="mt-1 text-xs text-text-muted">
-                            {{ [staff.designation, staff.department].filter(Boolean).join(' • ') }}
-                        </p>
-                    </div>
-
-                    <div v-if="can('hr_reports.view')" class="flex items-center gap-3">
-                        <Button :as="Link" :href="`/hr/staff/${staff.id}/statement`" variant="secondary" tone="purple" class="text-xs">
-                            Open Full HR Statement &rarr;
-                        </Button>
-                    </div>
-                </div>
-
-                <div class="mt-3 grid grid-cols-2 gap-3 border-t border-primary/10 pt-3 sm:grid-cols-4">
-                    <div>
-                        <p class="text-[11px] font-bold uppercase tracking-wider text-text-muted">Salary Payable</p>
-                        <p class="mt-0.5 text-sm font-bold text-text-strong">Rs. {{ formatMoney(staffClosingSalary) }}</p>
-                        <p class="text-[11px] text-text-muted">Business owes staff</p>
-                    </div>
-                    <div>
-                        <p class="text-[11px] font-bold uppercase tracking-wider text-text-muted">Staff Advance</p>
-                        <p class="mt-0.5 text-sm font-bold text-text-strong">Rs. {{ formatMoney(staffClosingAdvance) }}</p>
-                        <p class="text-[11px] text-text-muted">Staff owes business</p>
-                    </div>
-                    <div>
-                        <p class="text-[11px] font-bold uppercase tracking-wider text-text-muted">Period Salary Paid</p>
-                        <p class="mt-0.5 text-xs font-semibold text-primary">Rs. {{ formatMoney(staffTotalSalaryDebit) }}</p>
-                        <p class="text-[11px] text-text-muted">Earned: Rs. {{ formatMoney(staffTotalSalaryCredit) }}</p>
-                    </div>
-                    <div>
-                        <p class="text-[11px] font-bold uppercase tracking-wider text-text-muted">Period Advances Given</p>
-                        <p class="mt-0.5 text-xs font-semibold text-danger">Rs. {{ formatMoney(staffTotalAdvanceDebit) }}</p>
-                        <p class="text-[11px] text-text-muted">Recovered: Rs. {{ formatMoney(staffTotalAdvanceCredit) }}</p>
-                    </div>
-                </div>
-            </Card>
-
-            <!-- 1. Salary Payable Ledger -->
-            <Card variant="panel" class="overflow-hidden">
-                <div class="border-b border-border bg-bg-subtle/50 px-4 py-3">
-                    <div class="flex flex-wrap items-center justify-between gap-2">
-                        <div>
-                            <h3 class="text-sm font-bold text-text-strong">Salary Payable Ledger</h3>
-                            <p class="text-xs text-text-muted">Credit is net salary earned; debit is salary paid. Balance is the amount currently payable.</p>
-                        </div>
-                        <span class="text-xs font-semibold text-text-muted">
-                            Closing Balance: <span class="font-bold text-text-strong">Rs. {{ formatMoney(staffClosingSalary) }}</span>
-                        </span>
-                    </div>
-                </div>
-
-                <div class="w-full overflow-x-auto">
-                    <table class="w-full border-collapse text-[12.5px] text-text-base">
-                        <thead>
-                            <tr>
-                                <th scope="col" :class="[staffTableHeadClass, 'text-left']">Date (BS)</th>
-                                <th scope="col" :class="[staffTableHeadClass, 'text-left']">Date (AD)</th>
-                                <th scope="col" :class="[staffTableHeadClass, 'text-left']">Reference</th>
-                                <th scope="col" :class="[staffTableHeadClass, 'text-left']">Particulars / Description</th>
-                                <th scope="col" :class="[staffTableHeadClass, 'text-right']">Debit (Rs.)</th>
-                                <th scope="col" :class="[staffTableHeadClass, 'text-right']">Credit (Rs.)</th>
-                                <th scope="col" :class="[staffTableHeadClass, 'text-right']">Balance (Rs.)</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            <tr v-if="from" class="bg-primary-tint/20">
-                                <td colspan="6" class="border-t border-border px-3 py-2 text-xs font-semibold text-text-strong">
-                                    Opening balance <span class="font-normal text-text-muted">(before {{ formatBsDate(from) }} / {{ from }})</span>
-                                </td>
-                                <td class="border-t border-border px-3 py-2 text-right text-xs font-bold text-text-strong whitespace-nowrap">
-                                    Rs. {{ formatMoney(staffOpeningSalary) }}
-                                </td>
-                            </tr>
-                            <tr v-if="staffSalaryEntries.length === 0">
-                                <td colspan="7" class="px-4 py-6 text-center text-xs font-medium text-text-muted">
-                                    No salary entries found in this period.
-                                </td>
-                            </tr>
-                            <tr v-for="(entry, index) in staffSalaryEntries" :key="`salary-${index}`" class="hover:bg-bg-subtle/50 transition-colors">
-                                <td :class="[staffTableCellClass, 'whitespace-nowrap font-medium text-text-strong']">
-                                    {{ entry.date_bs ? formatBsDate(entry.date_bs) : formatBsDate(entry.date) }}
-                                </td>
-                                <td :class="[staffTableCellClass, 'whitespace-nowrap text-text-muted']">{{ entry.date }}</td>
-                                <td :class="[staffTableCellClass, 'whitespace-nowrap font-medium']">{{ entry.reference ?? '-' }}</td>
-                                <td :class="staffTableCellClass">{{ entry.description }}</td>
-                                <td :class="staffTableNumClass">
-                                    {{ compareMoney(entry.debit, '0.00') > 0 ? formatMoney(entry.debit) : '-' }}
-                                </td>
-                                <td :class="staffTableNumClass">
-                                    {{ compareMoney(entry.credit, '0.00') > 0 ? formatMoney(entry.credit) : '-' }}
-                                </td>
-                                <td :class="[staffTableNumClass, 'font-bold text-text-strong']">
-                                    Rs. {{ formatMoney(entry.balance) }}
-                                </td>
-                            </tr>
-                        </tbody>
-                        <tfoot>
-                            <tr>
-                                <td colspan="6" :class="staffTableTotalClass">Closing Balance (Salary Payable)</td>
-                                <td :class="[staffTableTotalClass, 'text-right whitespace-nowrap']">
-                                    Rs. {{ formatMoney(staffClosingSalary) }}
-                                </td>
-                            </tr>
-                        </tfoot>
-                    </table>
-                </div>
-            </Card>
-
-            <!-- 2. Staff Advance Ledger -->
-            <Card variant="panel" class="overflow-hidden">
-                <div class="border-b border-border bg-bg-subtle/50 px-4 py-3">
-                    <div class="flex flex-wrap items-center justify-between gap-2">
-                        <div>
-                            <h3 class="text-sm font-bold text-text-strong">Staff Advance Ledger</h3>
-                            <p class="text-xs text-text-muted">Debit is advance given; credit is advance recovered in payroll. Balance is the amount to recover.</p>
-                        </div>
-                        <span class="text-xs font-semibold text-text-muted">
-                            Closing Balance: <span class="font-bold text-text-strong">Rs. {{ formatMoney(staffClosingAdvance) }}</span>
-                        </span>
-                    </div>
-                </div>
-
-                <div class="w-full overflow-x-auto">
-                    <table class="w-full border-collapse text-[12.5px] text-text-base">
-                        <thead>
-                            <tr>
-                                <th scope="col" :class="[staffTableHeadClass, 'text-left']">Date (BS)</th>
-                                <th scope="col" :class="[staffTableHeadClass, 'text-left']">Date (AD)</th>
-                                <th scope="col" :class="[staffTableHeadClass, 'text-left']">Reference</th>
-                                <th scope="col" :class="[staffTableHeadClass, 'text-left']">Particulars / Description</th>
-                                <th scope="col" :class="[staffTableHeadClass, 'text-right']">Debit (Rs.)</th>
-                                <th scope="col" :class="[staffTableHeadClass, 'text-right']">Credit (Rs.)</th>
-                                <th scope="col" :class="[staffTableHeadClass, 'text-right']">Balance (Rs.)</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            <tr v-if="from" class="bg-primary-tint/20">
-                                <td colspan="6" class="border-t border-border px-3 py-2 text-xs font-semibold text-text-strong">
-                                    Opening balance <span class="font-normal text-text-muted">(before {{ formatBsDate(from) }} / {{ from }})</span>
-                                </td>
-                                <td class="border-t border-border px-3 py-2 text-right text-xs font-bold text-text-strong whitespace-nowrap">
-                                    Rs. {{ formatMoney(staffOpeningAdvance) }}
-                                </td>
-                            </tr>
-                            <tr v-if="staffAdvanceEntries.length === 0">
-                                <td colspan="7" class="px-4 py-6 text-center text-xs font-medium text-text-muted">
-                                    No advance entries found in this period.
-                                </td>
-                            </tr>
-                            <tr v-for="(entry, index) in staffAdvanceEntries" :key="`adv-${index}`" class="hover:bg-bg-subtle/50 transition-colors">
-                                <td :class="[staffTableCellClass, 'whitespace-nowrap font-medium text-text-strong']">
-                                    {{ entry.date_bs ? formatBsDate(entry.date_bs) : formatBsDate(entry.date) }}
-                                </td>
-                                <td :class="[staffTableCellClass, 'whitespace-nowrap text-text-muted']">{{ entry.date }}</td>
-                                <td :class="[staffTableCellClass, 'whitespace-nowrap font-medium']">{{ entry.reference ?? '-' }}</td>
-                                <td :class="staffTableCellClass">{{ entry.description }}</td>
-                                <td :class="staffTableNumClass">
-                                    {{ compareMoney(entry.debit, '0.00') > 0 ? formatMoney(entry.debit) : '-' }}
-                                </td>
-                                <td :class="staffTableNumClass">
-                                    {{ compareMoney(entry.credit, '0.00') > 0 ? formatMoney(entry.credit) : '-' }}
-                                </td>
-                                <td :class="[staffTableNumClass, 'font-bold text-text-strong']">
-                                    Rs. {{ formatMoney(entry.balance) }}
-                                </td>
-                            </tr>
-                        </tbody>
-                        <tfoot>
-                            <tr>
-                                <td colspan="6" :class="staffTableTotalClass">Closing Balance (Staff Advance)</td>
-                                <td :class="[staffTableTotalClass, 'text-right whitespace-nowrap']">
-                                    Rs. {{ formatMoney(staffClosingAdvance) }}
-                                </td>
-                            </tr>
-                        </tfoot>
-                    </table>
-                </div>
-            </Card>
-        </div>
+        <StaffLedgerSection
+            v-else-if="staff"
+            :staff="staff"
+            :staff-salary-entries="staffSalaryEntries"
+            :staff-advance-entries="staffAdvanceEntries"
+            :staff-opening-salary="staffOpeningSalary"
+            :staff-opening-advance="staffOpeningAdvance"
+            :staff-closing-salary="staffClosingSalary"
+            :staff-closing-advance="staffClosingAdvance"
+            :from="props.from"
+        />
 
         <!-- Account Ledger Details -->
         <div v-else class="space-y-4">
@@ -554,7 +370,7 @@ const staffTableTotalClass = 'border-t-2 border-border bg-primary-tint/30 px-3 p
                     <div class="flex items-center gap-2 pt-1 sm:pt-0">
                         <input
                             id="include-sub-accounts"
-                            v-model="includeSubAccounts"
+                            v-model="includeSubAccountsInput"
                             type="checkbox"
                             class="size-4 rounded border-border text-primary focus:ring-primary cursor-pointer"
                             @change="apply"
@@ -577,7 +393,7 @@ const staffTableTotalClass = 'border-t-2 border-border bg-primary-tint/30 px-3 p
                 </button>
             </div>
 
-            <!-- Account Summary Card -->
+            <!-- Account Summary Cards -->
             <div class="grid grid-cols-2 gap-3 sm:grid-cols-4">
                 <Card variant="panel" class="p-3">
                     <p class="text-[11px] font-bold uppercase tracking-wider text-text-muted">Account Name</p>
@@ -586,34 +402,49 @@ const staffTableTotalClass = 'border-t-2 border-border bg-primary-tint/30 px-3 p
                 </Card>
                 <Card variant="panel" class="p-3">
                     <p class="text-[11px] font-bold uppercase tracking-wider text-text-muted">Opening Balance</p>
-                    <p class="mt-1 text-sm font-bold" :class="isDebitBalance(openingBalance) ? 'text-primary' : 'text-danger'">
+                    <p class="mt-1 text-sm font-bold" :class="sideClass(openingSide)">
                         Rs. {{ absoluteMoney(openingBalance) }}
-                        <span class="text-xs font-semibold">{{ isDebitBalance(openingBalance) ? 'Dr' : 'Cr' }}</span>
+                        <span v-if="openingSide" class="text-xs font-semibold">{{ openingSide }}</span>
                     </p>
                     <p class="text-xs text-text-muted">At period start</p>
                 </Card>
                 <Card variant="panel" class="p-3">
                     <p class="text-[11px] font-bold uppercase tracking-wider text-text-muted">Period Debits / Credits</p>
                     <p class="mt-1 text-xs font-bold text-text-strong">
-                        Dr: <span class="text-primary font-mono">Rs. {{ formatMoney(totalPeriodDebit) }}</span>
+                        Dr: <span class="text-primary font-mono">Rs. {{ formatMoney(periodDebit) }}</span>
                     </p>
                     <p class="text-xs font-bold text-text-strong">
-                        Cr: <span class="text-danger font-mono">Rs. {{ formatMoney(totalPeriodCredit) }}</span>
+                        Cr: <span class="text-danger font-mono">Rs. {{ formatMoney(periodCredit) }}</span>
                     </p>
                 </Card>
                 <Card variant="panel" class="p-3">
                     <p class="text-[11px] font-bold uppercase tracking-wider text-text-muted">Closing Balance</p>
-                    <p class="mt-1 text-base font-extrabold" :class="isDebitBalance(closingBalance) ? 'text-primary' : 'text-danger'">
+                    <p class="mt-1 text-base font-extrabold" :class="sideClass(closingSide)">
                         Rs. {{ absoluteMoney(closingBalance) }}
-                        <span class="text-xs font-bold">{{ isDebitBalance(closingBalance) ? 'Dr' : 'Cr' }}</span>
+                        <span v-if="closingSide" class="text-xs font-bold">{{ closingSide }}</span>
                     </p>
                     <p class="text-xs text-text-muted">Current running balance</p>
                 </Card>
             </div>
 
-            <!-- Ledger Transactions Table -->
+            <!-- Sub-ledger summary: one row per sub-ledger, ties to the ledger below with sub-ledgers included -->
+            <Card v-if="subLedgerSummary.rows.length > 0" variant="panel">
+                <h2 class="mb-2 text-[13px] font-bold text-text-strong">Sub-ledger summary</h2>
+                <SubLedgerSummaryTable :summary="subLedgerSummary" @select="onAccountSelect" />
+            </Card>
+
+            <!-- Ledger Transactions Table (opening, lines, total, closing) -->
             <Card variant="panel">
-                <DataTable :columns="columns" :data="entries" empty-text="No transactions found for this account in the selected date range." />
+                <LedgerEntriesTable
+                    :entries="entries"
+                    :opening-balance="openingBalance"
+                    :opening-side="openingSide"
+                    :closing-balance="closingBalance"
+                    :closing-side="closingSide"
+                    :period-debit="periodDebit"
+                    :period-credit="periodCredit"
+                    :from="props.from"
+                />
             </Card>
         </div>
     </div>

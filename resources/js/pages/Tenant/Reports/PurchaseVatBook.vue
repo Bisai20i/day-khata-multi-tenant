@@ -1,5 +1,5 @@
 <script setup>
-import { computed, h, ref } from 'vue';
+import { computed, h, ref, watch } from 'vue';
 import { router } from '@inertiajs/vue3';
 import AppLayout from '@/layouts/AppLayout.vue';
 import { useLayoutChrome } from '@/composables/useLayoutChrome';
@@ -33,6 +33,7 @@ const props = defineProps({
             vat_amount: '0.00',
             capital_amount: '0.00',
             fixed_asset_vat_amount: '0.00',
+            tds_amount: '0.00',
             total: '0.00',
             count: 0,
         }),
@@ -47,9 +48,19 @@ const props = defineProps({
 
 useLayoutChrome('Purchase VAT Book');
 
-const from = ref(props.from);
-const to = ref(props.to);
-const storeId = ref(props.storeId);
+// Unsaved filter inputs; they follow the applied props after every visit.
+const fromInput = ref(props.from);
+const toInput = ref(props.to);
+const storeIdInput = ref(props.storeId);
+
+watch(
+    () => [props.from, props.to, props.storeId],
+    ([from, to, storeId]) => {
+        fromInput.value = from;
+        toInput.value = to;
+        storeIdInput.value = storeId;
+    },
+);
 
 const branchFilter = useBranchReportFilter(() => props.branchReport);
 const { label: branchWord } = useBranchLabel();
@@ -65,17 +76,17 @@ const rangeLabel = computed(
 
 const isLoading = ref(false);
 
-const hasActiveFilter = computed(() => storeId.value !== null);
+const hasActiveFilter = computed(() => props.storeId !== null || storeIdInput.value !== null);
 
 function resetFilters() {
-    storeId.value = null;
+    storeIdInput.value = null;
     applyFilter();
 }
 
 function applyFilter() {
     router.get(
         window.location.pathname,
-        { from: from.value, to: to.value, store_id: storeId.value ?? undefined, ...branchFilter.toQuery() },
+        { from: fromInput.value, to: toInput.value, store_id: storeIdInput.value ?? undefined, ...branchFilter.toQuery() },
         {
             preserveState: true,
             preserveScroll: true,
@@ -85,10 +96,12 @@ function applyFilter() {
     );
 }
 
+// Built from the applied props (what the server rendered), never the unsaved
+// inputs, so the file always matches the table on screen.
 const exportUrl = computed(() => {
-    const params = new URLSearchParams({ from: from.value, to: to.value });
-    if (storeId.value) {
-        params.set('store_id', storeId.value);
+    const params = new URLSearchParams({ from: props.from, to: props.to });
+    if (props.storeId) {
+        params.set('store_id', String(props.storeId));
     }
     branchFilter.appendTo(params);
 
@@ -126,6 +139,8 @@ const baseColumns = [
     },
     { id: 'round_off', header: 'Round Off', numeric: true, cell: ({ row }) => formatMoney(row.original.round_off ?? '0.00') },
     { id: 'total', header: 'Total amount', numeric: true, cell: ({ row }) => formatMoney(row.original.total) },
+    // Withheld from the supplier and paid to the IRD; part of the total, not extra to it.
+    { id: 'tds_amount', header: 'TDS withheld', numeric: true, cell: ({ row }) => formatMoney(row.original.tds_amount ?? '0.00') },
 ];
 
 // The branch column exists only for a multi-branch company.
@@ -174,15 +189,15 @@ const columns = computed(() => {
             <div class="flex flex-wrap items-end gap-3">
                 <div>
                     <Label class="mb-1">From date (BS)</Label>
-                    <NepaliDateInput v-model="from" />
+                    <NepaliDateInput v-model="fromInput" />
                 </div>
                 <div>
                     <Label class="mb-1">To date (BS)</Label>
-                    <NepaliDateInput v-model="to" />
+                    <NepaliDateInput v-model="toInput" />
                 </div>
                 <div class="w-56">
                     <Label class="mb-1">Store</Label>
-                    <Select v-model="storeId" :options="storeOptions" />
+                    <Select v-model="storeIdInput" :options="storeOptions" />
                 </div>
                 <Button variant="primary" tone="purple" :loading="isLoading" @click="applyFilter">Generate report</Button>
                 <Button v-if="hasActiveFilter" variant="secondary" tone="purple" :disabled="isLoading" @click="resetFilters">Reset</Button>
@@ -203,6 +218,7 @@ const columns = computed(() => {
                 <div><span class="text-text-muted">Fixed-asset VAT (of which):</span> <span class="font-semibold">{{ formatMoney(totals.fixed_asset_vat_amount) }}</span></div>
                 <div><span class="text-text-muted">Round Off:</span> <span class="font-semibold">{{ formatMoney(totals.round_off ?? '0.00') }}</span></div>
                 <div><span class="text-text-muted">Total amount:</span> <span class="font-bold">{{ formatMoney(totals.total) }}</span></div>
+                <div><span class="text-text-muted">TDS withheld:</span> <span class="font-semibold">{{ formatMoney(totals.tds_amount ?? '0.00') }}</span></div>
             </div>
         </Card>
     </div>

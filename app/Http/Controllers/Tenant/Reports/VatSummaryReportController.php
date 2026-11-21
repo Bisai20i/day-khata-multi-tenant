@@ -108,6 +108,8 @@ class VatSummaryReportController extends Controller
                 $summary['netVatPayable'],
                 $summary['reconciliation'],
                 $branchFilter->isActive() ? $branchFilter->label() : null,
+                $summary['from'],
+                $summary['to'],
             ),
             "vat-summary-{$summary['from']}-to-{$summary['to']}.xlsx",
         );
@@ -280,12 +282,23 @@ class VatSummaryReportController extends Controller
     /**
      * Defaults to the current open fiscal year's date range when no
      * explicit `from`/`to` query params are given, falling back to
-     * month-to-date if no fiscal year exists yet.
+     * month-to-date if no fiscal year exists yet. A lone `from` or `to` is
+     * rejected (422), never silently widened to the fiscal year.
      *
      * @return array{0: string, 1: string}
      */
     private function resolveDateRange(Request $request): array
     {
+        // Strict Y-m-d, as every other report: a malformed, reversed or
+        // half-supplied range, or an unknown store, is a validation error the
+        // page shows, not a database exception, and the export's download name
+        // can only ever contain a clean date.
+        $request->validate([
+            'from' => ['nullable', 'required_with:to', 'date_format:Y-m-d'],
+            'to' => ['nullable', 'required_with:from', 'date_format:Y-m-d', 'after_or_equal:from'],
+            'store_id' => ['nullable', 'integer', 'exists:stores,id'],
+        ]);
+
         $from = $request->string('from')->toString();
         $to = $request->string('to')->toString();
 

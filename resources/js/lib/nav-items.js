@@ -11,6 +11,7 @@ import {
     FileSignature,
     FileText,
     Factory,
+    FolderKanban,
     Handshake,
     HandCoins,
     History,
@@ -163,6 +164,7 @@ export function navGroups() {
                 { label: 'Chart of Accounts', href: '/accounts', aliases: ['/account-groups', '/account-subgroups'], icon: BookOpen, permission: 'accounts.view' },
                 { label: 'Fiscal Years', href: '/fiscal-years', icon: CalendarRange, permission: 'fiscal_year.view' },
                 { label: 'Fixed Assets', href: '/fixed-assets', icon: HandCoins, permission: 'fixed_assets.view' },
+                { label: 'Projects', href: '/projects', icon: FolderKanban, permission: 'projects.view' },
             ],
         },
         {

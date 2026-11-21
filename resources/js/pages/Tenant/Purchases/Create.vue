@@ -13,6 +13,7 @@ import PurchaseCreatePaymentNotes from '@/components/purchases/PurchaseCreatePay
 import PurchaseCreateMoreOptions from '@/components/purchases/PurchaseCreateMoreOptions.vue';
 import PurchaseCreateTotalsBar from '@/components/purchases/PurchaseCreateTotalsBar.vue';
 import PurchaseCreateModals from '@/components/purchases/PurchaseCreateModals.vue';
+import PurchaseSideProjectField from '@/components/purchases/PurchaseSideProjectField.vue';
 import { useBranchField } from '@/composables/useBranchField';
 import { useConfirm } from '@/composables/useConfirm';
 import { usePermissions } from '@/composables/usePermissions';
@@ -62,6 +63,8 @@ const props = defineProps({
     branchOptions: { type: Array, default: () => [] },
     defaultBranchId: { type: Number, default: null },
     areas: { type: Array, default: () => [] },
+    // Active projects for the optional project picker; hidden when none.
+    projects: { type: Array, default: () => [] },
 });
 
 const emit = defineEmits(['cancel', 'posted']);
@@ -137,6 +140,8 @@ function defaultFormData() {
         // when the tenant has the feature on.
         round_off: '',
         narration: '',
+        // Optional project: every ledger line of the bill is tagged with it.
+        project_id: null,
         // Blank fiscal_year_id posts into whichever year is currently
         // open; the only other value the picker offers is
         // correctionFiscalYear's id, in which case reason becomes required
@@ -453,6 +458,17 @@ function submit(print = false) {
             @select-supplier="selectSupplier"
             @add-supplier="openSupplierModal"
         />
+
+        <Card v-if="projects.length > 0" variant="panel" class="!p-4">
+            <div class="grid grid-cols-1 gap-4 sm:grid-cols-3">
+                <PurchaseSideProjectField
+                    id="purchase-project"
+                    v-model="form.project_id"
+                    :projects="projects"
+                    :error="form.errors.project_id"
+                />
+            </div>
+        </Card>
 
         <!-- Items: staging row + the bill's committed lines, one section -
              same as the sale form. -->

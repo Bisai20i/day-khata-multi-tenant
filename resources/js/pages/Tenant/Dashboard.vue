@@ -14,6 +14,9 @@ import {
     ReceiptText,
     Percent,
     ScanBarcode,
+    Banknote,
+    TrendingUp,
+    TrendingDown,
 } from '@lucide/vue';
 import AppLayout from '@/layouts/AppLayout.vue';
 import { useLayoutChrome } from '@/composables/useLayoutChrome';
@@ -22,7 +25,7 @@ import Button from '@/components/ui/Button.vue';
 import Label from '@/components/ui/Label.vue';
 import Select from '@/components/ui/Select.vue';
 import NepaliDateInput from '@/components/ui/NepaliDateInput.vue';
-import { formatMoney, formatQuantity } from '@/lib/money.js';
+import { compareMoney, formatMoney, formatQuantity, subtractMoney } from '@/lib/money.js';
 import { formatBsDate } from '@/lib/format.js';
 import { holdsAll } from '@/lib/quickActions';
 import { usePermissions } from '@/composables/usePermissions';
@@ -249,12 +252,25 @@ function withBranchQuery(href) {
 const financialCards = computed(() =>
     [
         { key: 'cashInHand', label: 'Cash in Hand', hint: 'Liquid cash right now', href: '/reports/cash-book', icon: Wallet },
+        { key: 'bankBalance', label: 'Bank Balance', hint: 'All bank accounts combined', href: '/reports/cash-book', icon: Banknote },
         { key: 'stockValue', label: 'Stock Value', hint: 'Inventory value on hand', href: '/reports/stock-valuation', icon: Boxes },
         { key: 'debtors', label: 'Customers Owe You', hint: 'Sundry Debtors to collect', href: '/reports/debtors', icon: HandCoins },
         { key: 'creditors', label: 'You Owe Suppliers', hint: 'Sundry Creditors to pay', href: '/reports/creditors', icon: Landmark },
     ]
         .filter((card) => props.kpis[card.key] !== undefined && props.kpis[card.key] !== null)
         .map((card) => ({ ...card, amount: props.kpis[card.key] })),
+);
+
+// Profit for the selected period, straight from the income statement's own
+// figures (server-side). A negative net profit is shown as a Net Loss.
+const profit = computed(() => props.kpis.profit ?? null);
+const isNetLoss = computed(() => profit.value !== null && compareMoney(profit.value.netProfit, '0.00') < 0);
+const isGrossLoss = computed(() => profit.value !== null && compareMoney(profit.value.grossProfit, '0.00') < 0);
+const netProfitAmount = computed(() =>
+    profit.value === null ? '0.00' : (isNetLoss.value ? subtractMoney('0.00', profit.value.netProfit) : profit.value.netProfit),
+);
+const grossProfitAmount = computed(() =>
+    profit.value === null ? '0.00' : (isGrossLoss.value ? subtractMoney('0.00', profit.value.grossProfit) : profit.value.grossProfit),
 );
 
 // Performance metrics for the selected period (with fallback to today/thisWeek for backward compatibility)
@@ -370,10 +386,49 @@ function formatAmount(amount) {
             </div>
         </Card>
 
+        <!-- Section 0: Profit headline (income statement figures for the period) -->
+        <template v-if="profit">
+            <h3 class="mb-2 text-xs font-bold tracking-wider uppercase text-text-muted">
+                Profit in Period ({{ periodLabel }})
+            </h3>
+            <div class="mb-5 grid grid-cols-1 gap-4 sm:grid-cols-2">
+                <Link :href="withBranchQuery('/reports/income-statement')" class="block">
+                    <Card variant="panel" class="h-full transition-colors hover:border-primary">
+                        <div class="flex items-start justify-between">
+                            <div class="flex size-9 items-center justify-center bg-primary-tint">
+                                <component :is="isGrossLoss ? TrendingDown : TrendingUp" class="size-5 text-primary" />
+                            </div>
+                            <span class="text-xs font-semibold text-text-muted">Income {{ formatAmount(profit.totalIncome) }}</span>
+                        </div>
+                        <p :class="['mt-3 text-2xl font-bold', isGrossLoss ? 'text-danger' : 'text-text-strong']">
+                            {{ isGrossLoss ? `(${formatAmount(grossProfitAmount)})` : formatAmount(grossProfitAmount) }}
+                        </p>
+                        <p class="text-sm font-semibold text-text-base">{{ isGrossLoss ? 'Gross Loss' : 'Gross Profit' }}</p>
+                        <p class="text-xs text-text-muted">Trading result before other income and expenses</p>
+                    </Card>
+                </Link>
+                <Link :href="withBranchQuery('/reports/income-statement')" class="block">
+                    <Card variant="panel" class="h-full transition-colors hover:border-primary">
+                        <div class="flex items-start justify-between">
+                            <div class="flex size-9 items-center justify-center bg-primary-tint">
+                                <component :is="isNetLoss ? TrendingDown : TrendingUp" class="size-5 text-primary" />
+                            </div>
+                            <span class="text-xs font-semibold text-text-muted">Expenses {{ formatAmount(profit.totalExpenses) }}</span>
+                        </div>
+                        <p :class="['mt-3 text-2xl font-bold', isNetLoss ? 'text-danger' : 'text-text-strong']">
+                            {{ isNetLoss ? `(${formatAmount(netProfitAmount)})` : formatAmount(netProfitAmount) }}
+                        </p>
+                        <p class="text-sm font-semibold text-text-base">{{ isNetLoss ? 'Net Loss' : 'Net Profit' }}</p>
+                        <p class="text-xs text-text-muted">Total income less total expenses</p>
+                    </Card>
+                </Link>
+            </div>
+        </template>
+
         <!-- Section 1: Financial Health & Liquidity (Point-in-Time Snapshot) -->
         <template v-if="financialCards.length">
             <h3 class="mb-2 text-xs font-bold tracking-wider uppercase text-text-muted">Financial Position</h3>
-            <div class="mb-5 grid grid-cols-2 gap-4 lg:grid-cols-4">
+            <div class="mb-5 grid grid-cols-2 gap-4 lg:grid-cols-3 xl:grid-cols-5">
                 <Link v-for="card in financialCards" :key="card.key" :href="withBranchQuery(card.href)" class="block">
                     <Card variant="panel" class="h-full transition-colors hover:border-primary">
                         <div class="flex size-9 items-center justify-center bg-primary-tint">

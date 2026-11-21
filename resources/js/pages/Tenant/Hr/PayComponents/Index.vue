@@ -56,7 +56,7 @@ function accountLabel(account) {
 
 // ---- Add -------------------------------------------------------------------
 
-const addForm = useForm({ code: '', name: '', expense_account_id: null });
+const addForm = useForm({ code: '', name: '', expense_account_id: null, is_contribution_base: false });
 
 function submitAdd() {
     addForm.post('/hr/pay-components', {
@@ -68,7 +68,7 @@ function submitAdd() {
 // ---- Inline edit -----------------------------------------------------------
 
 const editingId = ref(null);
-const editForm = useForm({ name: '', expense_account_id: null, is_active: true });
+const editForm = useForm({ name: '', expense_account_id: null, is_active: true, is_contribution_base: false });
 
 const editingComponent = computed(() => props.components.find((component) => component.id === editingId.value) ?? null);
 
@@ -78,6 +78,7 @@ function startEdit(component) {
         name: component.name,
         expense_account_id: component.expense_account_id,
         is_active: !!component.is_active,
+        is_contribution_base: !!component.is_contribution_base,
     });
     editForm.reset();
     editForm.clearErrors();
@@ -137,6 +138,14 @@ function submitEdit() {
                         Add component
                     </Button>
                 </div>
+                <div class="sm:col-span-4">
+                    <label class="flex items-center gap-2 text-sm text-text-base">
+                        <input v-model="addForm.is_contribution_base" type="checkbox" class="size-4 border-[1.5px] border-border" />
+                        Counts as basic pay for SSF / CIT
+                    </label>
+                    <p class="mt-1 text-xs text-text-muted">SSF and CIT percentages on a staff member apply to the total of the components ticked here.</p>
+                    <p v-if="addForm.errors.is_contribution_base" class="mt-1 text-sm text-danger">{{ addForm.errors.is_contribution_base }}</p>
+                </div>
             </form>
         </Card>
 
@@ -158,6 +167,7 @@ function submitEdit() {
                         <span class="text-sm text-text-base">
                             {{ component.name }}
                             <Badge v-if="component.is_system" variant="neutral" class="ml-1">Starter</Badge>
+                            <Badge v-if="component.is_contribution_base" variant="neutral" class="ml-1" title="SSF and CIT percentages apply to this component">Basic pay</Badge>
                         </span>
                         <span class="text-sm text-text-base">{{ accountLabel(component.expense_account) }}</span>
                         <span>
@@ -208,6 +218,14 @@ function submitEdit() {
                                 Starter components (Salary, Bonus, Allowance) can be renamed and remapped but never deactivated.
                             </p>
                             <p v-if="editForm.errors.is_active" class="mt-1 text-sm text-danger">{{ editForm.errors.is_active }}</p>
+                        </div>
+                        <div class="sm:col-span-3">
+                            <label class="flex items-center gap-2 text-sm text-text-base">
+                                <input v-model="editForm.is_contribution_base" type="checkbox" class="size-4 border-[1.5px] border-border" />
+                                Counts as basic pay for SSF / CIT
+                            </label>
+                            <p class="mt-1 text-xs text-text-muted">SSF and CIT percentages on a staff member apply to the total of the components ticked here.</p>
+                            <p v-if="editForm.errors.is_contribution_base" class="mt-1 text-sm text-danger">{{ editForm.errors.is_contribution_base }}</p>
                         </div>
                         <div class="flex items-center justify-end gap-2 sm:col-span-3">
                             <Button variant="secondary" tone="purple" type="button" @click="stopEdit">Cancel</Button>

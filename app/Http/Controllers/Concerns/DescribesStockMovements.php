@@ -12,10 +12,12 @@ use App\Models\PurchaseReturnLine;
 use App\Models\SaleLine;
 use App\Models\SaleReturnLine;
 use App\Models\StockAdjustmentLine;
+use App\Models\StockConversionLine;
 use App\Models\StockTransferLine;
 use App\Support\Money\Quantity;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\MorphTo;
+use Illuminate\Support\Facades\Route;
 
 /**
  * Row-level presentation of an ItemStockMovement, shared by the Stock
@@ -42,6 +44,9 @@ trait DescribesStockMovements
                 PurchaseReturnLine::class => ['purchaseReturn'],
                 StockAdjustmentLine::class => ['stockAdjustment'],
                 StockTransferLine::class => ['stockTransfer.fromStore', 'stockTransfer.toStore'],
+                StockConversionLine::class => ['stockConversion'],
+                MaterialIssueItem::class => ['materialIssueNote'],
+                ProductionCompletion::class => ['productionEntry'],
             ]);
         }];
     }
@@ -105,7 +110,38 @@ trait DescribesStockMovements
             $reference instanceof MaterialIssueItem => 'Material Issue #'.($reference->materialIssueNote?->number ?? $reference->material_issue_note_id),
             $reference instanceof ProductionCompletion => 'Production Entry #'.($reference->productionEntry?->number ?? $reference->production_entry_id),
             $reference instanceof ProductionEntry => 'Production Entry #'.$reference->number,
+            $reference instanceof StockConversionLine => 'Stock Conversion #'.$reference->stock_conversion_id
+                .($reference->stockConversion?->type ? ' ('.ucfirst($reference->stockConversion->type->value).')' : ''),
             default => $narration ?: '-',
         };
+    }
+
+    /**
+     * Link to the source document's show page, or null when that document
+     * type has no show route (purchases, returns, transfers, adjustments and
+     * conversions only have print/list routes today), the route is not
+     * registered, or the current user cannot view it. Kept separate from
+     * referenceDescription() so the text stays the same whether or not a
+     * link exists.
+     */
+    protected function referenceUrl(?Model $reference): ?string
+    {
+        [$routeName, $permission, $documentId] = match (true) {
+            $reference instanceof SaleLine => ['tenant.sales.show', 'sales.view', $reference->sale_id],
+            $reference instanceof MaterialIssueItem => ['tenant.material-issues.show', 'material_issues.view', $reference->material_issue_note_id],
+            $reference instanceof ProductionCompletion => ['tenant.production-entries.show', 'production_entries.view', $reference->production_entry_id],
+            $reference instanceof ProductionEntry => ['tenant.production-entries.show', 'production_entries.view', $reference->getKey()],
+            default => [null, null, null],
+        };
+
+        if ($routeName === null || $documentId === null || ! Route::has($routeName)) {
+            return null;
+        }
+
+        if (! request()->user()?->can($permission)) {
+            return null;
+        }
+
+        return route($routeName, $documentId, absolute: false);
     }
 }

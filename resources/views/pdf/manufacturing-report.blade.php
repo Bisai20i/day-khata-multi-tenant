@@ -11,7 +11,9 @@
     @if(!empty($branchFilterLabel))
         <div>{{ $branchFilterLabel }}</div>
     @endif
-    @if(($from ?? null) && ($to ?? null))
+    @if(($asOf ?? false) && ($to ?? null))
+        <div><strong>As on:</strong> {{ $to }}</div>
+    @elseif(($from ?? null) && ($to ?? null))
         <div><strong>Period:</strong> {{ $from }} to {{ $to }}</div>
     @endif
 @endsection

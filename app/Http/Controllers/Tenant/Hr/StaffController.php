@@ -29,6 +29,12 @@ class StaffController extends Controller
         'pan_no', 'bank_name', 'bank_account_no', 'user_id',
     ];
 
+    /**
+     * Default SSF / CIT percentages the payroll draft pre-fills payslips
+     * with; persisted like tds_rate (blank means 0).
+     */
+    private const CONTRIBUTION_RATES = ['ssf_employee_rate', 'ssf_employer_rate', 'cit_employee_rate', 'cit_employer_rate'];
+
     public function index(Request $request): Response
     {
         $search = $request->string('q')->toString();
@@ -106,6 +112,7 @@ class StaffController extends Controller
                 ...Arr::only($data, self::FIELDS),
                 'is_active' => $data['is_active'] ?? true,
                 'tds_rate' => $data['tds_rate'] ?? '0',
+                ...$this->submittedContributionRates($data, forCreate: true),
                 'branch_id' => $branchId,
             ]);
 
@@ -165,6 +172,7 @@ class StaffController extends Controller
                     ...(filled($data['staff_code'] ?? null) ? ['staff_code' => $data['staff_code']] : []),
                     'is_active' => $data['is_active'] ?? $staff->is_active,
                     ...(array_key_exists('tds_rate', $data) ? ['tds_rate' => $data['tds_rate'] ?? '0'] : []),
+                    ...$this->submittedContributionRates($data),
                     ...$branchChange,
                 ]);
 
@@ -177,6 +185,27 @@ class StaffController extends Controller
         }
 
         return back()->with('status', 'Staff member updated.');
+    }
+
+    /**
+     * The four SSF / CIT rates, like tds_rate: on create every rate is
+     * written (blank or missing means 0); on update only the submitted ones
+     * change (blank means 0).
+     *
+     * @param  array<string, mixed>  $data
+     * @return array<string, mixed>
+     */
+    private function submittedContributionRates(array $data, bool $forCreate = false): array
+    {
+        $rates = [];
+
+        foreach (self::CONTRIBUTION_RATES as $rate) {
+            if ($forCreate || array_key_exists($rate, $data)) {
+                $rates[$rate] = $data[$rate] ?? '0';
+            }
+        }
+
+        return $rates;
     }
 
     /**

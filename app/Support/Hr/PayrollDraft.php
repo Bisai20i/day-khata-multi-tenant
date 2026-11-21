@@ -67,6 +67,15 @@ class PayrollDraft
 
             $activeComponents = PayComponent::query()->where('is_active', true)->pluck('id');
 
+            // Components whose amounts form the "basic pay" the SSF and CIT
+            // percentages apply to.
+            $baseComponents = PayComponent::query()
+                ->where('is_active', true)
+                ->where('is_contribution_base', true)
+                ->pluck('id')
+                ->map(fn ($id): int => (int) $id)
+                ->all();
+
             // One query for every staff member's pay rows, grouped per person.
             $itemsByStaff = StaffPayItem::query()
                 ->whereIn('staff_id', $staff->modelKeys())
@@ -94,11 +103,43 @@ class PayrollDraft
                     // payslip's own `tds`, never the rate.
                     $gross = Money::sum($items->map(fn (StaffPayItem $item): Money => Money::of($item->amount))->all());
 
+                    // SSF / CIT pre-fill: the staff member's four rates on the
+                    // contribution base (pay items whose component is flagged
+                    // is_contribution_base). Editable like TDS; what posts is
+                    // the payslip's stored amounts, never the rates.
+                    $base = Money::sum($items
+                        ->filter(fn (StaffPayItem $item): bool => in_array((int) $item->pay_component_id, $baseComponents, true))
+                        ->map(fn (StaffPayItem $item): Money => Money::of($item->amount))
+                        ->all());
+
+                    $tds = $gross->percent($member->tds_rate ?? '0');
+                    $ssfEmployee = $base->percent($member->ssf_employee_rate ?? '0');
+                    $citEmployee = $base->percent($member->cit_employee_rate ?? '0');
+                    $note = null;
+
+                    // Rates that together take more than gross pay would make
+                    // writeLines() refuse the whole run, leaving nothing to
+                    // correct. Prefill none of the employee withholdings for
+                    // this line instead (recovery is 0 at generate), flag it in
+                    // the line note, and let the user enter them by hand; the
+                    // manual save path keeps its strict check. Employer
+                    // amounts are not deducted from gross, so they stay.
+                    if ($tds->plus($ssfEmployee)->plus($citEmployee)->isGreaterThan($gross)) {
+                        $tds = Money::zero();
+                        $ssfEmployee = Money::zero();
+                        $citEmployee = Money::zero();
+                        $note = 'The default TDS, employee SSF and employee CIT rates exceeded gross pay, so they were prefilled at 0.00 for this line.';
+                    }
+
                     $rows[] = [
                         'staff_id' => $member->id,
                         'advance_recovery' => '0.00',
-                        'tds' => $gross->percent($member->tds_rate ?? '0')->toString(),
-                        'note' => null,
+                        'tds' => $tds->toString(),
+                        'ssf_employee' => $ssfEmployee->toString(),
+                        'ssf_employer' => $base->percent($member->ssf_employer_rate ?? '0')->toString(),
+                        'cit_employee' => $citEmployee->toString(),
+                        'cit_employer' => $base->percent($member->cit_employer_rate ?? '0')->toString(),
+                        'note' => $note,
                         'items' => $items->map(fn (StaffPayItem $item): array => [
                             'pay_component_id' => $item->pay_component_id,
                             'amount' => $item->amount,
@@ -136,7 +177,7 @@ class PayrollDraft
      * and usable by the actor, so the form shows the problem now rather than
      * at posting.
      *
-     * @param  array{period_label: string, period_start: string, period_end: string, date: string, narration?: string|null, lines: array<int, array{staff_id: int|string, advance_recovery?: mixed, tds?: mixed, note?: string|null, items: array<int, array{pay_component_id: int|string, amount: mixed, note?: string|null}>}>}  $data
+     * @param  array{period_label: string, period_start: string, period_end: string, date: string, narration?: string|null, lines: array<int, array{staff_id: int|string, advance_recovery?: mixed, tds?: mixed, ssf_employee?: mixed, ssf_employer?: mixed, cit_employee?: mixed, cit_employer?: mixed, note?: string|null, items: array<int, array{pay_component_id: int|string, amount: mixed, note?: string|null}>}>}  $data
      *
      * @throws InvalidArgumentException
      */
@@ -246,7 +287,7 @@ class PayrollDraft
      * Writes lines and items, validating each, and stores the run's totals.
      * Each payslip is stamped with its staff member's current home branch.
      *
-     * @param  array<int, array{staff_id: int|string, advance_recovery?: mixed, tds?: mixed, note?: string|null, items: array<int, array{pay_component_id: int|string, amount: mixed, note?: string|null}>}>  $lines
+     * @param  array<int, array{staff_id: int|string, advance_recovery?: mixed, tds?: mixed, ssf_employee?: mixed, ssf_employer?: mixed, cit_employee?: mixed, cit_employer?: mixed, note?: string|null, items: array<int, array{pay_component_id: int|string, amount: mixed, note?: string|null}>}>  $lines
      */
     private static function writeLines(PayrollRun $run, array $lines, ?User $actor = null): void
     {
@@ -257,8 +298,20 @@ class PayrollDraft
         $totalGross = Money::zero();
         $totalRecovery = Money::zero();
         $totalTds = Money::zero();
+        $totalSsfEmployee = Money::zero();
+        $totalSsfEmployer = Money::zero();
+        $totalCitEmployee = Money::zero();
+        $totalCitEmployer = Money::zero();
         $seenStaff = [];
         $checkedBranches = [];
+
+        // One query for every named staff member, and (fetched on first need)
+        // one for the outstanding advances, instead of one of each per line.
+        $staffById = StaffMember::query()
+            ->whereIn('id', array_map(fn (array $line): int => (int) $line['staff_id'], array_values($lines)))
+            ->get()
+            ->keyBy('id');
+        $outstandingAdvances = null;
 
         foreach ($lines as $line) {
             $staffId = (int) $line['staff_id'];
@@ -269,7 +322,8 @@ class PayrollDraft
 
             $seenStaff[$staffId] = true;
 
-            $staff = StaffMember::query()->findOrFail($staffId);
+            // A missing id still raises the same ModelNotFoundException.
+            $staff = $staffById->get($staffId) ?? StaffMember::query()->findOrFail($staffId);
 
             if (! $staff->is_active) {
                 throw new InvalidArgumentException("{$staff->name} is inactive and cannot be paid in a new run.");
@@ -320,7 +374,11 @@ class PayrollDraft
                 throw new InvalidArgumentException("The advance recovery for {$staff->name} cannot exceed their gross pay.");
             }
 
-            if ($recovery->isPositive() && $recovery->isGreaterThan(StaffBalances::advance($staffId))) {
+            if ($recovery->isPositive()) {
+                $outstandingAdvances ??= StaffBalances::advances();
+            }
+
+            if ($recovery->isPositive() && $recovery->isGreaterThan($outstandingAdvances[$staffId] ?? Money::zero())) {
                 throw new InvalidArgumentException("The advance recovery for {$staff->name} is more than their outstanding advance.");
             }
 
@@ -334,6 +392,19 @@ class PayrollDraft
                 throw new InvalidArgumentException("The advance recovery and TDS for {$staff->name} together cannot exceed their gross pay.");
             }
 
+            $ssfEmployee = static::contribution($line, 'ssf_employee', 'employee SSF', $staff->name);
+            $ssfEmployer = static::contribution($line, 'ssf_employer', 'employer SSF', $staff->name);
+            $citEmployee = static::contribution($line, 'cit_employee', 'employee CIT', $staff->name);
+            $citEmployer = static::contribution($line, 'cit_employer', 'employer CIT', $staff->name);
+
+            // Employer amounts are extra employer cost, so only the employee
+            // share is deducted from (and capped by) gross pay.
+            $deductions = $recovery->plus($tds)->plus($ssfEmployee)->plus($citEmployee);
+
+            if ($deductions->isGreaterThan($gross)) {
+                throw new InvalidArgumentException("The advance recovery, TDS, employee SSF and employee CIT for {$staff->name} together cannot exceed their gross pay.");
+            }
+
             $payslip = $run->lines()->create([
                 'staff_id' => $staffId,
                 // The payslip follows the staff member's home branch.
@@ -341,7 +412,11 @@ class PayrollDraft
                 'gross' => $gross->toString(),
                 'advance_recovery' => $recovery->toString(),
                 'tds' => $tds->toString(),
-                'net' => $gross->minus($recovery)->minus($tds)->toString(),
+                'ssf_employee' => $ssfEmployee->toString(),
+                'ssf_employer' => $ssfEmployer->toString(),
+                'cit_employee' => $citEmployee->toString(),
+                'cit_employer' => $citEmployer->toString(),
+                'net' => $gross->minus($deductions)->toString(),
                 'note' => $line['note'] ?? null,
             ]);
 
@@ -356,13 +431,41 @@ class PayrollDraft
             $totalGross = $totalGross->plus($gross);
             $totalRecovery = $totalRecovery->plus($recovery);
             $totalTds = $totalTds->plus($tds);
+            $totalSsfEmployee = $totalSsfEmployee->plus($ssfEmployee);
+            $totalSsfEmployer = $totalSsfEmployer->plus($ssfEmployer);
+            $totalCitEmployee = $totalCitEmployee->plus($citEmployee);
+            $totalCitEmployer = $totalCitEmployer->plus($citEmployer);
         }
 
         $run->update([
             'total_gross' => $totalGross->toString(),
             'total_recovery' => $totalRecovery->toString(),
             'total_tds' => $totalTds->toString(),
-            'total_net' => $totalGross->minus($totalRecovery)->minus($totalTds)->toString(),
+            'total_ssf_employee' => $totalSsfEmployee->toString(),
+            'total_ssf_employer' => $totalSsfEmployer->toString(),
+            'total_cit_employee' => $totalCitEmployee->toString(),
+            'total_cit_employer' => $totalCitEmployer->toString(),
+            'total_net' => $totalGross->minus($totalRecovery)->minus($totalTds)
+                ->minus($totalSsfEmployee)->minus($totalCitEmployee)->toString(),
         ]);
+    }
+
+    /**
+     * One SSF / CIT amount from a submitted line: blank means zero, and it
+     * may never be negative.
+     *
+     * @param  array<string, mixed>  $line
+     *
+     * @throws InvalidArgumentException
+     */
+    private static function contribution(array $line, string $key, string $label, string $staffName): Money
+    {
+        $amount = Money::ofNullable($line[$key] ?? null) ?? Money::zero();
+
+        if ($amount->isNegative()) {
+            throw new InvalidArgumentException("The {$label} contribution for {$staffName} cannot be negative.");
+        }
+
+        return $amount;
     }
 }

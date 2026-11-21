@@ -32,6 +32,9 @@ const props = defineProps({
     canCancelSettlement: { type: Boolean, default: false },
     branchOptions: { type: Array, default: () => [] },
     defaultBranchId: { type: Number, default: null },
+    // Projects ({ id, code, name }) a settlement may be tagged with; empty
+    // hides the picker. Includes the bill's own project even when closed.
+    projects: { type: Array, default: () => [] },
 });
 
 const emit = defineEmits(['close', 'cancel-settlement']);
@@ -44,7 +47,20 @@ const settleForm = useForm({
     payment_mode: 'cash',
     bank_account_id: null,
     reference_number: '',
+    // Starts on the bill's project (see the watch below); null is "No project".
+    project_id: null,
 });
+
+// reka-ui's Select cannot hold an empty value, so "no project" is a
+// sentinel option, stored back as null.
+const NO_PROJECT = 'none';
+const projectOptions = computed(() => [
+    { value: NO_PROJECT, label: 'No project' },
+    ...props.projects.map((project) => ({
+        value: project.id,
+        label: project.code ? `${project.code} - ${project.name}` : project.name,
+    })),
+]);
 
 const { branchId, showPicker, withBranch } = useBranchField(
     () => props.branchOptions,
@@ -81,6 +97,7 @@ watch(
         settleForm.reset();
         settleForm.clearErrors();
         settleForm.amount = props.capitalPurchase.outstanding_amount;
+        settleForm.project_id = props.capitalPurchase.project_id ?? null;
 
         const billBranchId = props.capitalPurchase.branch_id ?? null;
         branchId.value = props.branchOptions.some((option) => option.id === billBranchId) ? billBranchId : props.defaultBranchId;
@@ -127,6 +144,16 @@ function submitSettle() {
                     <Label class="mb-1">Bank account <span class="text-danger">*</span></Label>
                     <Combobox :model-value="settleForm.bank_account_id" :options="settleAccountOptions" placeholder="Select bank account" @update:model-value="(v) => (settleForm.bank_account_id = v)" />
                     <p v-if="settleForm.errors.bank_account_id" class="mt-1 text-sm text-danger">{{ settleForm.errors.bank_account_id }}</p>
+                </div>
+                <div v-if="projects.length > 0">
+                    <Label for="cps-project" class="mb-1">Project</Label>
+                    <Select
+                        id="cps-project"
+                        :model-value="settleForm.project_id ?? NO_PROJECT"
+                        :options="projectOptions"
+                        @update:model-value="(v) => (settleForm.project_id = v === NO_PROJECT ? null : v)"
+                    />
+                    <p v-if="settleForm.errors.project_id" class="mt-1 text-sm text-danger" role="alert">{{ settleForm.errors.project_id }}</p>
                 </div>
                 <div>
                     <Label class="mb-1">Reference</Label>

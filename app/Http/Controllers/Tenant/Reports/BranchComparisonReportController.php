@@ -9,9 +9,11 @@ use App\Support\Branches\ActiveBranchSelection;
 use App\Support\Branches\BranchAccounts;
 use App\Support\Branches\BranchFilter;
 use App\Support\Money\Money;
+use App\Support\Reports\IncomeStatementStatement;
 use Brick\Math\BigDecimal;
 use Brick\Math\RoundingMode;
 use Illuminate\Http\Request;
+use Illuminate\Support\Str;
 use Inertia\Inertia;
 use Inertia\Response;
 use Maatwebsite\Excel\Facades\Excel;
@@ -38,7 +40,9 @@ use Maatwebsite\Excel\Facades\Excel;
  * - Purchases: the Expense rows of the "Purchase Accounts" group except
  *   Opening Stock (EXE9) and Stock Received from Branches (EXE11), net:
  *   Purchases Account less Purchase Return, plus Cost of Goods Sold (EXE10,
- *   manufactured goods sold) and any custom account in that group.
+ *   manufactured goods sold) and any custom account in that group, plus the
+ *   cost of sales accounts of the "Direct Expenses" group (Direct Wages,
+ *   Freight Inward and the like, codeless ones included).
  * - Net stock transfers: Stock Transferred (INI23) less Stock Received
  *   (EXE11). Inter-branch stock transfers are neither a sale of the sending
  *   branch nor a purchase of the receiving one, so they are kept out of
@@ -110,7 +114,7 @@ class BranchComparisonReportController extends Controller
                 "{$fiscalYear->name}: {$report['from']} to {$report['to']}",
                 ActiveBranchSelection::label(),
             ),
-            "branch-comparison-{$fiscalYear->name}.xlsx",
+            'branch-comparison-'.(Str::slug($fiscalYear->name) ?: (string) $fiscalYear->id).'.xlsx',
         );
     }
 
@@ -172,7 +176,7 @@ class BranchComparisonReportController extends Controller
      * One row per branch column of the income statement, Main first.
      *
      * @param  array<string, mixed>  $statement  AccountingReportController::incomeStatementData() with branch columns
-     * @param  array{sales: list<string>, purchases: list<string>}  $tradingCodes
+     * @param  array{sales: list<string>, purchases: list<string>, direct?: list<string>}  $tradingCodes
      * @return list<array<string, mixed>>
      */
     private function rows(array $statement, array $tradingCodes, BranchFilter $filter): array
@@ -200,7 +204,12 @@ class BranchComparisonReportController extends Controller
 
             $sales = $sum($statement['income'], $salesCodes);
             $closingStock = $sum($statement['income'], [FiscalYear::CLOSING_STOCK_CODE]);
-            $purchases = $sum($statement['expenses'], $purchaseCodes);
+            // A codeless Direct Expenses account is a trading expense in
+            // grossProfit() although no code list can name it.
+            $purchases = $sum($statement['expenses'], $purchaseCodes)->plus(Money::sum(array_map(
+                fn (array $row): string => $row['by_branch'][$branchId],
+                array_filter($statement['expenses'], fn (array $row): bool => IncomeStatementStatement::isCodelessDirectExpense($row)),
+            )));
             $openingStock = $sum($statement['expenses'], [FiscalYear::OPENING_STOCK_CODE]);
             $stockTransferred = $sum($statement['income'], [BranchAccounts::STOCK_TRANSFERRED_CODE]);
             $stockReceived = $sum($statement['expenses'], [BranchAccounts::STOCK_RECEIVED_CODE]);

@@ -1,5 +1,5 @@
 <script setup>
-import { computed, h, ref } from 'vue';
+import { computed, h, ref, watch } from 'vue';
 import { router } from '@inertiajs/vue3';
 import AppLayout from '@/layouts/AppLayout.vue';
 import { useLayoutChrome } from '@/composables/useLayoutChrome';
@@ -46,9 +46,19 @@ const props = defineProps({
 
 useLayoutChrome('Sales VAT Book');
 
-const from = ref(props.from);
-const to = ref(props.to);
-const storeId = ref(props.storeId);
+// Unsaved filter inputs; they follow the applied props after every visit.
+const fromInput = ref(props.from);
+const toInput = ref(props.to);
+const storeIdInput = ref(props.storeId);
+
+watch(
+    () => [props.from, props.to, props.storeId],
+    ([from, to, storeId]) => {
+        fromInput.value = from;
+        toInput.value = to;
+        storeIdInput.value = storeId;
+    },
+);
 
 const branchFilter = useBranchReportFilter(() => props.branchReport);
 const { label: branchWord } = useBranchLabel();
@@ -64,17 +74,17 @@ const rangeLabel = computed(
 
 const isLoading = ref(false);
 
-const hasActiveFilter = computed(() => storeId.value !== null);
+const hasActiveFilter = computed(() => props.storeId !== null || storeIdInput.value !== null);
 
 function resetFilters() {
-    storeId.value = null;
+    storeIdInput.value = null;
     applyFilter();
 }
 
 function applyFilter() {
     router.get(
         window.location.pathname,
-        { from: from.value, to: to.value, store_id: storeId.value ?? undefined, ...branchFilter.toQuery() },
+        { from: fromInput.value, to: toInput.value, store_id: storeIdInput.value ?? undefined, ...branchFilter.toQuery() },
         {
             preserveState: true,
             preserveScroll: true,
@@ -84,12 +94,12 @@ function applyFilter() {
     );
 }
 
-// Built from the currently-applied filters (not just whatever was last
-// submitted via Apply) so exporting always matches what's on screen.
+// Built from the applied props (what the server rendered), never the unsaved
+// inputs, so the file always matches the table on screen.
 const exportUrl = computed(() => {
-    const params = new URLSearchParams({ from: from.value, to: to.value });
-    if (storeId.value) {
-        params.set('store_id', storeId.value);
+    const params = new URLSearchParams({ from: props.from, to: props.to });
+    if (props.storeId) {
+        params.set('store_id', String(props.storeId));
     }
     branchFilter.appendTo(params);
 
@@ -175,15 +185,15 @@ const columns = computed(() => {
             <div class="flex flex-wrap items-end gap-3">
                 <div>
                     <Label class="mb-1">From date (BS)</Label>
-                    <NepaliDateInput v-model="from" />
+                    <NepaliDateInput v-model="fromInput" />
                 </div>
                 <div>
                     <Label class="mb-1">To date (BS)</Label>
-                    <NepaliDateInput v-model="to" />
+                    <NepaliDateInput v-model="toInput" />
                 </div>
                 <div class="w-56">
                     <Label class="mb-1">Store</Label>
-                    <Select v-model="storeId" :options="storeOptions" />
+                    <Select v-model="storeIdInput" :options="storeOptions" />
                 </div>
                 <Button variant="primary" tone="purple" :loading="isLoading" @click="applyFilter">Generate report</Button>
                 <Button v-if="hasActiveFilter" variant="secondary" tone="purple" :disabled="isLoading" @click="resetFilters">Reset</Button>

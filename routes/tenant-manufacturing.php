@@ -54,11 +54,11 @@ Route::name('tenant.')->group(function () {
         Route::get('/cogs-schedule', [ManufacturingReportController::class, 'cogsSchedule'])->middleware('can:manufacturing_reports.view')->name('cogs-schedule');
         Route::get('/reconciliation', [ManufacturingReportController::class, 'reconciliation'])->middleware('can:manufacturing_reports.view')->name('reconciliation');
         Route::get('/{report}/print', [ManufacturingReportController::class, 'print'])
-            ->middleware('can:manufacturing_reports.export')
+            ->middleware(['can:manufacturing_reports.view', 'can:manufacturing_reports.export'])
             ->where('report', 'stock-ledger|inventory-schedule|cogs-schedule|reconciliation')
             ->name('print');
         Route::get('/{report}/export', [ManufacturingReportController::class, 'export'])
-            ->middleware('can:manufacturing_reports.export')
+            ->middleware(['can:manufacturing_reports.view', 'can:manufacturing_reports.export'])
             ->where('report', 'stock-ledger|inventory-schedule|cogs-schedule|reconciliation')
             ->name('export');
     });

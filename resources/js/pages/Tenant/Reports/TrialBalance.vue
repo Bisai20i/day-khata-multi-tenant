@@ -9,6 +9,8 @@ import Button from '@/components/ui/Button.vue';
 import PageHeader from '@/components/ui/PageHeader.vue';
 import NepaliDateInput from '@/components/ui/NepaliDateInput.vue';
 import Label from '@/components/ui/Label.vue';
+import CheckboxField from '@/components/ui/CheckboxField.vue';
+import TrialBalanceSection from '@/components/accounting/TrialBalanceSection.vue';
 import { formatMoney } from '@/lib/money.js';
 import { formatBsDate } from '@/lib/format.js';
 import { formatBranchAmount } from '@/lib/branchReport.js';
@@ -38,7 +40,13 @@ const props = defineProps({
     totalPeriodCredit: { type: String, default: '0.00' },
     totalDebit: { type: String, default: '0.00' },
     totalCredit: { type: String, default: '0.00' },
+    // inBalance is the closing columns; opening and period are checked separately.
     inBalance: { type: Boolean, default: true },
+    openingInBalance: { type: Boolean, default: true },
+    periodInBalance: { type: Boolean, default: true },
+    hideZero: { type: Boolean, default: true },
+    // 'group' | 'subgroup' | 'ledger': how deep the server expands the hierarchy.
+    level: { type: String, default: 'ledger' },
     // Accounts with no head or group, listed under "Unclassified" (flags G-08).
     unclassifiedCount: { type: Number, default: 0 },
     // Branch filter and by-branch columns; null when the company has no branches.
@@ -54,10 +62,19 @@ const fiscalYearOptions = computed(() =>
     })),
 );
 
-const fiscalYear = ref(props.fiscalYearId);
-const from = ref(props.from);
-const to = ref(props.to);
-const accountId = ref(props.accountId);
+// Local inputs only; everything shown or linked reads the applied props.
+const fiscalYearInput = ref(props.fiscalYearId);
+const fromInput = ref(props.from);
+const toInput = ref(props.to);
+const accountIdInput = ref(props.accountId);
+const hideZeroInput = ref(props.hideZero);
+const levelInput = ref(props.level);
+
+const levelOptions = [
+    { value: 'group', label: 'Group' },
+    { value: 'subgroup', label: 'Sub group' },
+    { value: 'ledger', label: 'Ledger' },
+];
 
 const { label: branchWord } = useBranchLabel();
 const branchFilter = useBranchReportFilter(() => props.branchReport, { byBranch: true });
@@ -74,48 +91,114 @@ const accountOptions = computed(() => [
 
 // The window only ever means "inside the chosen year", so switching years
 // resets it rather than carrying dates that now fall outside.
-watch(fiscalYear, (value) => {
+watch(fiscalYearInput, (value) => {
+    if (value === props.fiscalYearId) {
+        return;
+    }
+
     const chosen = props.fiscalYears.find((year) => year.id === value);
-    from.value = chosen?.startDate ?? null;
-    to.value = chosen?.endDate ?? null;
+    fromInput.value = chosen?.startDate ?? null;
+    toInput.value = chosen?.endDate ?? null;
     apply();
+});
+
+watch(hideZeroInput, (value) => {
+    if (value !== props.hideZero) {
+        apply();
+    }
+});
+
+watch(levelInput, (value) => {
+    if (value !== props.level) {
+        apply();
+    }
+});
+
+// The server may clamp or replace what was sent; re-sync the inputs to what it applied.
+watch(
+    () => [props.fiscalYearId, props.from, props.to, props.accountId, props.hideZero, props.level],
+    () => {
+        fiscalYearInput.value = props.fiscalYearId;
+        fromInput.value = props.from;
+        toInput.value = props.to;
+        accountIdInput.value = props.accountId;
+        hideZeroInput.value = props.hideZero;
+        levelInput.value = props.level;
+    },
+);
+
+const hasActiveFilter = computed(() => props.accountId !== null || accountIdInput.value !== null);
+
+function clearFilters() {
+    accountIdInput.value = null;
+    apply();
+}
+
+// Opening, period and closing each balance on their own; the banner names the ones that do not.
+const isBalanced = computed(() => props.openingInBalance && props.periodInBalance && props.inBalance);
+const imbalanceLines = computed(() => {
+    const lines = [];
+
+    if (!props.openingInBalance) {
+        lines.push(`Opening: debit ${formatMoney(props.totalOpeningDebit)} against credit ${formatMoney(props.totalOpeningCredit)}.`);
+    }
+    if (!props.periodInBalance) {
+        lines.push(`Period: debit ${formatMoney(props.totalPeriodDebit)} against credit ${formatMoney(props.totalPeriodCredit)}.`);
+    }
+    if (!props.inBalance) {
+        lines.push(`Closing: debit ${formatMoney(props.totalDebit)} against credit ${formatMoney(props.totalCredit)}.`);
+    }
+
+    return lines;
 });
 
 function apply() {
     router.get(
         window.location.pathname,
         {
-            fiscal_year_id: fiscalYear.value ?? undefined,
-            from: from.value ?? undefined,
-            to: to.value ?? undefined,
-            account_id: accountId.value ?? undefined,
+            fiscal_year_id: fiscalYearInput.value ?? undefined,
+            from: fromInput.value ?? undefined,
+            to: toInput.value ?? undefined,
+            account_id: accountIdInput.value ?? undefined,
+            hide_zero: hideZeroInput.value ? 1 : 0,
+            level: levelInput.value,
             ...branchFilter.toQuery(),
         },
         { preserveState: true, preserveScroll: true },
     );
 }
 
-function printUrl() {
-    const params = new URLSearchParams({
-        fiscal_year_id: fiscalYear.value ?? '',
-        from: from.value ?? '',
-        to: to.value ?? '',
-        account_id: accountId.value ?? '',
-    });
+// Built from the applied props so Print and Export always match what is on screen.
+function reportUrl(action) {
+    const params = new URLSearchParams();
+    if (props.fiscalYearId !== null) {
+        params.set('fiscal_year_id', String(props.fiscalYearId));
+    }
+    if (props.from) {
+        params.set('from', props.from);
+    }
+    if (props.to) {
+        params.set('to', props.to);
+    }
+    if (props.accountId !== null) {
+        params.set('account_id', String(props.accountId));
+    }
+    params.set('hide_zero', props.hideZero ? '1' : '0');
+    params.set('level', props.level);
     branchFilter.appendTo(params);
-    return `/reports/trial-balance/print?${params.toString()}`;
+    return `/reports/trial-balance/${action}?${params.toString()}`;
 }
 
-function exportUrl() {
-    const params = new URLSearchParams({
-        fiscal_year_id: fiscalYear.value ?? '',
-        from: from.value ?? '',
-        to: to.value ?? '',
-        account_id: accountId.value ?? '',
-    });
-    branchFilter.appendTo(params);
-    return `/reports/trial-balance/export?${params.toString()}`;
-}
+// The branch scope the ledger drill-down must carry so its total matches the row.
+const ledgerBranchQuery = computed(() => {
+    const params = branchFilter.appendTo(new URLSearchParams());
+    params.delete('by_branch');
+
+    return params.toString();
+});
+
+const printUrl = () => reportUrl('print');
+const exportUrl = () => reportUrl('export');
 </script>
 
 <template>
@@ -144,26 +227,37 @@ function exportUrl() {
             <div class="flex flex-wrap items-end gap-3">
                 <div class="w-56">
                     <Label class="mb-1">Fiscal year</Label>
-                    <Select v-model="fiscalYear" :options="fiscalYearOptions" />
+                    <Select v-model="fiscalYearInput" :options="fiscalYearOptions" />
                 </div>
                 <div>
                     <Label class="mb-1">From date (BS)</Label>
-                    <NepaliDateInput v-model="from" />
+                    <NepaliDateInput v-model="fromInput" />
                 </div>
                 <div>
                     <Label class="mb-1">To date (BS)</Label>
-                    <NepaliDateInput v-model="to" />
+                    <NepaliDateInput v-model="toInput" />
                 </div>
                 <div class="w-64">
                     <Label class="mb-1">Account</Label>
-                    <Select v-model="accountId" :options="accountOptions" />
+                    <Select v-model="accountIdInput" :options="accountOptions" />
                 </div>
+                <div class="w-40">
+                    <Label class="mb-1">Level</Label>
+                    <Select v-model="levelInput" :options="levelOptions" />
+                </div>
+                <CheckboxField
+                    id="trial-balance-hide-zero"
+                    v-model="hideZeroInput"
+                    label="Hide zero-balance accounts"
+                    hint="Leave out accounts with no opening, period or closing balance."
+                    class="pb-2"
+                />
                 <Button variant="primary" tone="purple" @click="apply">Generate report</Button>
-                <Button v-if="accountId !== null" variant="secondary" tone="purple" @click="accountId = null; apply()">Reset</Button>
+                <Button v-if="hasActiveFilter" variant="secondary" tone="purple" @click="clearFilters">Reset</Button>
             </div>
-            <p v-if="from && to" class="mt-2 text-[12px] text-text-muted">
-                Showing report for {{ formatBsDate(from) }} to {{ formatBsDate(to) }} BS
-                <span class="text-text-muted">({{ from }} to {{ to }})</span>
+            <p v-if="props.from && props.to" class="mt-2 text-[12px] text-text-muted">
+                Showing report for {{ formatBsDate(props.from) }} to {{ formatBsDate(props.to) }} BS
+                <span class="text-text-muted">({{ props.from }} to {{ props.to }})</span>
             </p>
             <BranchReportNotes v-if="branchReport" :report="branchReport" hide-label />
         </Card>
@@ -182,20 +276,26 @@ function exportUrl() {
                     {{ unclassifiedCount === 1 ? 'it is' : 'they are' }} listed under Unclassified. Move {{ unclassifiedCount === 1 ? 'it' : 'them' }} into
                     the right group in the chart of accounts.
                 </p>
-                <p
-                    v-if="!inBalance"
-                    class="mb-3 rounded border border-danger px-3 py-2 text-[12.5px] font-semibold text-danger"
-                >
-                    This trial balance does not balance. Total debit {{ formatMoney(totalDebit) }} against total credit
-                    {{ formatMoney(totalCredit) }}.
-                </p>
+                <template v-if="props.accountId === null && heads.length > 0">
+                    <p
+                        v-if="isBalanced"
+                        class="mb-3 rounded border border-success bg-success-bg-soft px-3 py-2 text-[12.5px] font-semibold text-success"
+                        role="status"
+                    >
+                        Balanced: opening, period and closing debits all equal their credits.
+                    </p>
+                    <div v-else class="mb-3 rounded border border-danger px-3 py-2 text-[12.5px] font-semibold text-danger">
+                        <p>This trial balance does not balance:</p>
+                        <p v-for="line in imbalanceLines" :key="line">{{ line }}</p>
+                    </div>
+                </template>
 
                 <p v-if="hasBranchColumns && heads.length > 0" class="mb-2 text-[12px] text-text-muted">
-                    {{ branchWord }} columns show each account's closing balance in that {{ branchWord.toLowerCase() }}, as Dr or Cr.
+                    {{ branchWord() }} columns show each account's closing balance in that {{ branchWord('lower') }}, as Dr or Cr.
                 </p>
 
                 <p v-if="heads.length === 0" class="px-1 py-6 text-center text-[13px] text-text-muted">
-                    No transactions in this period. Try widening the date range.
+                    {{ props.hideZero ? 'No accounts with a balance in this period. Untick "Hide zero-balance accounts" to list every account, or widen the date range.' : 'No transactions in this period. Try widening the date range.' }}
                 </p>
 
                 <div v-else class="overflow-x-auto">
@@ -217,47 +317,18 @@ function exportUrl() {
                             />
                         </div>
 
-                        <template v-for="head in heads" :key="head.name">
-                            <div class="px-1 py-1.5 text-[13px] font-bold text-text-strong">{{ head.name }}</div>
-
-                            <template v-for="group in head.groups" :key="group.name">
-                                <div class="px-1 py-1 pl-4 text-[13px] font-semibold text-text-base">{{ group.name }}</div>
-
-                                <div
-                                    v-for="account in group.accounts"
-                                    :key="`acc-${account.id}`"
-                                    class="flex items-center px-1 py-1 pl-8 text-[13px] text-text-base"
-                                >
-                                    <div class="flex-1">{{ account.name }} <span class="text-text-muted">· {{ account.code ?? '-' }}</span></div>
-                                    <div class="w-28 text-right">{{ formatMoney(account.openingDebit) }}</div>
-                                    <div class="w-28 text-right">{{ formatMoney(account.openingCredit) }}</div>
-                                    <div class="w-28 text-right">{{ formatMoney(account.periodDebit) }}</div>
-                                    <div class="w-28 text-right">{{ formatMoney(account.periodCredit) }}</div>
-                                    <div class="w-28 text-right">{{ formatMoney(account.closingDebit) }}</div>
-                                    <div class="w-28 text-right">{{ formatMoney(account.closingCredit) }}</div>
-                                    <BranchReportCells v-if="hasBranchColumns" :columns="branchColumns" :values="account.by_branch" mode="drcr" />
-                                </div>
-
-                                <template v-for="subgroup in group.subgroups" :key="subgroup.name">
-                                    <div class="px-1 py-1 pl-8 text-[13px] font-semibold text-text-base">{{ subgroup.name }}</div>
-
-                                    <div
-                                        v-for="account in subgroup.accounts"
-                                        :key="`acc-${account.id}`"
-                                        class="flex items-center px-1 py-1 pl-12 text-[13px] text-text-base"
-                                    >
-                                        <div class="flex-1">{{ account.name }} <span class="text-text-muted">· {{ account.code ?? '-' }}</span></div>
-                                        <div class="w-28 text-right">{{ formatMoney(account.openingDebit) }}</div>
-                                        <div class="w-28 text-right">{{ formatMoney(account.openingCredit) }}</div>
-                                        <div class="w-28 text-right">{{ formatMoney(account.periodDebit) }}</div>
-                                        <div class="w-28 text-right">{{ formatMoney(account.periodCredit) }}</div>
-                                        <div class="w-28 text-right">{{ formatMoney(account.closingDebit) }}</div>
-                                        <div class="w-28 text-right">{{ formatMoney(account.closingCredit) }}</div>
-                                        <BranchReportCells v-if="hasBranchColumns" :columns="branchColumns" :values="account.by_branch" mode="drcr" />
-                                    </div>
-                                </template>
-                            </template>
-                        </template>
+                        <TrialBalanceSection
+                            v-for="head in heads"
+                            :key="head.name"
+                            :head="head"
+                            :columns="branchColumns"
+                            :has-branch-columns="hasBranchColumns"
+                            :can-ledger="can('account_ledger.view')"
+                            :fiscal-year-id="fiscalYearId"
+                            :from="props.from"
+                            :to="props.to"
+                            :ledger-query="ledgerBranchQuery"
+                        />
 
                         <div class="flex items-center px-1 pt-2 text-[13px] font-bold text-text-strong">
                             <div class="flex-1">Total</div>

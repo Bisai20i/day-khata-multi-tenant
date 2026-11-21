@@ -7,9 +7,11 @@ use App\Models\Account;
 use App\Models\CompanySetting;
 use App\Models\Customer;
 use App\Models\PrintLog;
+use App\Models\Project;
 use App\Models\Receipt;
 use App\Models\Sale;
 use App\Rules\AccountUnderHead;
+use App\Rules\OpenProject;
 use App\Support\AmountInWords;
 use App\Support\Branches\ActiveBranchSelection;
 use App\Support\Branches\BranchContext;
@@ -48,7 +50,7 @@ class ReceiptController extends Controller
         // the same query and payload as before.
         $isMultiBranch = ActiveBranchSelection::isMultiBranch($request);
         $receipts = BranchListFilter::apply(Receipt::query(), $request)
-            ->with(['customer:id,name', 'allocations.sale:id,total,invoice_number'])
+            ->with(['customer:id,name', 'allocations.sale:id,total,invoice_number', 'project:id,code,name'])
             ->when(BranchListFilter::columnVisible($request), fn ($query) => $query->with('branch:id,name,code'))
             ->orderByDesc('date')
             ->orderByDesc('id')
@@ -64,6 +66,9 @@ class ReceiptController extends Controller
             'customers' => Customer::query()->orderBy('name')->get(['id', 'name']),
             // Only balance sheet accounts (Assets, Liabilities, Capital), excluding party and control accounts.
             'accounts' => Receipt::settlementAccountQuery()->orderBy('name')->get(['id', 'code', 'name']),
+            // Optional cost centre for a new receipt (receipts are never
+            // edited, so only active projects are offered).
+            'projects' => Project::query()->active()->orderBy('name')->get(['id', 'code', 'name']),
             'outstandingSales' => Sale::query()
                 ->where('status', 'posted')
                 ->with('customer:id,name')
@@ -129,6 +134,8 @@ class ReceiptController extends Controller
             // Where the money came in (plan 12, BR07); Receipt::post()
             // checks it is active and accessible, default the posting branch.
             'branch_id' => ['nullable', 'integer', 'exists:branches,id'],
+            // Optional project (cost centre) stamped on every voucher line.
+            'project_id' => ['nullable', 'integer', new OpenProject],
             'allocations' => ['nullable', 'array'],
             'allocations.*.sale_id' => ['required_with:allocations', 'integer', 'distinct', 'exists:sales,id'],
             'allocations.*.amount' => ['required_with:allocations', 'numeric', 'decimal:0,2', 'min:0.01'],

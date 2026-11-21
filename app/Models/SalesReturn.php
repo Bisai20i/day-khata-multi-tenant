@@ -92,7 +92,7 @@ use InvalidArgumentException;
     'date', 'store_id', 'reason', 'taxable_amount', 'nontaxable_amount', 'vat_amount', 'vat_rate', 'tds_amount',
     'round_off', 'total', 'status', 'refund_account_id', 'refund_cash_amount', 'refund_bank_amount', 'refund_journal_voucher_id',
     'rejection_reason', 'created_by', 'cancelled_at', 'cancelled_by', 'cancel_reason', 'reversal_journal_voucher_id',
-    'branch_id',
+    'branch_id', 'project_id',
 ])]
 class SalesReturn extends Model
 {
@@ -143,6 +143,7 @@ class SalesReturn extends Model
             'refund_bank_amount' => Decimal::class.':2',
             'cancelled_at' => 'datetime',
             'branch_id' => 'integer',
+            'project_id' => 'integer',
         ];
     }
 
@@ -242,6 +243,16 @@ class SalesReturn extends Model
     }
 
     /**
+     * The project (cost centre) the credit note and its refund are tagged with.
+     *
+     * @return BelongsTo<Project, $this>
+     */
+    public function project(): BelongsTo
+    {
+        return $this->belongsTo(Project::class);
+    }
+
+    /**
      * What this document is called on screen and on paper. Only a return
      * that actually posted is a credit note with a number; a pending or
      * rejected request is neither (C7), which is why nothing may fall back
@@ -309,7 +320,7 @@ class SalesReturn extends Model
      * in step. The two credits always sum to the return's own `total`, so
      * the voucher balances whatever the share turns out to be.
      *
-     * @param  array{sale_id: int, date: string, reason?: string|null, refund_account_id?: int|null, store_id?: int|null, branch_id?: int|null, expected_total?: string|null}  $data
+     * @param  array{sale_id: int, date: string, reason?: string|null, refund_account_id?: int|null, store_id?: int|null, branch_id?: int|null, project_id?: int|null, expected_total?: string|null}  $data
      * @param  array<int, array{sale_line_id: int, quantity: string|float}>  $lines
      */
     public static function post(array $data, array $lines, User $actor): self
@@ -337,7 +348,7 @@ class SalesReturn extends Model
      * for a pending request's reserved quantity, so a later return can never
      * credit a paisa this one has claimed.
      *
-     * @param  array{sale_id: int, date: string, reason?: string|null, refund_account_id?: int|null, refund_cash_amount?: string|null, refund_bank_amount?: string|null, store_id?: int|null, branch_id?: int|null, expected_total?: string|null}  $data
+     * @param  array{sale_id: int, date: string, reason?: string|null, refund_account_id?: int|null, refund_cash_amount?: string|null, refund_bank_amount?: string|null, store_id?: int|null, branch_id?: int|null, project_id?: int|null, expected_total?: string|null}  $data
      * @param  array<int, array{sale_line_id: int, quantity: string|float, bonus_quantity?: string|float}>  $lines
      */
     public static function request(array $data, array $lines, User $actor): self
@@ -349,7 +360,7 @@ class SalesReturn extends Model
      * Shared body of post() and request(): everything except whether the
      * money side is written now or deferred to approve().
      *
-     * @param  array{sale_id: int, date: string, reason?: string|null, refund_account_id?: int|null, refund_cash_amount?: string|null, refund_bank_amount?: string|null, store_id?: int|null, branch_id?: int|null, expected_total?: string|null}  $data
+     * @param  array{sale_id: int, date: string, reason?: string|null, refund_account_id?: int|null, refund_cash_amount?: string|null, refund_bank_amount?: string|null, store_id?: int|null, branch_id?: int|null, project_id?: int|null, expected_total?: string|null}  $data
      * @param  array<int, array{sale_line_id: int, quantity: string|float, bonus_quantity?: string|float}>  $lines
      */
     private static function record(array $data, array $lines, User $actor, bool $post): self
@@ -374,6 +385,11 @@ class SalesReturn extends Model
             $refundAccountId = static::validatedRefundAccountId($data['refund_account_id'] ?? null);
             $refundCashAmount = static::validatedRefundSplitAmount($data['refund_cash_amount'] ?? null);
             $refundBankAmount = static::validatedRefundSplitAmount($data['refund_bank_amount'] ?? null);
+            // A linked return inherits its sale's project unless the request
+            // names one (an explicit null clears it).
+            $projectId = array_key_exists('project_id', $data)
+                ? static::projectIdOrNull($data['project_id'])
+                : static::projectIdOrNull($sale->project_id);
 
             $prepared = static::prepareLines($sale, $lines);
 
@@ -399,7 +415,7 @@ class SalesReturn extends Model
             }
 
             $voucher = $post
-                ? static::postCreditNote($sale, $prepared, $date, $data['reason'] ?? null, $actor, $placement->branchId, static::inventoryReturnLines($prepared['lines'], $costs))
+                ? static::postCreditNote($sale, $prepared, $date, $data['reason'] ?? null, $actor, $placement->branchId, static::inventoryReturnLines($prepared['lines'], $costs), $projectId)
                 : null;
 
             $salesReturn = static::create([
@@ -410,6 +426,7 @@ class SalesReturn extends Model
                 'date' => $date,
                 'store_id' => $storeId,
                 'branch_id' => $placement->branchId,
+                'project_id' => $projectId,
                 'reason' => $data['reason'] ?? null,
                 'taxable_amount' => $prepared['taxable'],
                 'nontaxable_amount' => $prepared['nontaxable'],
@@ -474,7 +491,7 @@ class SalesReturn extends Model
      * Goods only ever move INTO stock on a return, so - unlike a sale -
      * there is no negative-stock check to make.
      *
-     * @param  array{customer_id: int, date: string, reason?: string|null, store_id?: int|null, branch_id?: int|null, refund_account_id?: int|null, refund_cash_amount?: string|null, refund_bank_amount?: string|null, expected_total?: string|null}  $data
+     * @param  array{customer_id: int, date: string, reason?: string|null, store_id?: int|null, branch_id?: int|null, project_id?: int|null, refund_account_id?: int|null, refund_cash_amount?: string|null, refund_bank_amount?: string|null, expected_total?: string|null}  $data
      * @param  array<int, array{item_id: int, item_unit_id?: int|null, quantity: string|float, rate: string|float, bonus_quantity?: string|float}>  $lines
      */
     public static function postUnlinked(array $data, array $lines, User $actor): self
@@ -488,6 +505,7 @@ class SalesReturn extends Model
             $refundAccountId = static::validatedRefundAccountId($data['refund_account_id'] ?? null);
             $refundCashAmount = static::validatedRefundSplitAmount($data['refund_cash_amount'] ?? null);
             $refundBankAmount = static::validatedRefundSplitAmount($data['refund_bank_amount'] ?? null);
+            $projectId = static::projectIdOrNull($data['project_id'] ?? null);
 
             $settings = CompanySetting::current();
             $items = Item::with('units')->whereIn('id', collect($lines)->pluck('item_id'))->get()->keyBy('id');
@@ -541,6 +559,7 @@ class SalesReturn extends Model
                     'date' => $date,
                     'narration' => $data['reason'] ?? "Unlinked return from {$customer->name}",
                     'branch_id' => $placement->branchId,
+                    'project_id' => $projectId,
                 ],
                 $voucherLines,
                 $actor,
@@ -557,6 +576,7 @@ class SalesReturn extends Model
                 'date' => $date,
                 'store_id' => $storeId,
                 'branch_id' => $placement->branchId,
+                'project_id' => $projectId,
                 'reason' => $data['reason'] ?? null,
                 'taxable_amount' => $totals->taxableAmount,
                 'nontaxable_amount' => $totals->nontaxableAmount,
@@ -779,7 +799,7 @@ class SalesReturn extends Model
 
             // Posted into the branch stored at request time, whoever
             // approves: approval never moves a return to another branch.
-            $voucher = static::postCreditNote($sale, $prepared, $date, $salesReturn->reason, $actor, $salesReturn->branch_id, static::inventoryReturnLines($movementLines, $costs));
+            $voucher = static::postCreditNote($sale, $prepared, $date, $salesReturn->reason, $actor, $salesReturn->branch_id, static::inventoryReturnLines($movementLines, $costs), static::projectIdOrNull($salesReturn->project_id), allowInactiveProject: true);
 
             $salesReturn->update([
                 'journal_voucher_id' => $voucher->id,
@@ -803,7 +823,7 @@ class SalesReturn extends Model
             }
 
             $sale->loadMissing('customer');
-            static::postRefund($salesReturn, $sale->customer->account_id, $prepared['total']->minus($prepared['tds']), $date, $actor);
+            static::postRefund($salesReturn, $sale->customer->account_id, $prepared['total']->minus($prepared['tds']), $date, $actor, allowInactiveProject: true);
 
             return $salesReturn->fresh();
         });
@@ -1669,8 +1689,10 @@ class SalesReturn extends Model
      * @param  array{taxable: Money, nontaxable: Money, vat: Money, tds: Money, roundOff: Money, total: Money, lines: list<array{sale_line: SaleLine, net: Money}>}  $prepared
      * @param  int  $branchId  The return's own branch (its sale's), which the whole voucher posts into.
      * @param  list<array{account_id: int, debit: string, credit: string, narration: string}>  $inventoryLines  See inventoryReturnLines().
+     * @param  int|null  $projectId  The return's project, stamped on every line of the voucher.
+     * @param  bool  $allowInactiveProject  True when approving an already-requested return: it was validated against an open project when raised, so a project completed since must not strand it.
      */
-    private static function postCreditNote(Sale $sale, array $prepared, string $date, ?string $reason, User $actor, int $branchId, array $inventoryLines = []): JournalVoucher
+    private static function postCreditNote(Sale $sale, array $prepared, string $date, ?string $reason, User $actor, int $branchId, array $inventoryLines = [], ?int $projectId = null, bool $allowInactiveProject = false): JournalVoucher
     {
         $sale->loadMissing('customer');
 
@@ -1745,6 +1767,8 @@ class SalesReturn extends Model
                 'date' => $date,
                 'narration' => "Return against sale #{$sale->id}".($reason ? ": {$reason}" : ''),
                 'branch_id' => $branchId,
+                'project_id' => $projectId,
+                'allow_inactive_project' => $allowInactiveProject || JournalVoucher::isSameProject($projectId, $sale->project_id),
             ],
             $voucherLines,
             $actor,
@@ -1887,7 +1911,7 @@ class SalesReturn extends Model
      * here, because an unlinked return (postUnlinked()) has no Sale to read
      * a customer off at all (C7 "returns without a bill").
      */
-    private static function postRefund(self $salesReturn, int $customerAccountId, Money $customerCredit, string $date, User $actor): void
+    private static function postRefund(self $salesReturn, int $customerAccountId, Money $customerCredit, string $date, User $actor, bool $allowInactiveProject = false): void
     {
         if (! $customerCredit->isPositive()) {
             return;
@@ -1948,6 +1972,8 @@ class SalesReturn extends Model
                 // settles that branch's credit note, so both legs sit in the
                 // return's branch (plan 12, section 5.3 party-line rule).
                 'branch_id' => $salesReturn->branch_id,
+                'project_id' => static::projectIdOrNull($salesReturn->project_id),
+                'allow_inactive_project' => $allowInactiveProject || JournalVoucher::isSameProject($salesReturn->project_id, $salesReturn->sale?->project_id),
             ],
             $voucherLines,
             $actor,
@@ -2061,6 +2087,19 @@ class SalesReturn extends Model
         }
 
         return $money->toString();
+    }
+
+    /**
+     * A project id from a request field or a stored column, or null for "no
+     * project" (null or blank).
+     */
+    private static function projectIdOrNull(mixed $projectId): ?int
+    {
+        if ($projectId === null || $projectId === '') {
+            return null;
+        }
+
+        return (int) $projectId;
     }
 
     /**

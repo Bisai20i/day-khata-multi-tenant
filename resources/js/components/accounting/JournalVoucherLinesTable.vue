@@ -19,6 +19,9 @@ const props = defineProps({
     // Branches a line may be moved to (plan 12, BR12). Empty (the default,
     // and always for a single-branch company) hides the branch column.
     branchOptions: { type: Array, default: () => [] },
+    // Active projects ({ id, code, name }) a line may be tagged with. Empty
+    // (no projects set up) hides the project column.
+    projectOptions: { type: Array, default: () => [] },
 });
 
 defineEmits(['remove']);
@@ -53,9 +56,36 @@ function setLineBranch(index, value) {
     props.lines[index].branch_id = value === SAME_AS_VOUCHER ? null : value;
 }
 
-const LINE_GRID = computed(() => (showBranch.value
-    ? 'grid-cols-[1fr_150px_130px_130px_1fr_28px]'
-    : 'grid-cols-[1fr_130px_130px_1fr_28px]'));
+// Projects: a line left on "Same as voucher" (null) inherits the voucher's
+// project on the server (JournalVoucher::write()).
+const showProject = computed(() => props.projectOptions.length > 0);
+const lineProjectOptions = computed(() => [
+    { value: SAME_AS_VOUCHER, label: 'Same as voucher' },
+    ...props.projectOptions.map((project) => ({
+        value: project.id,
+        label: project.code ? `${project.code} - ${project.name}` : project.name,
+    })),
+]);
+
+function setLineProject(index, value) {
+    props.lines[index].project_id = value === SAME_AS_VOUCHER ? null : value;
+}
+
+// Static class strings so Tailwind's scanner sees every grid variant.
+const GRIDS = {
+    plain: 'grid-cols-[1fr_130px_130px_1fr_28px]',
+    branch: 'grid-cols-[1fr_150px_130px_130px_1fr_28px]',
+    project: 'grid-cols-[1fr_160px_130px_130px_1fr_28px]',
+    both: 'grid-cols-[1fr_150px_160px_130px_130px_1fr_28px]',
+};
+
+const LINE_GRID = computed(() => {
+    if (showBranch.value && showProject.value) return GRIDS.both;
+    if (showBranch.value) return GRIDS.branch;
+    if (showProject.value) return GRIDS.project;
+
+    return GRIDS.plain;
+});
 </script>
 
 <template>
@@ -76,6 +106,7 @@ const LINE_GRID = computed(() => (showBranch.value
             <div class="mb-2 grid gap-2 text-[10px] font-bold tracking-[.8px] text-text-muted uppercase" :class="LINE_GRID">
                 <span>Account</span>
                 <span v-if="showBranch">{{ branchLabel() }}</span>
+                <span v-if="showProject">Project</span>
                 <span class="text-right">Debit (Dr)</span>
                 <span class="text-right">Credit (Cr)</span>
                 <span>Line narration</span>
@@ -99,6 +130,15 @@ const LINE_GRID = computed(() => (showBranch.value
                         @update:model-value="(v) => setLineBranch(index, v)"
                     />
                     <p v-if="errors[`lines.${index}.branch_id`]" class="mt-1 text-xs text-danger">{{ errors[`lines.${index}.branch_id`] }}</p>
+                </div>
+                <div v-if="showProject">
+                    <Select
+                        :model-value="line.project_id ?? SAME_AS_VOUCHER"
+                        :options="lineProjectOptions"
+                        :aria-label="`Project of line ${index + 1}`"
+                        @update:model-value="(v) => setLineProject(index, v)"
+                    />
+                    <p v-if="errors[`lines.${index}.project_id`]" class="mt-1 text-xs text-danger">{{ errors[`lines.${index}.project_id`] }}</p>
                 </div>
                 <div>
                     <Input

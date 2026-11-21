@@ -8,7 +8,7 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 
-#[Fillable(['account_head_id', 'name'])]
+#[Fillable(['account_head_id', 'name', 'name_np'])]
 class AccountGroup extends Model
 {
     use HasFactory;
@@ -22,6 +22,7 @@ class AccountGroup extends Model
     public const PROTECTED_NAMES = [
         'Current Assets', 'Fixed Assets', 'Current Liabilities', 'Sales Accounts',
         'Indirect Income', 'Purchase Accounts', 'Indirect Expenses', 'Capital Account',
+        'Direct Expenses', 'Non-Current Liabilities',
     ];
 
     /**

@@ -51,6 +51,12 @@ class SaveStaffRequest extends FormRequest
             'is_active' => ['sometimes', 'boolean'],
             // Default salary TDS percentage the payroll draft pre-fills each payslip with.
             'tds_rate' => ['sometimes', 'nullable', 'numeric', 'decimal:0,2', 'between:0,100'],
+            // Default SSF / CIT percentages (employee and employer share) of
+            // the contribution base the payroll draft pre-fills each payslip with.
+            'ssf_employee_rate' => ['sometimes', 'nullable', 'numeric', 'decimal:0,2', 'between:0,100'],
+            'ssf_employer_rate' => ['sometimes', 'nullable', 'numeric', 'decimal:0,2', 'between:0,100'],
+            'cit_employee_rate' => ['sometimes', 'nullable', 'numeric', 'decimal:0,2', 'between:0,100'],
+            'cit_employer_rate' => ['sometimes', 'nullable', 'numeric', 'decimal:0,2', 'between:0,100'],
             'add_another' => ['sometimes', 'boolean'],
             // Home branch (plan 12, BR09). Existence, active and access are
             // checked by StaffController through DocumentBranch, which knows

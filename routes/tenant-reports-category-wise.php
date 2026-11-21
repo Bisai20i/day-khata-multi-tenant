@@ -19,6 +19,12 @@ use Illuminate\Support\Facades\Route;
 
 Route::name('tenant.reports.')->prefix('reports')->group(function () {
     Route::get('/sales-by-category', [CategoryWiseReportController::class, 'salesByCategory'])->middleware('can:sales_reports.view')->name('sales-by-category');
+    Route::get('/sales-by-category/items', [CategoryWiseReportController::class, 'salesByCategoryItems'])->middleware('can:sales_reports.view')->name('sales-by-category.items');
+    Route::get('/sales-by-category/export', [CategoryWiseReportController::class, 'salesByCategoryExport'])->middleware(['can:sales_reports.view', 'can:sales_reports.export'])->name('sales-by-category.export');
     Route::get('/purchase-by-category', [CategoryWiseReportController::class, 'purchaseByCategory'])->middleware('can:purchase_reports.view')->name('purchase-by-category');
+    Route::get('/purchase-by-category/items', [CategoryWiseReportController::class, 'purchaseByCategoryItems'])->middleware('can:purchase_reports.view')->name('purchase-by-category.items');
+    Route::get('/purchase-by-category/export', [CategoryWiseReportController::class, 'purchaseByCategoryExport'])->middleware(['can:purchase_reports.view', 'can:purchase_reports.export'])->name('purchase-by-category.export');
     Route::get('/stock-by-category', [CategoryWiseReportController::class, 'stockByCategory'])->middleware('can:stock_reports.view')->name('stock-by-category');
+    Route::get('/stock-by-category/items', [CategoryWiseReportController::class, 'stockByCategoryItems'])->middleware('can:stock_reports.view')->name('stock-by-category.items');
+    Route::get('/stock-by-category/export', [CategoryWiseReportController::class, 'stockByCategoryExport'])->middleware(['can:stock_reports.view', 'can:stock_reports.export'])->name('stock-by-category.export');
 });

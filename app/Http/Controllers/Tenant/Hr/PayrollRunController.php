@@ -158,6 +158,10 @@ class PayrollRunController extends Controller
                 'gross' => $line->gross,
                 'advance_recovery' => $line->advance_recovery,
                 'tds' => $line->tds,
+                'ssf_employee' => $line->ssf_employee,
+                'ssf_employer' => $line->ssf_employer,
+                'cit_employee' => $line->cit_employee,
+                'cit_employer' => $line->cit_employer,
                 'net' => $line->net,
                 'note' => $line->note,
                 'paid' => ($paid[$line->id] ?? Money::zero())->toString(),
@@ -170,8 +174,8 @@ class PayrollRunController extends Controller
                 ])->values(),
             ])->values(),
             // Only a draft is editable, so only a draft needs the pickers.
-            'components' => $isDraft ? PayComponent::query()->where('is_active', true)->orderBy('sort_order')->get(['id', 'code', 'name']) : [],
-            'staffOptions' => $isDraft ? StaffMember::query()->active()->orderBy('name')->get(['id', 'staff_code', 'name', 'tds_rate']) : [],
+            'components' => $isDraft ? PayComponent::query()->where('is_active', true)->orderBy('sort_order')->get(['id', 'code', 'name', 'is_contribution_base']) : [],
+            'staffOptions' => $isDraft ? StaffMember::query()->active()->orderBy('name')->get(['id', 'staff_code', 'name', 'tds_rate', 'ssf_employee_rate', 'ssf_employer_rate', 'cit_employee_rate', 'cit_employer_rate']) : [],
             'advanceBalances' => $isDraft
                 ? collect(StaffBalances::advances())->map(fn (Money $amount): string => $amount->toString())
                 : (object) [],
@@ -263,6 +267,10 @@ class PayrollRunController extends Controller
             'total_gross' => $run->total_gross,
             'total_recovery' => $run->total_recovery,
             'total_tds' => $run->total_tds,
+            'total_ssf_employee' => $run->total_ssf_employee,
+            'total_ssf_employer' => $run->total_ssf_employer,
+            'total_cit_employee' => $run->total_cit_employee,
+            'total_cit_employer' => $run->total_cit_employer,
             'total_net' => $run->total_net,
         ];
     }

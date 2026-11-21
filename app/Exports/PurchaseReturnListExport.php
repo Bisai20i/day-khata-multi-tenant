@@ -9,13 +9,14 @@ use Maatwebsite\Excel\Concerns\FromCollection;
 use Maatwebsite\Excel\Concerns\WithColumnFormatting;
 use Maatwebsite\Excel\Concerns\WithHeadings;
 use Maatwebsite\Excel\Concerns\WithMapping;
+use Maatwebsite\Excel\Concerns\WithStrictNullComparison;
 use PhpOffice\PhpSpreadsheet\Style\NumberFormat;
 
 /**
  * Purchase return (debit note) list Excel export (item 8) - see
  * PurchaseListExport's docblock for the shared rationale.
  */
-class PurchaseReturnListExport implements FromCollection, WithColumnFormatting, WithHeadings, WithMapping
+class PurchaseReturnListExport implements FromCollection, WithColumnFormatting, WithHeadings, WithMapping, WithStrictNullComparison
 {
     /**
      * @param  Collection<int, array<string, mixed>>  $rows

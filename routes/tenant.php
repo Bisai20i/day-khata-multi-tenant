@@ -63,6 +63,7 @@ Route::middleware([
         require base_path('routes/tenant-stores.php');
         require base_path('routes/tenant-branches.php');
         require base_path('routes/tenant-areas.php');
+        require base_path('routes/tenant-projects.php');
         require base_path('routes/tenant-ledger.php');
         require base_path('routes/tenant-sales.php');
         require base_path('routes/tenant-purchase.php');
@@ -78,11 +79,15 @@ Route::middleware([
         require base_path('routes/tenant-reports-inventory.php');
         require base_path('routes/tenant-reports-tds.php');
         require base_path('routes/tenant-reports-stock-valuation.php');
+        require base_path('routes/tenant-reports-stock-potential-profit.php');
         require base_path('routes/tenant-reports-stock-ageing.php');
         require base_path('routes/tenant-reports-item-wise-sales.php');
         require base_path('routes/tenant-reports-item-wise-purchase.php');
+        require base_path('routes/tenant-reports-party-wise-sales.php');
+        require base_path('routes/tenant-reports-party-wise-purchase.php');
         require base_path('routes/tenant-reports-category-wise.php');
         require base_path('routes/tenant-reports-vat-summary.php');
+        require base_path('routes/tenant-reports-vat-register.php');
         require base_path('routes/tenant-reports-stock-movement-register.php');
         require base_path('routes/tenant-reports-sales-with-note.php');
         require base_path('routes/tenant-reports-damage-lost-stock.php');

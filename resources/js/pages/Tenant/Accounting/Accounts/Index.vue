@@ -167,6 +167,7 @@ const form = useForm({
     parent_account_id: null,
     code: '',
     name: '',
+    name_np: '',
     phone: '',
     address: '',
 });
@@ -200,6 +201,7 @@ function openEdit(account) {
     form.clearErrors();
     form.code = account.code ?? '';
     form.name = account.name;
+    form.name_np = account.name_np ?? '';
     form.phone = account.phone ?? '';
     form.address = account.address ?? '';
     form.account_group_id = account.account_group_id;
@@ -519,6 +521,15 @@ const columns = [
                     <Label for="name" class="mb-1">Name <span class="text-danger">*</span></Label>
                     <Input id="name" v-model="form.name" type="text" placeholder="e.g. Cash in Hand" required />
                     <p v-if="form.errors.name" class="mt-1 text-sm text-danger">{{ form.errors.name }}</p>
+                </div>
+
+                <div>
+                    <div class="mb-1 flex items-center gap-1">
+                        <Label for="name_np">Name (Nepali)</Label>
+                        <InfoTip text="Optional. Shown on financial statements when the Nepali display is turned on." />
+                    </div>
+                    <Input id="name_np" v-model="form.name_np" type="text" placeholder="e.g. हातमा नगद" />
+                    <p v-if="form.errors.name_np" class="mt-1 text-sm text-danger">{{ form.errors.name_np }}</p>
                 </div>
 
                 <div>

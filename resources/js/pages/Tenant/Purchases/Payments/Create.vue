@@ -11,6 +11,7 @@ import InfoTip from '@/components/ui/InfoTip.vue';
 import NepaliDateInput from '@/components/ui/NepaliDateInput.vue';
 import Label from '@/components/ui/Label.vue';
 import BranchBadge from '@/components/branch/BranchBadge.vue';
+import PurchaseSideProjectField from '@/components/purchases/PurchaseSideProjectField.vue';
 import { useBranchField } from '@/composables/useBranchField';
 import { compareMoney, formatMoney, parseMoney, sumMoney } from '@/lib/money';
 import { formatBsDate, todayInKathmandu } from '@/lib/format';
@@ -22,6 +23,8 @@ const props = defineProps({
     outstandingPurchases: { type: Array, default: () => [] },
     branchOptions: { type: Array, default: () => [] },
     defaultBranchId: { type: Number, default: null },
+    // Active projects for the optional project picker.
+    projects: { type: Array, default: () => [] },
 });
 
 const emit = defineEmits(['cancel', 'posted']);
@@ -50,6 +53,8 @@ const form = useForm({
     bank_account_id: null,
     reference_number: '',
     narration: '',
+    // Optional project: every ledger line of the payment is tagged with it.
+    project_id: null,
 });
 
 const showBankAccount = computed(() => form.payment_mode === 'bank');
@@ -203,6 +208,13 @@ function submit() {
                     <Label class="mb-1">Reference number</Label>
                     <Input v-model="form.reference_number" type="text" maxlength="255" placeholder="Cheque or transfer number (optional)" />
                 </div>
+                <PurchaseSideProjectField
+                    v-if="projects.length > 0"
+                    id="payment-project"
+                    v-model="form.project_id"
+                    :projects="projects"
+                    :error="form.errors.project_id"
+                />
                 <div class="sm:col-span-3">
                     <Label class="mb-1">Notes (narration)</Label>
                     <Input v-model="form.narration" type="text" maxlength="255" placeholder="Optional note kept with this payment" />

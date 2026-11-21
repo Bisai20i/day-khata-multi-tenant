@@ -3,6 +3,7 @@
 namespace App\Http\Controllers\Tenant\Reports;
 
 use App\Enums\StockMovementType;
+use App\Exports\StockAgeingExport;
 use App\Http\Controllers\Controller;
 use App\Models\Item;
 use App\Models\ItemStockMovement;
@@ -13,11 +14,15 @@ use App\Support\Branches\BranchStock;
 use App\Support\Inventory\StockCosting;
 use App\Support\Money\Money;
 use App\Support\Money\Quantity;
+use App\Support\Reports\StockItemFilters;
 use Carbon\CarbonInterface;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Http\Request;
 use Illuminate\Support\Collection;
 use Inertia\Inertia;
 use Inertia\Response;
+use Maatwebsite\Excel\Facades\Excel;
+use Symfony\Component\HttpFoundation\BinaryFileResponse;
 
 /**
  * Stock (item) ageing: how long the stock on hand has been sitting, bucketed
@@ -52,22 +57,74 @@ use Inertia\Response;
  * from a store outside them is a lot, one between their own stores is not.
  * A `store_id` outside them is dropped. Not multi-branch: unchanged, plus
  * `branchReport: null`.
+ *
+ * Filters (legacy group / sub-group / brand / item): StockItemFilters narrows
+ * the items before ageing. `oldestDays` is the age of the oldest receipt still
+ * on hand for the item (null when no dated lot is on hand). index() and
+ * export() share report() so the download always matches the screen.
  */
 class StockAgeingReportController extends Controller
 {
     private const BUCKETS = ['d0_30', 'd31_60', 'd61_90', 'd90_plus'];
 
+    /** Item ids per inbound-lot query, under SQLite's bound-parameter limit. */
+    private const ITEM_CHUNK = 500;
+
     public function index(Request $request): Response
     {
+        $report = $this->report($request);
+
+        return Inertia::render('Tenant/Reports/StockAgeing', [
+            ...$report['page'],
+            ...StockItemFilters::options(),
+            'categoryId' => $report['filters']['item_category_id'] ?? null,
+            'subcategoryId' => $report['filters']['item_subcategory_id'] ?? null,
+            'brandId' => $report['filters']['brand_id'] ?? null,
+            'search' => $report['filters']['search'] ?? '',
+            'stores' => BranchStock::storeOptions($report['branchFilter'], Store::where('is_active', true))->orderBy('name')->get(['id', 'name']),
+            'branchReport' => $report['branchFilter']->payload(),
+        ]);
+    }
+
+    /**
+     * Same rows and totals as index(), streamed as a real .xlsx.
+     */
+    public function export(Request $request): BinaryFileResponse
+    {
+        $report = $this->report($request);
+        $branchFilter = $report['branchFilter'];
+
+        return Excel::download(
+            new StockAgeingExport(
+                $report['page']['rows']->all(),
+                $report['page']['totals'],
+                $report['page']['asOf'],
+                $branchFilter->isActive() ? $branchFilter->label() : null,
+            ),
+            "stock-ageing-{$report['page']['asOf']}.xlsx",
+        );
+    }
+
+    /**
+     * @return array{page: array<string, mixed>, filters: array<string, int|string>, branchFilter: BranchFilter}
+     */
+    private function report(Request $request): array
+    {
+        $request->validate([
+            'as_of' => ['nullable', 'date_format:Y-m-d'],
+            'store_id' => ['nullable', 'integer', 'exists:stores,id'],
+            ...StockItemFilters::rules(),
+        ]);
+
         $asOfDate = AsOfDate::resolveCarbon($request->input('as_of'));
         $asOf = $asOfDate->toDateString();
         $filter = BranchFilter::fromRequest($request);
+        $filters = StockItemFilters::fromRequest($request);
         $storeId = $request->integer('store_id') ?: null;
-        $storeId = $storeId !== null && Store::query()->whereKey($storeId)->exists() ? $storeId : null;
         $storeId = $filter->allowedStoreId($storeId);
         $stockScope = $filter->stockScope($storeId);
 
-        $valuation = BranchStock::valuationRows($filter, $asOf, $storeId);
+        $valuation = BranchStock::valuationRows($filter, $asOf, $storeId, $filters);
 
         $positiveIds = $valuation
             ->filter(fn (array $row) => $row['quantity']->isPositive())
@@ -84,6 +141,7 @@ class StockAgeingReportController extends Controller
             $quantity = $row['quantity'];
             $remaining = $quantity->isPositive() ? $quantity : Quantity::zero();
             $bucketQty = array_fill_keys(self::BUCKETS, Quantity::zero());
+            $oldestDays = null;
 
             foreach ($lots[$row['item_id']] ?? [] as $lot) {
                 if (! $remaining->isPositive()) {
@@ -95,6 +153,7 @@ class StockAgeingReportController extends Controller
                 $bucket = $this->bucketFor($days);
                 $bucketQty[$bucket] = $bucketQty[$bucket]->plus($take);
                 $remaining = $remaining->minus($take);
+                $oldestDays = $oldestDays === null ? $days : max($oldestDays, $days);
             }
 
             // Whatever no lot explains: all of a negative quantity, or a
@@ -111,6 +170,7 @@ class StockAgeingReportController extends Controller
                 'hsCode' => $row['hs_code'],
                 'quantity' => $quantity->toString(),
                 'value' => $row['value']->toString(),
+                'oldestDays' => $oldestDays,
                 'unagedQuantity' => $unagedQty->toString(),
                 'unagedValue' => $values[4]->toString(),
             ];
@@ -135,21 +195,31 @@ class StockAgeingReportController extends Controller
             $totals[$key] = Money::sum($rows->map(fn (array $r) => Money::of($r[$key])))->toString();
         }
 
-        return Inertia::render('Tenant/Reports/StockAgeing', [
-            'asOf' => $asOf,
-            'rows' => $rows,
-            'totals' => $totals,
-            // The branch view's total is its own rows' (same convention);
-            // otherwise the figure the report always showed.
-            'valuationTotal' => (is_array($stockScope)
-                ? Money::sum($valuation->map(fn (array $row) => $row['value']))
-                : StockCosting::totalClosingValue($asOf, $storeId))->toString(),
-            'negativeStockCount' => $rows->filter(fn (array $r) => Quantity::of($r['quantity'])->isNegative())->count(),
-            'excludedNonStockCount' => Item::query()->where('is_stockable', false)->count(),
-            'stores' => BranchStock::storeOptions($filter, Store::where('is_active', true))->orderBy('name')->get(['id', 'name']),
-            'storeId' => $storeId,
-            'branchReport' => $filter->payload(),
-        ]);
+        // The branch view's and a filtered view's total is its own rows'
+        // (same convention); otherwise the figure the report always showed.
+        $valuationTotal = is_array($stockScope) || $filters !== []
+            ? Money::sum($valuation->map(fn (array $row) => $row['value']))
+            : StockCosting::totalClosingValue($asOf, $storeId);
+
+        return [
+            'filters' => $filters,
+            'branchFilter' => $filter,
+            'page' => [
+                'asOf' => $asOf,
+                'rows' => $rows,
+                'totals' => $totals,
+                'valuationTotal' => $valuationTotal->toString(),
+                'negativeStockCount' => $rows->filter(fn (array $r) => Quantity::of($r['quantity'])->isNegative())->count(),
+                'excludedNonStockCount' => Item::query()
+                    ->where('is_stockable', false)
+                    ->when(isset($filters['item_category_id']), fn (Builder $q) => $q->where('item_category_id', $filters['item_category_id']))
+                    ->when(isset($filters['item_subcategory_id']), fn (Builder $q) => $q->where('item_subcategory_id', $filters['item_subcategory_id']))
+                    ->when(isset($filters['brand_id']), fn (Builder $q) => $q->where('brand_id', $filters['brand_id']))
+                    ->when(isset($filters['search']), fn (Builder $q) => $q->where('name', 'like', '%'.$filters['search'].'%'))
+                    ->count(),
+                'storeId' => $storeId,
+            ],
+        ];
     }
 
     private function bucketFor(int $days): string
@@ -210,19 +280,24 @@ class StockAgeingReportController extends Controller
 
         $lots = [];
 
-        ItemStockMovement::query()
-            ->whereIn('item_id', $itemIds)
-            ->whereIn('movement_type', $inTypes)
-            ->where('cancelled', false)
-            ->whereDate('date', '<=', $asOf)
-            ->when(is_int($storeId), fn ($query) => $query->where('store_id', $storeId))
-            ->when(is_array($storeId), fn ($query) => BranchStock::onlyCrossingTransfers($query->whereIn('store_id', $storeId), $storeId))
-            ->orderByDesc('date')
-            ->orderByDesc('id')
-            ->get(['id', 'item_id', 'quantity', 'date'])
-            ->each(function (ItemStockMovement $movement) use (&$lots): void {
-                $lots[$movement->item_id][] = ['date' => $movement->date, 'quantity' => Quantity::of($movement->quantity)];
-            });
+        // Chunked by item so the whereIn stays under SQLite's bound-parameter
+        // limit and each query hydrates only one chunk's models. Each item's
+        // lots all fall in one chunk, so its newest-first order holds.
+        foreach (array_chunk($itemIds, self::ITEM_CHUNK) as $chunk) {
+            ItemStockMovement::query()
+                ->whereIn('item_id', $chunk)
+                ->whereIn('movement_type', $inTypes)
+                ->where('cancelled', false)
+                ->whereDate('date', '<=', $asOf)
+                ->when(is_int($storeId), fn ($query) => $query->where('store_id', $storeId))
+                ->when(is_array($storeId), fn ($query) => BranchStock::onlyCrossingTransfers($query->whereIn('store_id', $storeId), $storeId))
+                ->orderByDesc('date')
+                ->orderByDesc('id')
+                ->get(['id', 'item_id', 'quantity', 'date'])
+                ->each(function (ItemStockMovement $movement) use (&$lots): void {
+                    $lots[$movement->item_id][] = ['date' => $movement->date, 'quantity' => Quantity::of($movement->quantity)];
+                });
+        }
 
         return $lots;
     }

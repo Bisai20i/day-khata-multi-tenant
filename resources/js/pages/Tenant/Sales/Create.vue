@@ -23,6 +23,8 @@ import PosEstimateModal from '@/components/pos/PosEstimateModal.vue';
 import { useSaleEstimate } from '@/composables/useSaleEstimate';
 import { useToast } from '@/composables/useToast';
 import Badge from '@/components/ui/Badge.vue';
+import Combobox from '@/components/ui/Combobox.vue';
+import Label from '@/components/ui/Label.vue';
 import { useDocumentBranchStore } from '@/composables/useDocumentBranchStore';
 
 /**
@@ -45,6 +47,9 @@ const props = defineProps({
     tdsAccounts: { type: Array, default: () => [] },
     stores: { type: Array, default: () => [] },
     agents: { type: Array, default: () => [] },
+    // Active projects (cost centres): { id, code, name }. Optional; the
+    // chosen one tags every line of the sale's voucher.
+    projects: { type: Array, default: () => [] },
     // Saved boilerplate lines a cashier can drop into Narration
     // (audit section 4 polish, "note templates") - see SaleController
     // ::storeNoteTemplate()/destroyNoteTemplate().
@@ -118,6 +123,7 @@ function defaultFormData() {
         tds_amount: '',
         agent_id: null,
         commission_amount: '',
+        project_id: null,
         narration: '',
         // Items only ever enter the bill through the "Add item" staging
         // panel (SaleCreateStagingRow) - no starter blank row here.
@@ -131,6 +137,7 @@ const form = useForm(
         ? {
               round_off: '',
               invoice_type: props.invoiceSettings?.active_invoice_type ?? 'full',
+              project_id: null,
               ...props.initialDraft,
           }
         : defaultFormData(),
@@ -161,6 +168,11 @@ const invoiceTypeDetails = computed(() => {
             };
     }
 });
+
+const projectOptions = computed(() => [
+    { value: null, label: 'No project' },
+    ...props.projects.map((project) => ({ value: project.id, label: project.code ? `${project.code} - ${project.name}` : project.name })),
+]);
 
 const roundOffEnabled = computed(() => !!props.invoiceSettings.round_off_enabled);
 
@@ -355,6 +367,20 @@ function submit(print = false, copies = 1) {
             :show-bank-field="showBankField"
             :show-partial-fields="showPartialFields"
         />
+
+        <div v-if="projects.length > 0" class="grid grid-cols-1 gap-4 md:grid-cols-3">
+            <div>
+                <Label for="sale-project" class="mb-1">Project</Label>
+                <Combobox
+                    id="sale-project"
+                    :model-value="form.project_id"
+                    :options="projectOptions"
+                    placeholder="No project"
+                    @update:model-value="(v) => (form.project_id = v)"
+                />
+                <p v-if="form.errors.project_id" class="mt-1 text-sm text-danger">{{ form.errors.project_id }}</p>
+            </div>
+        </div>
 
         <!-- Toggled from the sticky bar below (left side, chevron
              indicator) - the panel itself still renders here, directly

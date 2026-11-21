@@ -59,6 +59,8 @@ const props = defineProps({
     // Branch pickers of the manual journal (BranchFormOptions::props()).
     branchOptions: { type: Array, default: () => [] },
     defaultBranchId: { type: Number, default: null },
+    // Active projects for the create forms' project pickers.
+    projects: { type: Array, default: () => [] },
 });
 
 const page = usePage();
@@ -475,6 +477,7 @@ function iconAction(action) {
                 :correction-fiscal-year="correctionFiscalYear"
                 :branch-options="branchOptions"
                 :default-branch-id="defaultBranchId"
+                :projects="projects"
                 @cancel="showCreateForm = false"
                 @posted="showCreateForm = false"
             />
@@ -485,6 +488,7 @@ function iconAction(action) {
                 :accounts="accounts"
                 :branch-options="branchOptions"
                 :default-branch-id="defaultBranchId"
+                :projects="projects"
                 @cancel="showCashBankForm = false"
                 @posted="showCashBankForm = false"
             />
@@ -657,6 +661,7 @@ function iconAction(action) {
                     <thead>
                         <tr class="border-b border-border-soft text-left text-[11px] font-bold tracking-[.6px] text-text-muted uppercase">
                             <th class="pb-2 font-bold">Account</th>
+                            <th v-if="selectedVoucher.lines.some((line) => line.project)" class="pb-2 font-bold">Project</th>
                             <th class="pb-2 text-right font-bold">Debit</th>
                             <th class="pb-2 text-right font-bold">Credit</th>
                             <th class="pb-2 font-bold">Narration</th>
@@ -667,6 +672,7 @@ function iconAction(action) {
                             <td class="py-2 text-text-base">
                                 {{ line.account?.code ? `${line.account.code} - ${line.account.name}` : line.account?.name }}
                             </td>
+                            <td v-if="selectedVoucher.lines.some((l) => l.project)" class="py-2 text-text-muted">{{ line.project?.name ?? '-' }}</td>
                             <td class="py-2 text-right [font-variant-numeric:tabular-nums]">{{ formatMoney(line.debit) }}</td>
                             <td class="py-2 text-right [font-variant-numeric:tabular-nums]">{{ formatMoney(line.credit) }}</td>
                             <td class="py-2 text-text-muted">{{ line.narration ?? '-' }}</td>

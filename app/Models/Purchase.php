@@ -60,6 +60,7 @@ use InvalidArgumentException;
     'nontaxable_amount', 'vat_rate', 'force_non_taxable', 'vat_amount', 'total', 'round_off', 'cash_amount',
     'bank_amount', 'tds_account_id', 'tds_rate', 'tds_amount', 'narration', 'status',
     'created_by', 'cancelled_at', 'cancelled_by', 'cancel_reason', 'reversal_journal_voucher_id', 'branch_id',
+    'project_id',
 ])]
 class Purchase extends Model
 {
@@ -86,7 +87,18 @@ class Purchase extends Model
             'tds_rate' => Decimal::class.':2',
             'tds_amount' => Decimal::class.':2',
             'branch_id' => 'integer',
+            'project_id' => 'integer',
         ];
+    }
+
+    /**
+     * The project (cost centre) every ledger line of this bill is tagged with.
+     *
+     * @return BelongsTo<Project, $this>
+     */
+    public function project(): BelongsTo
+    {
+        return $this->belongsTo(Project::class);
     }
 
     /**
@@ -305,7 +317,7 @@ class Purchase extends Model
      * sale-purchase-ux.md. Omitted, this defaults to FiscalYear::current()
      * exactly as before.
      *
-     * @param  array{supplier_id: int, bill_number?: string, pan_number?: string, chalani_number?: string|null, date: string, payment_mode: string, bank_account_id?: int, store_id?: int|null, branch_id?: int|null, discount?: mixed, discount_type?: string, vat_rate?: mixed, force_non_taxable?: bool, cash_amount?: mixed, bank_amount?: mixed, tds_account_id?: int, tds_rate?: mixed, tds_amount?: mixed, round_off?: mixed, expected_total?: string|null, narration?: string, fiscal_year_id?: int, reason?: string|null}  $data
+     * @param  array{supplier_id: int, bill_number?: string, pan_number?: string, chalani_number?: string|null, date: string, payment_mode: string, bank_account_id?: int, store_id?: int|null, branch_id?: int|null, discount?: mixed, discount_type?: string, vat_rate?: mixed, force_non_taxable?: bool, cash_amount?: mixed, bank_amount?: mixed, tds_account_id?: int, tds_rate?: mixed, tds_amount?: mixed, round_off?: mixed, expected_total?: string|null, narration?: string, fiscal_year_id?: int, reason?: string|null, project_id?: int|null}  $data
      * @param  array<int, array{item_id: int, item_unit_id?: int|null, quantity: mixed, bonus_quantity?: mixed, rate: mixed, discount?: mixed, discount_type?: string, note?: string|null}>  $lines
      */
     public static function post(array $data, array $lines, User $actor): self
@@ -495,6 +507,7 @@ class Purchase extends Model
                     'fiscal_year_id' => $targetFiscalYear->id,
                     'reason' => $reason,
                     'branch_id' => $placement->branchId,
+                    'project_id' => $data['project_id'] ?? null,
                 ],
                 $voucherLines,
                 $actor,
@@ -508,6 +521,7 @@ class Purchase extends Model
                 'supplier_id' => $supplier->id,
                 'store_id' => $storeId,
                 'branch_id' => $placement->branchId,
+                'project_id' => $data['project_id'] ?? null,
                 'journal_voucher_id' => $voucher->id,
                 'fiscal_year_id' => $targetFiscalYear->id,
                 // Stored once, in the format bills have always printed in, so

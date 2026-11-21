@@ -46,6 +46,11 @@ const props = defineProps({
     // Branch picker of the settlement and create forms (BranchFormOptions::props()).
     branchOptions: { type: Array, default: () => [] },
     defaultBranchId: { type: Number, default: null },
+    // Project picker of the create form: active projects only.
+    projects: { type: Array, default: () => [] },
+    // Project picker of the settlement form: active projects plus any (since
+    // closed) project a listed bill carries, so it can default to its bill's.
+    settlementProjects: { type: Array, default: () => [] },
 });
 
 const page = usePage();
@@ -304,6 +309,7 @@ function moreActionsFor(purchase) {
                 :depreciation-methods="depreciationMethods"
                 :branch-options="branchOptions"
                 :default-branch-id="defaultBranchId"
+                :projects="projects"
                 @cancel="showCreateForm = false"
                 @posted="showCreateForm = false"
             />
@@ -377,6 +383,7 @@ function moreActionsFor(purchase) {
             :can-cancel-settlement="canCancelSettlement"
             :branch-options="branchOptions"
             :default-branch-id="defaultBranchId"
+            :projects="settlementProjects"
             @close="settling = null"
             @cancel-settlement="openCancelSettlement"
         />

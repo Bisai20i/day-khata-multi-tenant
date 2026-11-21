@@ -15,8 +15,8 @@ use App\Support\NepaliCalendar;
 use Barryvdh\DomPDF\Facade\Pdf;
 use Illuminate\Http\Request;
 use Illuminate\Http\Response as HttpResponse;
-use Illuminate\Support\Carbon;
 use Illuminate\Validation\Rule;
+use Illuminate\Validation\ValidationException;
 use Inertia\Inertia;
 use Inertia\Response;
 use Maatwebsite\Excel\Facades\Excel;
@@ -79,6 +79,7 @@ class ManufacturingReportController extends Controller
     public function cogsSchedule(Request $request): Response
     {
         [$from, $to] = $this->range($request);
+        $this->assertSingleFiscalYear($from, $to);
         $fiscalYear = $this->fiscalYear($to);
         $filter = BranchFilter::fromRequest($request);
 
@@ -122,6 +123,9 @@ class ManufacturingReportController extends Controller
             'rows' => $document['rows'],
             // Printed from BR16 on; null when not multi-branch.
             'branchFilterLabel' => $this->branchFilterLabel($filter),
+            // Inventory Schedule and Reconciliation are as-of reports: the
+            // header reads "As on", like the Excel export.
+            'asOf' => $document['asOf'] ?? false,
         ]);
 
         return $pdf->stream("manufacturing-{$report}.pdf");
@@ -133,7 +137,15 @@ class ManufacturingReportController extends Controller
         $document = $this->document($request, $report, $filter);
 
         return Excel::download(
-            new ManufacturingReportExport($document['headings'], $document['rows'], $document['numeric'], $this->branchFilterLabel($filter)),
+            new ManufacturingReportExport(
+                $document['title'],
+                $this->periodLabel($document),
+                $document['headings'],
+                $document['rows'],
+                $document['numeric'],
+                $document['quantity'] ?? [],
+                $this->branchFilterLabel($filter),
+            ),
             "manufacturing-{$report}.xlsx",
         );
     }
@@ -148,24 +160,93 @@ class ManufacturingReportController extends Controller
     }
 
     /**
-     * The validated [from, to] window, each defaulting to the current fiscal
-     * year's bound; an inverted pair falls back to the default.
+     * "As on <BS> BS (<AD> AD)" for the as-of reports, "From ... to ..." for the
+     * period ones: the Excel export's second heading row.
+     *
+     * @param  array{from: string, to: string, asOf?: bool}  $document
+     */
+    private function periodLabel(array $document): string
+    {
+        $describe = fn (string $date) => NepaliCalendar::formatBs($date)." BS ({$date} AD)";
+
+        return ($document['asOf'] ?? false)
+            ? 'As on '.$describe($document['to'])
+            : 'From '.$describe($document['from']).' to '.$describe($document['to']);
+    }
+
+    /**
+     * The validated [from, to] window. Both are strict Y-m-d: a malformed
+     * date is a validation error (a redirect back with `errors.from` /
+     * `errors.to`, which the pages show in a banner; 422 for a JSON
+     * request), never a silent fall back. With neither bound the window is the
+     * current fiscal year; with one, the other is that date's own fiscal year
+     * bound, so the user's date is never silently replaced and the window
+     * never spans two fiscal years by default.
      *
      * @return array{0: string, 1: string}
      */
     private function range(Request $request): array
     {
         $validated = $request->validate([
-            'from' => ['nullable', 'date'],
-            'to' => ['nullable', 'date', 'after_or_equal:from'],
+            'from' => ['nullable', 'date_format:Y-m-d'],
+            'to' => ['nullable', 'date_format:Y-m-d', 'after_or_equal:from'],
         ]);
 
         [$defaultFrom, $defaultTo] = $this->reports->defaultRange();
 
-        $from = isset($validated['from']) ? Carbon::parse($validated['from'])->toDateString() : $defaultFrom;
-        $to = isset($validated['to']) ? Carbon::parse($validated['to'])->toDateString() : $defaultTo;
+        $from = $validated['from'] ?? null;
+        $to = $validated['to'] ?? null;
 
-        return $from > $to ? [$defaultFrom, $defaultTo] : [$from, $to];
+        // One bound given: the other is that date's own fiscal year bound, so
+        // the window stays inside one fiscal year (the schedules read GL
+        // balances per year, so a window across two would show a false
+        // reconciling difference). With no year around the date, or none
+        // given, it falls back to the current year's bound.
+        if ($from === null) {
+            $from = $to === null
+                ? $defaultFrom
+                : ($this->fiscalYearBound($to, 'start') ?? ($defaultFrom <= $to ? $defaultFrom : $to));
+        }
+
+        if ($to === null) {
+            $to = $this->fiscalYearBound($from, 'end') ?? ($defaultTo >= $from ? $defaultTo : $from);
+        }
+
+        return [$from, $to];
+    }
+
+    /**
+     * Start or end of the fiscal year containing `$date`, or null when no
+     * fiscal year contains it.
+     */
+    private function fiscalYearBound(string $date, string $bound): ?string
+    {
+        $fiscalYear = $this->reports->fiscalYearFor($date);
+
+        if ($fiscalYear === null
+            || $fiscalYear->start_date->toDateString() > $date
+            || $fiscalYear->end_date->toDateString() < $date) {
+            return null;
+        }
+
+        return $bound === 'start' ? $fiscalYear->start_date->toDateString() : $fiscalYear->end_date->toDateString();
+    }
+
+    /**
+     * The COGS schedule reads GL balances from one fiscal year (the year
+     * containing `$to`), so a window that starts in another year would show a
+     * false reconciling difference. Reject it on `from`.
+     */
+    private function assertSingleFiscalYear(string $from, string $to): void
+    {
+        $fromYear = $this->fiscalYearBound($from, 'start');
+        $toYear = $this->fiscalYearBound($to, 'start');
+
+        if ($fromYear !== null && $toYear !== null && $fromYear !== $toYear) {
+            throw ValidationException::withMessages([
+                'from' => 'The from and to dates must fall within one fiscal year.',
+            ]);
+        }
     }
 
     private function fiscalYear(string $date): FiscalYear
@@ -185,7 +266,22 @@ class ManufacturingReportController extends Controller
 
     private function itemId(Request $request): ?int
     {
-        $validated = $request->validate(['item_id' => ['nullable', 'integer', 'exists:items,id']]);
+        $class = $this->ledgerClass($request);
+
+        // WIP is tracked per production entry, so it has no item filter.
+        if ($class === ManufacturingReports::CLASS_WIP) {
+            return null;
+        }
+
+        // The item must belong to the chosen inventory class, or switching the
+        // class in the URL would show another class's item under the wrong ledger.
+        $validated = $request->validate([
+            'item_id' => [
+                'nullable',
+                'integer',
+                Rule::exists('items', 'id')->where('inventory_class', $class),
+            ],
+        ]);
 
         return isset($validated['item_id']) ? (int) $validated['item_id'] : null;
     }
@@ -212,7 +308,7 @@ class ManufacturingReportController extends Controller
      * objects (numeric columns); the export converts those to numbers at the
      * cell boundary only.
      *
-     * @return array{title: string, from: string, to: string, headings: array<int, string>, numeric: array<int, int>, rows: array<int, array{cells: array<int, mixed>, style: string}>}
+     * @return array{title: string, from: string, to: string, asOf?: bool, headings: array<int, string>, numeric: array<int, int>, quantity?: array<int, int>, rows: array<int, array{cells: array<int, mixed>, style: string}>}
      */
     private function document(Request $request, string $report, BranchFilter $filter): array
     {
@@ -229,7 +325,7 @@ class ManufacturingReportController extends Controller
     }
 
     /**
-     * @return array{title: string, from: string, to: string, headings: array<int, string>, numeric: array<int, int>, rows: array<int, array{cells: array<int, mixed>, style: string}>}
+     * @return array{title: string, from: string, to: string, asOf?: bool, headings: array<int, string>, numeric: array<int, int>, quantity?: array<int, int>, rows: array<int, array{cells: array<int, mixed>, style: string}>}
      */
     private function stockLedgerDocument(Request $request, string $from, string $to, BranchFilter $filter): array
     {
@@ -238,13 +334,14 @@ class ManufacturingReportController extends Controller
         $money = fn (?string $value) => $value === null ? null : Money::of($value);
 
         $rows = [[
-            'cells' => [null, 'Opening balance', null, null, $quantity($ledger['opening']['quantity']), null, null, $money($ledger['opening']['value'])],
+            'cells' => [null, null, 'Opening balance', null, null, $quantity($ledger['opening']['quantity']), null, null, $money($ledger['opening']['value'])],
             'style' => 'subtotal',
         ]];
 
         foreach ($ledger['rows'] as $row) {
             $rows[] = [
                 'cells' => [
+                    NepaliCalendar::formatBs($row['date']),
                     $row['date'],
                     $row['document'],
                     $quantity($row['inQuantity']),
@@ -259,7 +356,7 @@ class ManufacturingReportController extends Controller
         }
 
         $rows[] = [
-            'cells' => [null, 'Closing balance', null, null, $quantity($ledger['closing']['quantity']), null, null, $money($ledger['closing']['value'])],
+            'cells' => [null, null, 'Closing balance', null, null, $quantity($ledger['closing']['quantity']), null, null, $money($ledger['closing']['value'])],
             'style' => 'total',
         ];
 
@@ -267,14 +364,15 @@ class ManufacturingReportController extends Controller
             'title' => "{$ledger['label']} Stock Ledger",
             'from' => $from,
             'to' => $to,
-            'headings' => ['Date', 'Document', 'In Qty', 'Out Qty', 'Balance Qty', 'In Value', 'Out Value', 'Balance Value'],
-            'numeric' => [2, 3, 4, 5, 6, 7],
+            'headings' => ['Date (BS)', 'Date (AD)', 'Document', 'In Qty', 'Out Qty', 'Balance Qty', 'In Value', 'Out Value', 'Balance Value'],
+            'numeric' => [3, 4, 5, 6, 7, 8],
+            'quantity' => [3, 4, 5],
             'rows' => $rows,
         ];
     }
 
     /**
-     * @return array{title: string, from: string, to: string, headings: array<int, string>, numeric: array<int, int>, rows: array<int, array{cells: array<int, mixed>, style: string}>}
+     * @return array{title: string, from: string, to: string, asOf?: bool, headings: array<int, string>, numeric: array<int, int>, quantity?: array<int, int>, rows: array<int, array{cells: array<int, mixed>, style: string}>}
      */
     private function scheduleDocument(string $from, string $to, BranchFilter $filter): array
     {
@@ -292,6 +390,7 @@ class ManufacturingReportController extends Controller
             'title' => 'Inventory Schedule',
             'from' => $from,
             'to' => $to,
+            'asOf' => true,
             'headings' => ['Inventory', 'Per ledger', 'Per subledger', 'Difference'],
             'numeric' => [1, 2, 3],
             'rows' => $rows,
@@ -299,10 +398,11 @@ class ManufacturingReportController extends Controller
     }
 
     /**
-     * @return array{title: string, from: string, to: string, headings: array<int, string>, numeric: array<int, int>, rows: array<int, array{cells: array<int, mixed>, style: string}>}
+     * @return array{title: string, from: string, to: string, asOf?: bool, headings: array<int, string>, numeric: array<int, int>, quantity?: array<int, int>, rows: array<int, array{cells: array<int, mixed>, style: string}>}
      */
     private function cogsDocument(string $from, string $to, BranchFilter $filter): array
     {
+        $this->assertSingleFiscalYear($from, $to);
         $schedule = $this->reports->cogsSchedule($this->fiscalYear($to), $from, $to, $filter);
 
         $rows = array_map(fn (array $line) => [
@@ -321,7 +421,7 @@ class ManufacturingReportController extends Controller
     }
 
     /**
-     * @return array{title: string, from: string, to: string, headings: array<int, string>, numeric: array<int, int>, rows: array<int, array{cells: array<int, mixed>, style: string}>}
+     * @return array{title: string, from: string, to: string, asOf?: bool, headings: array<int, string>, numeric: array<int, int>, quantity?: array<int, int>, rows: array<int, array{cells: array<int, mixed>, style: string}>}
      */
     private function reconciliationDocument(string $from, string $to, BranchFilter $filter): array
     {
@@ -332,10 +432,25 @@ class ManufacturingReportController extends Controller
             'style' => Money::of($row['difference'])->isZero() ? 'line' : 'alert',
         ], $reconciliation['rows']);
 
+        $totals = $reconciliation['totals'];
+        $rows[] = [
+            'cells' => ['Total', Money::of($totals['gl']), Money::of($totals['subledger']), Money::of($totals['difference'])],
+            'style' => 'total',
+        ];
+
+        // Decided per class (ManufacturingReports::reconciliation()), never
+        // from the total difference, which can net to zero.
+        $rows[] = $reconciliation['balanced']
+            // `merge`: the export spans the text across every column so it
+            // does not widen column A.
+            ? ['cells' => ['Status: reconciles, the ledger and the subledger agree for every class', null, null, null], 'style' => 'subtotal', 'merge' => true]
+            : ['cells' => ["Status: difference in {$reconciliation['differingCount']} class(es), resolve before closing the year", null, null, null], 'style' => 'alert', 'merge' => true];
+
         return [
             'title' => 'Inventory Reconciliation',
             'from' => $from,
             'to' => $to,
+            'asOf' => true,
             'headings' => ['Inventory', 'Per ledger', 'Per subledger', 'Difference'],
             'numeric' => [1, 2, 3],
             'rows' => $rows,

@@ -9,6 +9,7 @@ use Maatwebsite\Excel\Concerns\FromCollection;
 use Maatwebsite\Excel\Concerns\WithColumnFormatting;
 use Maatwebsite\Excel\Concerns\WithHeadings;
 use Maatwebsite\Excel\Concerns\WithMapping;
+use Maatwebsite\Excel\Concerns\WithStrictNullComparison;
 use PhpOffice\PhpSpreadsheet\Style\NumberFormat;
 
 /**
@@ -22,7 +23,7 @@ use PhpOffice\PhpSpreadsheet\Style\NumberFormat;
  * boundary and nowhere else (C1). The margin is the controller's exact
  * one-decimal string, written as text.
  */
-class BranchComparisonExport implements FromCollection, WithColumnFormatting, WithHeadings, WithMapping
+class BranchComparisonExport implements FromCollection, WithColumnFormatting, WithHeadings, WithMapping, WithStrictNullComparison
 {
     /**
      * @param  list<array<string, mixed>>  $rows  BranchComparisonReportController rows

@@ -1,5 +1,5 @@
 <script setup>
-import { computed, ref } from 'vue';
+import { computed, ref, watch } from 'vue';
 import { useForm } from '@inertiajs/vue3';
 import Card from '@/components/ui/Card.vue';
 import Button from '@/components/ui/Button.vue';
@@ -31,6 +31,9 @@ const props = defineProps({
     // pulled on demand (an Inertia optional prop).
     selectedSale: { type: Object, default: null },
     refundAccounts: { type: Array, default: () => [] },
+    // Active projects (cost centres): { id, code, name }. A linked return
+    // defaults to its sale's project (selectedSale.project_id / .project).
+    projects: { type: Array, default: () => [] },
     stores: { type: Array, default: () => [] },
     saleSearch: { type: String, default: '' },
     // Unlinked mode only: the goods are priced here the way a fresh sale
@@ -70,6 +73,32 @@ const form = useForm({
     refund_bank_amount: '',
     store_id: null,
     customer_id: null,
+    project_id: null,
+});
+
+// A linked return starts on its sale's project; the user may change or clear it.
+watch(
+    () => props.selectedSale?.id ?? null,
+    () => {
+        form.project_id = props.selectedSale?.project_id ?? null;
+    },
+    { immediate: true },
+);
+
+// Active projects, plus the sale's own project when it is no longer active,
+// so the default still shows by name.
+const projectOptions = computed(() => {
+    const projects = [...props.projects];
+    const saleProject = isUnlinked.value ? null : props.selectedSale?.project;
+
+    if (saleProject && !projects.some((project) => project.id === saleProject.id)) {
+        projects.push(saleProject);
+    }
+
+    return [
+        { value: null, label: 'No project' },
+        ...projects.map((project) => ({ value: project.id, label: project.code ? `${project.code} - ${project.name}` : project.name })),
+    ];
 });
 
 const {
@@ -238,6 +267,7 @@ function submit() {
                 date: data.date,
                 reason: data.reason || null,
                 store_id: data.store_id || null,
+                project_id: data.project_id ?? null,
                 ...refundPayload(data),
                 // The server recomputes and refuses a total that no longer
                 // matches what was previewed here (C8).
@@ -264,6 +294,7 @@ function submit() {
             date: data.date,
             reason: data.reason || null,
             store_id: data.store_id || null,
+            project_id: data.project_id ?? null,
             ...refundPayload(data),
             expected_total: totals.value.total,
             lines: payloadLines.value,
@@ -406,6 +437,20 @@ function submit() {
                 @remove-line="removeUnlinkedLine"
                 @item-picked="onUnlinkedItemPicked"
             />
+
+            <div v-if="(isUnlinked || selectedSale) && projectOptions.length > 1" class="grid grid-cols-2 gap-4">
+                <div>
+                    <Label for="sales-return-project" class="mb-1">Project</Label>
+                    <Combobox
+                        id="sales-return-project"
+                        :model-value="form.project_id"
+                        :options="projectOptions"
+                        placeholder="No project"
+                        @update:model-value="(value) => (form.project_id = value)"
+                    />
+                    <p v-if="form.errors.project_id" class="mt-1 text-sm text-danger">{{ form.errors.project_id }}</p>
+                </div>
+            </div>
 
             <SaleReturnCreateRefundFields
                 v-if="isUnlinked || selectedSale"

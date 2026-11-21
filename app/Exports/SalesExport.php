@@ -9,6 +9,7 @@ use Maatwebsite\Excel\Concerns\FromCollection;
 use Maatwebsite\Excel\Concerns\WithColumnFormatting;
 use Maatwebsite\Excel\Concerns\WithHeadings;
 use Maatwebsite\Excel\Concerns\WithMapping;
+use Maatwebsite\Excel\Concerns\WithStrictNullComparison;
 use PhpOffice\PhpSpreadsheet\Style\NumberFormat;
 
 /**
@@ -20,7 +21,7 @@ use PhpOffice\PhpSpreadsheet\Style\NumberFormat;
  * client-side re-summing). `Money::toFloat()` only at this Excel cell
  * boundary (C1).
  */
-class SalesExport implements FromCollection, WithColumnFormatting, WithHeadings, WithMapping
+class SalesExport implements FromCollection, WithColumnFormatting, WithHeadings, WithMapping, WithStrictNullComparison
 {
     /**
      * @param  Collection<int, array<string, mixed>>  $rows

@@ -11,6 +11,7 @@ use Maatwebsite\Excel\Concerns\FromCollection;
 use Maatwebsite\Excel\Concerns\WithColumnFormatting;
 use Maatwebsite\Excel\Concerns\WithHeadings;
 use Maatwebsite\Excel\Concerns\WithMapping;
+use Maatwebsite\Excel\Concerns\WithStrictNullComparison;
 use PhpOffice\PhpSpreadsheet\Style\NumberFormat;
 
 /**
@@ -19,7 +20,7 @@ use PhpOffice\PhpSpreadsheet\Style\NumberFormat;
  * same shape as App\Exports\SalesExport. `amount` is the voucher's SQL-summed
  * debit side; `Money::toFloat()` only at this Excel cell boundary (C1).
  */
-class JournalVoucherListExport implements FromCollection, WithColumnFormatting, WithHeadings, WithMapping
+class JournalVoucherListExport implements FromCollection, WithColumnFormatting, WithHeadings, WithMapping, WithStrictNullComparison
 {
     /**
      * @param  Collection<int, array{date: string, voucher_type: string, voucher_number: int|string, narration: ?string, fiscal_year: ?string, amount: string, created_by: ?string, status: string}>  $rows

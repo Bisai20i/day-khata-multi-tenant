@@ -39,13 +39,19 @@ use Inertia\Response;
  * - the invoice itself, positive, dated on the invoice (posted AND cancelled
  *   invoices alike: a cancelled bill was still withheld against in its own
  *   month);
- * - a negative row for a posted credit or debit note, dated on the note,
- *   carrying the note's OWN stored `tds_amount` - the exact amount its
- *   voucher reversed (C6);
- * - a negative row for a cancellation, dated on its Reversal voucher (C5).
+ * - a negative row for a credit or debit note, dated on the note, carrying
+ *   the note's OWN stored `tds_amount` - the exact amount its voucher
+ *   reversed (C6); posted AND cancelled notes alike, so cancelling a note
+ *   later never rewrites the month it was issued in;
+ * - a negative row for a cancelled invoice, dated on its Reversal voucher
+ *   (C5), and a positive row for a cancelled note, dated on its Reversal
+ *   voucher, restoring the TDS the note had reversed.
  *
- * Only `status = 'posted'` returns appear: a pending request has no money
+ * Pending and rejected returns never appear: a pending request has no money
  * effect at all and a rejected one never had any.
+ *
+ * TDS payable (deducted by us on purchases) and TDS receivable (deducted
+ * from us on sales) are reported as separate totals, never netted.
  *
  * **Branches** (plan 12, BR14). The branch filter (`branch`, `branches[]`,
  * BranchFilter) narrows every row group on the document's own branch_id,
@@ -75,7 +81,15 @@ class TdsReportController extends Controller
             'purchases' => $purchaseRows,
             'salesTotal' => $salesTotal->toString(),
             'purchasesTotal' => $purchasesTotal->toString(),
+            // Legacy prop kept for existing consumers; not shown on the page.
             'grandTotal' => $salesTotal->plus($purchasesTotal)->toString(),
+            // Kept apart on purpose, as the legacy report does: TDS this
+            // business deducted (purchases) must be deposited in full, while
+            // TDS customers deducted from it (sales) is an advance income-tax
+            // credit claimed on the annual return. Netting one against the
+            // other would understate the deposit due.
+            'tdsPayable' => $purchasesTotal->toString(),
+            'tdsReceivable' => $salesTotal->toString(),
             'stores' => BranchStock::storeOptions($branchFilter, Store::where('is_active', true))->orderBy('name')->get(['id', 'name']),
             'from' => $from,
             'to' => $to,
@@ -131,27 +145,25 @@ class TdsReportController extends Controller
                 'tds_amount' => Money::of($sale->tds_amount)->negated()->toString(),
             ]);
 
+        $returnWith = ['sale:id,invoice_number,customer_id,buyer_name,tds_account_id', 'sale.customer:id,name', 'sale.tdsAccount:id,name'];
+
         $returns = SalesReturn::query()
-            ->with(['sale:id,invoice_number,customer_id,buyer_name,tds_account_id', 'sale.customer:id,name', 'sale.tdsAccount:id,name'])
-            ->where('status', 'posted')
+            ->with($returnWith)
+            ->whereIn('status', ['posted', 'cancelled'])
             ->whereDate('date', '>=', $from)
             ->whereDate('date', '<=', $to)
             ->when($storeId, fn (Builder $query) => $query->where('store_id', $storeId))
             ->tap(fn (Builder $query) => $branchFilter->applyToDocuments($query, 'sales_returns.branch_id'))
             ->get()
-            ->map(fn (SalesReturn $return) => [
-                ...$branchFilter->rowBranch($return->branch_id),
-                'entry' => 'credit_note',
-                'date' => $return->date->toDateString(),
-                'document_number' => $return->credit_note_number,
-                'party' => $return->sale?->buyer_name ?? $return->sale?->customer?->name,
-                'tds_account' => $return->sale?->tdsAccount?->name,
-                'base_total' => Money::of($return->total)->negated()->toString(),
-                'tds_rate' => null,
-                'tds_amount' => Money::of($return->tds_amount)->negated()->toString(),
-            ]);
+            ->map(fn (SalesReturn $return) => $this->salesReturnRow($return, $return->date->toDateString(), 'credit_note', $branchFilter));
 
-        return $this->withoutZeroTds($issued->concat($returns)->concat($cancelled));
+        $cancelledReturns = $this->cancelledInPeriod(SalesReturn::query()->with($returnWith), $from, $to)
+            ->when($storeId, fn (Builder $query) => $query->where('store_id', $storeId))
+            ->tap(fn (Builder $query) => $branchFilter->applyToDocuments($query, 'sales_returns.branch_id'))
+            ->get()
+            ->map(fn (SalesReturn $return) => $this->salesReturnRow($return, $this->cancelDate($return), 'credit_note_cancelled', $branchFilter));
+
+        return $this->withoutZeroTds($issued->concat($returns)->concat($cancelled)->concat($cancelledReturns));
     }
 
     /**
@@ -197,27 +209,75 @@ class TdsReportController extends Controller
                 'tds_amount' => Money::of($purchase->tds_amount ?? '0.00')->negated()->toString(),
             ]);
 
+        $returnWith = ['purchase:id,bill_number,supplier_id,tds_account_id,tds_rate', 'purchase.supplier:id,name', 'purchase.tdsAccount:id,name'];
+
         $returns = PurchaseReturn::query()
-            ->with(['purchase:id,bill_number,supplier_id,tds_account_id,tds_rate', 'purchase.supplier:id,name', 'purchase.tdsAccount:id,name'])
-            ->where('status', 'posted')
+            ->with($returnWith)
+            ->whereIn('status', ['posted', 'cancelled'])
             ->whereDate('date', '>=', $from)
             ->whereDate('date', '<=', $to)
             ->when($storeId, fn (Builder $query) => $query->where('store_id', $storeId))
             ->tap(fn (Builder $query) => $branchFilter->applyToDocuments($query, 'purchase_returns.branch_id'))
             ->get()
-            ->map(fn (PurchaseReturn $return) => [
-                ...$branchFilter->rowBranch($return->branch_id),
-                'entry' => 'debit_note',
-                'date' => $return->date->toDateString(),
-                'document_number' => $return->debit_note_number,
-                'party' => $return->purchase?->supplier?->name,
-                'tds_account' => $return->purchase?->tdsAccount?->name,
-                'base_total' => Money::of($return->total)->negated()->toString(),
-                'tds_rate' => $return->purchase?->tds_rate,
-                'tds_amount' => Money::of($return->tds_amount)->negated()->toString(),
-            ]);
+            ->map(fn (PurchaseReturn $return) => $this->purchaseReturnRow($return, $return->date->toDateString(), 'debit_note', $branchFilter));
 
-        return $this->withoutZeroTds($issued->concat($returns)->concat($cancelled));
+        $cancelledReturns = $this->cancelledInPeriod(PurchaseReturn::query()->with($returnWith), $from, $to)
+            ->when($storeId, fn (Builder $query) => $query->where('store_id', $storeId))
+            ->tap(fn (Builder $query) => $branchFilter->applyToDocuments($query, 'purchase_returns.branch_id'))
+            ->get()
+            ->map(fn (PurchaseReturn $return) => $this->purchaseReturnRow($return, $this->cancelDate($return), 'debit_note_cancelled', $branchFilter));
+
+        return $this->withoutZeroTds($issued->concat($returns)->concat($cancelled)->concat($cancelledReturns));
+    }
+
+    /**
+     * A credit note's TDS row. Issuing the note reverses TDS (negative); a
+     * later cancellation of the note restores it (positive), dated on the
+     * note's Reversal voucher, so the note's issue month stays as filed.
+     *
+     * @return array<string, mixed>
+     */
+    private function salesReturnRow(SalesReturn $return, string $date, string $entry, BranchFilter $branchFilter): array
+    {
+        $isCancellation = $entry === 'credit_note_cancelled';
+        $total = Money::of($return->total);
+        $tds = Money::of($return->tds_amount ?? '0.00');
+
+        return [
+            ...$branchFilter->rowBranch($return->branch_id),
+            'entry' => $entry,
+            'date' => $date,
+            'document_number' => $return->credit_note_number,
+            'party' => $return->sale?->buyer_name ?? $return->sale?->customer?->name,
+            'tds_account' => $return->sale?->tdsAccount?->name,
+            'base_total' => ($isCancellation ? $total : $total->negated())->toString(),
+            'tds_rate' => null,
+            'tds_amount' => ($isCancellation ? $tds : $tds->negated())->toString(),
+        ];
+    }
+
+    /**
+     * A debit note's TDS row: the purchase-side mirror of salesReturnRow().
+     *
+     * @return array<string, mixed>
+     */
+    private function purchaseReturnRow(PurchaseReturn $return, string $date, string $entry, BranchFilter $branchFilter): array
+    {
+        $isCancellation = $entry === 'debit_note_cancelled';
+        $total = Money::of($return->total);
+        $tds = Money::of($return->tds_amount ?? '0.00');
+
+        return [
+            ...$branchFilter->rowBranch($return->branch_id),
+            'entry' => $entry,
+            'date' => $date,
+            'document_number' => $return->debit_note_number,
+            'party' => $return->purchase?->supplier?->name,
+            'tds_account' => $return->purchase?->tdsAccount?->name,
+            'base_total' => ($isCancellation ? $total : $total->negated())->toString(),
+            'tds_rate' => $return->purchase?->tds_rate,
+            'tds_amount' => ($isCancellation ? $tds : $tds->negated())->toString(),
+        ];
     }
 
     /**
@@ -280,12 +340,22 @@ class TdsReportController extends Controller
     /**
      * Defaults to the current open fiscal year's date range when no
      * explicit `from`/`to` query params are given, falling back to
-     * month-to-date if no fiscal year exists yet.
+     * month-to-date if no fiscal year exists yet. A lone `from` or `to` is
+     * rejected (422), never silently widened to the fiscal year.
      *
      * @return array{0: string, 1: string}
      */
     private function resolveDateRange(Request $request): array
     {
+        // Strict Y-m-d, as every other report: a malformed, reversed or
+        // half-supplied range, or an unknown store, is a validation error the
+        // page shows, not a database exception.
+        $request->validate([
+            'from' => ['nullable', 'required_with:to', 'date_format:Y-m-d'],
+            'to' => ['nullable', 'required_with:from', 'date_format:Y-m-d', 'after_or_equal:from'],
+            'store_id' => ['nullable', 'integer', 'exists:stores,id'],
+        ]);
+
         $from = $request->string('from')->toString();
         $to = $request->string('to')->toString();
 

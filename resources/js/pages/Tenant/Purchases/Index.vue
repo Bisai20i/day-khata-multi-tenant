@@ -60,6 +60,8 @@ const props = defineProps({
     branchOptions: { type: Array, default: () => [] },
     defaultBranchId: { type: Number, default: null },
     areas: { type: Array, default: () => [] },
+    // Active projects for the create form's optional project picker.
+    projects: { type: Array, default: () => [] },
 });
 
 // Plan 12, BR12: a branch column only for a multi-branch company viewing all
@@ -339,7 +341,14 @@ const columns = [
         id: 'supplier',
         header: 'Supplier',
         numeric: false,
-        cell: ({ row }) => row.original.supplier?.name ?? '-',
+        // The bill's project, if any, reads as a muted second line.
+        cell: ({ row }) =>
+            row.original.project
+                ? h('div', [
+                      h('span', row.original.supplier?.name ?? '-'),
+                      h('span', { class: 'block text-xs text-text-muted' }, `Project: ${row.original.project.code} - ${row.original.project.name}`),
+                  ])
+                : row.original.supplier?.name ?? '-',
     },
     ...branchColumns(),
     {
@@ -423,6 +432,7 @@ const columns = [
                 :branch-options="branchOptions"
                 :default-branch-id="defaultBranchId"
                 :areas="areas"
+                :projects="projects"
                 @cancel="closeCreateForm"
                 @posted="closeCreateForm"
             />

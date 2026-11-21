@@ -152,6 +152,8 @@ class PayrollPaymentController extends Controller
                 'run_date' => $line->run->date->toDateString(),
                 'gross' => $line->gross,
                 'tds' => $line->tds,
+                'ssf_employee' => $line->ssf_employee,
+                'cit_employee' => $line->cit_employee,
                 'advance_recovery' => $line->advance_recovery,
                 'net' => $line->net,
                 'outstanding' => $outstanding[$line->id]->toString(),

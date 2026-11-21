@@ -77,14 +77,24 @@ class StockCosting
      */
     public static function averageCost(Item $item, string $asOf): ?BigDecimal
     {
-        ['value' => $value, 'quantity' => $quantity] = static::basis($item->getKey(), $asOf);
+        return static::averageFromBasis(static::basis($item->getKey(), $asOf));
+    }
 
-        if ($quantity->isZero()) {
+    /**
+     * The weighted average of one cost basis, or null when it holds no
+     * quantity. The single place the average is divided out, shared by
+     * averageCost() and costsPerBaseUnitByDate() so they cannot drift.
+     *
+     * @param  array{value: Money, quantity: Quantity}  $basis
+     */
+    private static function averageFromBasis(array $basis): ?BigDecimal
+    {
+        if ($basis['quantity']->isZero()) {
             return null;
         }
 
-        return $value->toBigDecimal()->dividedBy(
-            $quantity->toBigDecimal(),
+        return $basis['value']->toBigDecimal()->dividedBy(
+            $basis['quantity']->toBigDecimal(),
             self::AVERAGE_COST_SCALE,
             RoundingMode::HalfUp,
         );
@@ -484,13 +494,74 @@ class StockCosting
     }
 
     /**
-     * The cost this item is valued at: its weighted average, or - when it has
-     * no priced history - the catalog purchase rate, which is also a
-     * per-base-unit figure. Zero when it has neither.
+     * The cost this item is valued at as of $asOf: its weighted average, or -
+     * when it has no priced history - the catalog purchase rate, which is also
+     * a per-base-unit figure. Zero when it has neither. What closingValue()
+     * multiplies the quantity on hand by.
      */
-    private static function costPerBaseUnit(Item $item, string $asOf): BigDecimal
+    public static function costPerBaseUnit(Item $item, string $asOf): BigDecimal
     {
         return static::averageCost($item, $asOf) ?? static::fallbackCost($item);
+    }
+
+    /**
+     * costPerBaseUnit() for many dates of one item, in one grouped query
+     * instead of one aggregate over the whole history per date.
+     *
+     * The query selects the exact same rows basisByItem() does (same
+     * movement types, non-null value, not cancelled, DATE(date) <= as-of,
+     * never store-scoped) and the same scaled-integer sums, but grouped by
+     * day. Integer sums are exact, so the running total of the daily sums at
+     * a date equals the one-shot sum up to that date, and the result then goes
+     * through the same basisFromScaled(), averageFromBasis() and
+     * fallbackCost() as the single-date path. Rows returned are bounded by the
+     * number of distinct days with a priced movement, not by movement count.
+     *
+     * @param  list<string>  $dates  Y-m-d, in any order
+     * @return array<string, BigDecimal> date => cost per base unit
+     */
+    public static function costsPerBaseUnitByDate(Item $item, array $dates): array
+    {
+        $dates = array_values(array_unique($dates));
+
+        if ($dates === []) {
+            return [];
+        }
+
+        sort($dates);
+
+        [$sumSql, $bindings] = static::basisSumSelect();
+
+        $rows = ItemStockMovement::query()
+            ->selectRaw("DATE(date) as movement_day, {$sumSql}", $bindings)
+            ->where('item_id', $item->getKey())
+            ->where('cancelled', false)
+            ->whereNotNull('value')
+            ->whereIn('movement_type', [...static::basisInTypes(), ...static::basisOutTypes()])
+            ->whereDate('date', '<=', end($dates))
+            ->groupByRaw('DATE(date)')
+            ->orderBy('movement_day')
+            ->toBase()
+            ->get();
+
+        $costs = [];
+        $valueScaled = BigDecimal::zero();
+        $quantityScaled = BigDecimal::zero();
+        $next = 0;
+        $count = $rows->count();
+
+        foreach ($dates as $date) {
+            while ($next < $count && (string) $rows[$next]->movement_day <= $date) {
+                $valueScaled = $valueScaled->plus(BigDecimal::of((int) $rows[$next]->basis_value));
+                $quantityScaled = $quantityScaled->plus(BigDecimal::of((int) $rows[$next]->basis_quantity));
+                $next++;
+            }
+
+            $costs[$date] = static::averageFromBasis(static::basisFromScaled($valueScaled, $quantityScaled))
+                ?? static::fallbackCost($item);
+        }
+
+        return $costs;
     }
 
     private static function fallbackCost(Item $item): BigDecimal
@@ -532,25 +603,14 @@ class StockCosting
             return [];
         }
 
-        $cast = (new ItemStockMovement)->getConnection()->getDriverName() === 'sqlite' ? 'INTEGER' : 'SIGNED';
-        $scaledValue = "CAST(ROUND(value * 100) AS {$cast})";
-        $scaledQuantity = "CAST(ROUND(quantity * 10000) AS {$cast})";
-
-        $inTypes = static::basisInTypes();
-        $outTypes = static::basisOutTypes();
-        $inPlaceholders = implode(', ', array_fill(0, count($inTypes), '?'));
+        [$sumSql, $bindings] = static::basisSumSelect();
 
         $rows = ItemStockMovement::query()
-            ->selectRaw(
-                "item_id,
-                 SUM(CASE WHEN movement_type IN ({$inPlaceholders}) THEN {$scaledValue} ELSE -{$scaledValue} END) as basis_value,
-                 SUM(CASE WHEN movement_type IN ({$inPlaceholders}) THEN {$scaledQuantity} ELSE -{$scaledQuantity} END) as basis_quantity",
-                [...$inTypes, ...$inTypes],
-            )
+            ->selectRaw("item_id, {$sumSql}", $bindings)
             ->whereIn('item_id', $itemIds)
             ->where('cancelled', false)
             ->whereNotNull('value')
-            ->whereIn('movement_type', [...$inTypes, ...$outTypes])
+            ->whereIn('movement_type', [...static::basisInTypes(), ...static::basisOutTypes()])
             ->whereDate('date', '<=', $asOf)
             ->groupBy('item_id')
             ->get();
@@ -558,13 +618,50 @@ class StockCosting
         $bases = [];
 
         foreach ($rows as $row) {
-            $bases[(int) $row->item_id] = [
-                'value' => Money::of(BigDecimal::of((int) $row->basis_value)->dividedBy(100, 2, RoundingMode::Unnecessary)),
-                'quantity' => Quantity::of(BigDecimal::of((int) $row->basis_quantity)->dividedBy(10000, 4, RoundingMode::Unnecessary)),
-            ];
+            $bases[(int) $row->item_id] = static::basisFromScaled(
+                BigDecimal::of((int) $row->basis_value),
+                BigDecimal::of((int) $row->basis_quantity),
+            );
         }
 
         return $bases;
+    }
+
+    /**
+     * The `basis_value` and `basis_quantity` SUM expressions (scaled
+     * integers, in-types add and purchase returns subtract) and their
+     * bindings, shared by basisByItem() and costsPerBaseUnitByDate().
+     *
+     * @return array{0: string, 1: list<string>}
+     */
+    private static function basisSumSelect(): array
+    {
+        $cast = (new ItemStockMovement)->getConnection()->getDriverName() === 'sqlite' ? 'INTEGER' : 'SIGNED';
+        $scaledValue = "CAST(ROUND(value * 100) AS {$cast})";
+        $scaledQuantity = "CAST(ROUND(quantity * 10000) AS {$cast})";
+
+        $inTypes = static::basisInTypes();
+        $inPlaceholders = implode(', ', array_fill(0, count($inTypes), '?'));
+
+        return [
+            "SUM(CASE WHEN movement_type IN ({$inPlaceholders}) THEN {$scaledValue} ELSE -{$scaledValue} END) as basis_value,
+                 SUM(CASE WHEN movement_type IN ({$inPlaceholders}) THEN {$scaledQuantity} ELSE -{$scaledQuantity} END) as basis_quantity",
+            [...$inTypes, ...$inTypes],
+        ];
+    }
+
+    /**
+     * A cost basis from the scaled-integer sums (value in paisa, quantity in
+     * 1/10000 units).
+     *
+     * @return array{value: Money, quantity: Quantity}
+     */
+    private static function basisFromScaled(BigDecimal $valueScaled, BigDecimal $quantityScaled): array
+    {
+        return [
+            'value' => Money::of($valueScaled->dividedBy(100, 2, RoundingMode::Unnecessary)),
+            'quantity' => Quantity::of($quantityScaled->dividedBy(10000, 4, RoundingMode::Unnecessary)),
+        ];
     }
 
     /**

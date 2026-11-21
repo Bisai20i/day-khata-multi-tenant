@@ -54,6 +54,7 @@ use InvalidArgumentException;
     'taxable_amount', 'nontaxable_amount', 'vat_rate', 'vat_amount',
     'total', 'status', 'created_by',
     'cancelled_at', 'cancelled_by', 'cancel_reason', 'reversal_journal_voucher_id', 'branch_id',
+    'project_id',
 ])]
 class CapitalPurchase extends Model
 {
@@ -75,7 +76,19 @@ class CapitalPurchase extends Model
             'vat_amount' => Decimal::class.':2',
             'total' => Decimal::class.':2',
             'branch_id' => 'integer',
+            'project_id' => 'integer',
         ];
+    }
+
+    /**
+     * The project (cost centre) every line of this bill's voucher is tagged
+     * with; null when untagged.
+     *
+     * @return BelongsTo<Project, $this>
+     */
+    public function project(): BelongsTo
+    {
+        return $this->belongsTo(Project::class);
     }
 
     /**
@@ -277,7 +290,7 @@ class CapitalPurchase extends Model
      * purchase carries no items and no units, so quantity and conversion
      * factor are both fixed at 1 and the line's gross is the amount itself.
      *
-     * @param  array{supplier_id?: int|null, type: string, bill_number?: string|null, date: string, narration?: string|null, payment_mode: string, bank_account_id?: int|null, cash_amount?: mixed, bank_amount?: mixed, vat_rate?: mixed, expected_total?: mixed, store_id?: int, branch_id?: int|null}  $data
+     * @param  array{supplier_id?: int|null, type: string, bill_number?: string|null, date: string, narration?: string|null, payment_mode: string, bank_account_id?: int|null, cash_amount?: mixed, bank_amount?: mixed, vat_rate?: mixed, expected_total?: mixed, store_id?: int, branch_id?: int|null, project_id?: int|string|null}  $data
      * @param  array<int, array{account_id: int, amount: mixed, narration?: string|null, vatable?: bool}>  $lines
      */
     public static function post(array $data, array $lines, User $actor): self
@@ -452,12 +465,17 @@ class CapitalPurchase extends Model
 
             $typeLabel = $type === 'capital' ? 'Capital purchase' : 'Capital service purchase';
 
+            // Optional project: JournalVoucher::post() checks it exists and
+            // tags every line with it; the bill stores the same id.
+            $projectId = filled($data['project_id'] ?? null) ? $data['project_id'] : null;
+
             $voucher = JournalVoucher::post(
                 [
                     'voucher_type' => VoucherType::CapitalPurchase->value,
                     'date' => $data['date'],
                     'narration' => $data['narration'] ?? ($supplier ? "{$typeLabel} from {$supplier->name}" : $typeLabel),
                     'branch_id' => $placement->branchId,
+                    'project_id' => $projectId,
                 ],
                 $voucherLines,
                 $actor,
@@ -474,6 +492,7 @@ class CapitalPurchase extends Model
                 'supplier_pan' => $data['supplier_pan'] ?? $supplier?->tpin,
                 'store_id' => $storeId,
                 'branch_id' => $placement->branchId,
+                'project_id' => $projectId,
                 'journal_voucher_id' => $voucher->id,
                 'type' => $type,
                 'bill_number' => $billNumber,

@@ -48,6 +48,8 @@ const props = defineProps({
     saleSearch: { type: String, default: '' },
     customers: { type: Array, default: () => [] },
     refundAccounts: { type: Array, default: () => [] },
+    // Active projects for the create form's optional Project field.
+    projects: { type: Array, default: () => [] },
     stores: { type: Array, default: () => [] },
     // Forwarded to Create.vue's unlinked mode only - see its own props doc
     // (audit section 3 "Sales", "returns without a bill").
@@ -137,6 +139,21 @@ const showCreateForm = computed(() => createMode.value !== null);
 
 const cancelling = ref(null);
 const cancelForm = useForm({ reason: '' });
+
+// The Reason cell, with the return's project (if any) underneath.
+function reasonCell(salesReturn) {
+    const reason = salesReturn.reason ?? '-';
+    const project = salesReturn.project;
+
+    if (!project) {
+        return reason;
+    }
+
+    return h('div', [
+        h('span', reason),
+        h('span', { class: 'block text-[11px] text-text-faint' }, `Project: ${project.code ? `${project.code} - ${project.name}` : project.name}`),
+    ]);
+}
 
 function openCancel(salesReturn) {
     cancelling.value = salesReturn;
@@ -236,7 +253,7 @@ const requestColumns = [
         id: 'reason',
         header: 'Reason',
         numeric: false,
-        cell: ({ row }) => row.original.reason ?? '-',
+        cell: ({ row }) => reasonCell(row.original),
     },
     {
         id: 'total',
@@ -337,7 +354,7 @@ const columns = [
         id: 'reason',
         header: 'Reason',
         numeric: false,
-        cell: ({ row }) => row.original.reason ?? '-',
+        cell: ({ row }) => reasonCell(row.original),
     },
     {
         id: 'total',
@@ -404,6 +421,7 @@ const columns = [
                 :selected-sale="selectedSale"
                 :sale-search="saleSearch"
                 :refund-accounts="refundAccounts"
+                :projects="projects"
                 :stores="stores"
                 :items="items"
                 :customers="customers"

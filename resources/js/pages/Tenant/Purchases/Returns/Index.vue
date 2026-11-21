@@ -61,6 +61,8 @@ const props = defineProps({
     // Branch picker of the unlinked return form (BranchFormOptions::props()).
     branchOptions: { type: Array, default: () => [] },
     defaultBranchId: { type: Number, default: null },
+    // Active projects for the create forms' optional project picker.
+    projects: { type: Array, default: () => [] },
 });
 
 // Plan 12, BR12: a branch column only for a multi-branch company viewing all
@@ -198,11 +200,16 @@ function unlinkedRefundSummary(purchaseReturn) {
     return parts.length > 0 ? parts.join(' + ') : '-';
 }
 
-/** "#12 - Supplier" for a linked return, "No bill - Supplier" for an unlinked one. */
+/**
+ * "#12 - Supplier" for a linked return, "No bill - Supplier" for an unlinked
+ * one, followed by the return's project when it has one.
+ */
 function purchaseSummary(purchaseReturn) {
     const supplier = purchaseReturn.purchase?.supplier?.name ?? purchaseReturn.supplier?.name ?? '-';
+    const summary = purchaseReturn.purchase?.id ? `#${purchaseReturn.purchase.id} - ${supplier}` : `No bill - ${supplier}`;
+    const project = purchaseReturn.project;
 
-    return purchaseReturn.purchase?.id ? `#${purchaseReturn.purchase.id} - ${supplier}` : `No bill - ${supplier}`;
+    return project ? `${summary} (Project: ${project.code} - ${project.name})` : summary;
 }
 
 const cancelling = ref(null);
@@ -336,6 +343,7 @@ const columns = [
                 :default-vat-rate="defaultVatRate"
                 :branch-options="branchOptions"
                 :default-branch-id="defaultBranchId"
+                :projects="projects"
                 @cancel="showCreateForm = false"
                 @posted="showCreateForm = false"
             />

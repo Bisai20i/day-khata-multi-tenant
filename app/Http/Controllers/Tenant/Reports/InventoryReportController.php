@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Tenant\Reports;
 
 use App\Enums\FiscalYearStatus;
 use App\Enums\StockMovementType;
+use App\Exports\StockSummaryExport;
 use App\Http\Controllers\Controller;
 use App\Models\FiscalYear;
 use App\Models\Item;
@@ -14,13 +15,16 @@ use App\Support\Branches\BranchStock;
 use App\Support\Branches\StockInTransit;
 use App\Support\Money\Money;
 use App\Support\Money\Quantity;
+use App\Support\Reports\StockItemFilters;
 use Brick\Math\BigDecimal;
 use Brick\Math\RoundingMode;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Http\Request;
 use Illuminate\Support\Carbon;
+use Illuminate\Support\Collection;
 use Inertia\Inertia;
 use Inertia\Response;
+use Maatwebsite\Excel\Facades\Excel;
 
 /**
  * Per-item stock movement summary over a date range: opening quantity (net
@@ -62,6 +66,66 @@ class InventoryReportController extends Controller
 {
     public function stockSummary(Request $request): Response
     {
+        $report = $this->summaryReport($request);
+        $filter = $report['filter'];
+        $filters = $report['filters'];
+
+        return Inertia::render('Tenant/Reports/StockSummary', [
+            'from' => $report['from'],
+            'to' => $report['to'],
+            'rows' => $report['rows'],
+            'grandTotalValuation' => $report['grandTotalValuation'],
+            'stores' => BranchStock::storeOptions($filter, Store::where('is_active', true))->orderBy('name')->get(['id', 'name']),
+            'storeId' => $report['storeId'],
+            'itemCategoryId' => $filters['item_category_id'] ?? null,
+            'itemSubcategoryId' => $filters['item_subcategory_id'] ?? null,
+            'brandId' => $filters['brand_id'] ?? null,
+            'search' => $filters['search'] ?? '',
+            'filterOptions' => StockItemFilters::options(),
+            'branchReport' => $filter->payload(),
+            'inTransit' => $report['inTransit'],
+        ]);
+    }
+
+    /**
+     * Same rows and totals as stockSummary() for the same query string,
+     * streamed as a real .xlsx.
+     */
+    public function stockSummaryExport(Request $request)
+    {
+        $report = $this->summaryReport($request);
+        $filter = $report['filter'];
+
+        return Excel::download(
+            new StockSummaryExport(
+                $report['rows']->all(),
+                $report['grandTotalValuation'],
+                $report['from'],
+                $report['to'],
+                $filter->isActive() ? $filter->label() : null,
+                $report['inTransit'],
+            ),
+            "stock-summary-{$report['from']}-to-{$report['to']}.xlsx",
+        );
+    }
+
+    /**
+     * The one place the summary is built, so the page and the Excel download
+     * can never disagree.
+     *
+     * @return array{from: string, to: string, rows: Collection<int, array<string, mixed>>, grandTotalValuation: string, filter: BranchFilter, storeId: int|null, filters: array<string, int|string>, inTransit: array{buckets: list<string>, totals: array<string, string>}|null}
+     */
+    private function summaryReport(Request $request): array
+    {
+        // Strict Y-m-d: a malformed or reversed range is a validation error
+        // the page shows. Absent dates still default to the open fiscal year.
+        $request->validate([
+            'from' => ['nullable', 'date_format:Y-m-d'],
+            'to' => ['nullable', 'date_format:Y-m-d', 'after_or_equal:from'],
+            'store_id' => ['nullable', 'integer', 'exists:stores,id'],
+            ...StockItemFilters::rules(),
+        ]);
+
         $openFiscalYear = FiscalYear::query()->where('status', FiscalYearStatus::Open)->first();
 
         $from = ($request->date('from') ?? $openFiscalYear?->start_date ?? now()->subDays(30))->toDateString();
@@ -69,9 +133,14 @@ class InventoryReportController extends Controller
         $filter = BranchFilter::fromRequest($request);
         $storeId = $filter->allowedStoreId($request->integer('store_id') ?: null);
         $stockScope = $filter->stockScope($storeId);
+        $filters = StockItemFilters::fromRequest($request);
 
         $items = Item::query()
             ->where('is_stockable', true)
+            ->when(isset($filters['item_category_id']), fn (Builder $q) => $q->where('item_category_id', $filters['item_category_id']))
+            ->when(isset($filters['item_subcategory_id']), fn (Builder $q) => $q->where('item_subcategory_id', $filters['item_subcategory_id']))
+            ->when(isset($filters['brand_id']), fn (Builder $q) => $q->where('brand_id', $filters['brand_id']))
+            ->when(isset($filters['search']), fn (Builder $q) => $q->where('name', 'like', '%'.$filters['search'].'%'))
             ->orderBy('name')
             ->get(['id', 'name', 'unit']);
 
@@ -81,12 +150,15 @@ class InventoryReportController extends Controller
         $opening = Item::currentStockByItem($itemIds, $stockScope, $dayBefore);
         $closing = Item::currentStockByItem($itemIds, $stockScope, $to);
         $movement = $this->movementTotals($itemIds, $from, $to, $stockScope);
-        $values = BranchStock::valuationRows($filter, $to, $storeId, ['include_empty' => true])->keyBy('item_id');
+        $values = BranchStock::valuationRows($filter, $to, $storeId, [...$filters, 'include_empty' => true])->keyBy('item_id');
 
         // BR19: goods between branches on the last day of the window. Only
         // read for a multi-branch company, and the columns only exist when
-        // something is in transit, so every other payload is unchanged.
-        $inTransit = $filter->isActive() ? StockInTransit::byItem($stockScope, $to) : [];
+        // something is in transit, so every other payload is unchanged. Cut
+        // down to the filtered items so the in-transit totals match the rows.
+        $inTransit = $filter->isActive()
+            ? array_intersect_key(StockInTransit::byItem($stockScope, $to), array_flip(array_map('intval', $itemIds)))
+            : [];
         $transitBuckets = $this->transitBuckets($inTransit);
 
         $rows = $items
@@ -119,19 +191,19 @@ class InventoryReportController extends Controller
                 && ! isset($inTransit[$row['itemId']]))
             ->values();
 
-        return Inertia::render('Tenant/Reports/StockSummary', [
+        return [
             'from' => $from,
             'to' => $to,
             'rows' => $rows,
             'grandTotalValuation' => Money::sum($rows->map(fn (array $row) => Money::of($row['valuation'])))->toString(),
-            'stores' => BranchStock::storeOptions($filter, Store::where('is_active', true))->orderBy('name')->get(['id', 'name']),
+            'filter' => $filter,
             'storeId' => $storeId,
-            'branchReport' => $filter->payload(),
+            'filters' => $filters,
             'inTransit' => $transitBuckets === [] ? null : [
                 'buckets' => $transitBuckets,
                 'totals' => $this->transitTotals($inTransit, $transitBuckets),
             ],
-        ]);
+        ];
     }
 
     /**

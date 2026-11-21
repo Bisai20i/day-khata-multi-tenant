@@ -24,7 +24,10 @@ const props = defineProps({
     purchases: { type: Array, default: () => [] },
     salesTotal: { type: String, default: '0.00' },
     purchasesTotal: { type: String, default: '0.00' },
-    grandTotal: { type: String, default: '0.00' },
+    // Never netted: TDS deducted by us is deposited in full; TDS deducted
+    // from us is an advance income-tax credit claimed separately.
+    tdsPayable: { type: String, default: '0.00' },
+    tdsReceivable: { type: String, default: '0.00' },
     stores: { type: Array, default: () => [] },
     from: { type: String, required: true },
     to: { type: String, required: true },
@@ -63,6 +66,8 @@ const entryLabels = {
     credit_note: 'Credit note',
     debit_note: 'Debit note',
     cancelled: 'Cancelled',
+    credit_note_cancelled: 'Credit note cancelled',
+    debit_note_cancelled: 'Debit note cancelled',
 };
 
 function entryCell({ row }) {
@@ -169,9 +174,17 @@ const purchaseColumns = computed(() => columnsFor('Supplier', 'Bill #'));
 
         <Card variant="panel">
             <div class="flex items-center px-1 py-1 text-[14px] font-bold text-text-strong">
-                <div class="flex-1">Combined Grand Total (Sales TDS + Purchases TDS)</div>
-                <div class="w-32 text-right">{{ formatMoney(grandTotal) }}</div>
+                <div class="flex-1">TDS payable (deducted by us, to deposit)</div>
+                <div class="w-32 text-right">{{ formatMoney(tdsPayable) }}</div>
             </div>
+            <div class="flex items-center px-1 py-1 text-[14px] font-bold text-text-strong">
+                <div class="flex-1">TDS receivable (deducted from us, advance tax credit)</div>
+                <div class="w-32 text-right">{{ formatMoney(tdsReceivable) }}</div>
+            </div>
+            <p class="mt-2 px-1 text-[12px] text-text-muted">
+                These are not netted: TDS deducted by you must be deposited in full, and TDS deducted from you is
+                claimed against your income tax.
+            </p>
         </Card>
     </div>
 </template>

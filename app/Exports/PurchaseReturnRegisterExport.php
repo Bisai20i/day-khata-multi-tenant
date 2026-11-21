@@ -9,7 +9,10 @@ use Maatwebsite\Excel\Concerns\FromCollection;
 use Maatwebsite\Excel\Concerns\WithColumnFormatting;
 use Maatwebsite\Excel\Concerns\WithHeadings;
 use Maatwebsite\Excel\Concerns\WithMapping;
+use Maatwebsite\Excel\Concerns\WithStrictNullComparison;
+use Maatwebsite\Excel\Concerns\WithStyles;
 use PhpOffice\PhpSpreadsheet\Style\NumberFormat;
+use PhpOffice\PhpSpreadsheet\Worksheet\Worksheet;
 
 /**
  * The debit-note book as a real .xlsx - the purchase-side mirror of
@@ -17,19 +20,23 @@ use PhpOffice\PhpSpreadsheet\Style\NumberFormat;
  * `debit_note_number` and the supplier bill number it debits. See
  * SalesReturnRegisterExport's own docblock for the reasoning.
  */
-class PurchaseReturnRegisterExport implements FromCollection, WithColumnFormatting, WithHeadings, WithMapping
+class PurchaseReturnRegisterExport implements FromCollection, WithColumnFormatting, WithHeadings, WithMapping, WithStrictNullComparison, WithStyles
 {
     /**
      * @param  Collection<int, array<string, mixed>>  $rows
      * @param  array<string, string|int>  $totals
      * @param  bool  $withBranch  Multi-branch tenant (BR14): a trailing Branch column from each row's `branch`.
      * @param  string|null  $branchLabel  BranchFilter::label() in a multi-branch tenant, else null (no extra heading row)
+     * @param  string|null  $from  Period start (AD, Y-m-d) for the period heading row; null omits that row
+     * @param  string|null  $to  Period end (AD, Y-m-d)
      */
     public function __construct(
         private readonly Collection $rows,
         private readonly array $totals,
         private readonly bool $withBranch = false,
         private readonly ?string $branchLabel = null,
+        private readonly ?string $from = null,
+        private readonly ?string $to = null,
     ) {}
 
     /**
@@ -55,7 +62,10 @@ class PurchaseReturnRegisterExport implements FromCollection, WithColumnFormatti
     }
 
     /**
-     * @return array<int, string>|list<list<string>>
+     * Title, period and (multi-branch) branch label rows and a blank
+     * spacer above the column headings; the columns themselves are unchanged.
+     *
+     * @return list<list<string>>
      */
     public function headings(): array
     {
@@ -63,7 +73,28 @@ class PurchaseReturnRegisterExport implements FromCollection, WithColumnFormatti
 
         $headings = $this->withBranch ? [...$headings, 'Branch'] : $headings;
 
-        return $this->branchLabel === null ? $headings : [[$this->branchLabel], $headings];
+        $rows = [['Purchase Return Register']];
+
+        if ($this->from !== null && $this->to !== null) {
+            $rows[] = ['Period: BS '.NepaliCalendar::formatBs($this->from).' to '.NepaliCalendar::formatBs($this->to)." (AD {$this->from} to {$this->to})"];
+        }
+
+        if ($this->branchLabel !== null) {
+            $rows[] = [$this->branchLabel];
+        }
+
+        return [...$rows, [''], $headings];
+    }
+
+    /**
+     * @return array<int, array<string, mixed>>
+     */
+    public function styles(Worksheet $sheet): array
+    {
+        return [
+            1 => ['font' => ['bold' => true, 'size' => 13]],
+            count($this->headings()) => ['font' => ['bold' => true]],
+        ];
     }
 
     /**

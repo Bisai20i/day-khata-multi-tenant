@@ -25,12 +25,15 @@ const page = usePage();
 // No open fiscal year means nothing can be posted: a banner explains why the
 // create buttons are gone, and a posting request that slips through (e.g.
 // from a tab opened earlier) comes back with a `fiscal_year` error that no
-// form field owns, so it is surfaced as a toast here instead.
+// form field owns, so it is surfaced as a toast here instead. The report and
+// ledger pages send `from` / `to` through GET filters with no form to show a
+// field error, so a rejected date range ("2025-07-16 00:00:00", to before
+// from) is surfaced the same way instead of silently doing nothing.
 const { hasOpenFiscalYear } = useOpenFiscalYear();
 const showFiscalYearBanner = computed(() => !hasOpenFiscalYear.value && !page.url.startsWith('/fiscal-years'));
 const { toast } = useToast();
 watch(
-    () => page.props.errors?.fiscal_year,
+    () => page.props.errors?.fiscal_year ?? page.props.errors?.from ?? page.props.errors?.to,
     (message) => {
         if (message) {
             toast({ message, variant: 'danger' });

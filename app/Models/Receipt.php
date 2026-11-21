@@ -57,7 +57,7 @@ use InvalidArgumentException;
     'customer_id', 'date', 'amount', 'payment_mode', 'bank_account_id',
     'reference_number', 'narration', 'status', 'journal_voucher_id',
     'created_by', 'cancelled_at', 'cancelled_by', 'cancel_reason',
-    'reversal_journal_voucher_id', 'branch_id',
+    'reversal_journal_voucher_id', 'branch_id', 'project_id',
 ])]
 class Receipt extends Model
 {
@@ -73,6 +73,7 @@ class Receipt extends Model
             'amount' => Decimal::class.':2',
             'cancelled_at' => 'datetime',
             'branch_id' => 'integer',
+            'project_id' => 'integer',
         ];
     }
 
@@ -106,6 +107,16 @@ class Receipt extends Model
     public function reversalJournalVoucher(): BelongsTo
     {
         return $this->belongsTo(JournalVoucher::class, 'reversal_journal_voucher_id');
+    }
+
+    /**
+     * The project (cost centre) every line of this receipt's voucher is tagged with.
+     *
+     * @return BelongsTo<Project, $this>
+     */
+    public function project(): BelongsTo
+    {
+        return $this->belongsTo(Project::class);
     }
 
     /**
@@ -155,7 +166,7 @@ class Receipt extends Model
      * allocated invoice may be in any branch the actor may use; the voucher
      * lines follow the party-line rule in the class docblock.
      *
-     * @param  array{customer_id: int, date: string, amount: string|float, payment_mode: string, bank_account_id?: int|null, reference_number?: string|null, narration?: string|null, branch_id?: int|string|null, allocations?: array<int, array{sale_id: int, amount: string|float}>}  $data
+     * @param  array{customer_id: int, date: string, amount: string|float, payment_mode: string, bank_account_id?: int|null, reference_number?: string|null, narration?: string|null, branch_id?: int|string|null, project_id?: int|string|null, allocations?: array<int, array{sale_id: int, amount: string|float}>}  $data
      *
      * Lock order: the allocated sales (ascending id), then (inside
      * JournalVoucher::post()) the fiscal year, with the sale locks taken
@@ -183,6 +194,7 @@ class Receipt extends Model
             }
 
             $branchId = DocumentBranch::forDocument($actor, $data['branch_id'] ?? null)->branchId;
+            $projectId = isset($data['project_id']) && $data['project_id'] !== '' ? (int) $data['project_id'] : null;
 
             ClosedFiscalYearGuard::assertDateInOpenYear($data['date'], $actor);
 
@@ -228,6 +240,7 @@ class Receipt extends Model
                         'date' => $data['date'],
                         'narration' => $data['narration'] ?? "Receipt from {$customer->name}",
                         'branch_id' => $branchId,
+                        'project_id' => $projectId,
                     ],
                     $voucherLines,
                     $actor,
@@ -247,6 +260,7 @@ class Receipt extends Model
 
             $receipt = static::create([
                 'branch_id' => $branchId,
+                'project_id' => $projectId,
                 'customer_id' => $customer->id,
                 'date' => $data['date'],
                 'amount' => $amount,

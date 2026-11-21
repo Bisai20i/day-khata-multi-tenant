@@ -49,9 +49,20 @@ const fiscalYearOptions = computed(() =>
     })),
 );
 
-const fiscalYear = ref(props.fiscalYearId);
-const from = ref(props.from);
-const to = ref(props.to);
+// Unapplied filter inputs; named *Input so none shadows a prop in the template.
+const fiscalYearInput = ref(props.fiscalYearId);
+const fromInput = ref(props.from);
+const toInput = ref(props.to);
+
+// Follow what the server applied (it clamps the dates to the fiscal year).
+watch(
+    () => [props.fiscalYearId, props.from, props.to],
+    () => {
+        fiscalYearInput.value = props.fiscalYearId;
+        fromInput.value = props.from;
+        toInput.value = props.to;
+    },
+);
 
 const branchOptions = computed(() => props.branchReport?.options ?? []);
 const isFixedScope = computed(() => branchOptions.value.length <= 1);
@@ -83,37 +94,41 @@ function toggleBranch(id, checked, event) {
     }
 }
 
-function branchQuery() {
-    const ids = branchOptions.value.map((branch) => branch.id).filter((id) => selectedIds.value.includes(id));
+function branchQuery(selection = selectedIds.value) {
+    const ids = branchOptions.value.map((branch) => branch.id).filter((id) => selection.includes(id));
 
     // Every branch the user may see: "all" (their own set for a restricted user).
     return ids.length === 0 || ids.length === branchOptions.value.length ? { branch: ALL_BRANCHES } : { branches: ids };
 }
 
-watch(fiscalYear, (value) => {
+function onFiscalYearChange(value) {
     const chosen = props.fiscalYears.find((year) => year.id === value);
-    from.value = chosen?.startDate ?? null;
-    to.value = chosen?.endDate ?? null;
+    fiscalYearInput.value = value;
+    fromInput.value = chosen?.startDate ?? null;
+    toInput.value = chosen?.endDate ?? null;
     apply();
-});
+}
 
 function apply() {
     router.get(
         window.location.pathname,
         {
-            fiscal_year_id: fiscalYear.value ?? undefined,
-            from: from.value ?? undefined,
-            to: to.value ?? undefined,
+            fiscal_year_id: fiscalYearInput.value ?? undefined,
+            from: fromInput.value ?? undefined,
+            to: toInput.value ?? undefined,
             ...branchQuery(),
         },
         { preserveState: true, preserveScroll: true },
     );
 }
 
+// Export follows the applied props (what is on screen), never the unapplied inputs.
 function exportUrl() {
-    const params = new URLSearchParams({ fiscal_year_id: fiscalYear.value ?? '', from: from.value ?? '', to: to.value ?? '' });
+    const params = new URLSearchParams({ fiscal_year_id: props.fiscalYearId ?? '', from: props.from ?? '', to: props.to ?? '' });
+    const applied = props.branchReport?.selected ?? null;
+    const appliedIds = applied === null ? branchOptions.value.map((branch) => branch.id) : applied;
 
-    for (const [key, value] of Object.entries(branchQuery())) {
+    for (const [key, value] of Object.entries(branchQuery(appliedIds))) {
         if (Array.isArray(value)) {
             value.forEach((id) => params.append(`${key}[]`, String(id)));
         } else {
@@ -170,15 +185,15 @@ const thClass = 'border-b-[1.5px] border-border px-2 py-2 text-[10px] font-bold 
                 <div class="flex flex-wrap items-end gap-3">
                     <div class="w-56">
                         <Label class="mb-1">Fiscal year</Label>
-                        <Select v-model="fiscalYear" :options="fiscalYearOptions" />
+                        <Select :model-value="fiscalYearInput" :options="fiscalYearOptions" @update:model-value="onFiscalYearChange" />
                     </div>
                     <div>
                         <Label class="mb-1">From date (BS)</Label>
-                        <NepaliDateInput v-model="from" />
+                        <NepaliDateInput v-model="fromInput" />
                     </div>
                     <div>
                         <Label class="mb-1">To date (BS)</Label>
-                        <NepaliDateInput v-model="to" />
+                        <NepaliDateInput v-model="toInput" />
                     </div>
                     <Button variant="primary" tone="purple" @click="apply">Generate report</Button>
                 </div>

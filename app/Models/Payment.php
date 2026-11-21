@@ -52,6 +52,7 @@ use InvalidArgumentException;
     'supplier_id', 'date', 'amount', 'payment_mode', 'bank_account_id',
     'reference_number', 'narration', 'status', 'journal_voucher_id', 'fiscal_year_id', 'payment_number',
     'created_by', 'cancelled_at', 'cancelled_by', 'cancel_reason', 'reversal_journal_voucher_id', 'branch_id',
+    'project_id',
 ])]
 class Payment extends Model
 {
@@ -67,7 +68,18 @@ class Payment extends Model
             'cancelled_at' => 'datetime',
             'amount' => Decimal::class.':2',
             'branch_id' => 'integer',
+            'project_id' => 'integer',
         ];
+    }
+
+    /**
+     * The project (cost centre) every ledger line of this payment is tagged with.
+     *
+     * @return BelongsTo<Project, $this>
+     */
+    public function project(): BelongsTo
+    {
+        return $this->belongsTo(Project::class);
     }
 
     /**
@@ -131,7 +143,7 @@ class Payment extends Model
      * (DocumentBranch::forDocument()); it must be active and accessible. The
      * voucher lines follow the party-line rule in the class docblock.
      *
-     * @param  array{supplier_id: int, date: string, amount: mixed, payment_mode: string, bank_account_id?: int|null, reference_number?: string|null, narration?: string|null, branch_id?: int|string|null, allocations?: array<int, array{purchase_id: int, amount: mixed}>}  $data
+     * @param  array{supplier_id: int, date: string, amount: mixed, payment_mode: string, bank_account_id?: int|null, reference_number?: string|null, narration?: string|null, branch_id?: int|string|null, project_id?: int|string|null, allocations?: array<int, array{purchase_id: int, amount: mixed}>}  $data
      *
      * Locks before any plain SELECT of the transaction (as
      * SalaryPaymentPoster::post()): on MySQL (REPEATABLE READ) the first
@@ -191,6 +203,7 @@ class Payment extends Model
                         'date' => $data['date'],
                         'narration' => $data['narration'] ?? "Payment to {$supplier->name}",
                         'branch_id' => $branchId,
+                        'project_id' => $data['project_id'] ?? null,
                     ],
                     $voucherLines,
                     $actor,
@@ -207,6 +220,7 @@ class Payment extends Model
 
             $payment = static::create([
                 'branch_id' => $branchId,
+                'project_id' => $data['project_id'] ?? null,
                 'supplier_id' => $supplier->id,
                 'date' => $data['date'],
                 'amount' => $amount,

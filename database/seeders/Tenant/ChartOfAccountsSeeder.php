@@ -64,81 +64,108 @@ class ChartOfAccountsSeeder extends Seeder
      * account under these two heads to zero and posts the net to the
      * "Profit & Loss" account (code CA2, under Capital) rather than carrying
      * a balance forward. Every other head carries forward as-is.
+     *
+     * Every head, group, subgroup and account also carries a Nepali display
+     * name (name_np). Existing tenants get the same values from
+     * 2026_11_21_120100_backfill_nepali_names_for_default_accounts.
      */
     public function run(): void
     {
         $profitAndLossHeads = ['Income', 'Expenses'];
 
-        $heads = collect(['Assets', 'Liabilities', 'Income', 'Expenses', 'Capital'])
-            ->mapWithKeys(fn (string $name) => [$name => AccountHead::create([
-                'name' => $name,
-                'is_profit_and_loss' => in_array($name, $profitAndLossHeads, true),
-            ])]);
+        $heads = collect([
+            'Assets' => 'सम्पत्ति',
+            'Liabilities' => 'दायित्व',
+            'Income' => 'आय',
+            'Expenses' => 'खर्च',
+            'Capital' => 'पुँजी',
+        ])->mapWithKeys(fn (string $nameNp, string $name) => [$name => AccountHead::create([
+            'name' => $name,
+            'name_np' => $nameNp,
+            'is_profit_and_loss' => in_array($name, $profitAndLossHeads, true),
+        ])]);
 
         $groups = collect([
-            ['head' => 'Assets', 'name' => 'Current Assets'],
-            ['head' => 'Assets', 'name' => 'Fixed Assets'],
-            ['head' => 'Liabilities', 'name' => 'Current Liabilities'],
-            ['head' => 'Income', 'name' => 'Sales Accounts'],
-            ['head' => 'Income', 'name' => 'Indirect Income'],
-            ['head' => 'Expenses', 'name' => 'Purchase Accounts'],
-            ['head' => 'Expenses', 'name' => 'Indirect Expenses'],
-            ['head' => 'Capital', 'name' => 'Capital Account'],
+            ['head' => 'Assets', 'name' => 'Current Assets', 'name_np' => 'चालु सम्पत्ति'],
+            ['head' => 'Assets', 'name' => 'Fixed Assets', 'name_np' => 'स्थिर सम्पत्ति'],
+            ['head' => 'Liabilities', 'name' => 'Current Liabilities', 'name_np' => 'चालु दायित्व'],
+            ['head' => 'Liabilities', 'name' => 'Non-Current Liabilities', 'name_np' => 'गैर-चालु दायित्व'],
+            ['head' => 'Income', 'name' => 'Sales Accounts', 'name_np' => 'बिक्री खाताहरू'],
+            ['head' => 'Income', 'name' => 'Indirect Income', 'name_np' => 'अप्रत्यक्ष आय'],
+            ['head' => 'Expenses', 'name' => 'Purchase Accounts', 'name_np' => 'खरिद खाताहरू'],
+            ['head' => 'Expenses', 'name' => 'Direct Expenses', 'name_np' => 'प्रत्यक्ष खर्च'],
+            ['head' => 'Expenses', 'name' => 'Indirect Expenses', 'name_np' => 'अप्रत्यक्ष खर्च'],
+            ['head' => 'Capital', 'name' => 'Capital Account', 'name_np' => 'पुँजी खाता'],
         ])->mapWithKeys(fn (array $group) => [$group['name'] => AccountGroup::create([
             'account_head_id' => $heads[$group['head']]->id,
             'name' => $group['name'],
+            'name_np' => $group['name_np'],
         ])]);
 
         $subgroups = collect([
-            ['group' => 'Current Assets', 'name' => 'Sundry Debtors'],
-            ['group' => 'Current Assets', 'name' => 'Cash-In-Hand'],
-            ['group' => 'Current Assets', 'name' => 'Bank Accounts'],
-            ['group' => 'Current Assets', 'name' => 'Stock'],
-            ['group' => 'Current Liabilities', 'name' => 'Sundry Creditors'],
-            ['group' => 'Current Liabilities', 'name' => 'Sales Agents'],
-            ['group' => 'Current Liabilities', 'name' => 'Salary Payable'],
-            ['group' => 'Capital Account', 'name' => 'Reserve Surplus'],
+            ['group' => 'Current Assets', 'name' => 'Sundry Debtors', 'name_np' => 'विविध देनदार'],
+            ['group' => 'Current Assets', 'name' => 'Cash-In-Hand', 'name_np' => 'हातमा नगद'],
+            ['group' => 'Current Assets', 'name' => 'Bank Accounts', 'name_np' => 'बैंक खाताहरू'],
+            ['group' => 'Current Assets', 'name' => 'Stock', 'name_np' => 'मौज्दात'],
+            ['group' => 'Current Liabilities', 'name' => 'Sundry Creditors', 'name_np' => 'विविध लेनदार'],
+            ['group' => 'Current Liabilities', 'name' => 'Sales Agents', 'name_np' => 'बिक्री एजेन्टहरू'],
+            ['group' => 'Current Liabilities', 'name' => 'Salary Payable', 'name_np' => 'तलब भुक्तानी योग्य'],
+            ['group' => 'Capital Account', 'name' => 'Reserve Surplus', 'name_np' => 'जगेडा तथा बचत'],
         ])->mapWithKeys(fn (array $subgroup) => [$subgroup['name'] => AccountSubgroup::create([
             'account_group_id' => $groups[$subgroup['group']]->id,
             'name' => $subgroup['name'],
+            'name_np' => $subgroup['name_np'],
         ])]);
 
         $defaultAccounts = [
-            ['subgroup' => 'Cash-In-Hand', 'code' => 'AS1', 'name' => 'Cash In Hand'],
-            ['subgroup' => 'Reserve Surplus', 'code' => 'CA2', 'name' => 'Profit & Loss'],
-            ['subgroup' => 'Stock', 'code' => 'AS11', 'name' => 'Stock in Hand'],
-            ['subgroup' => 'Stock', 'code' => 'AS12', 'name' => 'Raw Material Inventory'],
-            ['subgroup' => 'Stock', 'code' => 'AS13', 'name' => 'Work in Process'],
-            ['subgroup' => 'Stock', 'code' => 'AS14', 'name' => 'Finished Goods Inventory'],
-            ['group' => 'Sales Accounts', 'code' => 'INI20', 'name' => 'Sales Account'],
-            ['group' => 'Sales Accounts', 'code' => 'INI21', 'name' => 'Sales Return'],
-            ['group' => 'Sales Accounts', 'code' => 'INI22', 'name' => 'Closing Stock'],
-            ['group' => 'Purchase Accounts', 'code' => 'EXE8', 'name' => 'Purchases Account'],
-            ['group' => 'Purchase Accounts', 'code' => 'EXE81', 'name' => 'Purchase Return'],
-            ['group' => 'Purchase Accounts', 'code' => 'EXE9', 'name' => 'Opening Stock'],
-            ['group' => 'Purchase Accounts', 'code' => 'EXE10', 'name' => 'Cost of Goods Sold'],
-            ['group' => 'Current Liabilities', 'code' => 'LIA20', 'name' => 'Vat Payable'],
-            ['group' => 'Current Liabilities', 'code' => 'LIA21', 'name' => 'TDS Payable'],
-            ['group' => 'Current Assets', 'code' => 'ASA23', 'name' => 'Vat Receivable'],
-            ['group' => 'Fixed Assets', 'code' => 'AS31', 'name' => 'Accumulated Depreciation'],
-            ['group' => 'Indirect Expenses', 'code' => 'EXE20', 'name' => 'Depreciation Expense'],
-            ['group' => 'Indirect Expenses', 'code' => 'EXE21', 'name' => 'Loss on Asset Disposal'],
-            ['group' => 'Indirect Income', 'code' => 'INI30', 'name' => 'Gain on Asset Disposal'],
-            ['group' => 'Indirect Income', 'code' => 'INI31', 'name' => 'Round Off'],
-            ['group' => 'Indirect Expenses', 'code' => 'EXE22', 'name' => 'Sales Commission Expense'],
-            ['group' => 'Indirect Expenses', 'code' => 'EXE23', 'name' => 'Inventory Adjustment'],
-            ['group' => 'Indirect Expenses', 'code' => 'EXE24', 'name' => 'Production Loss'],
-            ['group' => 'Current Liabilities', 'code' => 'LIA22', 'name' => 'Salary Payable'],
-            ['group' => 'Current Assets', 'code' => 'ASA24', 'name' => 'Staff Advances Receivable'],
-            ['group' => 'Indirect Expenses', 'code' => 'EXE25', 'name' => 'Salaries & Wages'],
-            ['group' => 'Indirect Expenses', 'code' => 'EXE26', 'name' => 'Staff Bonus'],
-            ['group' => 'Indirect Expenses', 'code' => 'EXE27', 'name' => 'Staff Allowances'],
+            ['subgroup' => 'Cash-In-Hand', 'code' => 'AS1', 'name' => 'Cash In Hand', 'name_np' => 'हातमा नगद'],
+            ['subgroup' => 'Reserve Surplus', 'code' => 'CA2', 'name' => 'Profit & Loss', 'name_np' => 'नाफा नोक्सान'],
+            ['subgroup' => 'Stock', 'code' => 'AS11', 'name' => 'Stock in Hand', 'name_np' => 'हातमा रहेको मौज्दात'],
+            ['subgroup' => 'Stock', 'code' => 'AS12', 'name' => 'Raw Material Inventory', 'name_np' => 'कच्चा पदार्थ मौज्दात'],
+            ['subgroup' => 'Stock', 'code' => 'AS13', 'name' => 'Work in Process', 'name_np' => 'प्रक्रियामा रहेको काम'],
+            ['subgroup' => 'Stock', 'code' => 'AS14', 'name' => 'Finished Goods Inventory', 'name_np' => 'तयारी मालसामान मौज्दात'],
+            ['group' => 'Sales Accounts', 'code' => 'INI20', 'name' => 'Sales Account', 'name_np' => 'बिक्री'],
+            ['group' => 'Sales Accounts', 'code' => 'INI21', 'name' => 'Sales Return', 'name_np' => 'बिक्री फिर्ता'],
+            ['group' => 'Sales Accounts', 'code' => 'INI22', 'name' => 'Closing Stock', 'name_np' => 'अन्तिम मौज्दात'],
+            ['group' => 'Purchase Accounts', 'code' => 'EXE8', 'name' => 'Purchases Account', 'name_np' => 'खरिद'],
+            ['group' => 'Purchase Accounts', 'code' => 'EXE81', 'name' => 'Purchase Return', 'name_np' => 'खरिद फिर्ता'],
+            ['group' => 'Purchase Accounts', 'code' => 'EXE9', 'name' => 'Opening Stock', 'name_np' => 'प्रारम्भिक मौज्दात'],
+            ['group' => 'Purchase Accounts', 'code' => 'EXE10', 'name' => 'Cost of Goods Sold', 'name_np' => 'बिक्री गरिएको मालको लागत'],
+            ['group' => 'Current Liabilities', 'code' => 'LIA20', 'name' => 'Vat Payable', 'name_np' => 'भ्याट भुक्तानी योग्य'],
+            ['group' => 'Current Liabilities', 'code' => 'LIA21', 'name' => 'TDS Payable', 'name_np' => 'टीडीएस भुक्तानी योग्य'],
+            ['group' => 'Current Assets', 'code' => 'ASA23', 'name' => 'Vat Receivable', 'name_np' => 'भ्याट प्राप्य'],
+            ['group' => 'Fixed Assets', 'code' => 'AS31', 'name' => 'Accumulated Depreciation', 'name_np' => 'सञ्चित ह्रासकट्टी'],
+            ['group' => 'Indirect Expenses', 'code' => 'EXE20', 'name' => 'Depreciation Expense', 'name_np' => 'ह्रासकट्टी खर्च'],
+            ['group' => 'Indirect Expenses', 'code' => 'EXE21', 'name' => 'Loss on Asset Disposal', 'name_np' => 'सम्पत्ति बिक्रीमा नोक्सान'],
+            ['group' => 'Indirect Income', 'code' => 'INI30', 'name' => 'Gain on Asset Disposal', 'name_np' => 'सम्पत्ति बिक्रीमा नाफा'],
+            ['group' => 'Indirect Income', 'code' => 'INI31', 'name' => 'Round Off', 'name_np' => 'पूर्णांकन (राउन्ड अफ)'],
+            ['group' => 'Indirect Expenses', 'code' => 'EXE22', 'name' => 'Sales Commission Expense', 'name_np' => 'बिक्री कमिसन खर्च'],
+            ['group' => 'Indirect Expenses', 'code' => 'EXE23', 'name' => 'Inventory Adjustment', 'name_np' => 'मौज्दात समायोजन'],
+            ['group' => 'Indirect Expenses', 'code' => 'EXE24', 'name' => 'Production Loss', 'name_np' => 'उत्पादन नोक्सान'],
+            ['group' => 'Current Liabilities', 'code' => 'LIA22', 'name' => 'Salary Payable', 'name_np' => 'तलब भुक्तानी योग्य'],
+            ['group' => 'Current Assets', 'code' => 'ASA24', 'name' => 'Staff Advances Receivable', 'name_np' => 'कर्मचारी पेश्की प्राप्य'],
+            ['group' => 'Indirect Expenses', 'code' => 'EXE25', 'name' => 'Salaries & Wages', 'name_np' => 'तलब तथा ज्याला'],
+            ['group' => 'Indirect Expenses', 'code' => 'EXE26', 'name' => 'Staff Bonus', 'name_np' => 'कर्मचारी बोनस'],
+            ['group' => 'Indirect Expenses', 'code' => 'EXE27', 'name' => 'Staff Allowances', 'name_np' => 'कर्मचारी भत्ता'],
+            // Employer SSF / CIT contributions posted by payroll. Existing
+            // tenants get them from 2026_11_21_180000_add_employer_contribution_expense_accounts.
+            ['group' => 'Indirect Expenses', 'code' => HrAccounts::EMPLOYER_SSF_EXPENSE, 'name' => 'Employer SSF Contribution', 'name_np' => 'नियोक्ता एसएसएफ योगदान'],
+            ['group' => 'Indirect Expenses', 'code' => HrAccounts::EMPLOYER_CIT_EXPENSE, 'name' => 'Employer CIT Contribution', 'name_np' => 'नियोक्ता सीआईटी योगदान'],
+            // ERP-parity chart additions (todo/erp-parity S1). Existing tenants
+            // get them from 2026_11_21_100000_add_direct_expense_and_noncurrent_liability_accounts.
+            ['group' => 'Direct Expenses', 'code' => HrAccounts::DIRECT_WAGES, 'name' => 'Direct Wages', 'name_np' => 'प्रत्यक्ष ज्याला'],
+            ['group' => 'Direct Expenses', 'code' => 'EXE29', 'name' => 'Freight Inward', 'name_np' => 'आवक ढुवानी'],
+            ['group' => 'Direct Expenses', 'code' => 'EXE30', 'name' => 'Sub-contract Charges', 'name_np' => 'उप-ठेक्का शुल्क'],
+            ['group' => 'Direct Expenses', 'code' => 'EXE31', 'name' => 'Equipment Hire', 'name_np' => 'उपकरण भाडा'],
+            ['group' => 'Current Liabilities', 'code' => HrAccounts::SSF_PAYABLE, 'name' => 'SSF Payable', 'name_np' => 'एसएसएफ भुक्तानी योग्य'],
+            ['group' => 'Current Liabilities', 'code' => HrAccounts::CIT_PAYABLE, 'name' => 'CIT Payable', 'name_np' => 'सीआईटी भुक्तानी योग्य'],
+            ['group' => 'Non-Current Liabilities', 'code' => 'LIA25', 'name' => 'Long-term Loans', 'name_np' => 'दीर्घकालीन ऋण'],
             // Inter-branch accounts (plan 12, BR17; codes and placement
             // explained on App\Support\Branches\BranchAccounts). Existing
             // tenants get them from 2026_11_10_300000_add_inter_branch_accounts.
-            ['group' => 'Current Assets', 'code' => BranchAccounts::CLEARING_ACCOUNT_CODE, 'name' => BranchBalancer::CLEARING_ACCOUNT_NAME],
-            ['group' => 'Sales Accounts', 'code' => BranchAccounts::STOCK_TRANSFERRED_CODE, 'name' => BranchAccounts::STOCK_TRANSFERRED_NAME],
-            ['group' => 'Purchase Accounts', 'code' => BranchAccounts::STOCK_RECEIVED_CODE, 'name' => BranchAccounts::STOCK_RECEIVED_NAME],
+            ['group' => 'Current Assets', 'code' => BranchAccounts::CLEARING_ACCOUNT_CODE, 'name' => BranchBalancer::CLEARING_ACCOUNT_NAME, 'name_np' => 'अन्तर-शाखा क्लियरिङ'],
+            ['group' => 'Sales Accounts', 'code' => BranchAccounts::STOCK_TRANSFERRED_CODE, 'name' => BranchAccounts::STOCK_TRANSFERRED_NAME, 'name_np' => 'शाखामा हस्तान्तरित मौज्दात'],
+            ['group' => 'Purchase Accounts', 'code' => BranchAccounts::STOCK_RECEIVED_CODE, 'name' => BranchAccounts::STOCK_RECEIVED_NAME, 'name_np' => 'शाखाबाट प्राप्त मौज्दात'],
         ];
 
         foreach ($defaultAccounts as $account) {
@@ -147,6 +174,7 @@ class ChartOfAccountsSeeder extends Seeder
                 'account_subgroup_id' => isset($account['subgroup']) ? $subgroups[$account['subgroup']]->id : null,
                 'code' => $account['code'],
                 'name' => $account['name'],
+                'name_np' => $account['name_np'],
             ]);
         }
 
@@ -161,6 +189,7 @@ class ChartOfAccountsSeeder extends Seeder
                 'expense_account_id' => Account::where('code', $component['account'])->value('id'),
                 'is_system' => true,
                 'is_active' => true,
+                'is_contribution_base' => $component['contribution_base'],
                 'sort_order' => $sortOrder + 1,
             ]);
         }

@@ -2,6 +2,8 @@
 
 namespace App\Http\Requests\Tenant\Purchases;
 
+use App\Models\CapitalPurchase;
+use App\Rules\OpenProject;
 use App\Support\Branches\BranchAccounts;
 use Illuminate\Foundation\Http\FormRequest;
 
@@ -28,6 +30,10 @@ class SettleCapitalPurchaseRequest extends FormRequest
             // Where the money went out (plan 12, BR07); the model checks it
             // is active and accessible, default the posting branch.
             'branch_id' => ['nullable', 'integer', 'exists:branches,id'],
+            // Optional project; left out entirely, the settlement inherits
+            // the bill's (CapitalPurchaseSettlement::settle()). A completed
+            // project is accepted only when it is the bill's own.
+            'project_id' => ['nullable', 'integer', new OpenProject(CapitalPurchase::query()->whereKey($this->route('capitalPurchase'))->value('project_id'))],
         ];
     }
 }

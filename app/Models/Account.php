@@ -15,7 +15,7 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Support\Facades\DB;
 use InvalidArgumentException;
 
-#[Fillable(['account_group_id', 'account_subgroup_id', 'code', 'name', 'phone', 'address', 'parent_account_id'])]
+#[Fillable(['account_group_id', 'account_subgroup_id', 'code', 'name', 'name_np', 'phone', 'address', 'parent_account_id'])]
 class Account extends Model
 {
     use HasFactory;
@@ -31,14 +31,18 @@ class Account extends Model
      * (Inter-Branch Clearing), INI23 (Stock Transferred to Branches) and
      * EXE11 (Stock Received from Branches) are the inter-branch accounts
      * (BranchAccounts), looked up by code by BranchBalancer and the year-end
-     * I3 check.
+     * I3 check. EXE28 (Direct Wages), LIA23 (SSF Payable) and LIA24 (CIT
+     * Payable) are the payroll posting accounts added with the ERP-parity
+     * chart (HrAccounts). EXE32 (Employer SSF Contribution) and EXE33
+     * (Employer CIT Contribution) are the employer contribution expenses
+     * payroll debits (HrAccounts).
      *
      * @var list<string>
      */
     public const SYSTEM_CODES = [
         'AS1', 'AS11', 'AS12', 'AS13', 'AS14', 'AS31', 'ASA23', 'ASA24', 'ASA25', 'CA2', 'EXE8', 'EXE9', 'EXE10',
-        'EXE11', 'EXE20', 'EXE21', 'EXE22', 'EXE23', 'EXE24', 'EXE25', 'EXE26', 'EXE27',
-        'INI20', 'INI22', 'INI23', 'INI30', 'INI31', 'LIA20', 'LIA21', 'LIA22',
+        'EXE11', 'EXE20', 'EXE21', 'EXE22', 'EXE23', 'EXE24', 'EXE25', 'EXE26', 'EXE27', 'EXE28',
+        'EXE32', 'EXE33', 'INI20', 'INI22', 'INI23', 'INI30', 'INI31', 'LIA20', 'LIA21', 'LIA22', 'LIA23', 'LIA24',
     ];
 
     /**

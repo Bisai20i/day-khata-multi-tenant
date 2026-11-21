@@ -3,6 +3,8 @@
 namespace App\Http\Controllers\Tenant\Reports;
 
 use App\Enums\FiscalYearStatus;
+use App\Enums\VoucherType;
+use App\Exports\AgedPartyExport;
 use App\Exports\CreditorsExport;
 use App\Exports\DebtorsExport;
 use App\Exports\PurchaseReturnRegisterExport;
@@ -10,9 +12,11 @@ use App\Exports\PurchaseVatBookExport;
 use App\Exports\SalesReturnRegisterExport;
 use App\Exports\SalesVatBookExport;
 use App\Http\Controllers\Controller;
+use App\Models\Account;
 use App\Models\Area;
 use App\Models\CapitalPurchase;
 use App\Models\CapitalSale;
+use App\Models\CompanySetting;
 use App\Models\Customer;
 use App\Models\FiscalYear;
 use App\Models\JournalVoucher;
@@ -30,13 +34,17 @@ use App\Support\Branches\BranchFilter;
 use App\Support\Branches\BranchStock;
 use App\Support\Branches\PartyBranchBalances;
 use App\Support\Money\Money;
+use App\Support\NepaliCalendar;
+use Barryvdh\DomPDF\Facade\Pdf;
 use Brick\Math\BigDecimal;
 use Brick\Math\RoundingMode;
+use Carbon\CarbonInterface;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Http\Request;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Collection;
+use Illuminate\Support\Str;
 use Inertia\Inertia;
 use Inertia\Response;
 use Maatwebsite\Excel\Facades\Excel;
@@ -74,6 +82,13 @@ class SalesPurchaseReportController extends Controller
 {
     /** Ageing buckets, in days outstanding. */
     private const AGING_BUCKETS = ['current', 'days31_60', 'days61_90', 'days90Plus'];
+
+    /** Debtors/Creditors/ageing filters: a bad year, date or store is a 422, not a silent fallback. */
+    private const PARTY_REPORT_INPUT_RULES = [
+        'fiscal_year_id' => ['nullable', 'integer', 'exists:fiscal_years,id'],
+        'as_of' => ['nullable', 'date_format:Y-m-d'],
+        'store_id' => ['nullable', 'integer', 'exists:stores,id'],
+    ];
 
     public function salesRegister(Request $request): Response
     {
@@ -246,7 +261,7 @@ class SalesPurchaseReportController extends Controller
         $data = $this->salesVatBookPayload($from, $to, $request->integer('store_id') ?: null, $branchFilter);
 
         return Excel::download(
-            new SalesVatBookExport($data['rows'], $data['totals'], $branchFilter->isActive(), $branchFilter->isActive() ? $branchFilter->label() : null),
+            new SalesVatBookExport($data['rows'], $data['totals'], $branchFilter->isActive(), $branchFilter->isActive() ? $branchFilter->label() : null, $from, $to),
             "sales-vat-book-{$from}-to-{$to}.xlsx",
         );
     }
@@ -275,7 +290,7 @@ class SalesPurchaseReportController extends Controller
         $data = $this->purchaseVatBookPayload($from, $to, $request->integer('store_id') ?: null, $branchFilter);
 
         return Excel::download(
-            new PurchaseVatBookExport($data['rows'], $data['totals'], $branchFilter->isActive(), $branchFilter->isActive() ? $branchFilter->label() : null),
+            new PurchaseVatBookExport($data['rows'], $data['totals'], $branchFilter->isActive(), $branchFilter->isActive() ? $branchFilter->label() : null, $from, $to),
             "purchase-vat-book-{$from}-to-{$to}.xlsx",
         );
     }
@@ -300,7 +315,7 @@ class SalesPurchaseReportController extends Controller
         $data = $this->salesReturnRegisterPayload($from, $to, $request->integer('store_id') ?: null, $branchFilter);
 
         return Excel::download(
-            new SalesReturnRegisterExport($data['rows'], $data['totals'], $branchFilter->isActive(), $branchFilter->isActive() ? $branchFilter->label() : null),
+            new SalesReturnRegisterExport($data['rows'], $data['totals'], $branchFilter->isActive(), $branchFilter->isActive() ? $branchFilter->label() : null, $from, $to),
             "sales-return-register-{$from}-to-{$to}.xlsx",
         );
     }
@@ -325,7 +340,7 @@ class SalesPurchaseReportController extends Controller
         $data = $this->purchaseReturnRegisterPayload($from, $to, $request->integer('store_id') ?: null, $branchFilter);
 
         return Excel::download(
-            new PurchaseReturnRegisterExport($data['rows'], $data['totals'], $branchFilter->isActive(), $branchFilter->isActive() ? $branchFilter->label() : null),
+            new PurchaseReturnRegisterExport($data['rows'], $data['totals'], $branchFilter->isActive(), $branchFilter->isActive() ? $branchFilter->label() : null, $from, $to),
             "purchase-return-register-{$from}-to-{$to}.xlsx",
         );
     }
@@ -377,7 +392,7 @@ class SalesPurchaseReportController extends Controller
         return [
             'rows' => $rows,
             'totals' => [
-                ...$this->totalsFor($rows, ['subtotal', 'nontaxable_amount', 'taxable_amount', 'vat_amount', 'capital_amount', 'fixed_asset_vat_amount', 'round_off', 'total']),
+                ...$this->totalsFor($rows, ['subtotal', 'nontaxable_amount', 'taxable_amount', 'vat_amount', 'capital_amount', 'fixed_asset_vat_amount', 'round_off', 'total', 'tds_amount']),
                 'count' => $rows->count(),
             ],
             'from' => $from,
@@ -505,6 +520,17 @@ class SalesPurchaseReportController extends Controller
     }
 
     /**
+     * A capital document stores no round-off column, so its Round Off is
+     * whatever closes Sub Total + VAT to the stored Total (normally 0.00).
+     * Derived from the same signed strings, so the row adds up by
+     * construction and the book's column totals tie to its Total.
+     */
+    private function derivedRoundOff(string $total, string $subtotal, string $vat): string
+    {
+        return Money::of($total)->minus($subtotal)->minus($vat)->toString();
+    }
+
+    /**
      * @return array<string, mixed>
      */
     private function capitalSaleVatRow(CapitalSale $sale, string $date, string $entry): array
@@ -513,6 +539,8 @@ class SalesPurchaseReportController extends Controller
         $taxable = $this->signed($sale->taxable_amount, $sign);
         $nontaxable = $this->signed($sale->nontaxable_amount, $sign);
         $subtotal = Money::of($taxable)->plus(Money::of($nontaxable))->toString();
+        $vat = $this->signed($sale->vat_amount, $sign);
+        $total = $this->signed($sale->total, $sign);
 
         return [
             'kind' => 'capital_sale',
@@ -527,9 +555,10 @@ class SalesPurchaseReportController extends Controller
             'subtotal' => $subtotal,
             'nontaxable_amount' => $nontaxable,
             'taxable_amount' => $taxable,
-            'vat_amount' => $this->signed($sale->vat_amount, $sign),
+            'vat_amount' => $vat,
             'capital_amount' => $this->signed($sale->taxable_amount, $sign),
-            'total' => $this->signed($sale->total, $sign),
+            'round_off' => $this->derivedRoundOff($total, $subtotal, $vat),
+            'total' => $total,
             'capital' => true,
         ];
     }
@@ -619,6 +648,11 @@ class SalesPurchaseReportController extends Controller
             'fixed_asset_vat_amount' => $this->signed($this->fixedAssetVatAmount($purchase)->toString(), $sign),
             'round_off' => $this->signed($purchase->round_off, $sign),
             'total' => $this->signed($purchase->total, $sign),
+            // TDS withheld from the supplier on this bill (it goes to the IRD,
+            // not to the supplier). Informational, like the fixed-asset VAT: it
+            // is part of `total`, never subtracted from it. A cancelled bill
+            // gives it back, so it is negative on the cancellation row.
+            'tds_amount' => $this->signed($purchase->tds_amount ?? '0', $sign),
             'capital' => false,
         ];
     }
@@ -655,6 +689,8 @@ class SalesPurchaseReportController extends Controller
         $taxable = $this->signed($purchase->taxable_amount, $sign);
         $nontaxable = $this->signed($purchase->nontaxable_amount, $sign);
         $subtotal = Money::of($taxable)->plus(Money::of($nontaxable))->toString();
+        $vat = $this->signed($purchase->vat_amount, $sign);
+        $total = $this->signed($purchase->total, $sign);
 
         return [
             'kind' => 'capital_purchase',
@@ -668,13 +704,16 @@ class SalesPurchaseReportController extends Controller
             'subtotal' => $subtotal,
             'nontaxable_amount' => $nontaxable,
             'taxable_amount' => $taxable,
-            'vat_amount' => $this->signed($purchase->vat_amount, $sign),
+            'vat_amount' => $vat,
             'capital_amount' => $purchase->type === 'capital' ? $this->signed($purchase->taxable_amount, $sign) : Money::zero()->toString(),
             // A whole CapitalPurchase document is already its own "capital"
             // bucket above, so it never contributes to the fixed-asset
             // breakdown of an ordinary Purchase's vat_amount.
             'fixed_asset_vat_amount' => Money::zero()->toString(),
-            'total' => $this->signed($purchase->total, $sign),
+            'round_off' => $this->derivedRoundOff($total, $subtotal, $vat),
+            'total' => $total,
+            // A CapitalPurchase document carries no TDS.
+            'tds_amount' => Money::zero()->toString(),
             'capital' => $purchase->type === 'capital',
         ];
     }
@@ -820,160 +859,100 @@ class SalesPurchaseReportController extends Controller
     }
 
     /**
-     * Ages every still-open `credit`-mode sale by days elapsed between its
-     * invoice date and `as_of`, bucketed Current (0-30) / 31-60 / 61-90 /
-     * 90+, grouped by customer.
-     *
-     * Two audit fixes live here:
-     *
-     * - Outstanding is `Sale::outstandingAmount()` compared **exactly**. The
-     *   old `<= 0.01` filter was a float tolerance that both hid a real one
-     *   paisa debt and, worse, implied money comparisons need tolerances.
-     * - An "Opening / unallocated" bucket carries whatever the customer's
-     *   ledger balance holds that no open invoice explains: a migrated
-     *   opening due, a receipt on account, a manual journal voucher. Those
-     *   were invisible before (audit P1 "no ledger-based Debtors list"), so
-     *   a tenant who imported opening balances saw an empty ageing report
-     *   while the balance sheet showed lakhs of debtors.
-     *
-     * Branches (plan 12, BR14): the invoices are narrowed on their own
-     * branch_id and the ledger balance behind the opening bucket on
-     * journal_voucher_lines.branch_id, by the same BranchFilter. A party
-     * line is tagged with the branch of the document it settles, so a
-     * branch's buckets, its opening figure and its total all describe the
-     * same balance; a filtered side mixed with an unfiltered one would
-     * misstate the opening bucket by the other branches' invoices.
+     * Ages each customer's ledger balance as of `as_of` (receipts and
+     * returns applied FIFO to the oldest entries), bucketed Current (0-30) /
+     * 31-60 / 61-90 / 91+. See agedPartyPayload() for the basis and the row
+     * contract.
      */
     public function agedReceivables(Request $request): Response
     {
-        $asOf = $this->resolveAsOf($request);
-        $storeId = $request->integer('store_id') ?: null;
-        $areaFilter = AreaFilter::fromRequest($request);
-        $groupByArea = AreaFilter::groupRequested($request);
-        $branchFilter = BranchFilter::fromRequest($request);
+        $request->validate($this->agedReportRules(Customer::class));
 
-        $sales = Sale::query()
-            ->with(['customer:id,name,account_id,area_id', 'customer.area:id,name'])
-            ->where('payment_mode', 'credit')
-            ->where('status', 'posted')
-            ->whereDate('date', '<=', $asOf)
-            ->when($storeId, fn (Builder $query) => $query->where('store_id', $storeId))
-            ->when($areaFilter->isActive(), fn (Builder $query) => $areaFilter->applyThroughRelation($query, 'customer'))
-            ->tap(fn (Builder $query) => $branchFilter->applyToDocuments($query, 'sales.branch_id'))
-            ->orderBy('date')
-            ->get();
+        return Inertia::render('Tenant/Reports/AgedReceivables', $this->agedPartyPayload($request, Customer::class));
+    }
 
-        $byParty = [];
-        $accountIds = [];
+    public function agedReceivablesPdf(Request $request)
+    {
+        $request->validate($this->agedReportRules(Customer::class));
 
-        foreach ($sales as $sale) {
-            $outstanding = $sale->outstandingAmount();
+        return $this->agedPartyPdf($this->agedPartyPayload($request, Customer::class), 'Aged Receivables', 'Customer', 'aged-receivables');
+    }
 
-            if (! $outstanding->isPositive()) {
-                continue;
-            }
+    public function agedReceivablesExport(Request $request)
+    {
+        $request->validate($this->agedReportRules(Customer::class));
 
-            $key = $sale->customer_id;
-            $byParty[$key] ??= $this->emptyAgingRow($sale->customer?->name ?? 'Unknown', $sale->customer?->area?->name);
-            $bucket = $this->agingBucket((int) abs($sale->date->copy()->startOfDay()->diffInDays(Carbon::parse($asOf)->startOfDay())));
-
-            $byParty[$key][$bucket] = Money::of($byParty[$key][$bucket])->plus($outstanding)->toString();
-            $byParty[$key]['invoiced'] = Money::of($byParty[$key]['invoiced'])->plus($outstanding)->toString();
-
-            if ($sale->customer?->account_id) {
-                $accountIds[$key] = $sale->customer->account_id;
-            }
-        }
-
-        $rows = $this->withOpeningBucket($byParty, $accountIds, $areaFilter->apply(Customer::query()), $asOf, $storeId, creditNormal: false, branchIds: $branchFilter->lineBranchIds());
-
-        return Inertia::render('Tenant/Reports/AgedReceivables', [
-            'rows' => $rows,
-            'totals' => $this->sumAgingTotals($rows),
-            ...$this->areaReportProps($areaFilter, $groupByArea, $rows, ['opening', ...self::AGING_BUCKETS, 'total']),
-            'stores' => BranchStock::storeOptions($branchFilter, Store::where('is_active', true))->orderBy('name')->get(['id', 'name']),
-            'asOf' => $asOf,
-            'storeId' => $storeId,
-            'branchReport' => $branchFilter->payload(),
-        ]);
+        return $this->agedPartyExport($this->agedPartyPayload($request, Customer::class), 'Aged Receivables', 'Customer', 'aged-receivables');
     }
 
     /**
-     * Exact mirror of agedReceivables() for `credit`-mode purchases and
-     * suppliers, via Purchase::outstandingAmount() instead of
-     * Sale::outstandingAmount().
+     * Exact mirror of agedReceivables() for suppliers, ageing the
+     * credit-normal payable ledger (payments and purchase returns applied
+     * FIFO to the oldest bills).
      */
     public function agedPayables(Request $request): Response
     {
-        $asOf = $this->resolveAsOf($request);
-        $storeId = $request->integer('store_id') ?: null;
-        $areaFilter = AreaFilter::fromRequest($request);
-        $groupByArea = AreaFilter::groupRequested($request);
-        $branchFilter = BranchFilter::fromRequest($request);
+        $request->validate($this->agedReportRules(Supplier::class));
 
-        $purchases = Purchase::query()
-            ->with(['supplier:id,name,account_id,area_id', 'supplier.area:id,name'])
-            ->where('payment_mode', 'credit')
-            ->where('status', 'posted')
-            ->whereDate('date', '<=', $asOf)
-            ->when($storeId, fn (Builder $query) => $query->where('store_id', $storeId))
-            ->when($areaFilter->isActive(), fn (Builder $query) => $areaFilter->applyThroughRelation($query, 'supplier'))
-            ->tap(fn (Builder $query) => $branchFilter->applyToDocuments($query, 'purchases.branch_id'))
-            ->orderBy('date')
-            ->get();
+        return Inertia::render('Tenant/Reports/AgedPayables', $this->agedPartyPayload($request, Supplier::class));
+    }
 
-        $byParty = [];
-        $accountIds = [];
+    public function agedPayablesPdf(Request $request)
+    {
+        $request->validate($this->agedReportRules(Supplier::class));
 
-        foreach ($purchases as $purchase) {
-            $outstanding = $purchase->outstandingAmount();
+        return $this->agedPartyPdf($this->agedPartyPayload($request, Supplier::class), 'Aged Payables', 'Supplier', 'aged-payables');
+    }
 
-            if (! $outstanding->isPositive()) {
-                continue;
-            }
+    public function agedPayablesExport(Request $request)
+    {
+        $request->validate($this->agedReportRules(Supplier::class));
 
-            $key = $purchase->supplier_id;
-            $byParty[$key] ??= $this->emptyAgingRow($purchase->supplier?->name ?? 'Unknown', $purchase->supplier?->area?->name);
-            $bucket = $this->agingBucket((int) abs($purchase->date->copy()->startOfDay()->diffInDays(Carbon::parse($asOf)->startOfDay())));
-
-            $byParty[$key][$bucket] = Money::of($byParty[$key][$bucket])->plus($outstanding)->toString();
-            $byParty[$key]['invoiced'] = Money::of($byParty[$key]['invoiced'])->plus($outstanding)->toString();
-
-            if ($purchase->supplier?->account_id) {
-                $accountIds[$key] = $purchase->supplier->account_id;
-            }
-        }
-
-        $rows = $this->withOpeningBucket($byParty, $accountIds, $areaFilter->apply(Supplier::query()), $asOf, $storeId, creditNormal: true, branchIds: $branchFilter->lineBranchIds());
-
-        return Inertia::render('Tenant/Reports/AgedPayables', [
-            'rows' => $rows,
-            'totals' => $this->sumAgingTotals($rows),
-            ...$this->areaReportProps($areaFilter, $groupByArea, $rows, ['opening', ...self::AGING_BUCKETS, 'total']),
-            'stores' => BranchStock::storeOptions($branchFilter, Store::where('is_active', true))->orderBy('name')->get(['id', 'name']),
-            'asOf' => $asOf,
-            'storeId' => $storeId,
-            'branchReport' => $branchFilter->payload(),
-        ]);
+        return $this->agedPartyExport($this->agedPartyPayload($request, Supplier::class), 'Aged Payables', 'Supplier', 'aged-payables');
     }
 
     /**
-     * Ledger-based Debtors list: every customer whose ledger account carries
-     * a non-zero balance in the selected fiscal year. Unlike the ageing
-     * report this owes nothing to invoices - it is the receivable side of
-     * the trial balance, party by party, so it always reconciles with the
-     * Sundry Debtors subgroup on the Balance Sheet.
+     * Ledger-based Debtors list: every ledger account filed under the Sundry
+     * Debtors subgroup (customers' own accounts, plus any non-party account
+     * or sub-account a user filed there) that carries a non-zero balance in
+     * the selected fiscal year. Unlike the ageing report this owes nothing to
+     * invoices. With no area filter its total is the Sundry Debtors line of
+     * the Balance Sheet and the dashboard's Debtors figure for the same year
+     * and branch filter, as legacy's debtors() sums the whole subgroup.
      */
     public function debtors(Request $request): Response
     {
-        return Inertia::render('Tenant/Reports/Debtors', $this->partyBalancePayload($request, Customer::query(), creditNormal: false));
+        $request->validate(self::PARTY_REPORT_INPUT_RULES);
+
+        return Inertia::render('Tenant/Reports/Debtors', $this->partyBalancePayload($request, Customer::class, creditNormal: false));
+    }
+
+    public function debtorsPdf(Request $request)
+    {
+        $request->validate(self::PARTY_REPORT_INPUT_RULES);
+
+        $data = $this->partyBalancePayload($request, Customer::class, creditNormal: false, withBranchColumns: false);
+
+        return $this->partyBalancePdf($data, 'Debtors', 'Customer', creditNormal: false);
     }
 
     public function debtorsExport(Request $request)
     {
-        $data = $this->partyBalancePayload($request, Customer::query(), creditNormal: false, withBranchColumns: false);
+        $request->validate(self::PARTY_REPORT_INPUT_RULES);
 
-        return Excel::download(new DebtorsExport($data['rows'], $data['total'], $data['groups'], $data['branchReport']['label'] ?? null), 'debtors.xlsx');
+        $data = $this->partyBalancePayload($request, Customer::class, creditNormal: false, withBranchColumns: false);
+
+        return Excel::download(
+            new DebtorsExport(
+                $data['rows'],
+                $data['total'],
+                $data['groups'],
+                $data['branchReport']['label'] ?? null,
+                $data['fiscalYears']->firstWhere('id', $data['fiscalYearId'])?->name,
+                $data['areaLabel'],
+            ),
+            $this->partyBalanceFileName('debtors', $data['fiscalYearId'], 'xlsx'),
+        );
     }
 
     /**
@@ -981,14 +960,382 @@ class SalesPurchaseReportController extends Controller
      */
     public function creditors(Request $request): Response
     {
-        return Inertia::render('Tenant/Reports/Creditors', $this->partyBalancePayload($request, Supplier::query(), creditNormal: true));
+        $request->validate(self::PARTY_REPORT_INPUT_RULES);
+
+        return Inertia::render('Tenant/Reports/Creditors', $this->partyBalancePayload($request, Supplier::class, creditNormal: true));
+    }
+
+    public function creditorsPdf(Request $request)
+    {
+        $request->validate(self::PARTY_REPORT_INPUT_RULES);
+
+        $data = $this->partyBalancePayload($request, Supplier::class, creditNormal: true, withBranchColumns: false);
+
+        return $this->partyBalancePdf($data, 'Creditors', 'Supplier', creditNormal: true);
     }
 
     public function creditorsExport(Request $request)
     {
-        $data = $this->partyBalancePayload($request, Supplier::query(), creditNormal: true, withBranchColumns: false);
+        $request->validate(self::PARTY_REPORT_INPUT_RULES);
 
-        return Excel::download(new CreditorsExport($data['rows'], $data['total'], $data['groups'], $data['branchReport']['label'] ?? null), 'creditors.xlsx');
+        $data = $this->partyBalancePayload($request, Supplier::class, creditNormal: true, withBranchColumns: false);
+
+        return Excel::download(
+            new CreditorsExport(
+                $data['rows'],
+                $data['total'],
+                $data['groups'],
+                $data['branchReport']['label'] ?? null,
+                $data['fiscalYears']->firstWhere('id', $data['fiscalYearId'])?->name,
+                $data['areaLabel'],
+            ),
+            $this->partyBalanceFileName('creditors', $data['fiscalYearId'], 'xlsx'),
+        );
+    }
+
+    /**
+     * @param  array<string, mixed>  $data  partyBalancePayload() output
+     */
+    private function partyBalancePdf(array $data, string $title, string $partyLabel, bool $creditNormal)
+    {
+        $fiscalYear = $data['fiscalYearId'] === null ? null : FiscalYear::find($data['fiscalYearId']);
+
+        abort_if($fiscalYear === null, 404);
+
+        $today = Carbon::today()->toDateString();
+
+        $pdf = Pdf::loadView('pdf.party-balances', [
+            'company' => CompanySetting::current(),
+            'documentNumber' => "{$title} - {$fiscalYear->name}",
+            'documentDate' => $today,
+            'dateAd' => $today,
+            'dateBs' => NepaliCalendar::formatBs($today),
+            'fiscalYearName' => $fiscalYear->name,
+            'branchFilterLabel' => $data['branchReport']['label'] ?? null,
+            'title' => $title,
+            'partyLabel' => $partyLabel,
+            'creditNormal' => $creditNormal,
+            'rows' => $data['rows']->all(),
+            'total' => $data['total'],
+            'groups' => $data['groups'],
+            'areaLabel' => $data['areaLabel'],
+        ]);
+
+        return $pdf->stream(Str::lower($title).'-'.$this->reportFileSlug($fiscalYear).'.pdf');
+    }
+
+    /**
+     * "debtors-2082-83.xlsx"; just "debtors.xlsx" when there is no fiscal
+     * year yet (the list is then empty, but the download still works).
+     */
+    private function partyBalanceFileName(string $prefix, ?int $fiscalYearId, string $extension): string
+    {
+        $fiscalYear = $fiscalYearId === null ? null : FiscalYear::find($fiscalYearId);
+
+        return $prefix.($fiscalYear === null ? '' : '-'.$this->reportFileSlug($fiscalYear)).'.'.$extension;
+    }
+
+    /**
+     * Mirrors AccountingReportController::reportFileSlug(): "2082/83" breaks the Content-Disposition header.
+     */
+    private function reportFileSlug(FiscalYear $fiscalYear): string
+    {
+        return Str::slug($fiscalYear->name) ?: (string) $fiscalYear->id;
+    }
+
+    /**
+     * Validation for both ageing reports: a malformed date or an unknown
+     * party is a 422, never a silent fallback.
+     *
+     * @param  class-string<Customer|Supplier>  $partyClass
+     * @return array<string, list<string>>
+     */
+    private function agedReportRules(string $partyClass): array
+    {
+        $partyRule = $partyClass === Customer::class
+            ? ['customer_id' => ['nullable', 'integer', 'exists:customers,id']]
+            : ['supplier_id' => ['nullable', 'integer', 'exists:suppliers,id']];
+
+        return [
+            'as_of' => ['nullable', 'date_format:Y-m-d'],
+            'hide_zero' => ['nullable', 'boolean'],
+            ...$partyRule,
+        ];
+    }
+
+    /**
+     * The one payload behind both ageing reports (screen, PDF and Excel).
+     * $partyClass picks the side: Customer ages the debit-normal receivable
+     * ledger, Supplier the credit-normal payable ledger.
+     *
+     * Basis (legacy CustomerAgeingController / SupplierAgeingController):
+     * the party's own ledger as of `as_of`, not its invoices. Every voucher
+     * line on the party account dated on or before as_of in that date's
+     * fiscal year is read; each voucher is netted per account first (so a
+     * cash bill that debits and credits the party in one voucher ages
+     * nothing). A net increase on the party's normal side is an ageable
+     * entry, a net decrease (receipt, payment, return, journal credit) joins
+     * the party's pool of credits. That pool is applied FIFO against the
+     * entries, oldest first, and whatever each entry still holds is bucketed
+     * by whole days from its voucher date to as_of. A receipt or return dated
+     * after as_of therefore never reduces a bucket, which the old
+     * invoice-based method (live outstandingAmount()) could not promise.
+     *
+     * - The year's Opening Balance voucher (an import or the year-end carry
+     *   forward) has no true age, so what it still holds after FIFO is shown
+     *   in "Opening", never dated. It is applied first.
+     * - A cancelled document and its Reversal voucher, both on or before
+     *   as_of and netting to zero on the account, are dropped as a pair so a
+     *   cancellation does not settle some older entry. A pair cancelled
+     *   after as_of stays, exactly as the ledger stood that day.
+     * - A party whose credits exceed its entries (an advance) is left out of
+     *   the rows; the sum of those excesses is `advances`. `hide_zero`
+     *   (default on) drops parties whose balance nets to exactly zero.
+     * - The row total equals the party's ledger balance as of the date,
+     *   narrowed by the same BranchFilter on journal_voucher_lines.branch_id
+     *   (plan 12, BR14), so it ties to the account ledger run to as_of.
+     *
+     * Row contract: `party`, `party_id`, `account_id`, `mobile_no`, `area`,
+     * `oldest` (date of the oldest dated entry still open, null when only
+     * the opening balance is open), `days` (whole days from `oldest` to
+     * as_of), the five amount buckets and `total`.
+     *
+     * @param  class-string<Customer|Supplier>  $partyClass
+     * @return array<string, mixed>
+     */
+    private function agedPartyPayload(Request $request, string $partyClass): array
+    {
+        $receivable = $partyClass === Customer::class;
+
+        $asOf = $this->resolveAsOf($request);
+        $asOfDate = Carbon::parse($asOf)->startOfDay();
+        $partyId = $request->integer($receivable ? 'customer_id' : 'supplier_id') ?: null;
+        $hideZero = $request->has('hide_zero') ? $request->boolean('hide_zero') : true;
+        $areaFilter = AreaFilter::fromRequest($request);
+        $groupByArea = AreaFilter::groupRequested($request);
+        $branchFilter = BranchFilter::fromRequest($request);
+        $fiscalYearId = $this->resolveFiscalYearIdForDate($asOf);
+
+        $parties = $areaFilter->apply($partyClass::query())
+            ->whereNotNull('account_id')
+            ->when($partyId !== null, fn (Builder $query) => $query->whereKey($partyId))
+            ->with('area:id,name')
+            ->get(['id', 'name', 'account_id', 'area_id', 'mobile_no'])
+            ->keyBy(fn (Model $party) => (int) $party->account_id);
+
+        $ledger = $fiscalYearId === null || $parties->isEmpty()
+            ? []
+            : $this->agedLedgerEntries($parties->keys()->all(), $fiscalYearId, $asOf, ! $receivable, $branchFilter->lineBranchIds());
+
+        $rows = [];
+        $advances = Money::zero();
+
+        foreach ($ledger as $accountId => $entry) {
+            $balance = Money::sum(array_column($entry['debits'], 'amount'))->minus($entry['credit']);
+
+            if ($balance->isNegative()) {
+                $advances = $advances->plus($balance->negated());
+
+                continue;
+            }
+
+            if ($balance->isZero() && $hideZero) {
+                continue;
+            }
+
+            $rows[] = $this->agedPartyRow($parties->get($accountId), $entry, $asOfDate);
+        }
+
+        usort($rows, fn (array $a, array $b) => strcasecmp($a['party'], $b['party']));
+
+        return [
+            'rows' => $rows,
+            'totals' => $this->sumAgingTotals($rows),
+            'advances' => $advances->toString(),
+            ...$this->areaReportProps($areaFilter, $groupByArea, $rows, ['opening', ...self::AGING_BUCKETS, 'total']),
+            'parties' => fn () => $partyClass::query()->orderBy('name')->get(['id', 'name']),
+            'partyId' => $partyId,
+            'partyName' => $partyId === null ? null : $partyClass::query()->whereKey($partyId)->value('name'),
+            'hideZero' => $hideZero,
+            'asOf' => $asOf,
+            'fiscalYearId' => $fiscalYearId,
+            'branchReport' => $branchFilter->payload(),
+        ];
+    }
+
+    /**
+     * Each party account's vouchers in $fiscalYearId up to $asOf, netted per
+     * voucher on the party's normal side and split into ageable entries (in
+     * FIFO order: by date, the Opening Balance voucher first on its day, then
+     * by voucher id) and one pool of credits. Sums are taken as scaled
+     * integers in SQL, the same as ledgerBalances(), because SQLite reads a
+     * DECIMAL column back as REAL. Account ids are chunked so a large party
+     * list never exceeds a placeholder limit; a chunk holds whole accounts,
+     * so per-account order is intact.
+     *
+     * @param  list<int>  $accountIds
+     * @param  list<int>|null  $branchIds
+     * @return array<int, array{debits: list<array{date: string, amount: Money, opening: bool}>, credit: Money}>
+     */
+    private function agedLedgerEntries(array $accountIds, int $fiscalYearId, string $asOf, bool $creditNormal, ?array $branchIds): array
+    {
+        $debit = $this->scaledMoneyExpression('journal_voucher_lines.debit');
+        $credit = $this->scaledMoneyExpression('journal_voucher_lines.credit');
+        $net = $creditNormal ? "SUM({$credit}) - SUM({$debit})" : "SUM({$debit}) - SUM({$credit})";
+        $openingType = VoucherType::OpeningBalance->value;
+
+        $byAccount = [];
+
+        foreach (array_chunk($accountIds, 1000) as $chunk) {
+            $vouchers = JournalVoucherLine::query()
+                ->join('journal_vouchers', 'journal_vouchers.id', '=', 'journal_voucher_lines.journal_voucher_id')
+                ->whereIn('journal_voucher_lines.account_id', $chunk)
+                ->where('journal_vouchers.fiscal_year_id', $fiscalYearId)
+                ->whereDate('journal_vouchers.date', '<=', $asOf)
+                ->tap(fn (Builder $query) => BranchFilter::narrowLines($query, $branchIds))
+                ->groupBy('journal_voucher_lines.account_id', 'journal_vouchers.id', 'journal_vouchers.date', 'journal_vouchers.voucher_type', 'journal_vouchers.reversal_of_id')
+                ->selectRaw("journal_voucher_lines.account_id as account_id, journal_vouchers.id as voucher_id, journal_vouchers.date as voucher_date, journal_vouchers.voucher_type as voucher_type, journal_vouchers.reversal_of_id as reversal_of_id, {$net} as net_scaled")
+                ->orderBy('journal_vouchers.date')
+                ->orderByRaw('CASE WHEN journal_vouchers.voucher_type = ? THEN 0 ELSE 1 END', [$openingType])
+                ->orderBy('journal_vouchers.id')
+                ->toBase()
+                ->get();
+
+            foreach ($vouchers as $voucher) {
+                $byAccount[(int) $voucher->account_id][(int) $voucher->voucher_id] = [
+                    'date' => substr((string) $voucher->voucher_date, 0, 10),
+                    'net' => Money::of(BigDecimal::of((int) $voucher->net_scaled)->dividedBy(100, 2, RoundingMode::Unnecessary)),
+                    'opening' => $voucher->voucher_type === $openingType,
+                    'reversal_of_id' => $voucher->reversal_of_id === null ? null : (int) $voucher->reversal_of_id,
+                ];
+            }
+        }
+
+        $entries = [];
+
+        foreach ($byAccount as $accountId => $vouchers) {
+            foreach (array_keys($vouchers) as $voucherId) {
+                $originalId = $vouchers[$voucherId]['reversal_of_id'] ?? null;
+
+                if ($originalId !== null && isset($vouchers[$originalId]) && $vouchers[$originalId]['net']->plus($vouchers[$voucherId]['net'])->isZero()) {
+                    unset($vouchers[$originalId], $vouchers[$voucherId]);
+                }
+            }
+
+            $debits = [];
+            $credits = Money::zero();
+
+            foreach ($vouchers as $voucher) {
+                if ($voucher['net']->isPositive()) {
+                    $debits[] = ['date' => $voucher['date'], 'amount' => $voucher['net'], 'opening' => $voucher['opening']];
+                } elseif ($voucher['net']->isNegative()) {
+                    $credits = $credits->plus($voucher['net']->negated());
+                }
+            }
+
+            $entries[$accountId] = ['debits' => $debits, 'credit' => $credits];
+        }
+
+        return $entries;
+    }
+
+    /**
+     * One party's ageing row: the credit pool applied FIFO to its entries,
+     * the remainder bucketed (the Opening Balance remainder into `opening`).
+     * Exact Money throughout; the buckets sum to the party's balance.
+     *
+     * @param  array{debits: list<array{date: string, amount: Money, opening: bool}>, credit: Money}  $entry
+     * @return array<string, mixed>
+     */
+    private function agedPartyRow(Model $party, array $entry, CarbonInterface $asOfDate): array
+    {
+        $row = $this->emptyAgingRow($party);
+        $buckets = array_fill_keys(['opening', ...self::AGING_BUCKETS], Money::zero());
+        $unapplied = $entry['credit'];
+
+        foreach ($entry['debits'] as $debit) {
+            $applied = Money::min($unapplied, $debit['amount']);
+            $unapplied = $unapplied->minus($applied);
+            $open = $debit['amount']->minus($applied);
+
+            if (! $open->isPositive()) {
+                continue;
+            }
+
+            if ($debit['opening']) {
+                $buckets['opening'] = $buckets['opening']->plus($open);
+
+                continue;
+            }
+
+            $daysOutstanding = $this->daysOutstanding(Carbon::parse($debit['date'])->startOfDay(), $asOfDate);
+            $bucket = $this->agingBucket($daysOutstanding);
+            $buckets[$bucket] = $buckets[$bucket]->plus($open);
+
+            if ($row['oldest'] === null) {
+                $row['oldest'] = $debit['date'];
+                $row['days'] = $daysOutstanding;
+            }
+        }
+
+        foreach ($buckets as $key => $amount) {
+            $row[$key] = $amount->toString();
+        }
+
+        $row['total'] = Money::sum($buckets)->toString();
+
+        return $row;
+    }
+
+    /**
+     * @param  array<string, mixed>  $data  agedPartyPayload() output
+     */
+    private function agedPartyPdf(array $data, string $title, string $partyLabel, string $filePrefix)
+    {
+        $asOf = $data['asOf'];
+
+        $pdf = Pdf::loadView('pdf.aged-parties', [
+            'company' => CompanySetting::current(),
+            'documentNumber' => "{$title} - {$asOf}",
+            'documentDate' => $asOf,
+            'dateAd' => $asOf,
+            'dateBs' => NepaliCalendar::formatBs($asOf),
+            'fiscalYearName' => $data['fiscalYearId'] === null ? '' : (FiscalYear::query()->whereKey($data['fiscalYearId'])->value('name') ?? ''),
+            'branchFilterLabel' => $data['branchReport']['label'] ?? null,
+            'title' => $title,
+            'partyLabel' => $partyLabel,
+            'rows' => $data['rows'],
+            'totals' => $data['totals'],
+            'groups' => $data['groups'],
+            'asOf' => $asOf,
+            'areaLabel' => $data['areaLabel'],
+            'partyName' => $data['partyName'],
+            'advances' => $data['advances'],
+        ])->setPaper('a4', 'landscape');
+
+        return $pdf->stream("{$filePrefix}-{$asOf}.pdf");
+    }
+
+    /**
+     * @param  array<string, mixed>  $data  agedPartyPayload() output
+     */
+    private function agedPartyExport(array $data, string $title, string $partyLabel, string $filePrefix)
+    {
+        return Excel::download(
+            new AgedPartyExport(
+                rows: $data['rows'],
+                totals: $data['totals'],
+                groups: $data['groups'],
+                partyLabel: $partyLabel,
+                asOf: $data['asOf'],
+                branchLabel: $data['branchReport']['label'] ?? null,
+                title: $title,
+                partyName: $data['partyName'],
+                areaLabel: $data['areaLabel'],
+                advances: $data['advances'],
+            ),
+            "{$filePrefix}-{$data['asOf']}.xlsx",
+        );
     }
 
     /**
@@ -998,9 +1345,29 @@ class SalesPurchaseReportController extends Controller
      * counts every party from the first year-end close onwards.
      *
      * Audit T15-8: legacy's debtors()/creditors() use HAVING SUM(...) > 0, so an
-     * overpaid party (credit balance) is silently dropped there. This report keeps
-     * those rows - an overpayment is real money owed back - but flags each one via
-     * `is_credit_balance` so the difference from legacy is visible, not silent.
+     * overpaid party (negative balance on its normal side) is silently dropped
+     * there. This report keeps those rows - an overpayment is real money owed
+     * back - but flags each one via `is_overpaid` so the difference from legacy
+     * is visible, not silent. `balance` is signed on the party's normal side
+     * (positive = Dr for a debtor, Cr for a creditor), so an overpaid debtor
+     * holds a credit balance and an overpaid creditor a debit balance.
+     *
+     * Rows are ledger accounts, not party records (legacy reportsController
+     * partyBalanceReport() and DashboardController::subgroupBalance()): every
+     * account whose own subgroup is Sundry Debtors (Sundry Creditors for
+     * $creditNormal), so a non-party account or sub-account a user filed
+     * there is listed too and, with no area filter, the total is the Balance
+     * Sheet's subgroup line. A row is keyed by its account: `id` and
+     * `account_id` are both the account id, `party_id` is the customer or
+     * supplier that owns the account (null for a non-party account). Name,
+     * address, mobile and area come from that party, else from the account
+     * (which has no area). A customer or supplier whose account was moved to
+     * another subgroup is not listed, exactly as the Balance Sheet does not
+     * count it under this line.
+     *
+     * Area filter: a specific area keeps only accounts owned by a party in
+     * that area; "Unassigned" keeps parties with no area plus every
+     * non-party account.
      *
      * Branches (plan 12, BR14): the balance is the party account's lines
      * narrowed by BranchFilter on journal_voucher_lines.branch_id (the
@@ -1010,10 +1377,10 @@ class SalesPurchaseReportController extends Controller
      * group; a row is then kept when any branch amount is non-zero even if
      * the branches net to zero. Off, the rows are exactly what they were.
      *
-     * @param  Builder<covariant Model>  $parties
+     * @param  class-string<Customer|Supplier>  $partyClass
      * @return array<string, mixed>
      */
-    private function partyBalancePayload(Request $request, $parties, bool $creditNormal, bool $withBranchColumns = true): array
+    private function partyBalancePayload(Request $request, string $partyClass, bool $creditNormal, bool $withBranchColumns = true): array
     {
         $fiscalYears = FiscalYear::query()->orderByDesc('start_date')->get(['id', 'name', 'status']);
         $fiscalYearId = $request->integer('fiscal_year_id')
@@ -1022,22 +1389,41 @@ class SalesPurchaseReportController extends Controller
         $areaFilter = AreaFilter::fromRequest($request);
         $groupByArea = AreaFilter::groupRequested($request);
 
-        $records = $areaFilter->apply($parties)
-            ->with('area:id,name')
-            ->orderBy('name')
-            ->get(['id', 'name', 'account_id', 'address', 'mobile_no', 'area_id']);
-        $branchFilter = BranchFilter::fromRequest($request);
-        $balances = $this->ledgerBalances($records->pluck('account_id')->filter()->all(), $fiscalYearId, null, $creditNormal, $branchFilter->lineBranchIds());
+        $subgroupName = $creditNormal ? 'Sundry Creditors' : 'Sundry Debtors';
+        $inSubgroup = fn (Builder $subgroup) => $subgroup->where('name', $subgroupName);
 
-        $rows = $records
-            ->map(fn (Model $party) => [
-                'id' => $party->getKey(),
-                'name' => $party->name,
-                'address' => $party->address,
-                'mobile_no' => $party->mobile_no,
-                'area' => $party->area?->name,
-                'balance' => ($balances[$party->account_id] ?? Money::zero())->toString(),
-            ])
+        $accounts = Account::query()
+            ->whereHas('subgroup', $inSubgroup)
+            ->get(['id', 'name', 'address', 'phone']);
+        $partiesByAccount = $partyClass::query()
+            ->whereHas('account.subgroup', $inSubgroup)
+            ->with('area:id,name')
+            ->get(['id', 'name', 'account_id', 'address', 'mobile_no', 'area_id'])
+            ->keyBy('account_id');
+
+        $accounts = $accounts
+            ->filter(fn (Account $account): bool => $this->accountInArea($areaFilter, $partiesByAccount->get($account->id)))
+            ->values();
+
+        $branchFilter = BranchFilter::fromRequest($request);
+        $balances = $this->ledgerBalances($accounts->modelKeys(), $fiscalYearId, null, $creditNormal, $branchFilter->lineBranchIds());
+
+        $rows = $accounts
+            ->map(function (Account $account) use ($partiesByAccount, $balances): array {
+                $party = $partiesByAccount->get($account->id);
+
+                return [
+                    'id' => $account->id,
+                    'party_id' => $party?->getKey(),
+                    'account_id' => $account->id,
+                    'name' => $party?->name ?? $account->name,
+                    'address' => $party?->address ?? $account->address,
+                    'mobile_no' => $party?->mobile_no ?? $account->phone,
+                    'area' => $party?->area?->name,
+                    'balance' => ($balances[$account->id] ?? Money::zero())->toString(),
+                ];
+            })
+            ->sortBy('name', SORT_NATURAL | SORT_FLAG_CASE)
             ->values();
 
         $branchColumns = null;
@@ -1049,7 +1435,7 @@ class SalesPurchaseReportController extends Controller
             $split = PartyBranchBalances::withBranchColumns(
                 $branchFilter,
                 $rows,
-                $records->mapWithKeys(fn (Model $party): array => [$party->getKey() => $party->account_id])->all(),
+                $rows->mapWithKeys(fn (array $row): array => [$row['id'] => $row['account_id']])->all(),
                 $fiscalYearId,
                 $creditNormal,
             );
@@ -1061,7 +1447,7 @@ class SalesPurchaseReportController extends Controller
                 || collect($row['by_branch'] ?? [])->contains(fn (string $amount): bool => ! Money::of($amount)->isZero()))
             ->map(fn (array $row) => [
                 ...$row,
-                'is_credit_balance' => Money::of($row['balance'])->isNegative(),
+                'is_overpaid' => Money::of($row['balance'])->isNegative(),
             ])
             ->values();
 
@@ -1081,92 +1467,56 @@ class SalesPurchaseReportController extends Controller
             'fiscalYears' => $fiscalYears,
             'fiscalYearId' => $fiscalYearId,
             'creditBalanceNote' => $creditNormal
-                ? 'A negative balance means this supplier owes money back (overpaid).'
-                : 'A negative balance means this customer overpaid and is owed money back.',
+                ? 'A supplier shown as Dr was overpaid (a debit balance) and owes money back; it is flagged Overpaid.'
+                : 'A customer shown as Cr overpaid (a credit balance) and is owed money back; it is flagged Overpaid.',
         ];
     }
 
     /**
-     * Folds the "Opening / unallocated" bucket into the per-party ageing
-     * rows: the party's ledger balance minus everything the open invoices
-     * above already explain. A party with only an opening balance and no open
-     * invoice still gets a row, which is the whole point - a tenant who
-     * imported opening dues used to see an empty ageing page while the
-     * Balance Sheet showed lakhs of debtors (audit P1).
-     *
-     * The bucket is skipped entirely when a store is selected. The chart of
-     * accounts is not store-scoped, so a party's ledger balance cannot be
-     * attributed to one store; folding the whole balance into a single
-     * store's page would show every party under every store.
-     *
-     * A branch filter is different: every ledger line carries a branch, so
-     * $branchIds (BranchFilter::lineBranchIds(), the same filter that
-     * narrowed the invoices) narrows the balance and the bucket stays.
-     *
-     * @param  array<int|string, array<string, string>>  $byParty
-     * @param  array<int|string, int>  $accountIds
-     * @param  Builder<covariant Model>  $parties
-     * @param  list<int>|null  $branchIds
-     * @return list<array<string, string>>
+     * Whether a Debtors / Creditors account passes the area filter. The area
+     * lives on the owning party; a non-party account has none, so it counts
+     * as "Unassigned".
      */
-    private function withOpeningBucket(array $byParty, array $accountIds, $parties, string $asOf, ?int $storeId, bool $creditNormal, ?array $branchIds = null): array
+    private function accountInArea(AreaFilter $areaFilter, ?Model $party): bool
     {
-        if ($storeId === null) {
-            $records = $parties->with('area:id,name')->get(['id', 'name', 'account_id', 'area_id'])->keyBy(fn (Model $party) => $party->getKey());
+        if (! $areaFilter->isActive()) {
+            return true;
+        }
 
-            foreach ($records as $id => $party) {
-                if ($party->account_id) {
-                    $accountIds[$id] = $party->account_id;
-                }
-            }
+        $areaId = $party?->getAttribute('area_id');
 
-            // The year containing $asOf (open or closed). An as-of date past
-            // the last year falls back to the latest year that has started;
-            // before the first year there is no ledger to explain, so the
-            // opening bucket is skipped rather than showing -invoiced.
-            $fiscalYearId = FiscalYear::query()
+        if ($areaFilter->isUnassigned()) {
+            return $areaId === null;
+        }
+
+        return $areaId !== null && (int) $areaId === $areaFilter->areaId;
+    }
+
+    /**
+     * The year containing $asOf (open or closed). An as-of date past the last
+     * year falls back to the latest year that has started; before the first
+     * year there is none.
+     */
+    private function resolveFiscalYearIdForDate(string $asOf): ?int
+    {
+        $fiscalYearId = FiscalYear::query()
+            ->whereDate('start_date', '<=', $asOf)
+            ->whereDate('end_date', '>=', $asOf)
+            ->value('id')
+            ?? FiscalYear::query()
                 ->whereDate('start_date', '<=', $asOf)
-                ->whereDate('end_date', '>=', $asOf)
-                ->value('id')
-                ?? FiscalYear::query()
-                    ->whereDate('start_date', '<=', $asOf)
-                    ->orderByDesc('start_date')
-                    ->value('id');
+                ->orderByDesc('start_date')
+                ->value('id');
 
-            $balances = $this->ledgerBalances(array_values($accountIds), $fiscalYearId, $asOf, $creditNormal, $branchIds);
+        return $fiscalYearId === null ? null : (int) $fiscalYearId;
+    }
 
-            foreach ($fiscalYearId === null ? [] : $accountIds as $partyId => $accountId) {
-                $balance = $balances[$accountId] ?? Money::zero();
-                $invoiced = Money::of($byParty[$partyId]['invoiced'] ?? '0.00');
-                $opening = $balance->minus($invoiced);
-
-                if ($opening->isZero() && ! isset($byParty[$partyId])) {
-                    continue;
-                }
-
-                $byParty[$partyId] ??= $this->emptyAgingRow($records->get($partyId)?->name ?? 'Unknown', $records->get($partyId)?->area?->name);
-                $byParty[$partyId]['opening'] = $opening->toString();
-            }
-        }
-
-        $rows = [];
-
-        foreach ($byParty as $row) {
-            $row['total'] = Money::sum(array_map(
-                fn (string $key) => Money::of($row[$key]),
-                ['opening', ...self::AGING_BUCKETS],
-            ))->toString();
-
-            unset($row['invoiced']);
-
-            if (! Money::of($row['total'])->isZero()) {
-                $rows[] = $row;
-            }
-        }
-
-        usort($rows, fn (array $a, array $b) => strcasecmp($a['party'], $b['party']));
-
-        return $rows;
+    /**
+     * Whole days from $from to $asOfDate, never negative. Both are start-of-day.
+     */
+    private function daysOutstanding(CarbonInterface $from, CarbonInterface $asOfDate): int
+    {
+        return max(0, (int) $from->diffInDays($asOfDate, false));
     }
 
     /**
@@ -1226,21 +1576,25 @@ class SalesPurchaseReportController extends Controller
     }
 
     /**
-     * @return array<string, string>
+     * @return array<string, mixed>
      */
-    private function emptyAgingRow(string $party, ?string $area = null): array
+    private function emptyAgingRow(?Model $party): array
     {
         $zero = Money::zero()->toString();
 
         return [
-            'party' => $party,
-            'area' => $area,
+            'party' => $party?->name ?? 'Unknown',
+            'party_id' => $party?->getKey(),
+            'account_id' => $party?->account_id,
+            'mobile_no' => $party?->mobile_no,
+            'oldest' => null,
+            'days' => null,
+            'area' => $party?->area?->name,
             'opening' => $zero,
             'current' => $zero,
             'days31_60' => $zero,
             'days61_90' => $zero,
             'days90Plus' => $zero,
-            'invoiced' => $zero,
             'total' => $zero,
         ];
     }
@@ -1397,10 +1751,23 @@ class SalesPurchaseReportController extends Controller
      * explicit `from`/`to` query params are given, falling back to
      * month-to-date if no fiscal year exists yet.
      *
+     * Strict, as UnifiedVatRegisterController: a malformed or reversed
+     * range, a lone `from` or `to`, or an unknown store / customer / supplier
+     * is a 422 the page shows, never a silent fallback, so a download name
+     * can only ever carry two clean Y-m-d dates.
+     *
      * @return array{0: string, 1: string}
      */
     private function resolveDateRange(Request $request): array
     {
+        $request->validate([
+            'from' => ['nullable', 'required_with:to', 'date_format:Y-m-d'],
+            'to' => ['nullable', 'required_with:from', 'date_format:Y-m-d', 'after_or_equal:from'],
+            'store_id' => ['nullable', 'integer', 'exists:stores,id'],
+            'customer_id' => ['nullable', 'integer', 'exists:customers,id'],
+            'supplier_id' => ['nullable', 'integer', 'exists:suppliers,id'],
+        ]);
+
         $from = $request->string('from')->toString();
         $to = $request->string('to')->toString();
 

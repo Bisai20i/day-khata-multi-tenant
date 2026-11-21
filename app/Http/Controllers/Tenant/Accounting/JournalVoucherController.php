@@ -11,7 +11,9 @@ use App\Models\CompanySetting;
 use App\Models\FiscalYear;
 use App\Models\JournalVoucher;
 use App\Models\PrintLog;
+use App\Models\Project;
 use App\Models\User;
+use App\Rules\OpenProject;
 use App\Support\Branches\ActiveBranchSelection;
 use App\Support\Branches\BranchAccounts;
 use App\Support\Branches\BranchContext;
@@ -63,7 +65,7 @@ class JournalVoucherController extends Controller
 
         return Inertia::render('Tenant/Accounting/JournalVouchers/Index', [
             'journalVouchers' => $this->filteredVouchersQuery($filters, ActiveBranchSelection::narrowedBranchId($request))
-                ->with(['fiscalYear:id,name', 'creator:id,name', 'lines.account:id,code,name'])
+                ->with(['fiscalYear:id,name', 'creator:id,name', 'lines.account:id,code,name', 'lines.project:id,code,name'])
                 // The header (origin) branch, named only when several
                 // branches can appear (plan 12, BR12).
                 ->when(BranchListFilter::columnVisible($request), fn ($query) => $query->with('branch:id,name,code'))
@@ -89,6 +91,9 @@ class JournalVoucherController extends Controller
             // Branch pickers of the manual journal (header default plus a
             // per-line override); empty unless the company is multi-branch.
             ...BranchFormOptions::props($request),
+            // Project pickers: the manual journal's header default plus a
+            // per-line override, and the cash/bank voucher's single project.
+            'projects' => Project::query()->active()->orderBy('name')->get(['id', 'code', 'name']),
         ]);
     }
 
@@ -237,12 +242,16 @@ class JournalVoucherController extends Controller
             'date' => ['required', 'date'],
             'narration' => ['required', 'string', 'max:255'],
             'branch_id' => ['nullable', 'integer', 'exists:branches,id'],
+            // Document project, inherited by every line that names none.
+            'project_id' => ['nullable', 'integer', new OpenProject],
             'lines' => ['required', 'array', 'min:2'],
-            // One line per account and branch (flags G-20), like the
-            // cash/bank form below. Per branch, so a cut-over journal can
-            // move cash from one branch to another on the same account.
+            // One line per account, branch and project (flags G-20), like
+            // the cash/bank form below. Per branch, so a cut-over journal can
+            // move cash from one branch to another on the same account; per
+            // project, so one expense can be split across projects.
             'lines.*.account_id' => ['required', 'exists:accounts,id', $this->oneLinePerAccountAndBranch($request)],
             'lines.*.branch_id' => ['nullable', 'integer', 'exists:branches,id'],
+            'lines.*.project_id' => ['nullable', 'integer', new OpenProject],
             // decimal:0,2 as well as numeric: an amount with a third decimal
             // used to pass this check, balance against another third-decimal
             // line, and then be rounded per line by MySQL into an unbalanced
@@ -262,6 +271,7 @@ class JournalVoucherController extends Controller
             $header = [
                 ...Arr::only($data, ['fiscal_year_id', 'reason', 'date', 'narration']),
                 'branch_id' => $this->usableBranchId($actor, $data['branch_id'] ?? null, 'branch_id'),
+                'project_id' => $data['project_id'] ?? null,
             ];
             $lines = [];
 
@@ -271,6 +281,8 @@ class JournalVoucherController extends Controller
                 $lines[] = [
                     ...$line,
                     'branch_id' => $requested === null || $requested === '' ? null : $this->usableBranchId($actor, $requested, "lines.{$index}.branch_id"),
+                    // Blank inherits the header project in JournalVoucher::write().
+                    'project_id' => $line['project_id'] ?? null,
                 ];
             }
 
@@ -312,14 +324,16 @@ class JournalVoucherController extends Controller
     }
 
     /**
-     * The `distinct` rule, keyed by (account, effective branch) instead of
-     * account alone. The effective branch is the one the engine will post
-     * the line into: its own branch, else the header's, else the actor's
-     * posting branch (Main for a single-branch company), so a Main-tagged
-     * line and an untagged line on the same account are caught. Ids compare
-     * as integers ("7" equals "07"). Like `distinct`, every row of a
-     * duplicated pair gets the error on lines.N.account_id, so a journal
-     * without branches fails on exactly the rows it always did.
+     * The `distinct` rule, keyed by (account, effective branch, effective
+     * project) instead of account alone. The effective branch is the one the
+     * engine will post the line into: its own branch, else the header's, else
+     * the actor's posting branch (Main for a single-branch company), so a
+     * Main-tagged line and an untagged line on the same account are caught.
+     * The effective project is the line's own, else the header's, else none,
+     * the same inheritance JournalVoucher::write() applies. Ids compare as
+     * integers ("7" equals "07"). Like `distinct`, every row of a duplicated
+     * pair gets the error on lines.N.account_id, so a journal without
+     * branches or projects fails on exactly the rows it always did.
      */
     private function oneLinePerAccountAndBranch(Request $request): Closure
     {
@@ -335,16 +349,18 @@ class JournalVoucherController extends Controller
             }
         }
 
+        $headerProject = $id($request->input('project_id'));
         $keys = [];
 
         foreach ((array) $request->input('lines', []) as $index => $line) {
             if (is_array($line)) {
                 $accountId = $id($line['account_id'] ?? null);
                 $lineBranch = $id($line['branch_id'] ?? null) ?? $headerBranch;
+                $lineProject = $id($line['project_id'] ?? null) ?? $headerProject;
 
                 // An unreadable account id is left to the `exists` rule.
                 if ($accountId !== null) {
-                    $keys[$index] = $accountId.'|'.($lineBranch ?? '');
+                    $keys[$index] = $accountId.'|'.($lineBranch ?? '').'|'.($lineProject ?? '');
                 }
             }
         }
@@ -356,7 +372,7 @@ class JournalVoucherController extends Controller
             $key = $index !== null ? ($keys[$index] ?? null) : null;
 
             if ($key !== null && $counts[$key] > 1) {
-                $fail('Each account may appear only once per branch on a journal voucher.');
+                $fail('Each account may appear only once per branch and project on a journal voucher.');
             }
         };
     }
@@ -389,6 +405,9 @@ class JournalVoucherController extends Controller
             // The voucher's branch (plan 12, BR12); every line follows it.
             // Optional: default the actor's posting branch, as before.
             'branch_id' => ['nullable', 'integer', 'exists:branches,id'],
+            // The voucher's project; every line, cash/bank leg included, is
+            // tagged with it (JournalVoucher::postCashBank()).
+            'project_id' => ['nullable', 'integer', new OpenProject],
             'lines' => ['nullable', 'array'],
             'lines.*.account_id' => ['required_with:lines', 'exists:accounts,id', 'distinct'],
             'lines.*.amount' => ['required_with:lines', 'numeric', 'decimal:0,2', 'min:0.01'],

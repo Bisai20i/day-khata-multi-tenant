@@ -41,6 +41,8 @@ const props = defineProps({
     // Branch picker options and default (BranchFormOptions::props()).
     branchOptions: { type: Array, default: () => [] },
     defaultBranchId: { type: Number, default: null },
+    // Active projects ({ id, code, name }); empty hides every project picker.
+    projects: { type: Array, default: () => [] },
 });
 
 const emit = defineEmits(['cancel', 'posted']);
@@ -76,6 +78,8 @@ const form = useForm({
     reason: '',
     date: todayInKathmandu(),
     narration: '',
+    // The voucher's project; lines left on "Same as voucher" inherit it.
+    project_id: null,
     // Lines only ever enter the voucher through the "Add line" staging row
     // (JournalVoucherStagingRow) - no starter blank rows here.
     lines: [],
@@ -94,6 +98,18 @@ const { label: branchLabel, plural: branchPlural } = useBranchLabel();
 const spansBranches = computed(
     () => showPicker.value && form.lines.some((line) => (line.branch_id ?? null) !== null && line.branch_id !== branchId.value),
 );
+
+// reka-ui's Select cannot hold an empty value, so "no project" is a
+// sentinel option, stored back as null.
+const NO_PROJECT = 'none';
+const showProjects = computed(() => props.projects.length > 0);
+const projectOptions = computed(() => [
+    { value: NO_PROJECT, label: 'No project' },
+    ...props.projects.map((project) => ({
+        value: project.id,
+        label: project.code ? `${project.code} - ${project.name}` : project.name,
+    })),
+]);
 
 const isClosedYearSelected = computed(
     () => !!props.correctionFiscalYear && form.fiscal_year_id === props.correctionFiscalYear.id,
@@ -153,6 +169,7 @@ function submit(print = false) {
         ...data,
         fiscal_year_id: data.fiscal_year_id || undefined,
         reason: isClosedYearSelected.value ? data.reason : undefined,
+        project_id: data.project_id ?? undefined,
         lines: data.lines.map((line) => ({
             account_id: line.account_id,
             debit: voucherAmountOf(line.debit) ?? '0.00',
@@ -161,6 +178,8 @@ function submit(print = false) {
             // Only an explicit override, and only with the picker showing:
             // a single-branch company's lines are sent exactly as before.
             ...(showPicker.value && (line.branch_id ?? null) !== null ? { branch_id: line.branch_id } : {}),
+            // Only an explicit per-line project; blank inherits the voucher's.
+            ...((line.project_id ?? null) !== null ? { project_id: line.project_id } : {}),
         })),
     })).post('/journal-vouchers', {
         preserveScroll: true,
@@ -210,6 +229,19 @@ function submit(print = false) {
                     <p id="jv-narration-help" class="sr-only">Printed on the voucher and shown in every ledger it touches.</p>
                     <p v-if="form.errors.narration" class="mt-1 text-sm text-danger" role="alert">{{ form.errors.narration }}</p>
                 </div>
+                <div v-if="showProjects">
+                    <div class="mb-1 flex items-center gap-1">
+                        <Label for="jv-project">Project</Label>
+                        <InfoTip text="Tags every line with this project unless a line picks its own." />
+                    </div>
+                    <Select
+                        id="jv-project"
+                        :model-value="form.project_id ?? NO_PROJECT"
+                        :options="projectOptions"
+                        @update:model-value="(v) => (form.project_id = v === NO_PROJECT ? null : v)"
+                    />
+                    <p v-if="form.errors.project_id" class="mt-1 text-sm text-danger" role="alert">{{ form.errors.project_id }}</p>
+                </div>
                 <div v-if="canPostCorrection && correctionFiscalYear">
                     <div class="mb-1 flex items-center gap-1">
                         <Label for="jv-fiscal-year">Fiscal year</Label>
@@ -257,6 +289,7 @@ function submit(print = false) {
                 :errors="form.errors"
                 :account-options="accountOptions"
                 :branch-options="showPicker ? branchOptions : []"
+                :project-options="projects"
                 @remove="(index) => form.lines.splice(index, 1)"
             />
             <p v-if="spansBranches" class="mt-2 text-xs text-text-muted">

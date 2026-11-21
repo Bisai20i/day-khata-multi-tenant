@@ -18,6 +18,9 @@ const props = defineProps({
     customers: { type: Array, default: () => [] },
     accounts: { type: Array, default: () => [] },
     outstandingSales: { type: Array, default: () => [] },
+    // Active projects (cost centres): { id, code, name }. Optional; the
+    // chosen one tags every line of the receipt's voucher.
+    projects: { type: Array, default: () => [] },
     branchOptions: { type: Array, default: () => [] },
     defaultBranchId: { type: Number, default: null },
 });
@@ -31,6 +34,11 @@ const accountOptions = computed(() =>
         label: account.code ? `${account.code} - ${account.name}` : account.name,
     })),
 );
+
+const projectOptions = computed(() => [
+    { value: null, label: 'No project' },
+    ...props.projects.map((project) => ({ value: project.id, label: project.code ? `${project.code} - ${project.name}` : project.name })),
+]);
 
 const paymentModeOptions = [
     { value: 'cash', label: 'Cash' },
@@ -46,6 +54,7 @@ const form = useForm({
     payment_mode: 'cash',
     bank_account_id: null,
     reference_number: '',
+    project_id: null,
     narration: '',
 });
 
@@ -245,6 +254,17 @@ function submit() {
                         <InfoTip text="Cheque or transaction number, if any." />
                     </div>
                     <Input v-model="form.reference_number" type="text" placeholder="Optional" />
+                </div>
+                <div v-if="projects.length > 0">
+                    <Label for="receipt-project" class="mb-1">Project</Label>
+                    <Combobox
+                        id="receipt-project"
+                        :model-value="form.project_id"
+                        :options="projectOptions"
+                        placeholder="No project"
+                        @update:model-value="(v) => (form.project_id = v)"
+                    />
+                    <p v-if="form.errors.project_id" class="mt-1 text-sm text-danger">{{ form.errors.project_id }}</p>
                 </div>
                 <div class="col-span-3">
                     <Label class="mb-1">Narration</Label>

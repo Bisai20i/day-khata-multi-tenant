@@ -28,6 +28,7 @@ use Brick\Math\RoundingMode;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Route;
 
 /**
  * The four manufacturing reports of MC10: the per-class stock ledgers, the
@@ -307,7 +308,11 @@ class ManufacturingReports
      * both sides per branch (I8). An unrestricted, un-narrowed view runs
      * check() exactly as before; check() is never widened.
      *
-     * @return array{asOf: string, fiscalYear: ?string, rows: array<int, array{key: string, label: string, gl: string, subledger: string, difference: string}>, balanced: bool}
+     * `totals` adds the three classes up; `balanced` and `differingCount`
+     * are decided per class, never from the total difference, so an RM
+     * surplus cannot hide an FG shortfall of the same size.
+     *
+     * @return array{asOf: string, fiscalYear: ?string, rows: array<int, array{key: string, label: string, gl: string, subledger: string, difference: string}>, totals: array{gl: string, subledger: string, difference: string}, balanced: bool, differingCount: int}
      */
     public function reconciliation(FiscalYear $fiscalYear, string $asOf, ?BranchFilter $filter = null): array
     {
@@ -318,11 +323,17 @@ class ManufacturingReports
             : $this->branchesCheck($fiscalYear, $asOf, $branchIds);
 
         $rows = [];
-        $balanced = true;
+        $differingCount = 0;
+        $totalGl = Money::zero();
+        $totalSubledger = Money::zero();
+        $totalDifference = Money::zero();
 
         foreach (self::classKeys() as $key) {
             $entry = $check[$key];
-            $balanced = $balanced && $entry['difference']->isZero();
+            $differingCount += $entry['difference']->isZero() ? 0 : 1;
+            $totalGl = $totalGl->plus($entry['gl']);
+            $totalSubledger = $totalSubledger->plus($entry['subledger']);
+            $totalDifference = $totalDifference->plus($entry['difference']);
 
             $rows[] = [
                 'key' => $key,
@@ -333,7 +344,14 @@ class ManufacturingReports
             ];
         }
 
-        return ['asOf' => $asOf, 'fiscalYear' => $fiscalYear->bs_label, 'rows' => $rows, 'balanced' => $balanced];
+        return [
+            'asOf' => $asOf,
+            'fiscalYear' => $fiscalYear->bs_label,
+            'rows' => $rows,
+            'totals' => ['gl' => $totalGl->toString(), 'subledger' => $totalSubledger->toString(), 'difference' => $totalDifference->toString()],
+            'balanced' => $differingCount === 0,
+            'differingCount' => $differingCount,
+        ];
     }
 
     /**
@@ -466,6 +484,8 @@ class ManufacturingReports
                 'inValue' => $isIn ? $cost->toString() : null,
                 'outValue' => $isIn ? null : $cost->toString(),
                 'balanceValue' => $value->toString(),
+                // Show page of the source document, null where none exists or the user cannot view it.
+                'documentUrl' => $this->referenceUrl($movement->reference),
             ];
         }
 
@@ -525,6 +545,7 @@ class ManufacturingReports
                 'inValue' => $isIn ? $amount->toString() : null,
                 'outValue' => $isIn ? null : $amount->toString(),
                 'balanceValue' => $value->toString(),
+                'documentUrl' => $this->wipDocumentUrl($entry),
             ];
         }
 
@@ -538,6 +559,26 @@ class ManufacturingReports
             'rows' => $rows,
             'closing' => ['quantity' => null, 'value' => $value->toString()],
         ];
+    }
+
+    /**
+     * Show page of the production entry a WIP row belongs to, else of its
+     * material issue note; null when neither applies, the route is missing
+     * or the user cannot view it (the same checks as referenceUrl()).
+     */
+    private function wipDocumentUrl(ProductionWipEntry $entry): ?string
+    {
+        if ($entry->productionEntry !== null) {
+            return $this->referenceUrl($entry->productionEntry);
+        }
+
+        $note = $entry->materialIssueNote;
+
+        if ($note === null || ! Route::has('tenant.material-issues.show') || ! request()->user()?->can('material_issues.view')) {
+            return null;
+        }
+
+        return route('tenant.material-issues.show', $note->getKey(), absolute: false);
     }
 
     private function wipKindLabel(string $kind): string

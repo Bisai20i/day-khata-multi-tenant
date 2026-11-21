@@ -1,6 +1,7 @@
 <script setup>
-import { computed, ref } from 'vue';
+import { computed, ref, watch } from 'vue';
 import { Link, router } from '@inertiajs/vue3';
+import { FileSpreadsheet } from '@lucide/vue';
 import AppLayout from '@/layouts/AppLayout.vue';
 import { useLayoutChrome } from '@/composables/useLayoutChrome';
 import Card from '@/components/ui/Card.vue';
@@ -11,6 +12,7 @@ import Button from '@/components/ui/Button.vue';
 import Label from '@/components/ui/Label.vue';
 import { formatMoney, formatQuantity } from '@/lib/money';
 import { formatBsDate } from '@/lib/format';
+import { usePermissions } from '@/composables/usePermissions';
 import { useBranchReportFilter } from '@/composables/useBranchReportFilter';
 import BranchReportFilter from '@/components/branch/BranchReportFilter.vue';
 import BranchReportNotes from '@/components/branch/BranchReportNotes.vue';
@@ -21,7 +23,7 @@ const props = defineProps({
     from: { type: String, required: true },
     to: { type: String, required: true },
     rows: { type: Array, default: () => [] },
-    grandTotal: { type: Object, default: () => ({ value: '0.00', quantities: [] }) },
+    grandTotal: { type: Object, default: () => ({ value: '0.00', returns: '0.00', net: '0.00', quantities: [] }) },
     stores: { type: Array, default: () => [] },
     storeId: { type: [Number, null], default: null },
     // Branch filter; null when the company has no branches.
@@ -30,9 +32,17 @@ const props = defineProps({
 
 useLayoutChrome('Purchase by Category');
 
-const from = ref(props.from);
-const to = ref(props.to);
-const storeId = ref(props.storeId);
+const { can } = usePermissions();
+
+// Local filter state follows the applied props, so a back/forward visit or a
+// reset never leaves the inputs showing something the table is not.
+const fromInput = ref(props.from);
+const toInput = ref(props.to);
+const storeInput = ref(props.storeId);
+
+watch(() => props.from, (value) => (fromInput.value = value));
+watch(() => props.to, (value) => (toInput.value = value));
+watch(() => props.storeId, (value) => (storeInput.value = value));
 
 const branchFilter = useBranchReportFilter(() => props.branchReport);
 
@@ -43,17 +53,17 @@ const storeOptions = computed(() => [
 
 const isLoading = ref(false);
 
-const hasActiveFilter = computed(() => storeId.value !== null);
+const hasActiveFilter = computed(() => props.storeId !== null || storeInput.value !== null);
 
 function resetFilters() {
-    storeId.value = null;
+    storeInput.value = null;
     applyFilter();
 }
 
 function applyFilter() {
     router.get(
         window.location.pathname,
-        { from: from.value, to: to.value, store_id: storeId.value ?? undefined, ...branchFilter.toQuery() },
+        { from: fromInput.value, to: toInput.value, store_id: storeInput.value ?? undefined, ...branchFilter.toQuery() },
         {
             preserveState: true,
             preserveScroll: true,
@@ -67,6 +77,21 @@ const rangeLabel = computed(
     () => `BS ${formatBsDate(props.from)} to ${formatBsDate(props.to)} (AD ${props.from} to ${props.to})`,
 );
 
+// Built from the applied props so the file always matches what is on screen.
+function appliedParams() {
+    const params = new URLSearchParams({ from: props.from, to: props.to });
+
+    if (props.storeId) {
+        params.set('store_id', props.storeId);
+    }
+
+    branchFilter.appendTo(params);
+
+    return params;
+}
+
+const exportUrl = computed(() => `/reports/purchase-by-category/export?${appliedParams().toString()}`);
+
 // Quantities are a per-base-unit breakdown, never one number: 12 Boxes plus
 // 30 Kilograms is not "42". An empty list renders as a dash.
 function quantityLabel(quantities) {
@@ -77,34 +102,23 @@ function quantityLabel(quantities) {
     return quantities.map((entry) => `${formatQuantity(entry.quantity)} ${entry.unit}`.trim()).join(', ');
 }
 
-// Pivots a category/subcategory aggregate row into its underlying purchase
-// lines via Item-wise Purchase's own category_id/subcategory_id filters
-// (audit T15-11), keeping the same date range and store filter this report
-// is currently showing, rather than building a separate drill-down endpoint.
-function lineDetailHref(categoryId, subcategoryId) {
-    const params = new URLSearchParams({ from: props.from, to: props.to });
-
-    if (props.storeId) {
-        params.set('store_id', props.storeId);
-    }
-
-    branchFilter.appendTo(params);
+// The items behind a row. A subcategory id of null is the "Uncategorized" row
+// (items in the category with no subcategory), which the server calls `none`.
+function itemsHref(categoryId, subcategoryId, isSubcategory) {
+    const params = appliedParams();
     params.set('category_id', categoryId);
 
-    if (subcategoryId) {
-        params.set('subcategory_id', subcategoryId);
+    if (isSubcategory) {
+        params.set('subcategory_id', subcategoryId ?? 'none');
     }
 
-    return `/reports/item-wise-purchase?${params.toString()}`;
+    return `/reports/purchase-by-category/items?${params.toString()}`;
 }
 </script>
 
 <template>
     <div>
-        <PageHeader
-            title="Purchase by Category"
-            description="What you bought in each item category in the selected dates, by quantity and amount."
-        >
+        <PageHeader title="Purchase by Category" description="What you bought in each item category in the selected dates, by quantity and amount.">
             <BranchReportFilter
                 v-if="branchReport"
                 v-model:choice="branchFilter.choice.value"
@@ -113,27 +127,38 @@ function lineDetailHref(categoryId, subcategoryId) {
                 hide-label
                 @change="applyFilter"
             />
+            <Button v-if="can('purchase_reports.export')" as="a" :href="exportUrl" variant="secondary" tone="purple">
+                <FileSpreadsheet class="h-[14px] w-[14px]" aria-hidden="true" />
+                Export to Excel
+            </Button>
         </PageHeader>
 
         <p class="mb-1 text-[12.5px] text-text-muted">Showing report for {{ rangeLabel }}</p>
 
+        <p class="mb-1 text-[12.5px] text-text-muted">
+            Purchases is each line's value after its own discount and its share of the bill discount, before VAT. Returns is what posted
+            debit notes dated in these days gave back, on the same basis, and Net is Purchases minus Returns. These are the figures
+            Item-wise Purchase shows, so a category's Net equals the Net of its items there for the same dates, store and branch.
+            Cancelled purchases are left out entirely.
+        </p>
+
         <p class="mb-4 text-[12.5px] text-text-muted">
-            Quantities are in base units and listed per unit, so two different units are never added together.
+            Quantities bought include free (bonus) units, are in base units and are listed per unit, so two different units are never added together.
         </p>
 
         <Card variant="panel" class="mb-4">
             <div class="flex flex-wrap items-end gap-3">
                 <div>
                     <Label class="mb-1">From date (BS)</Label>
-                    <NepaliDateInput v-model="from" />
+                    <NepaliDateInput v-model="fromInput" />
                 </div>
                 <div>
                     <Label class="mb-1">To date (BS)</Label>
-                    <NepaliDateInput v-model="to" />
+                    <NepaliDateInput v-model="toInput" />
                 </div>
                 <div class="w-56">
                     <Label class="mb-1">Store</Label>
-                    <Select v-model="storeId" :options="storeOptions" />
+                    <Select v-model="storeInput" :options="storeOptions" />
                 </div>
                 <Button variant="primary" tone="purple" :loading="isLoading" @click="applyFilter">Generate report</Button>
                 <Button v-if="hasActiveFilter" variant="secondary" tone="purple" :disabled="isLoading" @click="resetFilters">Reset</Button>
@@ -149,19 +174,23 @@ function lineDetailHref(categoryId, subcategoryId) {
             <div v-else class="divide-y divide-border">
                 <div class="flex items-center px-1 py-1.5 text-[10px] font-bold tracking-[.8px] text-text-muted uppercase">
                     <div class="flex-1">Category / Subcategory</div>
-                    <div class="w-56 text-right">Quantity</div>
-                    <div class="w-32 text-right">Value</div>
-                    <div class="w-24 text-right">Lines</div>
+                    <div class="w-48 text-right">Quantity</div>
+                    <div class="w-28 text-right">Purchases</div>
+                    <div class="w-28 text-right">Returns</div>
+                    <div class="w-28 text-right">Net</div>
+                    <div class="w-20 text-right">Items</div>
                 </div>
 
                 <template v-for="category in rows" :key="category.categoryId">
                     <div class="flex items-center px-1 py-1.5 text-[13px] font-bold text-text-strong">
                         <div class="flex-1">{{ category.categoryName }}</div>
-                        <div class="w-56 text-right">{{ quantityLabel(category.quantities) }}</div>
-                        <div class="w-32 text-right">{{ formatMoney(category.value) }}</div>
-                        <div class="w-24 text-right">
-                            <Link :href="lineDetailHref(category.categoryId, null)" class="text-[12px] font-semibold text-purple-600 hover:underline">
-                                View lines
+                        <div class="w-48 text-right">{{ quantityLabel(category.quantities) }}</div>
+                        <div class="w-28 text-right">{{ formatMoney(category.value) }}</div>
+                        <div class="w-28 text-right">{{ formatMoney(category.returns) }}</div>
+                        <div class="w-28 text-right">{{ formatMoney(category.net) }}</div>
+                        <div class="w-20 text-right">
+                            <Link :href="itemsHref(category.categoryId, null, false)" class="text-[12px] font-semibold text-purple-600 hover:underline">
+                                View
                             </Link>
                         </div>
                     </div>
@@ -172,25 +201,29 @@ function lineDetailHref(categoryId, subcategoryId) {
                         class="flex items-center px-1 py-1 pl-6 text-[13px] text-text-base"
                     >
                         <div class="flex-1">{{ subcategory.subcategoryName }}</div>
-                        <div class="w-56 text-right">{{ quantityLabel(subcategory.quantities) }}</div>
-                        <div class="w-32 text-right">{{ formatMoney(subcategory.value) }}</div>
-                        <div class="w-24 text-right">
+                        <div class="w-48 text-right">{{ quantityLabel(subcategory.quantities) }}</div>
+                        <div class="w-28 text-right">{{ formatMoney(subcategory.value) }}</div>
+                        <div class="w-28 text-right">{{ formatMoney(subcategory.returns) }}</div>
+                        <div class="w-28 text-right">{{ formatMoney(subcategory.net) }}</div>
+                        <div class="w-20 text-right">
                             <Link
-                                v-if="subcategory.subcategoryId"
-                                :href="lineDetailHref(category.categoryId, subcategory.subcategoryId)"
+                                :href="itemsHref(category.categoryId, subcategory.subcategoryId, true)"
                                 class="text-[12px] font-semibold text-purple-600 hover:underline"
                             >
-                                View lines
+                                View
                             </Link>
                         </div>
                     </div>
                 </template>
             </div>
 
-            <div class="mt-3 flex items-center justify-end gap-6 border-t-[1.5px] border-border pt-3 text-[13px] font-bold text-text-strong">
-                <div>Grand Total</div>
-                <div class="w-56 text-right">{{ quantityLabel(grandTotal.quantities) }}</div>
-                <div class="w-32 text-right">{{ formatMoney(grandTotal.value) }}</div>
+            <div class="mt-3 flex items-center border-t-[1.5px] border-border px-1 pt-3 text-[13px] font-bold text-text-strong">
+                <div class="flex-1">Grand Total</div>
+                <div class="w-48 text-right">{{ quantityLabel(grandTotal.quantities) }}</div>
+                <div class="w-28 text-right">{{ formatMoney(grandTotal.value) }}</div>
+                <div class="w-28 text-right">{{ formatMoney(grandTotal.returns) }}</div>
+                <div class="w-28 text-right">{{ formatMoney(grandTotal.net) }}</div>
+                <div class="w-20" />
             </div>
         </Card>
     </div>

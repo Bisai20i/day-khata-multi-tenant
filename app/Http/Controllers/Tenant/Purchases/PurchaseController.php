@@ -13,10 +13,12 @@ use App\Models\FiscalYear;
 use App\Models\Item;
 use App\Models\ItemCategory;
 use App\Models\PrintLog;
+use App\Models\Project;
 use App\Models\Purchase;
 use App\Models\Store;
 use App\Models\Supplier;
 use App\Rules\AccountUnderHead;
+use App\Rules\OpenProject;
 use App\Support\AmountInWords;
 use App\Support\Billing\BillingException;
 use App\Support\Billing\RoundOffAccountMissing;
@@ -75,7 +77,7 @@ class PurchaseController extends Controller
         // each row names its branch only when several branches can appear.
         // A tenant that is not multi-branch gets the same query as before.
         $purchases = $this->filteredPurchasesQuery($filters, $request)
-            ->with(['supplier:id,name', 'lines.item:id,name,unit', 'journalVoucher:id,voucher_number', 'canceller:id,name'])
+            ->with(['supplier:id,name', 'lines.item:id,name,unit', 'journalVoucher:id,voucher_number', 'canceller:id,name', 'project:id,code,name'])
             ->when(BranchListFilter::columnVisible($request), fn ($query) => $query->with('branch:id,name,code'))
             ->orderBy(self::SORTABLE_COLUMNS[$filters['sort']], $filters['sort_dir'])
             ->orderByDesc('id')
@@ -112,6 +114,8 @@ class PurchaseController extends Controller
             'bankAccounts' => $this->accountsUnderHead('Assets'),
             'tdsAccounts' => $this->accountsUnderHead('Liabilities'),
             'stores' => $this->storeOptions($request),
+            // Optional project picker: only active projects take new bills.
+            'projects' => Project::query()->active()->orderBy('name')->get(['id', 'code', 'name']),
             'settings' => [
                 'default_vat_rate' => $company->default_vat_rate,
                 'default_store_id' => $company->default_store_id,
@@ -160,6 +164,9 @@ class PurchaseController extends Controller
             // branch, then the user's posting branch, and refuses a store of
             // another branch.
             'branch_id' => ['nullable', 'integer', 'exists:branches,id'],
+            // Optional project (cost centre); Purchase::post() tags every
+            // ledger line of the bill with it.
+            'project_id' => ['nullable', 'integer', new OpenProject],
             // decimal:0,N mirrors the column: a value with more decimals than
             // the column can hold used to be charged for and then silently
             // rounded on insert (audit P0-5).

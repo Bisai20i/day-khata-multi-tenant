@@ -15,8 +15,10 @@ use App\Models\FiscalYear;
 use App\Models\Item;
 use App\Models\ItemCategory;
 use App\Models\PrintLog;
+use App\Models\Project;
 use App\Models\Sale;
 use App\Models\SaleNoteTemplate;
+use App\Rules\OpenProject;
 use App\Support\AmountInWords;
 use App\Support\Billing\BillingException;
 use App\Support\Billing\RoundOffAccountMissing;
@@ -104,6 +106,7 @@ class SaleController extends Controller
                 'tdsAccount:id,name',
                 'creator:id,name',
                 'fiscalYear:id,name',
+                'project:id,code,name',
                 'lines.item:id,name,code,unit,hs_code',
                 'lines.itemUnit:id,name',
             ])
@@ -131,6 +134,9 @@ class SaleController extends Controller
             'stores' => $this->branchStoreOptions($request),
             'agents' => Agent::query()->where('is_active', true)->orderBy('name')->get(['id', 'name', 'commission_rate']),
             'noteTemplates' => SaleNoteTemplate::query()->orderBy('text')->get(['id', 'text']),
+            // Optional cost centre for a new bill. A sale is never edited, so
+            // only active projects are offered.
+            'projects' => Project::query()->active()->orderBy('name')->get(['id', 'code', 'name']),
             'walkInCustomerId' => Customer::walkIn()?->id,
             'invoiceSettings' => [
                 'default_vat_rate' => $settings->default_vat_rate,
@@ -488,6 +494,9 @@ class SaleController extends Controller
             // branch, then the user's posting branch, and refuses a store of
             // another branch or a branch the user cannot use.
             'branch_id' => ['nullable', 'integer', 'exists:branches,id'],
+            // Optional project (cost centre); Sale::post() stamps it on the
+            // sale and on every line of its voucher.
+            'project_id' => ['nullable', 'integer', new OpenProject],
             'discount' => ['nullable', 'decimal:0,2', 'min:0'],
             'discount_type' => ['nullable', 'in:percentage,flat'],
             'cash_amount' => ['nullable', 'decimal:0,2', 'min:0'],
@@ -611,6 +620,7 @@ class SaleController extends Controller
             'tdsAccount:id,name',
             'creator:id,name',
             'fiscalYear:id,name',
+            'project:id,code,name',
             'lines.item:id,name,code,unit,hs_code',
             'lines.itemUnit:id,name',
         ]);

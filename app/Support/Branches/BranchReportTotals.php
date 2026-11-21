@@ -37,15 +37,17 @@ final class BranchReportTotals
      * @param  Closure(Builder): mixed  $voucherConstraint
      * @param  list<int>|null  $branchIds  Null adds no branch predicate.
      * @param  list<int>|null  $accountIds  Null for every account.
+     * @param  int|null  $projectId  Only lines tagged with this project (the income statement's project filter); null adds no predicate.
      * @return array<int, array<int, Money>> account id => branch id => net
      */
-    public static function netByAccountAndBranch(Closure $voucherConstraint, ?array $branchIds, ?array $accountIds = null): array
+    public static function netByAccountAndBranch(Closure $voucherConstraint, ?array $branchIds, ?array $accountIds = null, ?int $projectId = null): array
     {
         $cast = JournalVoucherLine::query()->getConnection()->getDriverName() === 'sqlite' ? 'INTEGER' : 'SIGNED';
 
         $query = JournalVoucherLine::query()
             ->whereHas('journalVoucher', $voucherConstraint)
-            ->when($accountIds !== null, fn (Builder $lines) => $lines->whereIn('journal_voucher_lines.account_id', $accountIds));
+            ->when($accountIds !== null, fn (Builder $lines) => $lines->whereIn('journal_voucher_lines.account_id', $accountIds))
+            ->when($projectId !== null, fn (Builder $lines) => $lines->where('journal_voucher_lines.project_id', $projectId));
 
         $rows = BranchFilter::narrowLines($query, $branchIds)
             ->selectRaw(

@@ -10,10 +10,12 @@ import Select from '@/components/ui/Select.vue';
 import Button from '@/components/ui/Button.vue';
 import DataTable from '@/components/ui/DataTable.vue';
 import Label from '@/components/ui/Label.vue';
+import { FileSpreadsheet } from '@lucide/vue';
 import { formatQuantity, formatRate } from '@/lib/money';
 import { formatBsDate } from '@/lib/format';
 import { itemLedgerColumn } from '@/lib/itemLedger';
 import { stockBranchQuery } from '@/lib/stockBranchReport.js';
+import { usePermissions } from '@/composables/usePermissions';
 import { useBranchReportFilter } from '@/composables/useBranchReportFilter';
 import { useBranchReportColumns } from '@/composables/useBranchReportColumns';
 import BranchReportFilter from '@/components/branch/BranchReportFilter.vue';
@@ -36,25 +38,60 @@ const props = defineProps({
     categoryId: { type: [Number, null], default: null },
     subcategoryId: { type: [Number, null], default: null },
     brandId: { type: [Number, null], default: null },
+    // Applied direction filter: 'all', 'in' or 'out'.
+    direction: { type: String, default: 'all' },
+    // Applied movement type filter (StockMovementType value), null for all.
+    movementType: { type: [String, null], default: null },
+    // { value, label, direction: 'in'|'out' } per StockMovementType case.
+    movementTypes: { type: Array, default: () => [] },
+    // Per base unit over the whole result: { unit, in, out, net } exact strings.
+    totals: { type: Array, default: () => [] },
+    // True when only the first `rowLimit` rows were sent; totals still cover all.
+    truncated: { type: Boolean, default: false },
+    rowLimit: { type: Number, default: 5000 },
     // Branch filter and the by-branch summary; null when the company has no branches.
     branchReport: { type: [Object, null], default: null },
 });
 
 useLayoutChrome('Stock Movement Register');
 
-const from = ref(props.from);
-const to = ref(props.to);
-const itemId = ref(props.itemId);
-const storeId = ref(props.storeId);
-const categoryId = ref(props.categoryId);
-const subcategoryId = ref(props.subcategoryId);
-const brandId = ref(props.brandId);
+const { can } = usePermissions();
 
-// The server drops a store outside the chosen branches; follow what it applied.
+const fromInput = ref(props.from);
+const toInput = ref(props.to);
+const itemIdInput = ref(props.itemId);
+const storeIdInput = ref(props.storeId);
+const categoryIdInput = ref(props.categoryId);
+const subcategoryIdInput = ref(props.subcategoryId);
+const brandIdInput = ref(props.brandId);
+const directionChoice = ref(props.direction);
+const typeChoice = ref(props.movementType);
+
+// Follow what the server applied (it drops a store outside the chosen branches,
+// and a fresh visit or Back button brings new props).
 watch(
-    () => [props.storeId, props.stores],
+    () => [
+        props.from,
+        props.to,
+        props.itemId,
+        props.storeId,
+        props.stores,
+        props.categoryId,
+        props.subcategoryId,
+        props.brandId,
+        props.direction,
+        props.movementType,
+    ],
     () => {
-        storeId.value = props.storeId;
+        fromInput.value = props.from;
+        toInput.value = props.to;
+        itemIdInput.value = props.itemId;
+        storeIdInput.value = props.storeId;
+        categoryIdInput.value = props.categoryId;
+        subcategoryIdInput.value = props.subcategoryId;
+        brandIdInput.value = props.brandId;
+        directionChoice.value = props.direction;
+        typeChoice.value = props.movementType;
     },
 );
 
@@ -81,7 +118,7 @@ const categoryOptions = computed(() => [
 const subcategoryOptions = computed(() => [
     { value: null, label: 'All subcategories' },
     ...props.subcategories
-        .filter((subcategory) => !categoryId.value || subcategory.item_category_id === categoryId.value)
+        .filter((subcategory) => !categoryIdInput.value || subcategory.item_category_id === categoryIdInput.value)
         .map((subcategory) => ({ value: subcategory.id, label: subcategory.name })),
 ]);
 
@@ -90,23 +127,49 @@ const brandOptions = computed(() => [
     ...props.brands.map((brand) => ({ value: brand.id, label: brand.name })),
 ]);
 
+const directionOptions = [
+    { value: 'all', label: 'In & Out' },
+    { value: 'in', label: 'Stock in only' },
+    { value: 'out', label: 'Stock out only' },
+];
+
+// Narrowed to the chosen direction's own movement types.
+const typeOptions = computed(() => [
+    { value: null, label: 'All movement types' },
+    ...props.movementTypes
+        .filter((type) => directionChoice.value === 'all' || type.direction === directionChoice.value)
+        .map((type) => ({ value: type.value, label: type.label })),
+]);
+
+// A type that points the other way would only ever return an empty register.
+watch(directionChoice, (direction) => {
+    const picked = props.movementTypes.find((type) => type.value === typeChoice.value);
+    if (picked && direction !== 'all' && picked.direction !== direction) {
+        typeChoice.value = null;
+    }
+});
+
 const isLoading = ref(false);
 
 const hasActiveFilter = computed(
     () =>
-        itemId.value !== null ||
-        storeId.value !== null ||
-        categoryId.value !== null ||
-        subcategoryId.value !== null ||
-        brandId.value !== null,
+        itemIdInput.value !== null ||
+        storeIdInput.value !== null ||
+        categoryIdInput.value !== null ||
+        subcategoryIdInput.value !== null ||
+        brandIdInput.value !== null ||
+        directionChoice.value !== 'all' ||
+        typeChoice.value !== null,
 );
 
 function resetFilters() {
-    itemId.value = null;
-    storeId.value = null;
-    categoryId.value = null;
-    subcategoryId.value = null;
-    brandId.value = null;
+    itemIdInput.value = null;
+    storeIdInput.value = null;
+    categoryIdInput.value = null;
+    subcategoryIdInput.value = null;
+    brandIdInput.value = null;
+    directionChoice.value = 'all';
+    typeChoice.value = null;
     applyFilter();
 }
 
@@ -114,14 +177,16 @@ function applyFilter() {
     router.get(
         window.location.pathname,
         {
-            from: from.value,
-            to: to.value,
-            item_id: itemId.value ?? undefined,
-            store_id: storeId.value ?? undefined,
-            category_id: categoryId.value ?? undefined,
-            subcategory_id: subcategoryId.value ?? undefined,
-            brand_id: brandId.value ?? undefined,
-            ...stockBranchQuery(branchFilter, storeId.value),
+            from: fromInput.value,
+            to: toInput.value,
+            item_id: itemIdInput.value ?? undefined,
+            store_id: storeIdInput.value ?? undefined,
+            category_id: categoryIdInput.value ?? undefined,
+            subcategory_id: subcategoryIdInput.value ?? undefined,
+            brand_id: brandIdInput.value ?? undefined,
+            direction: directionChoice.value === 'all' ? undefined : directionChoice.value,
+            type: typeChoice.value ?? undefined,
+            ...stockBranchQuery(branchFilter, storeIdInput.value),
         },
         {
             preserveState: true,
@@ -131,6 +196,28 @@ function applyFilter() {
         },
     );
 }
+
+// Built from the currently-applied props so exporting always matches what's on screen.
+const exportUrl = computed(() => {
+    const params = new URLSearchParams({ from: props.from, to: props.to });
+    const applied = {
+        item_id: props.itemId,
+        store_id: props.storeId,
+        category_id: props.categoryId,
+        subcategory_id: props.subcategoryId,
+        brand_id: props.brandId,
+        direction: props.direction === 'all' ? null : props.direction,
+        type: props.movementType,
+    };
+    for (const [key, value] of Object.entries(applied)) {
+        if (value !== null && value !== undefined) {
+            params.set(key, String(value));
+        }
+    }
+    branchFilter.appendTo(params);
+
+    return `/reports/stock-movement-register/export?${params.toString()}`;
+});
 
 const rangeLabel = computed(
     () => `BS ${formatBsDate(props.from)} to ${formatBsDate(props.to)} (AD ${props.from} to ${props.to})`,
@@ -146,6 +233,14 @@ function quantitySign(value) {
 
     return /[1-9]/.test(value) ? 'text-success' : '';
 }
+
+// The applied period, store and branch, so the item ledger's balance matches the register.
+const ledgerQuery = computed(() => {
+    const branchQuery = branchFilter.toQuery();
+    delete branchQuery.by_branch;
+
+    return { from: props.from, to: props.to, store_id: props.storeId, ...branchQuery };
+});
 
 const columns = [
     { id: 'date_bs', header: 'Date (BS)', numeric: false, cell: ({ row }) => formatBsDate(row.original.date) },
@@ -172,7 +267,7 @@ const columns = [
         cell: ({ row }) => (row.original.unitCostRate === null ? '-' : formatRate(row.original.unitCostRate)),
     },
     { accessorKey: 'reference', header: 'Reference' },
-    itemLedgerColumn((row) => row.itemId),
+    itemLedgerColumn((row) => row.itemId, () => ledgerQuery.value),
 ];
 </script>
 
@@ -187,11 +282,15 @@ const columns = [
                 v-model:choice="branchFilter.choice.value"
                 v-model:by-branch="branchFilter.byBranch.value"
                 :report="branchReport"
-                :allow-by-branch="storeId === null"
+                :allow-by-branch="storeIdInput === null"
                 id-prefix="stock-movement-branch"
                 hide-label
                 @change="applyFilter"
             />
+            <Button v-if="can('stock_reports.export')" as="a" :href="exportUrl" variant="secondary" tone="purple">
+                <FileSpreadsheet class="h-[14px] w-[14px]" aria-hidden="true" />
+                Export to Excel
+            </Button>
         </PageHeader>
 
         <p class="mb-4 text-[12.5px] text-text-muted">Showing report for {{ rangeLabel }}</p>
@@ -200,31 +299,39 @@ const columns = [
             <div class="flex flex-wrap items-end gap-3">
                 <div>
                     <Label class="mb-1">From date (BS)</Label>
-                    <NepaliDateInput v-model="from" />
+                    <NepaliDateInput v-model="fromInput" />
                 </div>
                 <div>
                     <Label class="mb-1">To date (BS)</Label>
-                    <NepaliDateInput v-model="to" />
+                    <NepaliDateInput v-model="toInput" />
                 </div>
                 <div class="w-56">
                     <Label class="mb-1">Item</Label>
-                    <Select v-model="itemId" :options="itemOptions" />
+                    <Select v-model="itemIdInput" :options="itemOptions" />
                 </div>
                 <div class="w-56">
                     <Label class="mb-1">Store</Label>
-                    <Select v-model="storeId" :options="storeOptions" />
+                    <Select v-model="storeIdInput" :options="storeOptions" />
                 </div>
                 <div class="w-56">
                     <Label class="mb-1">Category</Label>
-                    <Select v-model="categoryId" :options="categoryOptions" />
+                    <Select v-model="categoryIdInput" :options="categoryOptions" />
                 </div>
                 <div class="w-56">
                     <Label class="mb-1">Subcategory</Label>
-                    <Select v-model="subcategoryId" :options="subcategoryOptions" />
+                    <Select v-model="subcategoryIdInput" :options="subcategoryOptions" />
                 </div>
                 <div class="w-56">
                     <Label class="mb-1">Brand</Label>
-                    <Select v-model="brandId" :options="brandOptions" />
+                    <Select v-model="brandIdInput" :options="brandOptions" />
+                </div>
+                <div class="w-48">
+                    <Label class="mb-1">Direction</Label>
+                    <Select v-model="directionChoice" :options="directionOptions" />
+                </div>
+                <div class="w-56">
+                    <Label class="mb-1">Movement type</Label>
+                    <Select v-model="typeChoice" :options="typeOptions" />
                 </div>
                 <Button variant="primary" tone="purple" :loading="isLoading" @click="applyFilter">Generate report</Button>
                 <Button v-if="hasActiveFilter" variant="secondary" tone="purple" :disabled="isLoading" @click="resetFilters">Reset</Button>
@@ -234,8 +341,38 @@ const columns = [
 
         <StockMovementBranchSummary v-if="hasBranchSummary" :report="branchReport" />
 
-        <Card variant="panel">
+        <div
+            v-if="truncated"
+            class="mb-3 rounded border border-warning-text bg-warning-bg px-3 py-2 text-[12.5px] font-semibold text-warning-text"
+        >
+            Showing the first {{ rowLimit.toLocaleString() }} movements only. Narrow the date range or filters, or export to Excel for every
+            row. The totals below cover all movements.
+        </div>
+
+        <Card variant="panel" class="mb-4">
             <DataTable :columns="columns" :data="movements" :page-size="25" empty-message="No records for this period or filter. Try widening the date range." />
+        </Card>
+
+        <Card v-if="totals.length" variant="panel">
+            <div class="mb-2 text-[10px] font-bold tracking-[.8px] text-text-muted uppercase">Totals by unit</div>
+            <table class="w-full text-[13px]">
+                <thead>
+                    <tr class="border-b border-border text-left text-text-muted">
+                        <th class="py-1.5 font-semibold">Unit</th>
+                        <th class="py-1.5 text-right font-semibold">Total in</th>
+                        <th class="py-1.5 text-right font-semibold">Total out</th>
+                        <th class="py-1.5 text-right font-semibold">Net</th>
+                    </tr>
+                </thead>
+                <tbody class="divide-y divide-border">
+                    <tr v-for="total in totals" :key="total.unit">
+                        <td class="py-1.5">{{ total.unit || '-' }}</td>
+                        <td class="py-1.5 text-right">{{ formatQuantity(total.in) }}</td>
+                        <td class="py-1.5 text-right">{{ formatQuantity(total.out) }}</td>
+                        <td class="py-1.5 text-right font-bold" :class="quantitySign(total.net)">{{ formatQuantity(total.net) }}</td>
+                    </tr>
+                </tbody>
+            </table>
         </Card>
     </div>
 </template>

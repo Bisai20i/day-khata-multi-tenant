@@ -24,6 +24,10 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
  *
  * `tds_rate` is the default salary TDS percentage (0-100, 2 decimals) the
  * payroll draft pre-fills each payslip with; the payslip's own `tds` posts.
+ * `ssf_employee_rate`, `ssf_employer_rate`, `cit_employee_rate` and
+ * `cit_employer_rate` are the same kind of default (percentages of the
+ * contribution-base pay components) for the employee and employer social
+ * security fund and CIT contributions; the payslip's own amounts post.
  *
  * `branch_id` is the staff member's home branch (NOT NULL, foreign key to
  * branches; plan 12, section 5.4): their payslip's expense, Salary Payable
@@ -38,7 +42,8 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
  */
 #[Fillable([
     'staff_code', 'name', 'mobile_no', 'address', 'designation', 'department', 'join_date', 'end_date',
-    'pan_no', 'bank_name', 'bank_account_no', 'user_id', 'is_active', 'tds_rate', 'branch_id',
+    'pan_no', 'bank_name', 'bank_account_no', 'user_id', 'is_active', 'tds_rate',
+    'ssf_employee_rate', 'ssf_employer_rate', 'cit_employee_rate', 'cit_employer_rate', 'branch_id',
 ])]
 class StaffMember extends Model
 {
@@ -84,6 +89,10 @@ class StaffMember extends Model
             'is_active' => 'boolean',
             'branch_id' => 'integer',
             'tds_rate' => Decimal::class.':2',
+            'ssf_employee_rate' => Decimal::class.':2',
+            'ssf_employer_rate' => Decimal::class.':2',
+            'cit_employee_rate' => Decimal::class.':2',
+            'cit_employer_rate' => Decimal::class.':2',
         ];
     }
 

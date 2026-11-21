@@ -12,7 +12,7 @@ import NepaliDateInput from '@/components/ui/NepaliDateInput.vue';
 import Label from '@/components/ui/Label.vue';
 import BranchBadge from '@/components/branch/BranchBadge.vue';
 import { useBranchField } from '@/composables/useBranchField';
-import { compareMoney, formatMoney, parseMoney, subtractMoney, sumMoney } from '@/lib/money';
+import { addMoney, compareMoney, formatMoney, parseMoney, subtractMoney, sumMoney } from '@/lib/money';
 import { formatBsDate } from '@/lib/format';
 
 const props = defineProps({
@@ -389,11 +389,12 @@ function submit() {
                     <p v-if="visibleLines.length === 0" class="text-sm text-text-muted">No payslips match this staff filter.</p>
 
                     <div v-else class="flex flex-col gap-2 overflow-x-auto">
-                        <div class="grid min-w-[980px] grid-cols-[32px_1fr_1fr_100px_100px_100px_130px_110px] gap-2 text-[10px] font-bold tracking-[.8px] text-text-muted uppercase">
+                        <div class="grid min-w-[1100px] grid-cols-[32px_1fr_1fr_100px_100px_100px_100px_130px_110px] gap-2 text-[10px] font-bold tracking-[.8px] text-text-muted uppercase">
                             <span></span>
                             <span>Staff</span>
                             <span>Payroll run</span>
                             <span class="flex items-center gap-1">TDS withheld <InfoTip text="Already withheld on the payslip; net pay is after TDS." /></span>
+                            <span class="flex items-center gap-1">SSF / CIT withheld <InfoTip text="Employee SSF and CIT already withheld on the payslip; net pay is after them. Employer contributions are not part of net pay." /></span>
                             <span>Net pay</span>
                             <span>Still owed</span>
                             <span>Settle now (Rs.)</span>
@@ -402,7 +403,7 @@ function submit() {
                         <div
                             v-for="line in visibleLines"
                             :key="line.id"
-                            class="grid min-w-[980px] grid-cols-[32px_1fr_1fr_100px_100px_100px_130px_110px] items-center gap-2"
+                            class="grid min-w-[1100px] grid-cols-[32px_1fr_1fr_100px_100px_100px_100px_130px_110px] items-center gap-2"
                         >
                             <input
                                 type="checkbox"
@@ -421,6 +422,7 @@ function submit() {
                                 <span class="text-xs text-text-muted">{{ formatBsDate(line.run_date) }}</span>
                             </span>
                             <span class="text-sm text-text-muted">{{ formatMoney(line.tds ?? '0.00') }}</span>
+                            <span class="text-sm text-text-muted">{{ formatMoney(addMoney(line.ssf_employee ?? '0.00', line.cit_employee ?? '0.00')) }}</span>
                             <span class="text-sm text-text-base">{{ formatMoney(line.net) }}</span>
                             <span class="text-sm text-text-base">{{ formatMoney(line.outstanding) }}</span>
                             <Input
@@ -435,7 +437,7 @@ function submit() {
                             <span v-else class="text-sm text-text-faint">-</span>
                             <span v-if="owedAfter(line) !== null" class="text-sm text-text-base">{{ formatMoney(owedAfter(line)) }}</span>
                             <span v-else class="text-sm text-text-faint">-</span>
-                            <p v-if="rowStates[line.id]?.error || serverRowErrors[line.id]" class="col-span-8 text-xs text-danger">
+                            <p v-if="rowStates[line.id]?.error || serverRowErrors[line.id]" class="col-span-9 text-xs text-danger">
                                 {{ rowStates[line.id]?.error ?? serverRowErrors[line.id] }}
                             </p>
                         </div>

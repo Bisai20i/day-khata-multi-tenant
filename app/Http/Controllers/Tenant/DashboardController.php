@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Tenant;
 
 use App\Enums\FiscalYearStatus;
 use App\Http\Controllers\Controller;
+use App\Http\Controllers\Tenant\Reports\AccountingReportController;
 use App\Models\Account;
 use App\Models\AccountHead;
 use App\Models\Customer;
@@ -28,6 +29,7 @@ use Illuminate\Contracts\Database\Query\Builder as BuilderContract;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Http\Request;
 use Illuminate\Support\Collection;
+use Illuminate\Validation\ValidationException;
 use Inertia\Inertia;
 use Inertia\Response;
 
@@ -46,6 +48,14 @@ use Inertia\Response;
 class DashboardController extends Controller
 {
     /**
+     * Name of the account subgroup that holds the bank ledgers (created by
+     * the ensure_bank_accounts_subgroup_exists migration).
+     */
+    private const BANK_SUBGROUP = 'Bank Accounts';
+
+    public function __construct(private readonly AccountingReportController $statements) {}
+
+    /**
      * The dashboard is the landing page for EVERY user (ROUTE-MAP allowlist),
      * so it is not gated as a whole; instead each widget is computed and sent
      * only when the user holds the key that already guards the equivalent
@@ -62,7 +72,10 @@ class DashboardController extends Controller
      * - kpis.sales, salesTrend, recentSales .... sales.view (all derivable
      *   from the sales list that key opens)
      * - kpis.purchases, purchaseTrend .......... purchases.view
-     * - kpis.cashInHand ........................ cash_bank_book.view
+     * - kpis.cashInHand, kpis.bankBalance ...... cash_bank_book.view
+     * - kpis.profit (gross / net profit) ....... financial_statements.view
+     *   (the income statement's key; omitted when there is no open fiscal
+     *   year or the range lies outside it)
      * - kpis.stockValue ........................ stock_valuation.view
      * - kpis.debtors ........................... receivables_reports.view
      * - kpis.creditors ......................... payables_reports.view
@@ -179,6 +192,18 @@ class DashboardController extends Controller
             $kpis['cashInHand'] = $this->accountBalance($filter, 'AS1', $fiscalYear)->toString();
         }
 
+        if ($can('cash_bank_book.view')) {
+            $kpis['bankBalance'] = $this->subgroupBalance($filter, self::BANK_SUBGROUP, $fiscalYear, creditNormal: false)->toString();
+        }
+
+        if ($can('financial_statements.view')) {
+            $profit = $this->profitFigures($filter, $fiscalYear, $from, $to);
+
+            if ($profit !== null) {
+                $kpis['profit'] = $profit;
+            }
+        }
+
         if ($can('stock_valuation.view')) {
             $kpis['stockValue'] = $this->stockValue($filter, $today)->toString();
         }
@@ -244,6 +269,62 @@ class DashboardController extends Controller
         );
 
         return Inertia::render('Tenant/Dashboard', $props);
+    }
+
+    /**
+     * Gross profit, net profit and the income / expense totals for the
+     * dashboard's range, read from the income statement's own computation
+     * (AccountingReportController::branchStatements(), which runs
+     * incomeStatementData() and IncomeStatementStatement::build()), so the
+     * dashboard can never disagree with the statement. The statement works
+     * inside one fiscal year, so the range is clamped to the open year; a
+     * range with no overlap, a malformed custom range or a year-less tenant
+     * yields null and the widget is simply omitted. Net profit is negative
+     * for a loss. Returns exact 2-decimal Money strings.
+     *
+     * @return array{grossProfit: string, netProfit: string, totalIncome: string, totalExpenses: string}|null
+     */
+    private function profitFigures(BranchFilter $filter, ?FiscalYear $fiscalYear, string $from, string $to): ?array
+    {
+        if ($fiscalYear === null) {
+            return null;
+        }
+
+        $isoDate = '/^\d{4}-\d{2}-\d{2}$/';
+
+        if (preg_match($isoDate, $from) !== 1 || preg_match($isoDate, $to) !== 1) {
+            return null;
+        }
+
+        $from = max($from, $fiscalYear->start_date->toDateString());
+        $to = min($to, $fiscalYear->end_date->toDateString());
+
+        if ($from > $to) {
+            return null;
+        }
+
+        try {
+            $data = $this->statements->branchStatements(
+                Request::create('/', 'GET', ['fiscal_year_id' => $fiscalYear->id, 'from' => $from, 'to' => $to]),
+                $filter,
+                byBranch: false,
+            );
+        } catch (ValidationException) {
+            return null;
+        }
+
+        $income = $data['statement'] ?? null;
+
+        if ($income === null) {
+            return null;
+        }
+
+        return [
+            'grossProfit' => $income['statement']['grossProfit'],
+            'netProfit' => $income['statement']['netProfit'],
+            'totalIncome' => $income['totalIncome'],
+            'totalExpenses' => $income['totalExpenses'],
+        ];
     }
 
     /**

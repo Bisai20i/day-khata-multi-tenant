@@ -2,41 +2,51 @@
 
 namespace App\Exports;
 
-use App\Support\Money\Money;
 use Illuminate\Support\Collection;
 use Maatwebsite\Excel\Concerns\FromCollection;
 use Maatwebsite\Excel\Concerns\WithColumnFormatting;
 use Maatwebsite\Excel\Concerns\WithHeadings;
 use Maatwebsite\Excel\Concerns\WithMapping;
+use Maatwebsite\Excel\Concerns\WithStrictNullComparison;
+use Maatwebsite\Excel\Concerns\WithStyles;
 use PhpOffice\PhpSpreadsheet\Style\NumberFormat;
+use PhpOffice\PhpSpreadsheet\Worksheet\Worksheet;
 
 /**
- * The ledger-based Debtors list as a real .xlsx: every customer carrying a
+ * The ledger-based Debtors list as a real .xlsx: every Sundry Debtors account carrying a
  * non-zero balance in the selected fiscal year, exactly as
- * SalesPurchaseReportController::debtors() renders it. This is the party
+ * SalesPurchaseReportController::debtors() renders it. This is the account
  * breakdown of the Sundry Debtors subgroup on the Balance Sheet, so it
  * includes migrated opening dues that no open invoice explains - the gap
  * the 2026-09-11 audit found ("no ledger-based Debtors/Creditors list").
  *
- * The balance cell is a real number with a 2-decimal format;
- * `Money::toFloat()` is used at that boundary and nowhere else (C1).
+ * The report signs each balance in the customer's normal side, Dr (positive = Dr, negative = Cr). The sheet
+ * shows the absolute amount in the Balance column (a real number with a
+ * 2-decimal format) and the side it actually sits on in the Dr/Cr column
+ * (column F), so an overpaid party reads e.g. `500.00 | Cr`. Zero shows no
+ * side. The Subtotal and Total rows get a side too.
  *
- * In a multi-branch tenant the sheet opens with the branch filter's label
- * (plan 12, BR14) above the headings and the balances are that filter's;
- * with no label the layout is exactly what it always was.
+ * Heading rows above the column headings (PartyBalanceRows::headingRows()):
+ * the title, the fiscal year, in a multi-branch tenant the branch filter's
+ * label (plan 12, BR14; the balances are that filter's), the area filter when
+ * one is applied, and a blank spacer. The columns A to F are unchanged.
  */
-class DebtorsExport implements FromCollection, WithColumnFormatting, WithHeadings, WithMapping
+class DebtorsExport implements FromCollection, WithColumnFormatting, WithHeadings, WithMapping, WithStrictNullComparison, WithStyles
 {
     /**
      * @param  Collection<int, array<string, mixed>>  $rows
      * @param  list<array{area: string, rows: list<array<string, mixed>>, totals: array<string, string>}>|null  $groups  the report's "Group by area" layout, when it was on
      * @param  string|null  $branchLabel  BranchFilter::label() in a multi-branch tenant, else null
+     * @param  string|null  $fiscalYearName  the fiscal year the balances belong to, null when there is none yet
+     * @param  string|null  $areaLabel  the applied area filter's label, null for all areas
      */
     public function __construct(
         private readonly Collection $rows,
         private readonly string $total,
         private readonly ?array $groups = null,
         private readonly ?string $branchLabel = null,
+        private readonly ?string $fiscalYearName = null,
+        private readonly ?string $areaLabel = null,
     ) {}
 
     /**
@@ -48,13 +58,19 @@ class DebtorsExport implements FromCollection, WithColumnFormatting, WithHeading
     }
 
     /**
-     * @return array<int, string>|list<list<string>>
+     * @return list<list<string>>
      */
     public function headings(): array
     {
-        $headings = ['Customer', 'Address', 'Mobile', 'Area', 'Balance'];
+        return PartyBalanceRows::headingRows('Debtors', 'Customer', $this->fiscalYearName, $this->branchLabel, $this->areaLabel);
+    }
 
-        return $this->branchLabel === null ? $headings : [[$this->branchLabel], $headings];
+    /**
+     * @return array<int, array<string, mixed>>
+     */
+    public function styles(Worksheet $sheet): array
+    {
+        return PartyBalanceRows::headingStyles($this->headings());
     }
 
     /**
@@ -71,13 +87,6 @@ class DebtorsExport implements FromCollection, WithColumnFormatting, WithHeading
      */
     public function map($row): array
     {
-        return [
-            $row['name'] ?? '',
-            $row['address'] ?? '',
-            $row['mobile_no'] ?? '',
-            $row['area'] ?? '',
-            // Heading rows of the grouped layout carry no balance.
-            ($row['balance'] ?? null) === null ? null : Money::of($row['balance'])->toFloat(),
-        ];
+        return PartyBalanceRows::cells($row, creditNormal: false);
     }
 }

@@ -26,8 +26,9 @@ use InvalidArgumentException;
  * `Cr Staff Advances Receivable` line (`Dr Salary Payable` settled = `Cr cash`
  * + `Cr advances`). Nothing is ever adjusted unless the caller asks, and the
  * adjustment is capped at both the amount settled and the staff member's
- * outstanding advance. (Salary TDS is withheld when the payroll run posts, so a
- * payslip's net, and therefore every payment against it, is already after TDS.)
+ * outstanding advance. (Salary TDS and the employee's SSF and CIT shares are
+ * withheld when the payroll run posts, so a payslip's net, and therefore every
+ * payment against it, is already after TDS, SSF and CIT.)
  * Mirrors App\Models\Payment's discipline:
  * allocations are aggregated per payslip and compared exactly (no tolerance)
  * against what is still owed, with the payslips' runs and then the payslip

@@ -38,6 +38,8 @@ const props = defineProps({
     // Branch picker of the create form (BranchFormOptions::props()).
     branchOptions: { type: Array, default: () => [] },
     defaultBranchId: { type: Number, default: null },
+    // Active projects for the create form's optional project picker.
+    projects: { type: Array, default: () => [] },
 });
 
 const { branchColumns } = useBranchListColumn();
@@ -115,7 +117,14 @@ const columns = [
         id: 'supplier',
         header: 'Supplier',
         numeric: false,
-        cell: ({ row }) => row.original.supplier?.name ?? '-',
+        // The payment's project, if any, reads as a muted second line.
+        cell: ({ row }) =>
+            row.original.project
+                ? h('div', [
+                      h('span', row.original.supplier?.name ?? '-'),
+                      h('span', { class: 'block text-xs text-text-muted' }, `Project: ${row.original.project.code} - ${row.original.project.name}`),
+                  ])
+                : row.original.supplier?.name ?? '-',
     },
     {
         id: 'amount',
@@ -175,6 +184,7 @@ const columns = [
                 :outstanding-purchases="outstandingPurchases"
                 :branch-options="branchOptions"
                 :default-branch-id="defaultBranchId"
+                :projects="projects"
                 @cancel="showCreateForm = false"
                 @posted="showCreateForm = false"
             />

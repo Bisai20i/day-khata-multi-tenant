@@ -1,6 +1,6 @@
 import { computed, ref, watch } from 'vue';
 // Relative (not `@/`) so the pure helpers below can be imported by a plain `node --test` file.
-import { addMoney, compareMoney, parseMoney, percentOf, subtractMoney, sumMoney } from '../lib/money.js';
+import { compareMoney, parseMoney, percentOf, subtractMoney, sumMoney } from '../lib/money.js';
 
 /**
  * State, totals and validation for the editable grid of a draft payroll run
@@ -55,6 +55,43 @@ function moneyOrNull(value) {
     return parsed.ok ? parsed.value : null;
 }
 
+/**
+ * The per-line amounts besides pay items and advance recovery. `withheld`
+ * ones come out of the staff member's pay (they count toward the gross cap and
+ * the net); the employer ones are extra employer cost and never touch either.
+ * Each carries the percent-rate key of staffOptions used to pre-fill it.
+ */
+const TDS_FIELD = { field: 'tds', label: 'TDS', withheld: true };
+const CONTRIBUTION_FIELDS = [
+    { field: 'ssf_employee', label: 'SSF (employee)', rateKey: 'ssf_employee_rate', withheld: true },
+    { field: 'ssf_employer', label: 'SSF (employer)', rateKey: 'ssf_employer_rate', withheld: false },
+    { field: 'cit_employee', label: 'CIT (employee)', rateKey: 'cit_employee_rate', withheld: true },
+    { field: 'cit_employer', label: 'CIT (employer)', rateKey: 'cit_employer_rate', withheld: false },
+];
+const MONEY_FIELDS = [TDS_FIELD, ...CONTRIBUTION_FIELDS];
+const WITHHELD_MESSAGE = 'The advance recovery, TDS, SSF and CIT withheld together cannot exceed the gross pay.';
+
+/** A canonical 2dp amount for the payload; blank is zero, an invalid entry is sent as typed so the server names it. */
+function payloadAmount(value) {
+    return isBlank(value) ? '0.00' : (moneyOrNull(value) ?? trimmed(value));
+}
+
+/**
+ * Sum of the pay items whose component counts as basic pay for SSF / CIT
+ * (`is_contribution_base`). Unparseable amounts count as zero.
+ *
+ * @param {object} line
+ * @param {Array<object>} components
+ * @returns {string}
+ */
+export function contributionBase(line, components) {
+    const baseIds = new Set((components ?? []).filter((c) => c.is_contribution_base).map((c) => c.id));
+
+    return sumMoney(
+        (line.items ?? []).filter((item) => baseIds.has(item.pay_component_id)).map((item) => moneyOrNull(item.amount) ?? '0.00'),
+    );
+}
+
 /** @returns {{key: number, pay_component_id: ?number, component_name: string, amount: string, note: string}} */
 export function emptyPayItem() {
     return { key: nextKey(), pay_component_id: null, component_name: '', amount: '', note: '' };
@@ -82,6 +119,10 @@ export function draftFromRun(run, lines) {
             staff_name: line.staff_name ?? '',
             advance_recovery: line.advance_recovery ?? '',
             tds: line.tds ?? '0.00',
+            ssf_employee: line.ssf_employee ?? '0.00',
+            ssf_employer: line.ssf_employer ?? '0.00',
+            cit_employee: line.cit_employee ?? '0.00',
+            cit_employer: line.cit_employer ?? '0.00',
             note: line.note ?? '',
             items: (line.items ?? []).map((item) => ({
                 key: nextKey(),
@@ -113,7 +154,11 @@ export function payrollDraftPayload(state) {
         lines: (state.lines ?? []).map((line) => ({
             staff_id: line.staff_id,
             advance_recovery: isBlank(line.advance_recovery) ? '0.00' : (moneyOrNull(line.advance_recovery) ?? trimmed(line.advance_recovery)),
-            tds: isBlank(line.tds) ? '0.00' : (moneyOrNull(line.tds) ?? trimmed(line.tds)),
+            tds: payloadAmount(line.tds),
+            ssf_employee: payloadAmount(line.ssf_employee),
+            ssf_employer: payloadAmount(line.ssf_employer),
+            cit_employee: payloadAmount(line.cit_employee),
+            cit_employer: payloadAmount(line.cit_employer),
             note: trimmed(line.note) || null,
             items: (line.items ?? []).map((item) => ({
                 pay_component_id: item.pay_component_id,
@@ -135,22 +180,35 @@ export function payrollDraftFingerprint(state) {
 }
 
 /**
- * Live gross / recovery / TDS / net of one staff line (net = gross - recovery
- * - TDS). Unparseable entries count as zero here; validatePayrollDraft() is
- * what reports them.
+ * Live gross / recovery / TDS / SSF / CIT / net of one staff line (net = gross
+ * - recovery - TDS - employee SSF - employee CIT; the employer amounts are
+ * extra employer cost and change neither gross nor net). Unparseable entries
+ * count as zero here; validatePayrollDraft() is what reports them.
  *
- * @returns {{gross: string, recovery: string, tds: string, net: string}}
+ * @returns {{gross: string, recovery: string, tds: string, ssf_employee: string, ssf_employer: string, cit_employee: string, cit_employer: string, net: string}}
  */
 export function payrollLineFigures(line) {
     const gross = sumMoney((line.items ?? []).map((item) => moneyOrNull(item.amount) ?? '0.00'));
     const recovery = moneyOrNull(line.advance_recovery) ?? '0.00';
-
     const tds = moneyOrNull(line.tds) ?? '0.00';
+    const ssfEmployee = moneyOrNull(line.ssf_employee) ?? '0.00';
+    const ssfEmployer = moneyOrNull(line.ssf_employer) ?? '0.00';
+    const citEmployee = moneyOrNull(line.cit_employee) ?? '0.00';
+    const citEmployer = moneyOrNull(line.cit_employer) ?? '0.00';
 
-    return { gross, recovery, tds, net: subtractMoney(subtractMoney(gross, recovery), tds) };
+    return {
+        gross,
+        recovery,
+        tds,
+        ssf_employee: ssfEmployee,
+        ssf_employer: ssfEmployer,
+        cit_employee: citEmployee,
+        cit_employer: citEmployer,
+        net: subtractMoney(gross, sumMoney([recovery, tds, ssfEmployee, citEmployee])),
+    };
 }
 
-/** @returns {{count: number, gross: string, recovery: string, tds: string, net: string}} */
+/** @returns {{count: number, gross: string, recovery: string, tds: string, ssf_employee: string, ssf_employer: string, cit_employee: string, cit_employer: string, net: string}} */
 export function payrollDraftTotals(lines) {
     const figures = (lines ?? []).map((line) => payrollLineFigures(line));
 
@@ -159,6 +217,10 @@ export function payrollDraftTotals(lines) {
         gross: sumMoney(figures.map((f) => f.gross)),
         recovery: sumMoney(figures.map((f) => f.recovery)),
         tds: sumMoney(figures.map((f) => f.tds)),
+        ssf_employee: sumMoney(figures.map((f) => f.ssf_employee)),
+        ssf_employer: sumMoney(figures.map((f) => f.ssf_employer)),
+        cit_employee: sumMoney(figures.map((f) => f.cit_employee)),
+        cit_employer: sumMoney(figures.map((f) => f.cit_employer)),
         net: sumMoney(figures.map((f) => f.net)),
     };
 }
@@ -185,7 +247,9 @@ export function payrollDraftFieldValues(state) {
 
         values[`${base}.staff_id`] = line.staff_id;
         values[`${base}.advance_recovery`] = line.advance_recovery;
-        values[`${base}.tds`] = line.tds;
+        MONEY_FIELDS.forEach(({ field }) => {
+            values[`${base}.${field}`] = line[field];
+        });
         values[`${base}.note`] = line.note;
         values[`${base}.items`] = (line.items ?? []).length;
         (line.items ?? []).forEach((item, itemIndex) => {
@@ -343,24 +407,32 @@ export function validatePayrollDraft(state, { advanceBalances = {}, activeCompon
             }
         }
 
-        if (!isBlank(line.tds)) {
-            const invalidTds = amountError(line.tds, 'TDS');
-            if (invalidTds) {
-                errors[`${base}.tds`] = invalidTds;
-            } else {
-                const tds = moneyOrNull(line.tds);
-                const { gross } = payrollLineFigures(line);
-                const recovery = moneyOrNull(line.advance_recovery) ?? '0.00';
+        // TDS, SSF and CIT amounts: each >= 0 and not above MAX_AMOUNT; the
+        // withheld ones (TDS + employee SSF + employee CIT) together with the
+        // advance recovery may not exceed gross. Employer amounts have no gross cap.
+        // net = gross - everything withheld, so a negative net means the cap is broken.
+        const withheldOverGross = compareMoney(payrollLineFigures(line).net, '0.00') < 0;
 
-                if (compareMoney(tds, '0.00') < 0) {
-                    errors[`${base}.tds`] = 'The TDS cannot be negative.';
-                } else if (compareMoney(tds, MAX_AMOUNT) > 0) {
-                    errors[`${base}.tds`] = 'The TDS is too large.';
-                } else if (compareMoney(addMoney(recovery, tds), gross) > 0) {
-                    errors[`${base}.tds`] = 'The advance recovery and TDS together cannot exceed the gross pay.';
-                }
+        MONEY_FIELDS.forEach(({ field, label, withheld }) => {
+            if (isBlank(line[field])) {
+                return;
             }
-        }
+            const invalid = amountError(line[field], label);
+            if (invalid) {
+                errors[`${base}.${field}`] = invalid;
+
+                return;
+            }
+            const amount = moneyOrNull(line[field]);
+
+            if (compareMoney(amount, '0.00') < 0) {
+                errors[`${base}.${field}`] = `The ${label} cannot be negative.`;
+            } else if (compareMoney(amount, MAX_AMOUNT) > 0) {
+                errors[`${base}.${field}`] = `The ${label} is too large.`;
+            } else if (withheld && withheldOverGross && compareMoney(amount, '0.00') > 0) {
+                errors[`${base}.${field}`] = WITHHELD_MESSAGE;
+            }
+        });
 
         if (trimmed(line.note).length > 255) {
             errors[`${base}.note`] = 'The note can be at most 255 characters.';
@@ -485,24 +557,49 @@ export function usePayrollDraft(form, source) {
             // that value the user has not touched it, so it follows the gross.
             tds_rate: moneyOrNull(staff.tds_rate),
             tds_auto_value: '0.00',
+            // Same idea for SSF / CIT, but their rates apply to the basic pay
+            // components (is_contribution_base), not to the whole gross.
+            ...Object.fromEntries(
+                CONTRIBUTION_FIELDS.flatMap(({ field, rateKey }) => [
+                    [field, '0.00'],
+                    [`${field}_rate`, moneyOrNull(staff[rateKey])],
+                    [`${field}_auto_value`, '0.00'],
+                ]),
+            ),
             note: '',
             items: [emptyPayItem()],
         });
     }
 
-    // Pre-fill TDS for newly added staff as percentOf(gross, rate). A value the
-    // user has typed over is never replaced.
+    // Pre-fill TDS for newly added staff as percentOf(gross, rate), and SSF / CIT
+    // as percentOf(basic pay, rate). A value the user has typed over is never replaced.
     watch(
-        () => form.lines.map((line) => payrollLineFigures(line).gross).join('|'),
+        () =>
+            form.lines
+                .map((line) => `${payrollLineFigures(line).gross}:${contributionBase(line, components.value)}`)
+                .join('|'),
         () => {
             form.lines.forEach((line) => {
-                if (!line.tds_rate || line.tds !== line.tds_auto_value) {
-                    return;
-                }
-                const next = percentOf(payrollLineFigures(line).gross, line.tds_rate);
+                if (line.tds_rate && line.tds === line.tds_auto_value) {
+                    const next = percentOf(payrollLineFigures(line).gross, line.tds_rate);
 
-                line.tds = next;
-                line.tds_auto_value = next;
+                    line.tds = next;
+                    line.tds_auto_value = next;
+                }
+
+                const base = contributionBase(line, components.value);
+
+                CONTRIBUTION_FIELDS.forEach(({ field }) => {
+                    const rate = line[`${field}_rate`];
+
+                    if (!rate || line[field] !== line[`${field}_auto_value`]) {
+                        return;
+                    }
+                    const next = percentOf(base, rate);
+
+                    line[field] = next;
+                    line[`${field}_auto_value`] = next;
+                });
             });
         },
     );

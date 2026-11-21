@@ -43,6 +43,43 @@ class HrAccounts
      */
     public const TDS_PAYABLE = 'LIA21';
 
+    /**
+     * Current Liabilities: social security fund contributions accrued and not
+     * yet paid to the fund. Payroll credits it with the employee's withholding
+     * (taken out of net pay) plus the employer's contribution (EMPLOYER_SSF_EXPENSE),
+     * as one liability. Not a control account: per-staff amounts are read from
+     * the payslips (`hr_payroll_lines.ssf_employee` / `ssf_employer`).
+     */
+    public const SSF_PAYABLE = 'LIA23';
+
+    /**
+     * Current Liabilities: citizen investment trust contributions accrued and
+     * not yet paid to the trust. Payroll credits it with the employee's
+     * withholding plus the employer's contribution (EMPLOYER_CIT_EXPENSE), as
+     * one liability (`hr_payroll_lines.cit_employee` / `cit_employer`).
+     */
+    public const CIT_PAYABLE = 'LIA24';
+
+    /**
+     * Indirect Expenses: the employer's SSF contribution, an extra cost on top
+     * of gross pay. Payroll debits it; the credit goes to SSF_PAYABLE.
+     */
+    public const EMPLOYER_SSF_EXPENSE = 'EXE32';
+
+    /**
+     * Indirect Expenses: the employer's CIT contribution, an extra cost on top
+     * of gross pay. Payroll debits it; the credit goes to CIT_PAYABLE.
+     */
+    public const EMPLOYER_CIT_EXPENSE = 'EXE33';
+
+    /**
+     * Direct Expenses (above Gross Profit): wages of hourly / labour / site
+     * staff. Payroll debits it through the DIRECT_WAGES starter pay component
+     * (or any component a tenant maps to it); monthly salaries stay on
+     * SALARIES_AND_WAGES under Indirect Expenses.
+     */
+    public const DIRECT_WAGES = 'EXE28';
+
     public const SALARIES_AND_WAGES = 'EXE25';
 
     public const STAFF_BONUS = 'EXE26';
@@ -55,14 +92,19 @@ class HrAccounts
     public const CONTROL_CODES = [self::SALARY_PAYABLE, self::STAFF_ADVANCES_RECEIVABLE];
 
     /**
-     * The pay components every tenant starts with, in display order.
+     * The pay components every tenant starts with, in display order. Existing
+     * tenants got the first three from 2026_11_05_100100 and Direct Wages from
+     * 2026_11_21_130000_add_direct_wages_pay_component. `contribution_base`
+     * marks the component the SSF / CIT percentages apply to (the basic pay);
+     * only Salary is one (existing tenants: 2026_11_21_180100).
      *
-     * @var list<array{code: string, name: string, account: string}>
+     * @var list<array{code: string, name: string, account: string, contribution_base: bool}>
      */
     public const STARTER_COMPONENTS = [
-        ['code' => 'SALARY', 'name' => 'Salary', 'account' => self::SALARIES_AND_WAGES],
-        ['code' => 'BONUS', 'name' => 'Bonus', 'account' => self::STAFF_BONUS],
-        ['code' => 'ALLOWANCE', 'name' => 'Allowance', 'account' => self::STAFF_ALLOWANCES],
+        ['code' => 'SALARY', 'name' => 'Salary', 'account' => self::SALARIES_AND_WAGES, 'contribution_base' => true],
+        ['code' => 'BONUS', 'name' => 'Bonus', 'account' => self::STAFF_BONUS, 'contribution_base' => false],
+        ['code' => 'ALLOWANCE', 'name' => 'Allowance', 'account' => self::STAFF_ALLOWANCES, 'contribution_base' => false],
+        ['code' => 'DIRECT_WAGES', 'name' => 'Direct Wages', 'account' => self::DIRECT_WAGES, 'contribution_base' => false],
     ];
 
     /**

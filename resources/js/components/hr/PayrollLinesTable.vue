@@ -6,7 +6,8 @@ import { compareMoney, formatMoney, sumMoney } from '@/lib/money.js';
 /**
  * Read-only payslip table of a posted or cancelled payroll run: one row per
  * staff member, one column per pay component used anywhere in the run, then
- * gross, advance recovered, salary TDS and net. A posted run also shows what has been
+ * gross, advance recovered, salary TDS, employee SSF / CIT withheld, net and the
+ * employer SSF / CIT contributions (extra cost, outside net). A posted run also shows what has been
  * paid against each payslip and what is still outstanding (Salary Payable).
  *
  * Every figure is a server decimal string; the column and footer totals are
@@ -55,6 +56,10 @@ const totals = computed(() => ({
     gross: sumMoney(props.lines.map((line) => line.gross)),
     recovery: sumMoney(props.lines.map((line) => line.advance_recovery)),
     tds: sumMoney(props.lines.map((line) => line.tds ?? '0.00')),
+    ssfEmployee: sumMoney(props.lines.map((line) => line.ssf_employee ?? '0.00')),
+    citEmployee: sumMoney(props.lines.map((line) => line.cit_employee ?? '0.00')),
+    ssfEmployer: sumMoney(props.lines.map((line) => line.ssf_employer ?? '0.00')),
+    citEmployer: sumMoney(props.lines.map((line) => line.cit_employer ?? '0.00')),
     net: sumMoney(props.lines.map((line) => line.net)),
     paid: sumMoney(props.lines.map((line) => line.paid ?? '0.00')),
     outstanding: sumMoney(props.lines.map((line) => line.outstanding ?? '0.00')),
@@ -73,7 +78,7 @@ function itemNotes(line) {
 <template>
     <Card variant="panel" title="Payslips" class="!p-4 overflow-x-auto">
         <p v-if="lines.length === 0" class="py-6 text-center text-sm text-text-faint">This run has no payslips.</p>
-        <table v-else class="w-full text-sm" :class="showPayments ? 'min-w-[860px]' : 'min-w-[640px]'">
+        <table v-else class="w-full text-sm" :class="showPayments ? 'min-w-[1100px]' : 'min-w-[880px]'">
             <thead>
                 <tr class="text-left text-[10px] font-bold tracking-[.8px] text-text-muted uppercase">
                     <th class="py-2 pr-3">Staff</th>
@@ -81,7 +86,11 @@ function itemNotes(line) {
                     <th class="px-2 py-2 text-right">Gross</th>
                     <th class="px-2 py-2 text-right">Advance recovered</th>
                     <th class="px-2 py-2 text-right">TDS</th>
+                    <th class="px-2 py-2 text-right" title="Employee SSF withheld from pay">SSF (emp)</th>
+                    <th class="px-2 py-2 text-right" title="Employee CIT withheld from pay">CIT (emp)</th>
                     <th class="px-2 py-2 text-right">Net</th>
+                    <th class="px-2 py-2 text-right" title="Employer SSF contribution, extra employer cost (not part of net pay)">Employer SSF</th>
+                    <th class="px-2 py-2 text-right" title="Employer CIT contribution, extra employer cost (not part of net pay)">Employer CIT</th>
                     <th v-if="showPayments" class="px-2 py-2 text-right">Paid</th>
                     <th v-if="showPayments" class="py-2 pl-2 text-right">Outstanding</th>
                 </tr>
@@ -101,7 +110,11 @@ function itemNotes(line) {
                     <td class="px-2 py-2 text-right font-semibold">{{ formatMoney(line.gross) }}</td>
                     <td class="px-2 py-2 text-right">{{ formatMoney(line.advance_recovery) }}</td>
                     <td class="px-2 py-2 text-right">{{ formatMoney(line.tds ?? '0.00') }}</td>
+                    <td class="px-2 py-2 text-right">{{ formatMoney(line.ssf_employee ?? '0.00') }}</td>
+                    <td class="px-2 py-2 text-right">{{ formatMoney(line.cit_employee ?? '0.00') }}</td>
                     <td class="px-2 py-2 text-right font-semibold text-text-strong">{{ formatMoney(line.net) }}</td>
+                    <td class="px-2 py-2 text-right">{{ formatMoney(line.ssf_employer ?? '0.00') }}</td>
+                    <td class="px-2 py-2 text-right">{{ formatMoney(line.cit_employer ?? '0.00') }}</td>
                     <td v-if="showPayments" class="px-2 py-2 text-right">{{ formatMoney(line.paid ?? '0.00') }}</td>
                     <td v-if="showPayments" class="py-2 pl-2 text-right" :class="isPositive(line.outstanding) ? 'font-semibold text-warning-text' : 'text-text-faint'">
                         {{ formatMoney(line.outstanding ?? '0.00') }}
@@ -115,7 +128,11 @@ function itemNotes(line) {
                     <td class="px-2 py-2 text-right">{{ formatMoney(totals.gross) }}</td>
                     <td class="px-2 py-2 text-right">{{ formatMoney(totals.recovery) }}</td>
                     <td class="px-2 py-2 text-right">{{ formatMoney(totals.tds) }}</td>
+                    <td class="px-2 py-2 text-right">{{ formatMoney(totals.ssfEmployee) }}</td>
+                    <td class="px-2 py-2 text-right">{{ formatMoney(totals.citEmployee) }}</td>
                     <td class="px-2 py-2 text-right">{{ formatMoney(totals.net) }}</td>
+                    <td class="px-2 py-2 text-right">{{ formatMoney(totals.ssfEmployer) }}</td>
+                    <td class="px-2 py-2 text-right">{{ formatMoney(totals.citEmployer) }}</td>
                     <td v-if="showPayments" class="px-2 py-2 text-right">{{ formatMoney(totals.paid) }}</td>
                     <td v-if="showPayments" class="py-2 pl-2 text-right">{{ formatMoney(totals.outstanding) }}</td>
                 </tr>

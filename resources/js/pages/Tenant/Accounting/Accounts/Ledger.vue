@@ -1,5 +1,5 @@
 <script setup>
-import { computed, h, ref } from 'vue';
+import { computed, ref, watch } from 'vue';
 import { router } from '@inertiajs/vue3';
 import AppLayout from '@/layouts/AppLayout.vue';
 import { useLayoutChrome } from '@/composables/useLayoutChrome';
@@ -8,10 +8,9 @@ import Card from '@/components/ui/Card.vue';
 import Select from '@/components/ui/Select.vue';
 import Button from '@/components/ui/Button.vue';
 import NepaliDateInput from '@/components/ui/NepaliDateInput.vue';
-import DataTable from '@/components/ui/DataTable.vue';
 import Label from '@/components/ui/Label.vue';
+import LedgerEntriesTable from '@/components/accounting/LedgerEntriesTable.vue';
 import { formatMoney } from '@/lib/money';
-import { formatBsDate } from '@/lib/format';
 import { useBranchReportFilter } from '@/composables/useBranchReportFilter';
 import BranchReportFilter from '@/components/branch/BranchReportFilter.vue';
 import BranchReportNotes from '@/components/branch/BranchReportNotes.vue';
@@ -52,6 +51,24 @@ const props = defineProps({
         type: String,
         default: '0.00',
     },
+    // Dr / Cr side of the opening and closing balances ('' when zero).
+    openingSide: {
+        type: String,
+        default: '',
+    },
+    closingSide: {
+        type: String,
+        default: '',
+    },
+    // Totals of the debit / credit columns over the selected window.
+    periodDebit: {
+        type: String,
+        default: '0.00',
+    },
+    periodCredit: {
+        type: String,
+        default: '0.00',
+    },
     entries: {
         type: Array,
         default: () => [],
@@ -74,91 +91,72 @@ const props = defineProps({
     },
 });
 
+// "1,250.00 Dr" / "1,250.00 Cr"; zero prints "0.00" with no side, never "-0.00".
+function balanceText(balance, side) {
+    const amount = formatMoney(balance).replace(/^-/, '');
+
+    return side ? `${amount} ${side}` : amount;
+}
+
 useLayoutChrome(() => `Ledger - ${props.account.name}`);
 
 // An arbitrary date window inside the chosen fiscal year (T14 task 3) - the
 // backend clamps whatever is sent here to the year's own start/end and
 // recomputes the opening balance for the window (never just resets it to
 // zero), so a mid-year "From" still opens at the right running total.
-const from = ref(props.from);
-const to = ref(props.to);
+const fromInput = ref(props.from);
+const toInput = ref(props.to);
 const branchFilter = useBranchReportFilter(() => props.branchReport);
+
+watch(
+    () => props.from,
+    (v) => (fromInput.value = v),
+);
+
+watch(
+    () => props.to,
+    (v) => (toInput.value = v),
+);
+
+// The server always sends the fiscal year's own start/end, so "Clear filters"
+// only matters once the applied window differs from them.
+const hasCustomWindow = computed(() => {
+    const year = props.fiscalYears.find((candidate) => candidate.id === props.fiscalYearId);
+
+    if (!year) {
+        return Boolean(props.from || props.to);
+    }
+
+    return (props.from !== null && props.from !== year.start_date) || (props.to !== null && props.to !== year.end_date);
+});
 
 function applyWindow() {
     router.get(
         window.location.pathname,
-        { fiscal_year_id: props.fiscalYearId, from: from.value ?? undefined, to: to.value ?? undefined, ...branchFilter.toQuery() },
+        { fiscal_year_id: props.fiscalYearId, from: fromInput.value ?? undefined, to: toInput.value ?? undefined, ...branchFilter.toQuery() },
         { preserveState: true, preserveScroll: true },
     );
 }
 
 function clearWindow() {
-    from.value = null;
-    to.value = null;
+    fromInput.value = null;
+    toInput.value = null;
     applyWindow();
 }
 
-function printUrl() {
+// Print / Export follow the applied filters (props), not unapplied edits.
+function reportUrl(suffix) {
     const params = new URLSearchParams({
         fiscal_year_id: props.fiscalYearId ?? '',
-        from: from.value ?? '',
-        to: to.value ?? '',
+        from: props.from ?? '',
+        to: props.to ?? '',
     });
     branchFilter.appendTo(params);
-    return `${window.location.pathname}/print?${params.toString()}`;
+    return `${window.location.pathname}/${suffix}?${params.toString()}`;
 }
 
-function exportUrl() {
-    const params = new URLSearchParams({
-        fiscal_year_id: props.fiscalYearId ?? '',
-        from: from.value ?? '',
-        to: to.value ?? '',
-    });
-    branchFilter.appendTo(params);
-    return `${window.location.pathname}/export?${params.toString()}`;
-}
-
-// Only the types a manual ledger reader is likely to meet need a friendly
-// label; anything else falls back to its own value, so a new VoucherType never
-// renders as a blank cell.
-const voucherTypeLabels = {
-    opening_balance: 'Opening Balance',
-    journal: 'Journal',
-    closing_entry: 'Closing Entry',
-    roll_forward_adjustment: 'Roll Forward Adjustment',
-    reversal: 'Reversal',
-    sale: 'Sale',
-    sale_abbreviated: 'Sale (Abbreviated)',
-    sale_pan: 'Sale (PAN)',
-    sale_return: 'Sales Return',
-    purchase: 'Purchase',
-    purchase_return: 'Purchase Return',
-    capital_purchase: 'Capital Purchase',
-    capital_sale: 'Capital Sale',
-    fixed_asset_purchase: 'Fixed Asset Purchase',
-    depreciation: 'Depreciation',
-    asset_disposal: 'Asset Disposal',
-    receipt: 'Receipt',
-    payment: 'Payment',
-    cash_receipt: 'Cash Receipt',
-    cash_payment: 'Cash Payment',
-    bank_receipt: 'Bank Receipt',
-    bank_payment: 'Bank Payment',
-    contra: 'Contra',
-    material_issue: 'Material Issue',
-    production: 'Production',
-    production_entry: 'Production Entry',
-    inventory_cost: 'Inventory Cost',
-    payroll: 'Payroll',
-    salary_payment: 'Salary Payment',
-    staff_advance: 'Staff Advance',
-    branch_stock_transfer: 'Branch Stock Transfer',
-};
-
-function voucherLabel(entry) {
-    const type = voucherTypeLabels[entry.voucherType] ?? entry.voucherType;
-    return `${type} #${entry.voucherNumber}`;
-}
+const printUrl = () => reportUrl('print');
+const exportUrl = () => reportUrl('export');
 
 const fiscalYearOptions = computed(() =>
     props.fiscalYears.map((fiscalYear) => ({
@@ -170,65 +168,14 @@ const fiscalYearOptions = computed(() =>
 function onFiscalYearChange(value) {
     // A new fiscal year has its own start/end, so any window chosen for the
     // previous one is dropped rather than sent along and silently clamped.
-    from.value = null;
-    to.value = null;
+    fromInput.value = null;
+    toInput.value = null;
     router.get(
         window.location.pathname,
         { fiscal_year_id: value, ...branchFilter.toQuery() },
         { preserveState: true, preserveScroll: true },
     );
 }
-
-// Amounts arrive from the server as exact decimal strings (the running
-// balance is accumulated with App\Support\Money\Money there, so it never
-// drifts and never renders "-0.00"); the page only formats them.
-const columns = [
-    {
-        id: 'dateBs',
-        header: 'Date (BS)',
-        numeric: false,
-        cell: ({ row }) => formatBsDate(row.original.date) || '-',
-    },
-    { accessorKey: 'date', header: 'Date (AD)' },
-    {
-        id: 'voucher',
-        header: 'Voucher',
-        numeric: false,
-        cell: ({ row }) => voucherLabel(row.original),
-    },
-    {
-        accessorKey: 'narration',
-        header: 'Narration',
-        numeric: false,
-        cell: ({ row }) => row.original.narration ?? '-',
-    },
-    {
-        accessorKey: 'debit',
-        header: 'Debit',
-        cell: ({ row }) => formatMoney(row.original.debit),
-    },
-    {
-        accessorKey: 'credit',
-        header: 'Credit',
-        cell: ({ row }) => formatMoney(row.original.credit),
-    },
-    {
-        accessorKey: 'balance',
-        header: 'Running balance',
-        cell: ({ row }) => formatMoney(row.original.balance),
-    },
-    {
-        id: 'document',
-        header: 'Source document',
-        numeric: false,
-        cell: ({ row }) =>
-            row.original.document
-                ? row.original.document.url
-                    ? h('a', { href: row.original.document.url, target: '_blank', rel: 'noopener', class: 'text-primary underline' }, row.original.document.label)
-                    : row.original.document.label
-                : '-',
-    },
-];
 </script>
 
 <template>
@@ -265,14 +212,14 @@ const columns = [
                 </div>
                 <div>
                     <Label class="mb-1">From date</Label>
-                    <NepaliDateInput v-model="from" />
+                    <NepaliDateInput v-model="fromInput" />
                 </div>
                 <div>
                     <Label class="mb-1">To date</Label>
-                    <NepaliDateInput v-model="to" />
+                    <NepaliDateInput v-model="toInput" />
                 </div>
                 <Button variant="primary" tone="purple" @click="applyWindow">Apply filters</Button>
-                <Button v-if="from || to" variant="secondary" tone="purple" @click="clearWindow">Clear filters</Button>
+                <Button v-if="hasCustomWindow" variant="secondary" tone="purple" @click="clearWindow">Clear filters</Button>
             </div>
             <p class="mt-2 text-xs text-text-muted">Dates outside the chosen fiscal year are trimmed to its start and end. The opening balance adjusts to your From date.</p>
             <BranchReportNotes v-if="branchReport" :report="branchReport" hide-label />
@@ -280,8 +227,14 @@ const columns = [
 
         <Card v-if="fiscalYearId !== null" variant="panel" class="mb-4">
             <div class="flex flex-wrap justify-end gap-6 text-[13px]">
-                <div><span class="text-text-muted">Opening balance:</span> <span class="font-semibold tabular-nums">{{ formatMoney(openingBalance) }}</span></div>
-                <div><span class="text-text-muted">Closing balance:</span> <span class="font-semibold tabular-nums">{{ formatMoney(closingBalance) }}</span></div>
+                <div>
+                    <span class="text-text-muted">Opening balance:</span>
+                    <span class="font-semibold tabular-nums">{{ balanceText(openingBalance, openingSide) }}</span>
+                </div>
+                <div>
+                    <span class="text-text-muted">Closing balance:</span>
+                    <span class="font-semibold tabular-nums">{{ balanceText(closingBalance, closingSide) }}</span>
+                </div>
             </div>
         </Card>
 
@@ -289,7 +242,18 @@ const columns = [
             <p v-if="fiscalYearId === null" class="px-1 py-6 text-center text-[13px] text-text-muted">
                 No fiscal year has been created yet. Create one under Fiscal Years to start seeing ledger activity here.
             </p>
-            <DataTable v-else :columns="columns" :data="entries" :page-size="25" empty-message="No activity in this period. Try a wider date range or another fiscal year." />
+            <LedgerEntriesTable
+                v-else
+                :entries="entries"
+                :opening-balance="openingBalance"
+                :opening-side="openingSide"
+                :closing-balance="closingBalance"
+                :closing-side="closingSide"
+                :period-debit="periodDebit"
+                :period-credit="periodCredit"
+                :from="props.from"
+                empty-message="No activity in this period. Try a wider date range or another fiscal year."
+            />
         </Card>
     </div>
 </template>

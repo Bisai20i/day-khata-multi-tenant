@@ -10,6 +10,7 @@ use App\Exports\CancelledDocumentsExport;
 use App\Exports\DayBookExport;
 use App\Exports\HrTableExport;
 use App\Exports\IncomeStatementExport;
+use App\Exports\LedgerExport;
 use App\Exports\TrialBalanceExport;
 use App\Http\Controllers\Controller;
 use App\Models\Account;
@@ -22,6 +23,7 @@ use App\Models\FiscalYear;
 use App\Models\JournalVoucher;
 use App\Models\JournalVoucherLine;
 use App\Models\Payment;
+use App\Models\Project;
 use App\Models\Purchase;
 use App\Models\PurchaseReturn;
 use App\Models\Receipt;
@@ -38,15 +40,23 @@ use App\Support\Hr\StaffStatementData;
 use App\Support\Inventory\StockCosting;
 use App\Support\Money\Money;
 use App\Support\NepaliCalendar;
+use App\Support\Reports\BalanceSheetStatement;
+use App\Support\Reports\IncomeStatementStatement;
+use App\Support\Reports\LedgerBook;
+use App\Support\Reports\LedgerStatement;
+use App\Support\Reports\SubLedgerSummary;
+use App\Support\Reports\TrialBalanceStatement;
 use Barryvdh\DomPDF\Facade\Pdf;
 use Brick\Math\BigDecimal;
 use Brick\Math\RoundingMode;
+use Carbon\CarbonImmutable;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Query\Builder as QueryBuilder;
 use Illuminate\Http\Request;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Str;
+use Illuminate\Validation\ValidationException;
 use Inertia\Inertia;
 use Inertia\Response;
 use Maatwebsite\Excel\Facades\Excel;
@@ -94,13 +104,22 @@ class AccountingReportController extends Controller
 {
     private const UNCLASSIFIED = 'Unclassified';
 
+    /** Request attribute holding reportProjectId()'s validated result. */
+    private const PROJECT_ID_ATTRIBUTE = 'report_project_id';
+
     /**
      * @var array<string, list<string>>
      */
     private const REPORT_INPUT_RULES = [
         'fiscal_year_id' => ['nullable', 'integer', 'exists:fiscal_years,id'],
-        'from' => ['nullable', 'date'],
-        'to' => ['nullable', 'date', 'after_or_equal:from'],
+        // Strictly ISO: resolveWindow() compares these as strings against
+        // the year's Y-m-d bounds, so a time suffix or another format would
+        // clamp wrongly. Every sender (NepaliDateInput, the fiscal year
+        // options, the window echoed back as props) emits Y-m-d.
+        'from' => ['nullable', 'date_format:Y-m-d'],
+        'to' => ['nullable', 'date_format:Y-m-d', 'after_or_equal:from'],
+        'account_id' => ['nullable', 'integer', 'exists:accounts,id'],
+        'staff_id' => ['nullable', 'integer', 'exists:hr_staff,id'],
     ];
 
     public function ledger(Request $request): Response
@@ -110,6 +129,7 @@ class AccountingReportController extends Controller
         $accountId = $request->integer('account_id') ?: null;
         $staffId = $request->integer('staff_id') ?: null;
         $includeSubAccounts = $request->boolean('include_sub_accounts', true);
+        $projectId = $this->reportProjectId($request);
         $accounts = Account::with(['parent:id,name', 'group.accountHead', 'subgroup.accountGroup.accountHead'])
             ->orderBy('name')
             ->get(['id', 'code', 'name', 'account_group_id', 'account_subgroup_id', 'parent_account_id'])
@@ -127,10 +147,19 @@ class AccountingReportController extends Controller
             ->orderBy('name')
             ->get(['id', 'staff_code', 'name', 'designation', 'department']);
 
-        $data = $this->emptyAccountBook();
+        $data = [
+            'entries' => [],
+            'openingBalance' => '0.00',
+            'openingSide' => '',
+            'closingBalance' => '0.00',
+            'closingSide' => '',
+            'periodDebit' => '0.00',
+            'periodCredit' => '0.00',
+        ];
         $account = null;
         $staff = null;
         $staffStatement = null;
+        $subLedgerSummary = ['rows' => [], 'total' => null];
         [$from, $to] = [null, null];
 
         if ($fiscalYear !== null) {
@@ -139,7 +168,10 @@ class AccountingReportController extends Controller
             if ($accountId) {
                 $account = Account::with(['subAccounts:id,parent_account_id,name,code', 'group.accountHead', 'subgroup.accountGroup.accountHead'])->find($accountId);
                 if ($account) {
-                    $data = $this->accountBook($account, $fiscalYear, $from, $to, $filter->lineBranchIds(), $includeSubAccounts);
+                    $data = LedgerBook::build($account, $fiscalYear, $from, $to, $filter->lineBranchIds(), $includeSubAccounts, true, $projectId);
+                    $subLedgerSummary = $includeSubAccounts
+                        ? SubLedgerSummary::build($account, $fiscalYear, $from, $to, $filter->lineBranchIds(), $projectId)
+                        : ['rows' => [], 'total' => null];
                 }
             } elseif ($staffId) {
                 $staff = StaffMember::find($staffId);
@@ -180,8 +212,15 @@ class AccountingReportController extends Controller
             'from' => $from,
             'to' => $to,
             'openingBalance' => $data['openingBalance'],
+            'openingSide' => $data['openingSide'],
             'closingBalance' => $data['closingBalance'],
+            'closingSide' => $data['closingSide'],
+            'periodDebit' => $data['periodDebit'],
+            'periodCredit' => $data['periodCredit'],
             'entries' => $data['entries'],
+            'subLedgerSummary' => $subLedgerSummary,
+            'projects' => $this->reportProjectOptions(),
+            'projectId' => $projectId,
             'branchReport' => $filter->payload(),
         ]);
     }
@@ -191,7 +230,7 @@ class AccountingReportController extends Controller
         if ($accountId = $request->integer('account_id')) {
             $account = Account::findOrFail($accountId);
 
-            return $this->accountBookPdf($request, $account, 'Ledger');
+            return $this->accountLedgerPdf($request, $account);
         }
 
         if ($staffId = $request->integer('staff_id')) {
@@ -213,7 +252,7 @@ class AccountingReportController extends Controller
         if ($accountId = $request->integer('account_id')) {
             $account = Account::findOrFail($accountId);
 
-            return $this->accountBookExport($request, $account, 'ledger');
+            return $this->accountLedgerExport($request, $account);
         }
 
         if ($staffId = $request->integer('staff_id')) {
@@ -228,6 +267,76 @@ class AccountingReportController extends Controller
         }
 
         abort(404, 'No account or staff specified.');
+    }
+
+    /**
+     * The Ledger PDF mirrors the Reports page 1:1 (opening row, entries,
+     * total row, closing row, every balance with its Dr/Cr side). Cash Book
+     * and Bank Book keep accountBookPdf() and the shared account-book view.
+     */
+    private function accountLedgerPdf(Request $request, Account $account)
+    {
+        $fiscalYear = $this->resolveFiscalYear($request);
+        abort_if($fiscalYear === null, 404, 'No fiscal year to report on.');
+
+        $filter = BranchFilter::fromRequest($request);
+        [$from, $to] = $this->resolveWindow($request, $fiscalYear);
+        $includeSubAccounts = $request->boolean('include_sub_accounts', true);
+        $projectId = $this->reportProjectId($request);
+        $book = LedgerBook::build($account, $fiscalYear, $from, $to, $filter->lineBranchIds(), $includeSubAccounts, true, $projectId);
+
+        $pdf = Pdf::loadView('pdf.ledger', array_merge([
+            'title' => "Ledger - {$account->name}",
+            'company' => CompanySetting::current(),
+            'documentNumber' => $account->code ? "{$account->code} - {$account->name}" : $account->name,
+            'documentDate' => $to,
+            'dateAd' => $to,
+            'dateBs' => NepaliCalendar::formatBs($to),
+            'fiscalYearName' => $fiscalYear->name,
+            'from' => $from,
+            'to' => $to,
+            'branchFilterLabel' => $this->branchFilterLabel($filter),
+            'partyArea' => null,
+            'includesSubLedgers' => $includeSubAccounts && $account->subAccounts()->exists(),
+            'projectLabel' => $this->reportProjectLabel($projectId),
+            'subLedgerSummary' => $includeSubAccounts
+                ? SubLedgerSummary::build($account, $fiscalYear, $from, $to, $filter->lineBranchIds(), $projectId)
+                : ['rows' => [], 'total' => null],
+        ], $book));
+
+        return $pdf->stream(LedgerStatement::fileName($account, $fiscalYear, 'pdf'));
+    }
+
+    private function accountLedgerExport(Request $request, Account $account)
+    {
+        $fiscalYear = $this->resolveFiscalYear($request);
+        abort_if($fiscalYear === null, 404, 'No fiscal year to report on.');
+
+        $filter = BranchFilter::fromRequest($request);
+        [$from, $to] = $this->resolveWindow($request, $fiscalYear);
+        $includeSubAccounts = $request->boolean('include_sub_accounts', true);
+        $projectId = $this->reportProjectId($request);
+        $book = LedgerBook::build($account, $fiscalYear, $from, $to, $filter->lineBranchIds(), $includeSubAccounts, true, $projectId);
+
+        return Excel::download(
+            new LedgerExport(
+                $book['entries'],
+                $book['openingBalance'],
+                $book['openingSide'],
+                $book['closingBalance'],
+                $book['closingSide'],
+                $book['periodDebit'],
+                $book['periodCredit'],
+                branchLabel: $this->branchFilterLabel($filter),
+                accountLabel: $account->code ? "{$account->code} - {$account->name}" : $account->name,
+                periodLabel: "{$from} to {$to} - {$fiscalYear->name}",
+                projectLabel: $this->reportProjectLabel($projectId),
+                subLedgerSummary: $includeSubAccounts
+                    ? SubLedgerSummary::build($account, $fiscalYear, $from, $to, $filter->lineBranchIds(), $projectId)
+                    : ['rows' => [], 'total' => null],
+            ),
+            LedgerStatement::fileName($account, $fiscalYear, 'xlsx'),
+        );
     }
 
     private function staffLedgerPdf(StaffMember $staff, FiscalYear $fiscalYear, ?string $from, ?string $to, array $data)
@@ -301,7 +410,7 @@ class AccountingReportController extends Controller
             'partyArea' => null,
         ]);
 
-        return $pdf->stream('staff-ledger-'.$staff->staff_code.'.pdf');
+        return $pdf->stream('staff-ledger-'.(Str::slug((string) $staff->staff_code) ?: (string) $staff->id).'.pdf');
     }
 
     private function staffLedgerExport(StaffMember $staff, array $data): BinaryFileResponse
@@ -343,7 +452,7 @@ class AccountingReportController extends Controller
 
         return Excel::download(
             new HrTableExport($headings, $rows, [5, 6, 7]),
-            "staff-ledger-{$staff->staff_code}.xlsx"
+            'staff-ledger-'.(Str::slug((string) $staff->staff_code) ?: (string) $staff->id).'.xlsx'
         );
     }
 
@@ -383,6 +492,10 @@ class AccountingReportController extends Controller
             'from' => $from,
             'to' => $to,
             'heads' => $heads,
+            // Legacy's "Hide zero-balance accounts" toggle; on by default.
+            'hideZero' => $this->trialBalanceHidesZero($request),
+            // Lowest row level shown: group, subgroup or ledger.
+            'level' => $this->trialBalanceLevel($request),
         ], $totals));
     }
 
@@ -396,11 +509,13 @@ class AccountingReportController extends Controller
             'to' => null,
             'income' => [],
             'expenses' => [],
-            'stock' => ['opening' => '0.00', 'closing' => '0.00', 'posted' => false, 'asOf' => null],
+            'stock' => ['opening' => '0.00', 'closing' => '0.00', 'posted' => false, 'yearPosted' => false, 'openingAsOf' => null, 'asOf' => null, 'projectFiltered' => false],
             'totalIncome' => '0.00',
             'totalExpenses' => '0.00',
             'grossProfit' => '0.00',
             'netProfit' => '0.00',
+            'statement' => IncomeStatementStatement::build([], [], ['sales' => [], 'purchases' => [], 'direct' => []]),
+            'projectId' => $this->reportProjectId($request),
         ];
         $branchReport = $filter->payload(supportsByBranch: true, isStatement: true);
 
@@ -421,7 +536,10 @@ class AccountingReportController extends Controller
             'totalExpenses' => $data['totalExpenses'],
             'grossProfit' => $data['grossProfit'],
             'netProfit' => $data['netProfit'],
+            'statement' => $data['statement'],
             'branchReport' => $branchReport,
+            'projects' => $this->reportProjectOptions(),
+            'projectId' => $data['projectId'],
         ]);
     }
 
@@ -461,7 +579,18 @@ class AccountingReportController extends Controller
             'totalLiabilitiesAndCapital' => $data['totalLiabilitiesAndCapital'],
             'balanceWarning' => $data['balanceWarning'],
             'branchReport' => $branchReport,
+            'hideZero' => $this->balanceSheetHidesZero($request),
         ]);
+    }
+
+    /**
+     * Whether the Balance Sheet prunes zero ledgers and the nodes they leave
+     * empty. On unless the request sends an explicit falsy `hide_zero`
+     * (e.g. `0`); the page, PDF and export all read it here.
+     */
+    private function balanceSheetHidesZero(Request $request): bool
+    {
+        return $request->boolean('hide_zero', true);
     }
 
     /**
@@ -490,6 +619,8 @@ class AccountingReportController extends Controller
             'vouchers' => $data['vouchers'],
             'totalDebit' => $data['totalDebit'],
             'totalCredit' => $data['totalCredit'],
+            'projects' => $this->reportProjectOptions(),
+            'projectId' => $data['projectId'] ?? $this->reportProjectId($request),
             'branchReport' => $filter->payload(),
         ]);
     }
@@ -606,10 +737,47 @@ class AccountingReportController extends Controller
             'dateBs' => NepaliCalendar::formatBs($to),
             'fiscalYearName' => $fiscalYear->name,
             'heads' => $data['heads'],
+            'from' => $data['from'],
+            'to' => $to,
+            'accountLabel' => $this->trialBalanceAccountLabel($accountId),
+            'hideZero' => $this->trialBalanceHidesZero($request),
+            'level' => $this->trialBalanceLevel($request),
             'branchFilterLabel' => $this->branchFilterLabel($filter),
         ], $data['totals']));
 
-        return $pdf->stream("trial-balance-{$fiscalYear->name}.pdf");
+        return $pdf->stream('trial-balance-'.$this->reportFileSlug($fiscalYear).'.pdf');
+    }
+
+    /**
+     * "CODE - Name" of the single ledger a Trial Balance is narrowed to, or
+     * null for the whole chart (legacy's `?accno=` filter).
+     */
+    private function trialBalanceAccountLabel(?int $accountId): ?string
+    {
+        $account = $accountId === null ? null : Account::find($accountId, ['code', 'name']);
+
+        return $account === null ? null : trim(($account->code ? "{$account->code} - " : '').$account->name);
+    }
+
+    /**
+     * Whether the Trial Balance hides ledgers whose every figure is zero.
+     * On unless the request sends an explicit falsy `hide_zero` (e.g. `0`);
+     * the page, PDF and export all read it here.
+     */
+    private function trialBalanceHidesZero(Request $request): bool
+    {
+        return $request->boolean('hide_zero', true);
+    }
+
+    /**
+     * The lowest Trial Balance row level shown: `group`, `subgroup` or
+     * `ledger`. Anything else, or no `level` param, is `ledger`.
+     */
+    private function trialBalanceLevel(Request $request): string
+    {
+        $level = $request->query('level');
+
+        return in_array($level, ['group', 'subgroup', 'ledger'], true) ? $level : 'ledger';
     }
 
     public function trialBalanceExport(Request $request)
@@ -621,7 +789,21 @@ class AccountingReportController extends Controller
         $accountId = $request->integer('account_id') ?: null;
         $data = $this->trialBalanceData($request, $fiscalYear, $filter, $accountId, false);
 
-        return Excel::download(new TrialBalanceExport($data['heads'], $this->branchFilterLabel($filter)), "trial-balance-{$fiscalYear->name}.xlsx");
+        return Excel::download(
+            new TrialBalanceExport(
+                $data['heads'],
+                $this->branchFilterLabel($filter),
+                $data['totals'],
+                $data['from'],
+                $data['to'],
+                $this->trialBalanceAccountLabel($accountId),
+                $this->trialBalanceHidesZero($request),
+                $fiscalYear->name,
+                $this->trialBalanceLevel($request),
+                CompanySetting::current(),
+            ),
+            'trial-balance-'.$this->reportFileSlug($fiscalYear).'.xlsx',
+        );
     }
 
     /**
@@ -682,12 +864,30 @@ class AccountingReportController extends Controller
             }
         }
 
+        // Legacy's "Hide zero-balance accounts": drop a ledger only when every
+        // figure is zero - including its branch columns, so a ledger that is
+        // nonzero in one branch stays. Applied after the by-branch totals
+        // above, which must still see every account.
+        // Counted before the drop: the "accounts with no head or group"
+        // warning (G-08) must still fire for an unmapped account that has no
+        // balance yet, which is now hidden by default.
+        $unclassifiedCount = $this->unclassifiedCount($rows);
+
+        if ($this->trialBalanceHidesZero($request)) {
+            $rows = $rows->reject(fn (array $row): bool => $this->isZeroTrialBalanceRow($row))->values();
+        }
+
         return [
             'from' => $from,
             'to' => $to,
-            'heads' => $this->buildHierarchy($rows),
+            'heads' => TrialBalanceStatement::build(
+                $this->buildHierarchy($rows),
+                $columns === null ? null : array_column($columns, 'id'),
+                self::UNCLASSIFIED,
+                $this->trialBalanceLevel($request),
+            ),
             'totals' => $this->trialBalanceTotals($rows),
-            'unclassifiedCount' => $this->unclassifiedCount($rows),
+            'unclassifiedCount' => $unclassifiedCount,
             'columns' => $columns,
             'branchTotals' => $branchTotals,
         ];
@@ -717,6 +917,18 @@ class AccountingReportController extends Controller
     private function branchFilterLabel(BranchFilter $filter): ?string
     {
         return $filter->isActive() ? $filter->label() : null;
+    }
+
+    /**
+     * The fiscal year's part of a PDF/Excel download filename. A year name
+     * such as "2082/83" holds a "/", which Symfony refuses in the
+     * Content-Disposition header (a 500), so the name is slugged, falling
+     * back to the id when nothing usable is left. On-page titles keep the
+     * raw name.
+     */
+    private function reportFileSlug(FiscalYear $fiscalYear): string
+    {
+        return Str::slug($fiscalYear->name) ?: (string) $fiscalYear->id;
     }
 
     /**
@@ -754,9 +966,10 @@ class AccountingReportController extends Controller
             'dateBs' => NepaliCalendar::formatBs($data['to']),
             'fiscalYearName' => $fiscalYear->name,
             'branchFilterLabel' => $this->branchFilterLabel($filter),
+            'projectLabel' => $this->reportProjectLabel($data['projectId']),
         ], $data));
 
-        return $pdf->stream("income-statement-{$fiscalYear->name}.pdf");
+        return $pdf->stream('income-statement-'.$this->reportFileSlug($fiscalYear).'.pdf');
     }
 
     public function incomeStatementExport(Request $request)
@@ -768,8 +981,19 @@ class AccountingReportController extends Controller
         $data = $this->incomeStatementData($request, $fiscalYear, $filter, false);
 
         return Excel::download(
-            new IncomeStatementExport($data['income'], $data['expenses'], $data['grossProfit'], $data['netProfit'], $this->branchFilterLabel($filter)),
-            "income-statement-{$fiscalYear->name}.xlsx",
+            new IncomeStatementExport(
+                $data['income'],
+                $data['expenses'],
+                $data['grossProfit'],
+                $data['netProfit'],
+                $this->branchFilterLabel($filter),
+                $data['statement'],
+                $fiscalYear->name,
+                $data['from'],
+                $data['to'],
+                $this->reportProjectLabel($data['projectId']),
+            ),
+            'income-statement-'.$this->reportFileSlug($fiscalYear).'.xlsx',
         );
     }
 
@@ -784,16 +1008,49 @@ class AccountingReportController extends Controller
      * nets to zero for the company but not for some branch is kept (as
      * 0.00) so each branch's column still adds up to its own totals.
      *
-     * @return array{from: string, to: string, income: array, expenses: array, stock: array, totalIncome: string, totalExpenses: string, grossProfit: string, netProfit: string, columns: list<array{id: int, name: string, code: string}>|null, branchTotals: array<int, array<string, string>>|null}
+     * Optional project filter (`project_id`, a positive integer; blank or 0
+     * is no filter), read here once so the page, PDF and Excel agree. Every
+     * ledger-line read that feeds the statement (the company balances and
+     * the by-branch nets) keeps only lines tagged with that project. Stock
+     * is a company-wide periodic figure that is not tagged to projects, so
+     * in project mode the opening and closing stock are 0.00 (also per
+     * branch), no virtual stock rows are added and `stock.projectFiltered`
+     * is true; the real EXE9 / INI22 year-end lines are untagged and drop
+     * out by themselves. The statement is then the project's own sales,
+     * purchases, direct costs, other income and expenses. branchStatements()
+     * (dashboard, branch comparison) passes `$applyProject = false`, so a
+     * stray `project_id` in their URL never reaches them.
+     *
+     * @return array{from: string, to: string, income: array, expenses: array, stock: array, totalIncome: string, totalExpenses: string, grossProfit: string, netProfit: string, columns: list<array{id: int, name: string, code: string}>|null, branchTotals: array<int, array<string, string>>|null, statement: array<string, mixed>, projectId: int|null, tradingCodes: array{sales: list<string>, purchases: list<string>, direct: list<string>}}
      */
-    private function incomeStatementData(Request $request, FiscalYear $fiscalYear, BranchFilter $filter, bool $withBranchColumns): array
+    private function incomeStatementData(Request $request, FiscalYear $fiscalYear, BranchFilter $filter, bool $withBranchColumns, bool $applyProject = true): array
     {
         [$from, $to] = $this->resolveWindow($request, $fiscalYear);
         $lineIds = $filter->lineBranchIds();
+        $projectId = $applyProject ? $this->reportProjectId($request) : null;
 
         $excluded = $this->sweepVoucherIds($fiscalYear);
-        $balances = $this->balancesByAccount($fiscalYear, $excluded, $from, $to, $lineIds);
-        $stock = $this->stockPosition($fiscalYear, $to, $filter->effectiveIds(), $lineIds);
+        $balances = $this->balancesByAccount($fiscalYear, $excluded, $from, $to, $lineIds, $projectId);
+        $stockBranchIds = $filter->effectiveIds();
+
+        if ($projectId === null) {
+            $yearStock = $this->stockPosition($fiscalYear, $to, $stockBranchIds, $lineIds, $excluded);
+            $stock = [
+                ...$this->incomeStatementStock($yearStock, $fiscalYear, $from, $to, $stockBranchIds, $lineIds, $excluded),
+                'projectFiltered' => false,
+            ];
+        } else {
+            $yearStock = null;
+            $stock = [
+                'opening' => Money::zero()->toString(),
+                'closing' => Money::zero()->toString(),
+                'posted' => false,
+                'asOf' => $to,
+                'yearPosted' => false,
+                'openingAsOf' => null,
+                'projectFiltered' => true,
+            ];
+        }
 
         $nets = [];
         $columns = null;
@@ -806,15 +1063,36 @@ class AccountingReportController extends Controller
                     ->whereDate('date', '>=', $from)
                     ->whereDate('date', '<=', $to),
                 $lineIds,
+                null,
+                $projectId,
             );
-            // The stock rows read the whole year, not the window, so a branch
-            // whose only figure is an opening stock balance needs a column too.
-            $columns = $filter->columns([
-                ...BranchReportTotals::branchIdsIn($nets),
-                ...BranchReportTotals::branchIdsWithStores(),
-                ...$this->stockAccountBranchIds($fiscalYear, $excluded, $lineIds),
-            ]);
-            $branchStock = $this->stockPositionsByBranch($fiscalYear, $to, array_column($columns, 'id'), $excluded, $stock['posted']);
+
+            if ($yearStock === null) {
+                // Project mode: no stock, so only branches with project lines.
+                $columns = $filter->columns(BranchReportTotals::branchIdsIn($nets));
+                $branchStock = array_fill_keys(
+                    array_column($columns, 'id'),
+                    ['opening' => Money::zero(), 'closing' => Money::zero()],
+                );
+            } else {
+                // The stock rows read the whole year, not the window, so a branch
+                // whose only figure is an opening stock balance needs a column too.
+                $columns = $filter->columns([
+                    ...BranchReportTotals::branchIdsIn($nets),
+                    ...BranchReportTotals::branchIdsWithStores(),
+                    ...$this->stockAccountBranchIds($fiscalYear, $excluded, $lineIds),
+                ]);
+                // The year's own per-branch figures (same "posted" fact as
+                // $yearStock), then the same window override the company
+                // figure got, so the columns still add up to it.
+                $branchStock = $this->windowedBranchStock(
+                    $this->stockPositionsByBranch($fiscalYear, $to, array_column($columns, 'id'), $excluded, $yearStock['posted']),
+                    $stock,
+                    $to,
+                    $fiscalYear,
+                    $excluded,
+                );
+            }
         }
 
         $keep = $this->accountIdsWithBranchAmounts($nets);
@@ -826,30 +1104,33 @@ class AccountingReportController extends Controller
         // anywhere in its ledger, so the two sides are shown as computed
         // rows. Once close() has posted them, the real EXE9 / INI22 balances
         // are already in $balances and adding them again would double the
-        // stock movement.
-        if (! $stock['posted']) {
+        // stock movement. $stock['posted'] is false too when the window
+        // leaves the year-end vouchers out (see incomeStatementStock()), and
+        // then they are not in $balances either. A project filter shows no
+        // stock at all (see the docblock).
+        if ($projectId === null && ! $stock['posted']) {
             $anyBranch = fn (string $side): bool => array_filter($branchStock, fn (array $position): bool => ! $position[$side]->isZero()) !== [];
 
             $expenses = $this->withVirtualRow($expenses, FiscalYear::OPENING_STOCK_CODE, 'Opening Stock', $stock['opening'], $anyBranch('opening'));
             $income = $this->withVirtualRow($income, FiscalYear::CLOSING_STOCK_CODE, 'Closing Stock', $stock['closing'], $anyBranch('closing'));
         }
 
+        $tradingCodes = $this->tradingCodes();
         $totalIncome = Money::sum(array_column($income, 'amount'));
         $totalExpenses = Money::sum(array_column($expenses, 'amount'));
-        $grossProfit = $this->grossProfit($income, $expenses);
+        $grossProfit = $this->grossProfit($income, $expenses, $tradingCodes);
 
         $branchTotals = null;
 
         if ($columns !== null) {
             $income = $this->statementRowsByBranch($income, $nets, $columns, $branchStock, creditNormal: true);
             $expenses = $this->statementRowsByBranch($expenses, $nets, $columns, $branchStock, creditNormal: false);
-            $tradingCodes = $this->tradingCodes();
             $branchTotals = [];
 
             foreach ($columns as $column) {
                 $branchId = $column['id'];
                 $project = fn (array $rows): array => array_map(
-                    fn (array $row): array => ['code' => $row['code'], 'amount' => $row['by_branch'][$branchId]],
+                    fn (array $row): array => ['code' => $row['code'], 'group' => $row['group'] ?? null, 'amount' => $row['by_branch'][$branchId]],
                     $rows,
                 );
                 $branchIncome = Money::sum(array_column($project($income), 'amount'));
@@ -878,7 +1159,87 @@ class AccountingReportController extends Controller
             'netProfit' => $totalIncome->minus($totalExpenses)->toString(),
             'columns' => $columns,
             'branchTotals' => $branchTotals,
+            // Same rows and trading codes as grossProfit above, partitioned
+            // so statement.grossProfit / netProfit equal the keys above.
+            'statement' => IncomeStatementStatement::build(
+                $income,
+                $expenses,
+                $tradingCodes,
+                $columns === null ? null : array_column($columns, 'id'),
+            ),
+            'projectId' => $projectId,
+            'tradingCodes' => $tradingCodes,
         ];
+    }
+
+    /**
+     * The optional project filter of the income statement and the ledger: a
+     * positive project id, or null for none (blank, missing or 0).
+     */
+    private function reportProjectId(Request $request): ?int
+    {
+        // Validated once per request: the income statement page reads it twice.
+        if ($request->attributes->has(self::PROJECT_ID_ATTRIBUTE)) {
+            return $request->attributes->get(self::PROJECT_ID_ATTRIBUTE);
+        }
+
+        $request->validate([
+            'project_id' => array_filter([
+                'nullable',
+                'integer',
+                'min:0',
+                // 0 and blank mean "no filter"; any other id must be a real project.
+                $request->integer('project_id') > 0 ? 'exists:projects,id' : null,
+            ]),
+        ]);
+
+        $projectId = $request->integer('project_id');
+        $projectId = $projectId > 0 ? $projectId : null;
+
+        $request->attributes->set(self::PROJECT_ID_ATTRIBUTE, $projectId);
+
+        return $projectId;
+    }
+
+    /**
+     * Every project for the report project selectors, ordered by
+     * code. Projects are company-wide masters with no branch scope.
+     *
+     * @return list<array{id: int, code: string, name: string, status: string}>
+     */
+    private function reportProjectOptions(): array
+    {
+        return Project::query()
+            ->orderBy('code')
+            ->orderBy('id')
+            ->get(['id', 'code', 'name', 'status'])
+            ->map(fn (Project $project): array => [
+                'id' => (int) $project->id,
+                'code' => $project->code,
+                'name' => $project->name,
+                'status' => $project->status,
+            ])
+            ->values()
+            ->all();
+    }
+
+    /**
+     * "CODE - Name" of the filtered project for the PDF / Excel header, or
+     * null when the report is not filtered (or the project no longer exists).
+     */
+    private function reportProjectLabel(?int $projectId): ?string
+    {
+        if ($projectId === null) {
+            return null;
+        }
+
+        $project = Project::query()->find($projectId, ['id', 'code', 'name']);
+
+        if ($project === null) {
+            return null;
+        }
+
+        return "{$project->code} - {$project->name}";
     }
 
     /**
@@ -888,32 +1249,48 @@ class AccountingReportController extends Controller
      * is incomeStatementData() with the by-branch columns on, so a branch's
      * figures in the comparison are exactly its column on the income
      * statement. `tradingCodes` comes along so the caller splits the trading
-     * section the same way grossProfit() does.
+     * section the same way grossProfit() does (plus the codeless Direct
+     * Expenses rows, IncomeStatementStatement::isCodelessDirectExpense()).
      *
      * Validates the request (fiscal year, window) like every report action
      * here, through resolveFiscalYear(). `statement` is null when no fiscal
      * year exists yet. No existing page calls this.
      *
-     * @return array{fiscalYears: Collection<int, array{id: int, name: string, status: string, startDate: string, endDate: string}>, fiscalYear: FiscalYear|null, statement: array<string, mixed>|null, tradingCodes: array{sales: list<string>, purchases: list<string>}}
+     * `$byBranch` false skips the by-branch columns and the trading-code
+     * split, for a caller (the dashboard) that needs only the company-level
+     * figures; those figures are identical either way, but the by-branch path
+     * runs several extra queries.
+     *
+     * @return array{fiscalYears: Collection<int, array{id: int, name: string, status: string, startDate: string, endDate: string}>, fiscalYear: FiscalYear|null, statement: array<string, mixed>|null, tradingCodes: array{sales: list<string>, purchases: list<string>, direct: list<string>}}
      */
-    public function branchStatements(Request $request, BranchFilter $filter): array
+    public function branchStatements(Request $request, BranchFilter $filter, bool $byBranch = true): array
     {
         $fiscalYear = $this->resolveFiscalYear($request);
+
+        $statement = $fiscalYear === null ? null : $this->incomeStatementData($request, $fiscalYear, $filter, $byBranch, false);
+
+        // incomeStatementData() already read the trading codes; reuse them.
+        $tradingCodes = match (true) {
+            ! $byBranch => ['sales' => [], 'purchases' => [], 'direct' => []],
+            $statement !== null => $statement['tradingCodes'],
+            default => $this->tradingCodes(),
+        };
 
         return [
             'fiscalYears' => $this->fiscalYearOptions(),
             'fiscalYear' => $fiscalYear,
-            'statement' => $fiscalYear === null ? null : $this->incomeStatementData($request, $fiscalYear, $filter, true),
-            'tradingCodes' => $this->tradingCodes(),
+            'statement' => $statement,
+            'tradingCodes' => $tradingCodes,
         ];
     }
 
     /**
      * Adds `by_branch` (decimal strings in the statement's sign) to income
      * statement rows. A computed stock row (no account id) takes each
-     * branch's own opening or closing stock.
+     * branch's own opening or closing stock. Every other key (`group`,
+     * `subgroup`) is carried through unchanged.
      *
-     * @param  array<int, array{id: ?int, code: ?string, name: string, amount: string, computed: bool}>  $rows
+     * @param  array<int, array{id: ?int, code: ?string, name: string, amount: string, computed: bool, group?: ?string, subgroup?: ?string}>  $rows
      * @param  array<int, array<int, Money>>  $nets
      * @param  list<array{id: int, name: string, code: string}>  $columns
      * @param  array<int, array{opening: Money, closing: Money}>  $branchStock
@@ -1036,6 +1413,177 @@ class AccountingReportController extends Controller
         return $positions;
     }
 
+    /**
+     * The Income Statement's stock figures for its date window, on top of
+     * stockPosition()'s figures for the year ($yearStock). Income Statement
+     * only: the Balance Sheet keeps reading stockPosition() directly.
+     *
+     * The year-end trading pair (EXE9 / INI22, FiscalYear::close()) is
+     * dated on the year's last day, so the window holds it exactly when
+     * `to` is that day. Legacy semantics for a window: opening stock is the
+     * stock valued as at the day before `from`, closing stock as at `to`.
+     *
+     * | Year posted | from         | to         | Figures used                                       | posted |
+     * |-------------|--------------|------------|----------------------------------------------------|--------|
+     * | no          | year start   | any        | $yearStock unchanged (AS11 opening, closing at to) | false  |
+     * | yes         | any          | year end   | $yearStock unchanged (real EXE9/INI22 rows)        | true   |
+     * | no          | after start  | any        | opening valued at from-1, closing at to            | false  |
+     * | yes         | year start   | before end | opening = posted pair's EXE9, closing valued at to | false  |
+     * | yes         | after start  | before end | opening valued at from-1, closing valued at to     | false  |
+     *
+     * The whole year (the default window) always lands on one of the first
+     * two rows, so its output is exactly stockPosition()'s. "posted" is what
+     * the report used: true only when the stock rows are the real posted
+     * vouchers inside the window; false means the caller adds computed rows,
+     * which can never double count because a window ending before the year's
+     * last day holds no trading voucher. `yearPosted` is the company fact
+     * (close() has posted the pair), and `openingAsOf` the date the opening
+     * stock was valued at (null when it is the year's brought-forward figure).
+     *
+     * Known limit kept on purpose: a posted year with `from` after the start
+     * and `to` on the last day still shows the year's posted opening stock,
+     * since the real EXE9 row is inside the window and replacing it would
+     * mean excluding the posted vouchers from the ledger read.
+     *
+     * The fourth row's opening is the EXE9 side of the posted trading pair
+     * ONLY (postedTradingOpeningStock()), not stockPosition()'s whole-year,
+     * sweep-free EXE9 balance: that balance also holds any manual EXE9 line,
+     * and a manual line dated inside the window is already in the ledger
+     * rows, so it would be counted twice. With the pair alone the window
+     * reads exactly what the same window read before close() ran (Stock in
+     * Hand's opening, which the pair moved onto EXE9, plus the manual lines
+     * as ledger rows).
+     *
+     * @param  array{opening: string, closing: string, posted: bool, asOf: string}  $yearStock  stockPosition()
+     * @param  list<int>|null  $stockBranchIds  BranchFilter::effectiveIds()
+     * @param  list<int>|null  $lineBranchIds  BranchFilter::lineBranchIds()
+     * @param  array<int, int>  $excludedVoucherIds  sweepVoucherIds()
+     * @return array{opening: string, closing: string, posted: bool, asOf: string, yearPosted: bool, openingAsOf: string|null}
+     */
+    private function incomeStatementStock(array $yearStock, FiscalYear $fiscalYear, string $from, string $to, ?array $stockBranchIds, ?array $lineBranchIds, array $excludedVoucherIds): array
+    {
+        $yearPosted = $yearStock['posted'];
+        $opensAtYearStart = $from === $fiscalYear->start_date->toDateString();
+        $windowHoldsTradingVouchers = $to === $fiscalYear->end_date->toDateString();
+
+        // No Stock in Hand account: stockPosition() reports zero stock and
+        // so does every window.
+        $usesYearFigures = $yearPosted ? $windowHoldsTradingVouchers : $opensAtYearStart;
+
+        if ($usesYearFigures || ! Account::where('code', FiscalYear::STOCK_IN_HAND_CODE)->exists()) {
+            return $yearStock + ['yearPosted' => $yearPosted, 'openingAsOf' => null];
+        }
+
+        $openingAsOf = $opensAtYearStart ? null : CarbonImmutable::parse($from)->subDay()->toDateString();
+
+        // Reaching here with $openingAsOf null is only ever the fourth row
+        // (posted year, from the start, to before the end): the not-posted
+        // year from the start returned above.
+        return [
+            'opening' => $openingAsOf === null
+                ? Money::sum($this->postedTradingOpeningStock($fiscalYear, $excludedVoucherIds, $lineBranchIds))->toString()
+                : $this->periodicStockValue($openingAsOf, $stockBranchIds)->toString(),
+            'closing' => $yearPosted
+                ? $this->periodicStockValue($to, $stockBranchIds)->toString()
+                : $yearStock['closing'],
+            'posted' => false,
+            'asOf' => $to,
+            'yearPosted' => $yearPosted,
+            'openingAsOf' => $openingAsOf,
+        ];
+    }
+
+    /**
+     * Trading stock value as at $asOf for the company (null) or a branch
+     * set, the same choice stockPosition() makes for its closing stock.
+     *
+     * @param  list<int>|null  $stockBranchIds  BranchFilter::effectiveIds()
+     */
+    private function periodicStockValue(string $asOf, ?array $stockBranchIds): Money
+    {
+        return $stockBranchIds === null
+            ? StockCosting::totalPeriodicClosingValue($asOf)
+            : BranchReportTotals::periodicClosingValue($asOf, $stockBranchIds);
+    }
+
+    /**
+     * Applies incomeStatementStock()'s window decision to the per-branch
+     * figures from stockPositionsByBranch() (called with the year's own
+     * "posted" fact), so each branch column moves exactly as the company
+     * figure did: a recomputed opening is valued per branch as at
+     * `openingAsOf`, and a posted year's closing, when the window leaves the
+     * posted vouchers out, is valued per branch as at `to`. Both use the
+     * Main-remainder convention, so the columns add up to the company.
+     * A posted year's window from the start keeps the per-branch posted
+     * opening but, like the company figure, the trading pair's EXE9 alone
+     * (postedTradingOpeningStock()), never the manual EXE9 lines the ledger
+     * rows already carry. Nothing changes on the two "unchanged" rows of
+     * that decision table.
+     *
+     * @param  array<int, array{opening: Money, closing: Money}>  $positions
+     * @param  array{posted: bool, yearPosted: bool, openingAsOf: string|null}  $stock  incomeStatementStock()
+     * @param  array<int, int>  $excludedVoucherIds  sweepVoucherIds()
+     * @return array<int, array{opening: Money, closing: Money}>
+     */
+    private function windowedBranchStock(array $positions, array $stock, string $to, FiscalYear $fiscalYear, array $excludedVoucherIds): array
+    {
+        $branchIds = array_keys($positions);
+        $recomputeClosing = $stock['yearPosted'] && ! $stock['posted'];
+
+        if ($branchIds === [] || ($stock['openingAsOf'] === null && ! $recomputeClosing)) {
+            return $positions;
+        }
+
+        if ($stock['openingAsOf'] !== null) {
+            $openingValues = BranchReportTotals::periodicClosingValuesByBranch($stock['openingAsOf'], $branchIds);
+        } else {
+            $pairOpening = $this->postedTradingOpeningStock($fiscalYear, $excludedVoucherIds, $branchIds);
+            $openingValues = array_combine($branchIds, array_map(fn (int $branchId): Money => $pairOpening[$branchId] ?? Money::zero(), $branchIds));
+        }
+
+        $closingValues = $recomputeClosing ? BranchReportTotals::periodicClosingValuesByBranch($to, $branchIds) : null;
+
+        foreach ($branchIds as $branchId) {
+            $positions[$branchId] = [
+                'opening' => $openingValues[$branchId],
+                'closing' => $closingValues === null ? $positions[$branchId]['closing'] : $closingValues[$branchId],
+            ];
+        }
+
+        return $positions;
+    }
+
+    /**
+     * The opening stock close() moved onto EXE9 with the year-end trading
+     * pair, per branch: EXE9's net on the year's closing-entry vouchers,
+     * sweep left out (the sweep is the only other closing entry touching
+     * EXE9, see sweepVoucherIds()). Manual EXE9 lines are not in it. The
+     * company figure is the sum over the branches, read under the same line
+     * predicate as stockPosition().
+     *
+     * @param  array<int, int>  $excludedVoucherIds  sweepVoucherIds()
+     * @param  list<int>|null  $branchIds  Line branch predicate; null adds none.
+     * @return array<int, Money> branch id => EXE9 net
+     */
+    private function postedTradingOpeningStock(FiscalYear $fiscalYear, array $excludedVoucherIds, ?array $branchIds): array
+    {
+        $openingStockId = Account::where('code', FiscalYear::OPENING_STOCK_CODE)->value('id');
+
+        if ($openingStockId === null) {
+            return [];
+        }
+
+        $nets = BranchReportTotals::netByAccountAndBranch(
+            fn (Builder $query) => $query->where('fiscal_year_id', $fiscalYear->id)
+                ->where('voucher_type', VoucherType::ClosingEntry->value)
+                ->when($excludedVoucherIds !== [], fn (Builder $q) => $q->whereNotIn('id', $excludedVoucherIds)),
+            $branchIds,
+            [(int) $openingStockId],
+        );
+
+        return $nets[(int) $openingStockId] ?? [];
+    }
+
     public function balanceSheetPdf(Request $request)
     {
         $fiscalYear = $this->resolveFiscalYear($request);
@@ -1052,9 +1600,10 @@ class AccountingReportController extends Controller
             'dateBs' => NepaliCalendar::formatBs($data['to']),
             'fiscalYearName' => $fiscalYear->name,
             'branchFilterLabel' => $this->branchFilterLabel($filter),
+            'hideZero' => $this->balanceSheetHidesZero($request),
         ], $data));
 
-        return $pdf->stream("balance-sheet-{$fiscalYear->name}.pdf");
+        return $pdf->stream('balance-sheet-'.$this->reportFileSlug($fiscalYear).'.pdf');
     }
 
     public function balanceSheetExport(Request $request)
@@ -1066,8 +1615,18 @@ class AccountingReportController extends Controller
         $data = $this->balanceSheetData($request, $fiscalYear, $filter, false);
 
         return Excel::download(
-            new BalanceSheetExport($data['heads'], $data['totalAssets'], $data['totalLiabilitiesAndCapital'], $this->branchFilterLabel($filter)),
-            "balance-sheet-{$fiscalYear->name}.xlsx",
+            new BalanceSheetExport(
+                $data['heads'],
+                $data['totalAssets'],
+                $data['totalLiabilitiesAndCapital'],
+                $this->branchFilterLabel($filter),
+                $data['currentYearEarnings'],
+                $data['balanceWarning'],
+                $fiscalYear->name,
+                $data['to'],
+                CompanySetting::current(),
+            ),
+            'balance-sheet-'.$this->reportFileSlug($fiscalYear).'.xlsx',
         );
     }
 
@@ -1105,6 +1664,15 @@ class AccountingReportController extends Controller
      * per-branch totals say whether each branch balances. A per-branch
      * mismatch is reported there, never thrown.
      *
+     * `heads` is buildHierarchy() passed through BalanceSheetStatement::build()
+     * (account `amount`, subgroup/group/head `total` and `by_branch`, heads
+     * in statement order); the Trial Balance keeps the bare hierarchy.
+     * Current year profit / (loss) is one synthetic ledger inside Capital
+     * (per branch from branchTotals' `currentYearEarnings`), so the Capital
+     * total includes it; totalLiabilitiesAndCapital already did. With
+     * `hide_zero` (default on) zero ledgers and empty nodes are pruned after
+     * totals; unclassifiedCount counts the unpruned rows.
+     *
      * @return array{from: string, to: string, heads: array, stock: array, currentYearEarnings: string, totalAssets: string, totalLiabilitiesAndCapital: string, balanceWarning: ?string, unclassifiedCount: int, columns: list<array{id: int, name: string, code: string}>|null, branchTotals: array<int, array<string, string|bool>>|null}
      */
     private function balanceSheetData(Request $request, FiscalYear $fiscalYear, BranchFilter $filter, bool $withBranchColumns): array
@@ -1115,7 +1683,7 @@ class AccountingReportController extends Controller
         $balances = $this->balancesByAccount($fiscalYear, [], null, $to, $lineIds);
         $rows = $this->accountRows($balances, ['Assets', 'Liabilities', 'Capital']);
         $stock = $this->stockPosition($fiscalYear, $to, $filter->effectiveIds(), $lineIds);
-        $currentYearEarnings = $this->unsweptProfitAndLoss($fiscalYear, $to, $lineIds);
+        $currentYearEarnings = $this->unsweptProfitAndLoss($balances);
         $stockAdjustment = Money::of($stock['closing'])->minus(Money::of($stock['opening']));
 
         if (! $stock['posted'] && ! $stockAdjustment->isZero()) {
@@ -1138,10 +1706,21 @@ class AccountingReportController extends Controller
             [$rows, $columns, $branchTotals] = $this->balanceSheetByBranch($rows, $fiscalYear, $filter, $to, $stock['posted']);
         }
 
+        $currentYearProfit = [
+            'amount' => $currentYearEarnings->toString(),
+            'by_branch' => $branchTotals === null ? null : array_map(fn (array $totals): string => $totals['currentYearEarnings'], $branchTotals),
+        ];
+
         return [
             'from' => $from,
             'to' => $to,
-            'heads' => $this->buildHierarchy($rows),
+            'heads' => BalanceSheetStatement::build(
+                $this->buildHierarchy($rows),
+                $columns === null ? null : array_column($columns, 'id'),
+                self::UNCLASSIFIED,
+                $currentYearProfit,
+                $this->balanceSheetHidesZero($request),
+            ),
             'stock' => $stock,
             'currentYearEarnings' => $currentYearEarnings->toString(),
             'totalAssets' => $totalAssets->toString(),
@@ -1167,8 +1746,15 @@ class AccountingReportController extends Controller
             fn (Builder $query) => $query->where('fiscal_year_id', $fiscalYear->id)->whereDate('date', '<=', $to),
             $filter->lineBranchIds(),
         );
-        $columns = $filter->columns([...BranchReportTotals::branchIdsIn($nets), ...BranchReportTotals::branchIdsWithStores()]);
-        $branchStock = $this->stockPositionsByBranch($fiscalYear, $to, array_column($columns, 'id'), $this->sweepVoucherIds($fiscalYear), $stockPosted);
+        $excluded = $this->sweepVoucherIds($fiscalYear);
+        // The stock position reads the whole year, not up to `to`, so a
+        // branch whose only stock line is dated after `to` needs a column too.
+        $columns = $filter->columns([
+            ...BranchReportTotals::branchIdsIn($nets),
+            ...BranchReportTotals::branchIdsWithStores(),
+            ...$this->stockAccountBranchIds($fiscalYear, $excluded, $filter->lineBranchIds()),
+        ]);
+        $branchStock = $this->stockPositionsByBranch($fiscalYear, $to, array_column($columns, 'id'), $excluded, $stockPosted);
         $profitAndLossAccountIds = $this->profitAndLossAccountIds();
         $stockInHandId = Account::where('code', FiscalYear::STOCK_IN_HAND_CODE)->value('id');
 
@@ -1239,9 +1825,10 @@ class AccountingReportController extends Controller
             'dateBs' => NepaliCalendar::formatBs($data['to']),
             'fiscalYearName' => $fiscalYear->name,
             'branchFilterLabel' => $this->branchFilterLabel($filter),
+            'projectLabel' => $this->reportProjectLabel($data['projectId']),
         ], $data));
 
-        return $pdf->stream("day-book-{$fiscalYear->name}.pdf");
+        return $pdf->stream('day-book-'.$this->reportFileSlug($fiscalYear).'.pdf');
     }
 
     public function dayBookExport(Request $request)
@@ -1252,7 +1839,7 @@ class AccountingReportController extends Controller
         $filter = BranchFilter::fromRequest($request);
         $data = $this->dayBookData($request, $fiscalYear, $filter);
 
-        return Excel::download(new DayBookExport($data['vouchers'], $this->branchFilterLabel($filter)), "day-book-{$fiscalYear->name}.xlsx");
+        return Excel::download(new DayBookExport($data['vouchers'], $this->branchFilterLabel($filter), $this->reportProjectLabel($data['projectId'])), 'day-book-'.$this->reportFileSlug($fiscalYear).'.xlsx');
     }
 
     /**
@@ -1266,7 +1853,16 @@ class AccountingReportController extends Controller
      * branch, taken from the list the filter already loaded, so it costs no
      * query.
      *
-     * @return array{from: string, to: string, vouchers: array, totalDebit: string, totalCredit: string}
+     * Project (optional `project_id`, blank or 0 is no filter): the same
+     * narrowing as a branch. A voucher is listed when ANY of its lines is
+     * tagged with the project, and only those lines are shown and totalled.
+     *
+     * Each voucher also carries `total` (the sum of its shown debits, which
+     * equals its credits unless a filter narrowed the lines) and `party`,
+     * the customer / supplier whose ledger account is on one of its shown
+     * lines (null for a voucher with no party, such as a plain journal).
+     *
+     * @return array{from: string, to: string, vouchers: array, totalDebit: string, totalCredit: string, projectId: int|null}
      */
     private function dayBookData(Request $request, FiscalYear $fiscalYear, BranchFilter $filter): array
     {
@@ -1276,28 +1872,31 @@ class AccountingReportController extends Controller
         // whole allowed set must still only see vouchers with a line in it.
         $lineIds = $filter->effectiveIds();
         $withBranch = $filter->isActive();
+        $projectId = $this->reportProjectId($request);
+        $narrowLines = fn (Builder|QueryBuilder $lines) => BranchFilter::narrowLines($lines, $lineIds)
+            ->when($projectId !== null, fn ($query) => $query->where('journal_voucher_lines.project_id', $projectId));
 
         $vouchers = JournalVoucher::query()
-            ->with($lineIds === null ? 'lines.account:id,code,name' : [
+            ->with([
                 // Before the nested key, so this constraint is the one kept.
-                'lines' => fn (HasMany $lines) => BranchFilter::narrowLines($lines->getQuery(), $lineIds),
+                'lines' => fn (HasMany $lines) => $narrowLines($lines->getQuery()),
                 'lines.account:id,code,name',
             ])
             ->where('fiscal_year_id', $fiscalYear->id)
             ->whereDate('date', '>=', $from)
             ->whereDate('date', '<=', $to)
             ->when($voucherType !== null, fn (Builder $query) => $query->where('voucher_type', $voucherType))
-            ->when($lineIds !== null, fn (Builder $query) => $query->whereExists(fn (QueryBuilder $lines) => BranchFilter::narrowLines(
+            ->when($lineIds !== null || $projectId !== null, fn (Builder $query) => $query->whereExists(fn (QueryBuilder $lines) => $narrowLines(
                 $lines->selectRaw('1')
                     ->from('journal_voucher_lines')
                     ->whereColumn('journal_voucher_lines.journal_voucher_id', 'journal_vouchers.id'),
-                $lineIds,
             )))
             ->orderBy('date')
             ->orderBy('id')
             ->get();
 
         $lines = $vouchers->flatMap->lines;
+        $partyNames = $this->dayBookPartyNames($lines->pluck('account_id')->map(fn ($id): int => (int) $id)->unique()->values()->all());
 
         // Branch-series numbers (BR20) print with their code; no query when
         // every voucher is in the shared series.
@@ -1311,6 +1910,8 @@ class AccountingReportController extends Controller
                 'voucherType' => $voucher->voucher_type->value,
                 'voucherNumber' => $voucher->displayNumber(),
                 'narration' => $voucher->narration,
+                'party' => $this->dayBookParty($voucher, $partyNames),
+                'total' => Money::sum($voucher->lines->map(fn (JournalVoucherLine $line) => Money::of($line->debit)))->toString(),
                 'lines' => $voucher->lines->map(fn (JournalVoucherLine $line) => [
                     'accountCode' => $line->account->code,
                     'accountName' => $line->account->name,
@@ -1322,7 +1923,56 @@ class AccountingReportController extends Controller
             ])->values()->all(),
             'totalDebit' => Money::sum($lines->map(fn (JournalVoucherLine $line) => Money::of($line->debit)))->toString(),
             'totalCredit' => Money::sum($lines->map(fn (JournalVoucherLine $line) => Money::of($line->credit)))->toString(),
+            'projectId' => $projectId,
         ];
+    }
+
+    /**
+     * Customer and supplier names by their ledger account id, for the Day
+     * Book's Party column: two queries for the whole report. Names only, so
+     * the branch scope is lifted the same way LedgerDocuments lifts it for a
+     * document label.
+     *
+     * @param  list<int>  $accountIds
+     * @return array<int, string>
+     */
+    private function dayBookPartyNames(array $accountIds): array
+    {
+        if ($accountIds === []) {
+            return [];
+        }
+
+        return BranchContext::unrestricted(function () use ($accountIds): array {
+            $names = [];
+
+            foreach ([Customer::class, Supplier::class] as $model) {
+                foreach (array_chunk($accountIds, 500) as $chunk) {
+                    foreach ($model::query()->whereIn('account_id', $chunk)->get(['account_id', 'name']) as $party) {
+                        $names[(int) $party->account_id] ??= (string) $party->name;
+                    }
+                }
+            }
+
+            return $names;
+        });
+    }
+
+    /**
+     * The distinct party names on a voucher's shown lines, in line order, or
+     * null when none of its lines is a customer or supplier account.
+     *
+     * @param  array<int, string>  $partyNames  dayBookPartyNames()
+     */
+    private function dayBookParty(JournalVoucher $voucher, array $partyNames): ?string
+    {
+        $names = $voucher->lines
+            ->map(fn (JournalVoucherLine $line): ?string => $partyNames[(int) $line->account_id] ?? null)
+            ->filter()
+            ->unique()
+            ->values()
+            ->all();
+
+        return $names === [] ? null : implode(', ', $names);
     }
 
     public function cashBookPdf(Request $request)
@@ -1644,7 +2294,13 @@ class AccountingReportController extends Controller
         $from = $from !== '' ? max($from, $start) : $start;
         $to = $to !== '' ? min($to, $end) : $end;
 
-        return $from > $to ? [$start, $end] : [$from, $to];
+        if ($from > $to) {
+            throw ValidationException::withMessages([
+                'from' => 'The selected dates must fall within the fiscal year ('.$start.' to '.$end.').',
+            ]);
+        }
+
+        return [$from, $to];
     }
 
     /**
@@ -1692,13 +2348,14 @@ class AccountingReportController extends Controller
      *
      * @param  array<int, int>  $excludeVoucherIds
      * @param  list<int>|null  $branchIds  BranchFilter::lineBranchIds(); null adds no predicate.
+     * @param  int|null  $projectId  Only lines tagged with this project; null adds no predicate.
      * @return array<int, Money>
      */
-    private function balancesByAccount(FiscalYear $fiscalYear, array $excludeVoucherIds, ?string $from, ?string $to, ?array $branchIds = null): array
+    private function balancesByAccount(FiscalYear $fiscalYear, array $excludeVoucherIds, ?string $from, ?string $to, ?array $branchIds = null, ?int $projectId = null): array
     {
         return array_map(
             fn (array $totals) => $totals['debit']->minus($totals['credit']),
-            $this->periodTotalsByAccount($fiscalYear, $excludeVoucherIds, $from, $to, $branchIds),
+            $this->periodTotalsByAccount($fiscalYear, $excludeVoucherIds, $from, $to, $branchIds, $projectId),
         );
     }
 
@@ -1721,11 +2378,15 @@ class AccountingReportController extends Controller
      * the whereHas; null adds nothing, so the query is byte-identical to the
      * one before branches.
      *
+     * $projectId (the income statement's optional project filter) likewise
+     * narrows the lines table to that project; null, which every other
+     * report passes, adds nothing.
+     *
      * @param  array<int, int>  $excludeVoucherIds
      * @param  list<int>|null  $branchIds
      * @return array<int, array{debit: Money, credit: Money}>
      */
-    private function periodTotalsByAccount(FiscalYear $fiscalYear, array $excludeVoucherIds, ?string $from, ?string $to, ?array $branchIds = null): array
+    private function periodTotalsByAccount(FiscalYear $fiscalYear, array $excludeVoucherIds, ?string $from, ?string $to, ?array $branchIds = null, ?int $projectId = null): array
     {
         $cast = JournalVoucherLine::query()->getConnection()->getDriverName() === 'sqlite' ? 'INTEGER' : 'SIGNED';
 
@@ -1737,6 +2398,7 @@ class AccountingReportController extends Controller
                     ->when($to !== null, fn (Builder $q) => $q->whereDate('date', '<=', $to));
             })
             ->tap(fn (Builder $lines) => BranchFilter::narrowLines($lines, $branchIds))
+            ->when($projectId !== null, fn (Builder $lines) => $lines->where('journal_voucher_lines.project_id', $projectId))
             ->selectRaw(
                 "account_id,
                  COALESCE(SUM(CAST(ROUND(debit * 100) AS {$cast})), 0) as debit_scaled,
@@ -1836,15 +2498,14 @@ class AccountingReportController extends Controller
      * what the sweep achieved), the year's profit for an open one, and the
      * leftover effect of a correction for a reopened one.
      *
-     * $branchIds narrows the lines (BranchFilter::lineBranchIds()), giving
-     * the branch set's own unswept profit.
+     * $balances is the caller's balancesByAccount($fiscalYear, [], null, $to,
+     * $branchIds) (no voucher excluded, so the closing entries count), read
+     * once by balanceSheetData() instead of scanning the lines a second time.
      *
-     * @param  list<int>|null  $branchIds
+     * @param  array<int, Money>  $balances
      */
-    private function unsweptProfitAndLoss(FiscalYear $fiscalYear, string $to, ?array $branchIds = null): Money
+    private function unsweptProfitAndLoss(array $balances): Money
     {
-        $balances = $this->balancesByAccount($fiscalYear, [], null, $to, $branchIds);
-
         $profitAndLossAccountIds = $this->profitAndLossAccountIds();
 
         $net = Money::zero();
@@ -1902,11 +2563,16 @@ class AccountingReportController extends Controller
      * zero on both sides, which the branch-scoped Stock in Hand read then
      * gives correctly.
      *
+     * $excludedVoucherIds lets a caller that already holds sweepVoucherIds()
+     * pass it in; null (the Balance Sheet's call) computes it here, so that
+     * path is unchanged.
+     *
      * @param  list<int>|null  $stockBranchIds  BranchFilter::effectiveIds()
      * @param  list<int>|null  $lineBranchIds  BranchFilter::lineBranchIds()
+     * @param  array<int, int>|null  $excludedVoucherIds  sweepVoucherIds(), or null to compute it
      * @return array{opening: string, closing: string, posted: bool, asOf: string}
      */
-    private function stockPosition(FiscalYear $fiscalYear, string $to, ?array $stockBranchIds = null, ?array $lineBranchIds = null): array
+    private function stockPosition(FiscalYear $fiscalYear, string $to, ?array $stockBranchIds = null, ?array $lineBranchIds = null, ?array $excludedVoucherIds = null): array
     {
         $stockInHand = Account::where('code', FiscalYear::STOCK_IN_HAND_CODE)->first();
 
@@ -1922,7 +2588,7 @@ class AccountingReportController extends Controller
             ->whereHas('lines', fn (Builder $lines) => $lines->where('account_id', $stockInHand->id))
             ->exists());
 
-        $excluded = $this->sweepVoucherIds($fiscalYear);
+        $excluded = $excludedVoucherIds ?? $this->sweepVoucherIds($fiscalYear);
         $withoutSweep = $this->balancesByAccount($fiscalYear, $excluded, null, $fiscalYear->end_date->toDateString(), $lineBranchIds);
 
         if ($posted) {
@@ -2093,6 +2759,29 @@ class AccountingReportController extends Controller
     }
 
     /**
+     * True when a Trial Balance row carries no figure at all: all six
+     * company columns are zero and so is every branch column.
+     *
+     * @param  array<string, mixed>  $row
+     */
+    private function isZeroTrialBalanceRow(array $row): bool
+    {
+        foreach (['openingDebit', 'openingCredit', 'periodDebit', 'periodCredit', 'closingDebit', 'closingCredit'] as $key) {
+            if (! $row[$key]->isZero()) {
+                return false;
+            }
+        }
+
+        foreach ($row['by_branch'] ?? [] as $net) {
+            if (! $net->isZero()) {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    /**
      * @return array<string, string|bool>
      */
     private function emptyTrialBalanceTotals(): array
@@ -2105,6 +2794,8 @@ class AccountingReportController extends Controller
             'totalDebit' => '0.00',
             'totalCredit' => '0.00',
             'inBalance' => true,
+            'openingInBalance' => true,
+            'periodInBalance' => true,
         ];
     }
 
@@ -2116,17 +2807,25 @@ class AccountingReportController extends Controller
     {
         $sum = fn (string $key) => Money::sum($rows->pluck($key));
 
+        $openingDebit = $sum('openingDebit');
+        $openingCredit = $sum('openingCredit');
+        $periodDebit = $sum('periodDebit');
+        $periodCredit = $sum('periodCredit');
         $closingDebit = $sum('closingDebit');
         $closingCredit = $sum('closingCredit');
 
         return [
-            'totalOpeningDebit' => $sum('openingDebit')->toString(),
-            'totalOpeningCredit' => $sum('openingCredit')->toString(),
-            'totalPeriodDebit' => $sum('periodDebit')->toString(),
-            'totalPeriodCredit' => $sum('periodCredit')->toString(),
+            'totalOpeningDebit' => $openingDebit->toString(),
+            'totalOpeningCredit' => $openingCredit->toString(),
+            'totalPeriodDebit' => $periodDebit->toString(),
+            'totalPeriodCredit' => $periodCredit->toString(),
             'totalDebit' => $closingDebit->toString(),
             'totalCredit' => $closingCredit->toString(),
             'inBalance' => $closingDebit->isEqualTo($closingCredit),
+            // Legacy checks each bucket on its own: a trial balance whose
+            // closing columns agree can still hide an out-of-balance opening.
+            'openingInBalance' => $openingDebit->isEqualTo($openingCredit),
+            'periodInBalance' => $periodDebit->isEqualTo($periodCredit),
         ];
     }
 
@@ -2134,9 +2833,14 @@ class AccountingReportController extends Controller
      * $keepAccountIds keeps those accounts even at a zero company amount (the
      * by-branch view, where some branch is not zero).
      *
+     * Each row also names its account `group` (the account's own group, or
+     * with none its subgroup's group) and `subgroup` (null when the account
+     * sits directly under a group), for the statement's nesting and for the
+     * codeless Direct Expenses test in grossProfit(). Loaded eagerly.
+     *
      * @param  array<int, Money>  $balances
      * @param  list<int>  $keepAccountIds
-     * @return array<int, array{id: ?int, code: ?string, name: string, amount: string, computed: bool}>
+     * @return array<int, array{id: ?int, code: ?string, name: string, amount: string, computed: bool, group: ?string, subgroup: ?string}>
      */
     private function headBalances(string $headName, array $balances, bool $creditNormal, array $keepAccountIds = []): array
     {
@@ -2149,6 +2853,7 @@ class AccountingReportController extends Controller
         $accounts = Account::query()
             ->whereHas('group', fn (Builder $query) => $query->where('account_head_id', $head->id))
             ->orWhereHas('subgroup.accountGroup', fn (Builder $query) => $query->where('account_head_id', $head->id))
+            ->with(['group:id,name', 'subgroup:id,name,account_group_id', 'subgroup.accountGroup:id,name'])
             ->get();
 
         $rows = [];
@@ -2167,6 +2872,8 @@ class AccountingReportController extends Controller
                 'name' => $account->name,
                 'amount' => $amount->toString(),
                 'computed' => false,
+                'group' => $account->group?->name ?? $account->subgroup?->accountGroup?->name,
+                'subgroup' => $account->subgroup?->name,
             ];
         }
 
@@ -2174,8 +2881,8 @@ class AccountingReportController extends Controller
     }
 
     /**
-     * @param  array<int, array{id: ?int, code: ?string, name: string, amount: string, computed: bool}>  $rows
-     * @return array<int, array{id: ?int, code: ?string, name: string, amount: string, computed: bool}>
+     * @param  array<int, array{id: ?int, code: ?string, name: string, amount: string, computed: bool, group: ?string, subgroup: ?string}>  $rows
+     * @return array<int, array{id: ?int, code: ?string, name: string, amount: string, computed: bool, group: ?string, subgroup: ?string}>
      */
     private function withVirtualRow(array $rows, string $code, string $name, string $amount, bool $keepZero = false): array
     {
@@ -2189,19 +2896,24 @@ class AccountingReportController extends Controller
             'name' => $name,
             'amount' => Money::of($amount)->toString(),
             'computed' => true,
+            'group' => null,
+            'subgroup' => null,
         ];
 
         return $rows;
     }
 
     /**
-     * Trading-account gross profit: sales plus closing stock, less purchases
-     * and opening stock. Only the two trading groups take part - indirect
-     * income and indirect expenses belong below the gross profit line.
+     * Trading-account gross profit: sales plus closing stock, less purchases,
+     * direct expenses and opening stock. Only the trading groups take part -
+     * indirect income and indirect expenses belong below the gross profit
+     * line. A codeless account of the Direct Expenses group (its row carries
+     * `group`, see IncomeStatementStatement::isCodelessDirectExpense()) is a
+     * trading expense too, since a code list cannot name it.
      *
-     * @param  array<int, array{code: ?string, amount: string}>  $income
-     * @param  array<int, array{code: ?string, amount: string}>  $expenses
-     * @param  array{sales: list<string>, purchases: list<string>}|null  $tradingCodes  tradingCodes(), read once by a caller computing many columns.
+     * @param  array<int, array{code: ?string, amount: string, group?: ?string}>  $income
+     * @param  array<int, array{code: ?string, amount: string, group?: ?string}>  $expenses
+     * @param  array{sales: list<string>, purchases: list<string>, direct?: list<string>}|null  $tradingCodes  tradingCodes(), read once by a caller computing many columns.
      */
     private function grossProfit(array $income, array $expenses, ?array $tradingCodes = null): Money
     {
@@ -2209,20 +2921,33 @@ class AccountingReportController extends Controller
         $salesCodes = $tradingCodes['sales'];
         $purchaseCodes = $tradingCodes['purchases'];
 
-        $total = function (array $rows, array $codes): Money {
-            $matching = array_filter($rows, fn (array $row) => $row['code'] !== null && in_array($row['code'], $codes, true));
+        $total = function (array $rows, array $codes, bool $expenseSide): Money {
+            $matching = array_filter(
+                $rows,
+                fn (array $row) => ($row['code'] !== null && in_array($row['code'], $codes, true))
+                    || ($expenseSide && IncomeStatementStatement::isCodelessDirectExpense($row)),
+            );
 
             return Money::sum(array_column($matching, 'amount'));
         };
 
-        return $total($income, $salesCodes)->minus($total($expenses, $purchaseCodes));
+        return $total($income, $salesCodes, false)->minus($total($expenses, $purchaseCodes, true));
     }
 
     /**
      * Account codes on each side of the trading account: sales plus closing
-     * stock, purchases plus opening stock.
+     * stock; purchases, direct expenses and opening stock. `purchases`
+     * already holds the Direct Expenses codes (so every consumer that splits
+     * by code alone puts them above gross profit); `direct` lists them again
+     * so the statement can show them as their own cost of sales block.
      *
-     * @return array{sales: list<string>, purchases: list<string>}
+     * A Direct Expenses account is one whose group is "Direct Expenses", or,
+     * with no group of its own, whose subgroup sits in that group: the same
+     * precedence headBalances() uses for a row's `group`. Codeless accounts
+     * of that group cannot be listed here; they are matched by their row's
+     * `group` instead (IncomeStatementStatement::isCodelessDirectExpense()).
+     *
+     * @return array{sales: list<string>, purchases: list<string>, direct: list<string>}
      */
     private function tradingCodes(): array
     {
@@ -2232,9 +2957,22 @@ class AccountingReportController extends Controller
             ->filter()
             ->all();
 
+        $directGroup = IncomeStatementStatement::DIRECT_EXPENSES_GROUP;
+        $directCodes = Account::query()
+            ->where(fn (Builder $query) => $query
+                ->whereHas('group', fn (Builder $group) => $group->where('name', $directGroup))
+                ->orWhere(fn (Builder $viaSubgroup) => $viaSubgroup
+                    ->whereNull('account_group_id')
+                    ->whereHas('subgroup.accountGroup', fn (Builder $group) => $group->where('name', $directGroup))))
+            ->pluck('code')
+            ->filter()
+            ->values()
+            ->all();
+
         return [
             'sales' => [...$codesOf('Sales Accounts'), FiscalYear::CLOSING_STOCK_CODE],
-            'purchases' => [...$codesOf('Purchase Accounts'), FiscalYear::OPENING_STOCK_CODE],
+            'purchases' => [...$codesOf('Purchase Accounts'), ...$directCodes, FiscalYear::OPENING_STOCK_CODE],
+            'direct' => $directCodes,
         ];
     }
 
@@ -2272,94 +3010,32 @@ class AccountingReportController extends Controller
     /**
      * A single account's running book over a window INSIDE one fiscal year.
      *
-     * Opening balance = that year's Opening Balance voucher lines, plus that
-     * year's lines dated before `$from`. Nothing is ever summed across a
-     * year boundary: the old all-time cumulative opening counted the new
-     * year's Opening Balance voucher on top of the previous year's own
-     * lines, so a cash balance of 600 at the end of FY1 opened FY2 at 1,200
-     * (audit P0-18).
+     * The logic lives in LedgerBook (Trial Balance semantics: the P&L sweep
+     * voucher is excluded, a no-op for cash/bank accounts). It is called with
+     * documents OFF here, so Cash Book / Bank Book keep exactly the three keys
+     * and the per-line shape they always had.
      *
-     * The two halves are deliberately disjoint - the entries list leaves out
-     * Opening Balance vouchers entirely - so a window starting on the year's
-     * first day cannot count the carry-forward twice.
-     *
-     * $branchIds (BranchFilter::lineBranchIds()) narrows both halves to the
-     * lines of those branches: a branch's cash book is "what was posted
-     * under that branch" (plan 12, section 5.4). Null adds nothing.
+     * Audit P0-18: an opening balance is "this year's Opening Balance voucher
+     * plus this year's lines before the window" - never a sum across a year
+     * boundary - and the entries list leaves Opening Balance vouchers out so
+     * the carry-forward is not counted twice.
      *
      * @param  list<int>|null  $branchIds
      * @return array{entries: array<int, array<string, mixed>>, openingBalance: string, closingBalance: string}
      */
     private function accountBook(Account $account, FiscalYear $fiscalYear, string $from, string $to, ?array $branchIds = null, bool $includeSubAccounts = false): array
     {
-        $cast = JournalVoucherLine::query()->getConnection()->getDriverName() === 'sqlite' ? 'INTEGER' : 'SIGNED';
-
-        $accountIds = [$account->id];
-        if ($includeSubAccounts) {
-            $accountIds = array_unique(array_merge($accountIds, $account->allSubAccountIds()));
-        }
-
-        $openingScaled = JournalVoucherLine::query()
-            ->whereIn('account_id', $accountIds)
-            ->whereHas('journalVoucher', function (Builder $query) use ($fiscalYear, $from) {
-                $query->where('fiscal_year_id', $fiscalYear->id)
-                    ->where(fn (Builder $q) => $q
-                        ->where('voucher_type', VoucherType::OpeningBalance->value)
-                        ->orWhereDate('date', '<', $from));
-            })
-            ->tap(fn (Builder $lines) => BranchFilter::narrowLines($lines, $branchIds))
-            ->selectRaw(
-                "COALESCE(SUM(CAST(ROUND(debit * 100) AS {$cast})), 0) - COALESCE(SUM(CAST(ROUND(credit * 100) AS {$cast})), 0) as net_scaled"
-            )
-            ->value('net_scaled');
-
-        $openingBalance = Money::of(BigDecimal::of((int) $openingScaled)->dividedBy(100, 2, RoundingMode::Unnecessary));
-
-        $lines = JournalVoucherLine::query()
-            ->whereIn('account_id', $accountIds)
-            ->whereHas('journalVoucher', function (Builder $query) use ($fiscalYear, $from, $to) {
-                $query->where('fiscal_year_id', $fiscalYear->id)
-                    ->where('voucher_type', '!=', VoucherType::OpeningBalance->value)
-                    ->whereDate('date', '>=', $from)
-                    ->whereDate('date', '<=', $to);
-            })
-            ->tap(fn (Builder $lines) => BranchFilter::narrowLines($lines, $branchIds))
-            ->with(['journalVoucher', 'account:id,name,code'])
-            ->get()
-            ->sortBy([['journalVoucher.date', 'asc'], ['id', 'asc']])
-            ->values();
-
-        JournalVoucher::loadSeriesBranches($lines->pluck('journalVoucher'));
-
-        $runningBalance = $openingBalance;
-
-        $entries = $lines->map(function (JournalVoucherLine $line) use (&$runningBalance, $account) {
-            $debit = Money::of($line->debit);
-            $credit = Money::of($line->credit);
-            $runningBalance = $runningBalance->plus($debit)->minus($credit);
-
-            $subAccountTag = $line->account_id !== $account->id && $line->account ? " [{$line->account->name}]" : '';
-
-            return [
-                'date' => $line->journalVoucher->date->toDateString(),
-                'voucherType' => $line->journalVoucher->voucher_type->value,
-                'voucherNumber' => $line->journalVoucher->displayNumber(),
-                'narration' => ($line->narration ?? $line->journalVoucher->narration).$subAccountTag,
-                'accountName' => $line->account?->name,
-                'accountCode' => $line->account?->code,
-                'isSubAccount' => $line->account_id !== $account->id,
-                'debit' => $debit->toString(),
-                'credit' => $credit->toString(),
-                'balance' => $runningBalance->toString(),
-            ];
-        })->values()->all();
+        $book = LedgerBook::build($account, $fiscalYear, $from, $to, $branchIds, $includeSubAccounts, false);
 
         return [
-            'entries' => $entries,
-            // Money never renders "-0.00" (CONTRACTS C1), so a zero balance
-            // always prints as 0.00 whichever side it arrived from.
-            'openingBalance' => $openingBalance->toString(),
-            'closingBalance' => $runningBalance->toString(),
+            // Cash Book / Bank Book pages render `narration ?? '-'`: keep the
+            // empty-string narration they always received.
+            'entries' => array_map(
+                static fn (array $entry): array => ['narration' => (string) ($entry['narration'] ?? '')] + $entry,
+                $book['entries'],
+            ),
+            'openingBalance' => $book['openingBalance'],
+            'closingBalance' => $book['closingBalance'],
         ];
     }
 

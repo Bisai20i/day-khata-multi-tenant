@@ -6,6 +6,7 @@ use App\Support\Money\Money;
 use Maatwebsite\Excel\Concerns\FromArray;
 use Maatwebsite\Excel\Concerns\WithColumnFormatting;
 use Maatwebsite\Excel\Concerns\WithHeadings;
+use Maatwebsite\Excel\Concerns\WithStrictNullComparison;
 use PhpOffice\PhpSpreadsheet\Cell\Coordinate;
 use PhpOffice\PhpSpreadsheet\Style\NumberFormat;
 
@@ -15,7 +16,7 @@ use PhpOffice\PhpSpreadsheet\Style\NumberFormat;
  * and become real 2-decimal numbers here, at the Excel boundary - the only
  * place a float is legitimate (.ai/rules/lib.md).
  */
-class HrTableExport implements FromArray, WithColumnFormatting, WithHeadings
+class HrTableExport implements FromArray, WithColumnFormatting, WithHeadings, WithStrictNullComparison
 {
     /**
      * @param  list<string>  $headings

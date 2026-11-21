@@ -8,12 +8,14 @@ import Combobox from '@/components/ui/Combobox.vue';
 import Select from '@/components/ui/Select.vue';
 import Label from '@/components/ui/Label.vue';
 import NepaliDateInput from '@/components/ui/NepaliDateInput.vue';
-import { compareMoney, formatMoney } from '@/lib/money.js';
+import PayrollLineContributions from '@/components/hr/PayrollLineContributions.vue';
+import { addMoney, compareMoney, formatMoney } from '@/lib/money.js';
 
 /**
  * The editable grid of a draft payroll run: the run's header fields, then one
  * block per staff member holding their pay items (component + amount + note),
- * the advance recovery, TDS and a note, with live gross/net from usePayrollDraft.
+ * the advance recovery, a note, and the TDS / SSF / CIT amounts (PayrollLineContributions),
+ * with live gross/net from usePayrollDraft.
  *
  * `form` is the page's useForm instance and is edited in place (the same
  * pattern as PurchaseCreatePaymentNotes); `draft` is usePayrollDraft()'s
@@ -110,7 +112,7 @@ function err(path) {
             </template>
 
             <p class="mb-3 text-xs text-text-muted">
-                Each staff member needs at least one pay item. Advance recovery and TDS are deducted from gross pay; together they cannot exceed the gross pay, and the recovery cannot exceed the staff member's outstanding advance.
+                Each staff member needs at least one pay item. Advance recovery, TDS, employee SSF and employee CIT are deducted from gross pay; together they cannot exceed the gross pay, and the recovery cannot exceed the staff member's outstanding advance. Employer SSF and CIT are extra employer cost and do not change gross or net pay.
             </p>
 
             <p v-if="err('lines')" class="mb-3 border-[1.5px] border-danger bg-danger-bg px-3 py-2 text-sm text-danger" role="alert">
@@ -133,6 +135,9 @@ function err(path) {
                         <span>Gross <span class="font-bold text-text-strong">{{ formatMoney(draft.figuresFor(line).gross) }}</span></span>
                         <span>Recovery <span class="font-bold text-text-strong">{{ formatMoney(draft.figuresFor(line).recovery) }}</span></span>
                         <span>TDS <span class="font-bold text-text-strong">{{ formatMoney(draft.figuresFor(line).tds) }}</span></span>
+                        <span>SSF (emp) <span class="font-bold text-text-strong">{{ formatMoney(draft.figuresFor(line).ssf_employee) }}</span></span>
+                        <span>CIT (emp) <span class="font-bold text-text-strong">{{ formatMoney(draft.figuresFor(line).cit_employee) }}</span></span>
+                        <span>Employer SSF + CIT <span class="font-bold text-text-strong">{{ formatMoney(addMoney(draft.figuresFor(line).ssf_employer, draft.figuresFor(line).cit_employer)) }}</span></span>
                         <span>Net <span class="font-bold text-text-strong">{{ formatMoney(draft.figuresFor(line).net) }}</span></span>
                     </div>
                     <button
@@ -221,7 +226,7 @@ function err(path) {
                         <Plus class="h-3.5 w-3.5" /> Add pay item
                     </button>
 
-                    <div class="grid grid-cols-1 gap-3 border-t border-border-soft pt-3 sm:grid-cols-[200px_200px_1fr]">
+                    <div class="grid grid-cols-1 gap-3 border-t border-border-soft pt-3 sm:grid-cols-[200px_1fr]">
                         <div>
                             <Label :for="`payroll-recovery-${line.key}`" class="mb-1">Advance recovery</Label>
                             <Input
@@ -239,26 +244,12 @@ function err(path) {
                             </p>
                         </div>
                         <div>
-                            <Label :for="`payroll-tds-${line.key}`" class="mb-1">TDS</Label>
-                            <Input
-                                :id="`payroll-tds-${line.key}`"
-                                v-model="line.tds"
-                                type="text"
-                                inputmode="decimal"
-                                placeholder="0.00"
-                                class="text-right"
-                                :disabled="readonly"
-                            />
-                            <p v-if="err(`lines.${lineIndex}.tds`)" class="mt-1 text-xs text-danger" role="alert">
-                                {{ err(`lines.${lineIndex}.tds`) }}
-                            </p>
-                        </div>
-                        <div>
                             <Label :for="`payroll-note-${line.key}`" class="mb-1">Note</Label>
                             <Input :id="`payroll-note-${line.key}`" v-model="line.note" type="text" placeholder="Optional note on this payslip" :disabled="readonly" />
                             <p v-if="err(`lines.${lineIndex}.note`)" class="mt-1 text-xs text-danger" role="alert">{{ err(`lines.${lineIndex}.note`) }}</p>
                         </div>
                     </div>
+                    <PayrollLineContributions class="mt-3" :line="line" :line-index="lineIndex" :draft="draft" :readonly="readonly" />
                 </div>
             </div>
         </Card>

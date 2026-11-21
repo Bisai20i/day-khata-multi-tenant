@@ -9,6 +9,8 @@ use App\Models\CapitalSale;
 use App\Models\CompanySetting;
 use App\Models\Customer;
 use App\Models\PrintLog;
+use App\Models\Project;
+use App\Rules\OpenProject;
 use App\Support\AmountInWords;
 use App\Support\Billing\BillingException;
 use App\Support\Branches\BranchAccounts;
@@ -40,7 +42,7 @@ class CapitalSaleController extends Controller
     {
         return Inertia::render('Tenant/Sales/CapitalSales/Index', [
             'capitalSales' => BranchListFilter::apply(CapitalSale::query(), $request)
-                ->with(['customer:id,name', 'lines.account:id,code,name', 'journalVoucher:id,voucher_number'])
+                ->with(['customer:id,name', 'lines.account:id,code,name', 'journalVoucher:id,voucher_number', 'project:id,code,name'])
                 ->when(BranchListFilter::columnVisible($request), fn ($query) => $query->with('branch:id,name,code'))
                 ->orderByDesc('date')
                 ->orderByDesc('id')
@@ -52,6 +54,8 @@ class CapitalSaleController extends Controller
             'stores' => $this->branchStoreOptions($request),
             'defaultVatRate' => (string) (CompanySetting::current()->default_vat_rate ?? '13.00'),
             ...BranchFormOptions::props($request),
+            // Project picker of the create form.
+            'projects' => Project::query()->active()->orderBy('name')->get(['id', 'code', 'name']),
         ]);
     }
 
@@ -69,6 +73,8 @@ class CapitalSaleController extends Controller
             // branch, then the user's posting branch, and refuses a store of
             // another branch or a branch the user cannot use.
             'branch_id' => ['nullable', 'integer', 'exists:branches,id'],
+            // Optional project; every line of the invoice's voucher is tagged with it.
+            'project_id' => ['nullable', 'integer', new OpenProject],
             'cash_amount' => ['nullable', 'numeric', 'min:0', 'decimal:0,2'],
             'bank_amount' => ['nullable', 'numeric', 'min:0', 'decimal:0,2'],
             'vat_rate' => ['nullable', 'numeric', 'min:0', 'max:100', 'decimal:0,2'],

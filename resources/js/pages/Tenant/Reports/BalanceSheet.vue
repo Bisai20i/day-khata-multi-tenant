@@ -1,6 +1,6 @@
 <script setup>
 import { computed, ref, watch } from 'vue';
-import { Link, router } from '@inertiajs/vue3';
+import { router } from '@inertiajs/vue3';
 import AppLayout from '@/layouts/AppLayout.vue';
 import { useLayoutChrome } from '@/composables/useLayoutChrome';
 import Card from '@/components/ui/Card.vue';
@@ -9,6 +9,7 @@ import Button from '@/components/ui/Button.vue';
 import PageHeader from '@/components/ui/PageHeader.vue';
 import NepaliDateInput from '@/components/ui/NepaliDateInput.vue';
 import Label from '@/components/ui/Label.vue';
+import CheckboxField from '@/components/ui/CheckboxField.vue';
 import { formatMoney, isZeroMoney } from '@/lib/money.js';
 import { formatBsDate } from '@/lib/format.js';
 import { usePermissions } from '@/composables/usePermissions';
@@ -18,6 +19,7 @@ import BranchReportFilter from '@/components/branch/BranchReportFilter.vue';
 import BranchReportNotes from '@/components/branch/BranchReportNotes.vue';
 import BranchReportCells from '@/components/branch/BranchReportCells.vue';
 import BranchReportHeaderRow from '@/components/branch/BranchReportHeaderRow.vue';
+import BalanceSheetSection from '@/components/accounting/BalanceSheetSection.vue';
 
 defineOptions({ layout: AppLayout });
 
@@ -30,7 +32,12 @@ const props = defineProps({
     to: { type: [String, null], default: null },
     heads: { type: Array, default: () => [] },
     stock: { type: Object, default: () => ({ opening: '0.00', closing: '0.00', posted: false }) },
+    // Still sent by the server, but it is already inside Capital (a synthetic ledger row) and inside
+    // totalLiabilitiesAndCapital, so it is never rendered or added again here. Declared only so it does not
+    // fall through to the root element as an attribute.
     currentYearEarnings: { type: String, default: '0.00' },
+    // Effective value of the hide_zero filter (the server defaults it to true).
+    hideZero: { type: Boolean, default: true },
     totalAssets: { type: String, default: '0.00' },
     totalLiabilitiesAndCapital: { type: String, default: '0.00' },
     balanceWarning: { type: [String, null], default: null },
@@ -49,35 +56,71 @@ const fiscalYearOptions = computed(() =>
     })),
 );
 
-const fiscalYear = ref(props.fiscalYearId);
-const to = ref(props.to);
+// Editable inputs only; the applied values (what the server rendered) are the props.
+const fiscalYearInput = ref(props.fiscalYearId);
+const toInput = ref(props.to);
+const hideZeroInput = ref(props.hideZero);
+
+watch(
+    () => [props.fiscalYearId, props.to, props.hideZero],
+    ([fiscalYearId, to, hideZero]) => {
+        fiscalYearInput.value = fiscalYearId;
+        toInput.value = to;
+        hideZeroInput.value = hideZero;
+    },
+);
+
+watch(hideZeroInput, (value) => {
+    if (value !== props.hideZero) {
+        apply();
+    }
+});
 
 const branchFilter = useBranchReportFilter(() => props.branchReport, { byBranch: true });
 const { byBranch: hasBranchColumns, columns: branchColumns, unbalancedIds, totalValues, minWidth } = useBranchReportColumns(
     () => props.branchReport,
 );
 
-watch(fiscalYear, (value) => {
+watch(fiscalYearInput, (value) => {
+    if (value === props.fiscalYearId) {
+        return;
+    }
+
     const chosen = props.fiscalYears.find((year) => year.id === value);
-    to.value = chosen?.endDate ?? null;
+    toInput.value = chosen?.endDate ?? null;
     apply();
 });
 
 function apply() {
     router.get(
         window.location.pathname,
-        { fiscal_year_id: fiscalYear.value ?? undefined, to: to.value ?? undefined, ...branchFilter.toQuery() },
+        {
+            fiscal_year_id: fiscalYearInput.value ?? undefined,
+            to: toInput.value ?? undefined,
+            hide_zero: hideZeroInput.value ? 1 : 0,
+            ...branchFilter.toQuery(),
+        },
         { preserveState: true, preserveScroll: true },
     );
 }
 
+// Liabilities & Equity (left) is every head except Assets, in the server order; Assets sits on the right.
+// The current year profit is already a ledger row inside Capital, so there is no separate profit section.
 const assetHeads = computed(() => props.heads.filter((head) => head.name === 'Assets'));
 const otherHeads = computed(() => props.heads.filter((head) => head.name !== 'Assets'));
-const hasEarnings = computed(() => !isZeroMoney(props.currentYearEarnings));
-// A branch can carry earnings while the company nets to zero, so the row stays for its column.
-const showEarnings = computed(
-    () => hasEarnings.value || (hasBranchColumns.value && Object.values(totalValues('currentYearEarnings')).some((value) => !isZeroMoney(value))),
-);
+// Stacked (branch columns) keeps the wide amount cell so the branch cells stay aligned; the half-width
+// two-sided layout uses a narrower one.
+const amountWidth = computed(() => (hasBranchColumns.value ? 'w-32' : 'w-28'));
+const isBalanced = computed(() => props.balanceWarning === null && !isZeroMoney(props.totalAssets));
+
+// Branch params for ledger links (the ledger ignores `by_branch`).
+const branchQuery = computed(() => {
+    const params = new URLSearchParams();
+    branchFilter.appendTo(params);
+    params.delete('by_branch');
+
+    return params.toString();
+});
 
 function inventoryScheduleUrl() {
     const params = new URLSearchParams({ to: props.stock.asOf });
@@ -85,16 +128,24 @@ function inventoryScheduleUrl() {
     return `/reports/manufacturing/inventory-schedule?${params.toString()}`;
 }
 
-function printUrl() {
-    const params = new URLSearchParams({ fiscal_year_id: fiscalYear.value ?? '', to: to.value ?? '' });
+// Built from the applied report (props), so Print and Export match what is on screen.
+function appliedParams() {
+    const params = new URLSearchParams({
+        fiscal_year_id: props.fiscalYearId ?? '',
+        to: props.to ?? '',
+        hide_zero: props.hideZero ? '1' : '0',
+    });
     branchFilter.appendTo(params);
-    return `/reports/balance-sheet/print?${params.toString()}`;
+
+    return params;
+}
+
+function printUrl() {
+    return `/reports/balance-sheet/print?${appliedParams().toString()}`;
 }
 
 function exportUrl() {
-    const params = new URLSearchParams({ fiscal_year_id: fiscalYear.value ?? '', to: to.value ?? '' });
-    branchFilter.appendTo(params);
-    return `/reports/balance-sheet/export?${params.toString()}`;
+    return `/reports/balance-sheet/export?${appliedParams().toString()}`;
 }
 </script>
 
@@ -124,12 +175,19 @@ function exportUrl() {
             <div class="flex flex-wrap items-end gap-3">
                 <div class="w-56">
                     <Label class="mb-1">Fiscal year</Label>
-                    <Select v-model="fiscalYear" :options="fiscalYearOptions" />
+                    <Select v-model="fiscalYearInput" :options="fiscalYearOptions" />
                 </div>
                 <div>
                     <Label class="mb-1">As at date (BS)</Label>
-                    <NepaliDateInput v-model="to" />
+                    <NepaliDateInput v-model="toInput" />
                 </div>
+                <CheckboxField
+                    id="balance-sheet-hide-zero"
+                    v-model="hideZeroInput"
+                    label="Hide zero-balance accounts"
+                    hint="Leave out accounts and groups with no balance as at this date."
+                    class="pb-2"
+                />
                 <Button variant="primary" tone="purple" @click="apply">Generate report</Button>
             </div>
             <p v-if="to" class="mt-2 text-[12px] text-text-muted">
@@ -157,64 +215,73 @@ function exportUrl() {
             >
                 {{ balanceWarning }}
             </p>
+            <p
+                v-else-if="isBalanced"
+                class="mb-4 rounded border border-success bg-success-bg-soft px-3 py-2 text-[12.5px] font-semibold text-success"
+                role="status"
+            >
+                Balance Sheet is balanced
+            </p>
 
-            <div class="grid gap-4" :class="{ 'md:grid-cols-2': !hasBranchColumns }">
-                <Card variant="panel" title="Assets" :class="{ 'overflow-x-auto': hasBranchColumns }">
-                    <div v-if="assetHeads.length === 0" class="px-1 py-6 text-center text-[13px] text-text-muted">No asset balances as at this date. Try a later date.</div>
-                    <div v-else class="divide-y divide-border" :style="minWidth(360, 128)">
+            <div class="grid items-start gap-4" :class="{ 'md:grid-cols-2': !hasBranchColumns }">
+                <Card variant="panel" title="Liabilities &amp; Equity" :class="{ 'overflow-x-auto': hasBranchColumns }">
+                    <div class="divide-y divide-border" :style="minWidth(320, 128)">
                         <BranchReportHeaderRow
                             v-if="hasBranchColumns"
                             :columns="branchColumns"
                             :warn-ids="unbalancedIds"
-                            warn-title="Assets and liabilities &amp; capital do not match for this column."
+                            warn-title="Assets and liabilities &amp; equity do not match for this column."
                         />
-                        <template v-for="head in assetHeads" :key="head.name">
-                            <template v-for="group in head.groups" :key="group.name">
-                                <div class="px-1 py-1 text-[13px] font-semibold text-text-base">{{ group.name }}</div>
-                                <div
-                                    v-for="account in group.accounts"
-                                    :key="`acc-${account.id}`"
-                                    class="flex items-center px-1 py-1 pl-4 text-[13px] text-text-base"
-                                >
-                                    <div class="flex-1">
-                                        <Link
-                                            v-if="account.id && can('account_ledger.view')"
-                                            :href="`/reports/ledger?account_id=${account.id}&fiscal_year_id=${fiscalYearId ?? ''}&to=${to ?? ''}`"
-                                            class="text-primary hover:underline"
-                                        >
-                                            {{ account.name }}
-                                        </Link>
-                                        <template v-else>{{ account.name }}</template>
-                                    </div>
-                                    <div class="w-32 text-right">{{ formatMoney(account.debit) }}</div>
-                                    <BranchReportCells v-if="hasBranchColumns" :columns="branchColumns" :values="account.by_branch" cell-class="w-32" />
-                                </div>
-                                <template v-for="subgroup in group.subgroups" :key="subgroup.name">
-                                    <div class="px-1 py-1 pl-4 text-[13px] font-semibold text-text-base">{{ subgroup.name }}</div>
-                                    <div
-                                        v-for="account in subgroup.accounts"
-                                        :key="`acc-${account.id}`"
-                                        class="flex items-center px-1 py-1 pl-8 text-[13px] text-text-base"
-                                    >
-                                        <div class="flex-1">
-                                            <Link
-                                                v-if="account.id && can('account_ledger.view')"
-                                                :href="`/reports/ledger?account_id=${account.id}&fiscal_year_id=${fiscalYearId ?? ''}&to=${to ?? ''}`"
-                                                class="text-primary hover:underline"
-                                            >
-                                                {{ account.name }}
-                                            </Link>
-                                            <template v-else>{{ account.name }}</template>
-                                        </div>
-                                        <div class="w-32 text-right">{{ formatMoney(account.debit) }}</div>
-                                        <BranchReportCells v-if="hasBranchColumns" :columns="branchColumns" :values="account.by_branch" cell-class="w-32" />
-                                    </div>
-                                </template>
-                            </template>
-                        </template>
+                        <p v-if="otherHeads.length === 0" class="px-1 py-4 text-center text-[13px] text-text-muted">
+                            Nothing to show{{ hideZero ? '. Untick "Hide zero-balance accounts" to list every account.' : '.' }}
+                        </p>
+                        <BalanceSheetSection
+                            v-for="head in otherHeads"
+                            :key="head.name"
+                            :head="head"
+                            :base-level="1"
+                            show-heading
+                            show-head-total
+                            :columns="branchColumns"
+                            :has-branch-columns="hasBranchColumns"
+                            :can-ledger="can('account_ledger.view')"
+                            :fiscal-year-id="fiscalYearId"
+                            :to="to"
+                            :branch-query="branchQuery"
+                        />
+                        <div class="flex items-center px-1 pt-2 text-[13px] font-bold text-text-strong">
+                            <div class="flex-1">Total Liabilities &amp; Equity</div>
+                            <div :class="amountWidth" class="text-right">{{ formatMoney(totalLiabilitiesAndCapital) }}</div>
+                            <BranchReportCells v-if="hasBranchColumns" :columns="branchColumns" :values="totalValues('totalLiabilitiesAndCapital')" cell-class="w-32" />
+                        </div>
+                    </div>
+                </Card>
+
+                <Card variant="panel" title="Assets" :class="{ 'overflow-x-auto': hasBranchColumns }">
+                    <div class="divide-y divide-border" :style="minWidth(320, 128)">
+                        <BranchReportHeaderRow
+                            v-if="hasBranchColumns"
+                            :columns="branchColumns"
+                            :warn-ids="unbalancedIds"
+                            warn-title="Assets and liabilities &amp; equity do not match for this column."
+                        />
+                        <p v-if="assetHeads.length === 0" class="px-1 py-4 text-center text-[13px] text-text-muted">
+                            Nothing to show{{ hideZero ? '. Untick "Hide zero-balance accounts" to list every account.' : ' as at this date. Try a later date.' }}
+                        </p>
+                        <BalanceSheetSection
+                            v-for="head in assetHeads"
+                            :key="head.name"
+                            :head="head"
+                            :columns="branchColumns"
+                            :has-branch-columns="hasBranchColumns"
+                            :can-ledger="can('account_ledger.view')"
+                            :fiscal-year-id="fiscalYearId"
+                            :to="to"
+                            :branch-query="branchQuery"
+                        />
                         <div class="flex items-center px-1 pt-2 text-[13px] font-bold text-text-strong">
                             <div class="flex-1">Total Assets</div>
-                            <div class="w-32 text-right">{{ formatMoney(totalAssets) }}</div>
+                            <div :class="amountWidth" class="text-right">{{ formatMoney(totalAssets) }}</div>
                             <BranchReportCells v-if="hasBranchColumns" :columns="branchColumns" :values="totalValues('totalAssets')" cell-class="w-32" />
                         </div>
                     </div>
@@ -227,75 +294,6 @@ function exportUrl() {
                             Inventory schedule: raw material, work in process and finished goods
                         </a>
                     </p>
-                </Card>
-
-                <Card variant="panel" title="Liabilities &amp; Capital" :class="{ 'overflow-x-auto': hasBranchColumns }">
-                    <div v-if="otherHeads.length === 0 && !showEarnings" class="px-1 py-6 text-center text-[13px] text-text-muted">
-                        No liability or capital balances as at this date. Try a later date.
-                    </div>
-                    <div v-else class="divide-y divide-border" :style="minWidth(360, 128)">
-                        <BranchReportHeaderRow
-                            v-if="hasBranchColumns"
-                            :columns="branchColumns"
-                            :warn-ids="unbalancedIds"
-                            warn-title="Assets and liabilities &amp; capital do not match for this column."
-                        />
-                        <template v-for="head in otherHeads" :key="head.name">
-                            <div class="px-1 py-1.5 text-[13px] font-bold text-text-strong">{{ head.name }}</div>
-                            <template v-for="group in head.groups" :key="group.name">
-                                <div class="px-1 py-1 pl-4 text-[13px] font-semibold text-text-base">{{ group.name }}</div>
-                                <div
-                                    v-for="account in group.accounts"
-                                    :key="`acc-${account.id}`"
-                                    class="flex items-center px-1 py-1 pl-8 text-[13px] text-text-base"
-                                >
-                                    <div class="flex-1">
-                                        <Link
-                                            v-if="account.id && can('account_ledger.view')"
-                                            :href="`/reports/ledger?account_id=${account.id}&fiscal_year_id=${fiscalYearId ?? ''}&to=${to ?? ''}`"
-                                            class="text-primary hover:underline"
-                                        >
-                                            {{ account.name }}
-                                        </Link>
-                                        <template v-else>{{ account.name }}</template>
-                                    </div>
-                                    <div class="w-32 text-right">{{ formatMoney(account.credit) }}</div>
-                                    <BranchReportCells v-if="hasBranchColumns" :columns="branchColumns" :values="account.by_branch" cell-class="w-32" />
-                                </div>
-                                <template v-for="subgroup in group.subgroups" :key="subgroup.name">
-                                    <div class="px-1 py-1 pl-8 text-[13px] font-semibold text-text-base">{{ subgroup.name }}</div>
-                                    <div
-                                        v-for="account in subgroup.accounts"
-                                        :key="`acc-${account.id}`"
-                                        class="flex items-center px-1 py-1 pl-12 text-[13px] text-text-base"
-                                    >
-                                        <div class="flex-1">
-                                            <Link
-                                                v-if="account.id && can('account_ledger.view')"
-                                                :href="`/reports/ledger?account_id=${account.id}&fiscal_year_id=${fiscalYearId ?? ''}&to=${to ?? ''}`"
-                                                class="text-primary hover:underline"
-                                            >
-                                                {{ account.name }}
-                                            </Link>
-                                            <template v-else>{{ account.name }}</template>
-                                        </div>
-                                        <div class="w-32 text-right">{{ formatMoney(account.credit) }}</div>
-                                        <BranchReportCells v-if="hasBranchColumns" :columns="branchColumns" :values="account.by_branch" cell-class="w-32" />
-                                    </div>
-                                </template>
-                            </template>
-                        </template>
-                        <div v-if="showEarnings" class="flex items-center px-1 py-1 pl-4 text-[13px] text-text-base">
-                            <div class="flex-1">Current Year Earnings (unaudited)</div>
-                            <div class="w-32 text-right">{{ formatMoney(currentYearEarnings) }}</div>
-                            <BranchReportCells v-if="hasBranchColumns" :columns="branchColumns" :values="totalValues('currentYearEarnings')" cell-class="w-32" />
-                        </div>
-                        <div class="flex items-center px-1 pt-2 text-[13px] font-bold text-text-strong">
-                            <div class="flex-1">Total Liabilities &amp; Capital</div>
-                            <div class="w-32 text-right">{{ formatMoney(totalLiabilitiesAndCapital) }}</div>
-                            <BranchReportCells v-if="hasBranchColumns" :columns="branchColumns" :values="totalValues('totalLiabilitiesAndCapital')" cell-class="w-32" />
-                        </div>
-                    </div>
                 </Card>
             </div>
         </template>

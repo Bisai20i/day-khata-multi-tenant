@@ -78,6 +78,10 @@ function initialData() {
         user_id: staff?.user_id ?? null,
         is_active: staff?.is_active ?? true,
         tds_rate: staff?.tds_rate ?? '0',
+        ssf_employee_rate: staff?.ssf_employee_rate ?? '0',
+        ssf_employer_rate: staff?.ssf_employer_rate ?? '0',
+        cit_employee_rate: staff?.cit_employee_rate ?? '0',
+        cit_employer_rate: staff?.cit_employer_rate ?? '0',
         pay_effective_from: props.today,
         pay_items: props.payItems.map((item) => newRow(item.pay_component_id, item.amount)),
     };
@@ -138,30 +142,51 @@ function rowError(index, field) {
 
 const payItemsError = computed(() => form.errors.pay_items ?? '');
 
-// Blank, or a decimal from 0 to 100 with at most 2 decimals (string check, no float math).
-const TDS_RATE_PATTERN = /^(?:100(?:\.0{1,2})?|\d{1,2}(?:\.\d{1,2})?)$/;
-const clientTdsError = ref('');
+// Percent rates: blank, or a decimal from 0 to 100 with at most 2 decimals (string check, no float math).
+const RATE_PATTERN = /^(?:100(?:\.0{1,2})?|\d{1,2}(?:\.\d{1,2})?)$/;
+const RATE_ERROR_MESSAGE = 'Enter a rate from 0 to 100 with at most 2 decimals.';
+const BASIC_PAY_HELP = 'Percentage of the basic pay components (the ones marked as counting for SSF / CIT), prefilled on payroll drafts; editable per payslip.';
 
-function tdsRateIsValid(value) {
+// TDS first, then the four SSF / CIT contribution rates. One list drives the
+// validation, the error reset, the payload and the contribution inputs below.
+const RATE_FIELDS = [
+    { field: 'tds_rate', label: 'Salary TDS rate (%)' },
+    { field: 'ssf_employee_rate', label: 'SSF rate, employee (%)', help: BASIC_PAY_HELP },
+    { field: 'ssf_employer_rate', label: 'SSF rate, employer (%)', help: BASIC_PAY_HELP },
+    { field: 'cit_employee_rate', label: 'CIT rate, employee (%)', help: BASIC_PAY_HELP },
+    { field: 'cit_employer_rate', label: 'CIT rate, employer (%)', help: BASIC_PAY_HELP },
+];
+const CONTRIBUTION_RATE_FIELDS = RATE_FIELDS.slice(1);
+const clientRateErrors = ref({});
+
+function rateIsValid(value) {
     const text = String(value ?? '').trim();
 
-    return text === '' || TDS_RATE_PATTERN.test(text);
+    return text === '' || RATE_PATTERN.test(text);
 }
 
-const tdsRateError = computed(() => clientTdsError.value || form.errors.tds_rate || '');
+/** Client message first, then the server's, for one rate field. */
+function rateError(field) {
+    return clientRateErrors.value[field] || form.errors[field] || '';
+}
 
-watch(
-    () => form.tds_rate,
-    () => {
-        clientTdsError.value = '';
-    },
-);
+RATE_FIELDS.forEach(({ field }) => {
+    watch(
+        () => form[field],
+        () => {
+            if (clientRateErrors.value[field]) {
+                clientRateErrors.value = { ...clientRateErrors.value, [field]: '' };
+            }
+        },
+    );
+});
 
 function submit() {
     if (!canSave.value) return;
 
-    if (!tdsRateIsValid(form.tds_rate)) {
-        clientTdsError.value = 'Enter a rate from 0 to 100 with at most 2 decimals.';
+    const invalidRates = RATE_FIELDS.filter(({ field }) => !rateIsValid(form[field]));
+    if (invalidRates.length > 0) {
+        clientRateErrors.value = Object.fromEntries(invalidRates.map(({ field }) => [field, RATE_ERROR_MESSAGE]));
 
         return;
     }
@@ -175,7 +200,7 @@ function submit() {
             ...rest,
             // Blank code means "auto" on create and "keep current" on edit.
             staff_code: rest.staff_code === '' ? null : rest.staff_code,
-            tds_rate: String(rest.tds_rate ?? '').trim(),
+            ...Object.fromEntries(RATE_FIELDS.map(({ field }) => [field, String(rest[field] ?? '').trim()])),
             pay_items: rows.map((row) => {
                 const parsed = parseMoney(row.amount);
 
@@ -304,11 +329,33 @@ function discard() {
                                     label="Salary TDS rate (%)"
                                     for="tds_rate"
                                     help="Default % of gross pay withheld as TDS when a payroll draft is generated; editable per payslip."
-                                    :error="tdsRateError"
+                                    :error="rateError('tds_rate')"
                                 >
                                     <Input
                                         id="tds_rate"
                                         v-model="form.tds_rate"
+                                        type="text"
+                                        inputmode="decimal"
+                                        placeholder="0"
+                                        class="text-right"
+                                        :aria-describedby="describedBy"
+                                    />
+                                </FormField>
+                            </div>
+
+                            <div class="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                                <FormField
+                                    v-for="rate in CONTRIBUTION_RATE_FIELDS"
+                                    :key="rate.field"
+                                    v-slot="{ describedBy }"
+                                    :label="rate.label"
+                                    :for="rate.field"
+                                    :help="rate.help"
+                                    :error="rateError(rate.field)"
+                                >
+                                    <Input
+                                        :id="rate.field"
+                                        v-model="form[rate.field]"
                                         type="text"
                                         inputmode="decimal"
                                         placeholder="0"

@@ -20,4 +20,6 @@ use Illuminate\Support\Facades\Route;
 
 Route::name('tenant.reports.')->prefix('reports')->group(function () {
     Route::get('/stock-by-brand', [BrandWiseReportController::class, 'stockByBrand'])->middleware('can:stock_reports.view')->name('stock-by-brand');
+    Route::get('/stock-by-brand/items', [BrandWiseReportController::class, 'stockByBrandItems'])->middleware('can:stock_reports.view')->name('stock-by-brand.items');
+    Route::get('/stock-by-brand/export', [BrandWiseReportController::class, 'stockByBrandExport'])->middleware(['can:stock_reports.view', 'can:stock_reports.export'])->name('stock-by-brand.export');
 });

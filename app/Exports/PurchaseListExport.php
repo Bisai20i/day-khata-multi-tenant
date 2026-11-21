@@ -9,6 +9,7 @@ use Maatwebsite\Excel\Concerns\FromCollection;
 use Maatwebsite\Excel\Concerns\WithColumnFormatting;
 use Maatwebsite\Excel\Concerns\WithHeadings;
 use Maatwebsite\Excel\Concerns\WithMapping;
+use Maatwebsite\Excel\Concerns\WithStrictNullComparison;
 use PhpOffice\PhpSpreadsheet\Style\NumberFormat;
 
 /**
@@ -19,7 +20,7 @@ use PhpOffice\PhpSpreadsheet\Style\NumberFormat;
  * `Money::toFloat()` is the one sanctioned use of a float here - an Excel
  * numeric cell, never arithmetic (CONTRACTS C1).
  */
-class PurchaseListExport implements FromCollection, WithColumnFormatting, WithHeadings, WithMapping
+class PurchaseListExport implements FromCollection, WithColumnFormatting, WithHeadings, WithMapping, WithStrictNullComparison
 {
     /**
      * @param  Collection<int, array<string, mixed>>  $rows

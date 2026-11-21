@@ -1,6 +1,6 @@
 <script setup>
-import { ref } from 'vue';
-import { router } from '@inertiajs/vue3';
+import { computed, ref, watch } from 'vue';
+import { router, usePage } from '@inertiajs/vue3';
 import AppLayout from '@/layouts/AppLayout.vue';
 import { useLayoutChrome } from '@/composables/useLayoutChrome';
 import { usePermissions } from '@/composables/usePermissions';
@@ -30,17 +30,34 @@ useLayoutChrome('Inventory Schedule');
 
 const asOfInput = ref(props.asOf);
 
+// Follow what the server applied (it fills in the fiscal-year default).
+watch(
+    () => props.asOf,
+    () => {
+        asOfInput.value = props.asOf;
+    },
+);
+
 const branchFilter = useBranchReportFilter(() => props.branchReport);
+
+// A malformed filter (a bad date) redirects back with validation errors; show them
+// instead of leaving the page looking unchanged.
+const page = usePage();
+const filterErrors = computed(() => ['from', 'to'].map((key) => page.props.errors?.[key]).filter(Boolean));
 
 function apply() {
     router.get(window.location.pathname, { to: asOfInput.value, ...branchFilter.toQuery() }, { preserveState: true, preserveScroll: true });
 }
 
+// Print and Export follow the applied props (what is on screen), never the unapplied input.
 function fileUrl(suffix) {
-    const params = new URLSearchParams({ to: asOfInput.value });
+    const params = new URLSearchParams({ to: props.asOf });
     branchFilter.appendTo(params);
-    return `${window.location.pathname}/${suffix}?${params}`;
+    return `/reports/manufacturing/inventory-schedule/${suffix}?${params}`;
 }
+
+const printUrl = computed(() => fileUrl('print'));
+const exportUrl = computed(() => fileUrl('export'));
 </script>
 
 <template>
@@ -54,9 +71,17 @@ function fileUrl(suffix) {
                 hide-label
                 @change="apply"
             />
-            <a v-if="can('manufacturing_reports.export')" :href="fileUrl('print')" target="_blank" rel="noopener"><Button variant="secondary" tone="purple">Print</Button></a>
-            <a v-if="can('manufacturing_reports.export')" :href="fileUrl('export')"><Button variant="secondary" tone="purple">Export</Button></a>
+            <Button v-if="can('manufacturing_reports.export')" as="a" :href="printUrl" target="_blank" rel="noopener" variant="secondary" tone="purple">Print</Button>
+            <Button v-if="can('manufacturing_reports.export')" as="a" :href="exportUrl" variant="secondary" tone="purple">Export to Excel</Button>
         </PageHeader>
+
+        <div
+            v-if="filterErrors.length"
+            class="mb-4 border-[1.5px] border-red-600 bg-red-50 px-4 py-2 text-[13px] font-semibold text-red-700"
+            role="alert"
+        >
+            <p v-for="message in filterErrors" :key="message">{{ message }}</p>
+        </div>
 
         <p class="mb-4 text-[12.5px] text-text-muted">As of BS {{ formatBsDate(asOf) }} (AD {{ asOf }})</p>
 

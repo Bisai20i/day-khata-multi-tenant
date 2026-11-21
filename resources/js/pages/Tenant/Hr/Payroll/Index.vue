@@ -16,7 +16,7 @@ import Label from '@/components/ui/Label.vue';
 import { useToast } from '@/composables/useToast';
 import { usePermissions } from '@/composables/usePermissions';
 import { useBranchListColumn } from '@/composables/useBranchListColumn';
-import { formatMoney, sumMoney } from '@/lib/money.js';
+import { addMoney, formatMoney, sumMoney } from '@/lib/money.js';
 import { formatBsDate } from '@/lib/format.js';
 
 defineOptions({ layout: AppLayout });
@@ -116,6 +116,10 @@ const pageTotals = computed(() => {
         gross: sumMoney(rows.map((run) => run.total_gross ?? '0')),
         recovery: sumMoney(rows.map((run) => run.total_recovery ?? '0')),
         tds: sumMoney(rows.map((run) => run.total_tds ?? '0')),
+        ssfEmployee: sumMoney(rows.map((run) => run.total_ssf_employee ?? '0')),
+        ssfEmployer: sumMoney(rows.map((run) => run.total_ssf_employer ?? '0')),
+        citEmployee: sumMoney(rows.map((run) => run.total_cit_employee ?? '0')),
+        citEmployer: sumMoney(rows.map((run) => run.total_cit_employer ?? '0')),
         net: sumMoney(rows.map((run) => run.total_net ?? '0')),
     };
 });
@@ -157,6 +161,19 @@ const columns = [
     { id: 'total_gross', header: 'Gross', numeric: true, cell: ({ row }) => formatMoney(row.original.total_gross ?? '0') },
     { id: 'total_recovery', header: 'Advance recovery', numeric: true, cell: ({ row }) => formatMoney(row.original.total_recovery ?? '0') },
     { id: 'total_tds', header: 'TDS', numeric: true, cell: ({ row }) => formatMoney(row.original.total_tds ?? '0') },
+    // One figure per fund: what the run posts to it, employee withholding plus employer contribution.
+    {
+        id: 'total_ssf',
+        header: 'SSF (emp + er)',
+        numeric: true,
+        cell: ({ row }) => formatMoney(addMoney(row.original.total_ssf_employee ?? '0', row.original.total_ssf_employer ?? '0')),
+    },
+    {
+        id: 'total_cit',
+        header: 'CIT (emp + er)',
+        numeric: true,
+        cell: ({ row }) => formatMoney(addMoney(row.original.total_cit_employee ?? '0', row.original.total_cit_employer ?? '0')),
+    },
     { id: 'total_net', header: 'Net pay', numeric: true, cell: ({ row }) => formatMoney(row.original.total_net ?? '0') },
     {
         id: 'status',
@@ -264,6 +281,10 @@ const columns = [
                                 <th class="px-3 py-1.5 text-left text-[10px] font-bold tracking-[.8px] text-text-muted uppercase">Gross (posted runs on this page)</th>
                                 <th class="px-3 py-1.5 text-left text-[10px] font-bold tracking-[.8px] text-text-muted uppercase">Advance recovery (posted)</th>
                                 <th class="px-3 py-1.5 text-left text-[10px] font-bold tracking-[.8px] text-text-muted uppercase">TDS (posted)</th>
+                                <th class="px-3 py-1.5 text-left text-[10px] font-bold tracking-[.8px] text-text-muted uppercase" title="Employee SSF withheld from pay">SSF employee (posted)</th>
+                                <th class="px-3 py-1.5 text-left text-[10px] font-bold tracking-[.8px] text-text-muted uppercase" title="Employer SSF contribution, extra employer cost">SSF employer (posted)</th>
+                                <th class="px-3 py-1.5 text-left text-[10px] font-bold tracking-[.8px] text-text-muted uppercase" title="Employee CIT withheld from pay">CIT employee (posted)</th>
+                                <th class="px-3 py-1.5 text-left text-[10px] font-bold tracking-[.8px] text-text-muted uppercase" title="Employer CIT contribution, extra employer cost">CIT employer (posted)</th>
                                 <th class="bg-primary-tint px-3 py-1.5 text-left text-[10px] font-bold tracking-[.8px] text-primary uppercase">Net pay (posted)</th>
                             </tr>
                         </thead>
@@ -272,11 +293,19 @@ const columns = [
                                 <td class="px-3 py-1.5 font-bold text-text-strong">{{ formatMoney(pageTotals.gross) }}</td>
                                 <td class="px-3 py-1.5 font-bold text-text-strong">{{ formatMoney(pageTotals.recovery) }}</td>
                                 <td class="px-3 py-1.5 font-bold text-text-strong">{{ formatMoney(pageTotals.tds) }}</td>
+                                <td class="px-3 py-1.5 font-bold text-text-strong">{{ formatMoney(pageTotals.ssfEmployee) }}</td>
+                                <td class="px-3 py-1.5 font-bold text-text-strong">{{ formatMoney(pageTotals.ssfEmployer) }}</td>
+                                <td class="px-3 py-1.5 font-bold text-text-strong">{{ formatMoney(pageTotals.citEmployee) }}</td>
+                                <td class="px-3 py-1.5 font-bold text-text-strong">{{ formatMoney(pageTotals.citEmployer) }}</td>
                                 <td class="bg-primary-tint px-3 py-1.5 text-base font-extrabold text-primary">{{ formatMoney(pageTotals.net) }}</td>
                             </tr>
                         </tbody>
                     </table>
                 </div>
+
+                <p class="mt-2 text-xs text-text-muted">
+                    The SSF and CIT columns add the employee amount withheld from pay and the employer contribution, the total posted to each fund. Employer contributions are extra employer cost and are not part of net pay.
+                </p>
 
                 <PaginatorNav :paginator="runs" label="Payroll run pagination" />
             </template>

@@ -5,9 +5,11 @@ namespace App\Http\Controllers\Tenant\Purchases;
 use App\Http\Controllers\Controller;
 use App\Models\Account;
 use App\Models\Payment;
+use App\Models\Project;
 use App\Models\Purchase;
 use App\Models\Supplier;
 use App\Rules\AccountUnderHead;
+use App\Rules\OpenProject;
 use App\Support\Branches\ActiveBranchSelection;
 use App\Support\Branches\BranchAccounts;
 use App\Support\Branches\BranchFormOptions;
@@ -35,7 +37,7 @@ class PaymentController extends Controller
             // names each row's branch only when several can appear. A tenant
             // that is not multi-branch gets the same query as before.
             'payments' => BranchListFilter::apply(Payment::query(), $request)
-                ->with(['supplier:id,name', 'allocations:id,payment_id,amount'])
+                ->with(['supplier:id,name', 'allocations:id,payment_id,amount', 'project:id,code,name'])
                 ->when(BranchListFilter::columnVisible($request), fn ($query) => $query->with('branch:id,name,code'))
                 ->orderByDesc('date')
                 ->orderByDesc('id')
@@ -59,6 +61,8 @@ class PaymentController extends Controller
                 $request->integer('supplier_id') ?: null,
                 ActiveBranchSelection::isMultiBranch($request),
             )),
+            // Optional project picker: only active projects take new payments.
+            'projects' => Project::query()->active()->orderBy('name')->get(['id', 'code', 'name']),
             ...BranchFormOptions::props($request),
         ]);
     }
@@ -76,6 +80,9 @@ class PaymentController extends Controller
             // Where the money went out (plan 12, BR07); Payment::post()
             // checks it is active and accessible, default the posting branch.
             'branch_id' => ['nullable', 'integer', 'exists:branches,id'],
+            // Optional project (cost centre); Payment::post() tags every
+            // ledger line of the payment with it.
+            'project_id' => ['nullable', 'integer', new OpenProject],
             'allocations' => ['nullable', 'array'],
             // `distinct` plus Payment::post()'s own aggregation: two rows
             // naming the same bill used to be checked separately against the
